@@ -13,13 +13,17 @@ from __future__ import annotations
 
 from bragi.core.models._base import Base
 from bragi.core.models.post import Post, PostStatus
+from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 
 __all__ = [
     "Base",
+    "MatchType",
     "Post",
     "PostStatus",
+    "Redirect",
+    "RedirectSource",
     "Site",
     "User",
 ]

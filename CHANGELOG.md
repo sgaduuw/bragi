@@ -50,3 +50,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   visible in `app.extensions["registry"].content_types` on both
   admin and delivery apps. Real admin Blueprint and delivery
   templates land in follow-up commits.
+- `Redirect` model (`bragi.core.models.redirect.Redirect`) with
+  `MatchType` and `RedirectSource` string constants. Per-site
+  unique constraint on `(site_id, source_path, match_type)`.
+- alembic migration `add_redirects` (revision `36a0ec65ddbf`)
+  adds the `redirects` table.
