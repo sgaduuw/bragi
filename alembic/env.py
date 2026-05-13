@@ -4,6 +4,7 @@ Reads the DB URL from BRAGI_DATABASE_URL when set, otherwise falls
 back to the value in alembic.ini. Target metadata is
 `bragi.core.models.Base.metadata` so autogenerate sees every model.
 """
+
 from __future__ import annotations
 
 import os
@@ -16,7 +17,7 @@ from sqlalchemy import engine_from_config, pool
 config = context.config
 
 # Override DB URL from environment when present.
-if (db_url := os.environ.get("BRAGI_DATABASE_URL")):
+if db_url := os.environ.get("BRAGI_DATABASE_URL"):
     config.set_main_option("sqlalchemy.url", db_url)
 
 # Configure loggers from alembic.ini.

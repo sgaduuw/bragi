@@ -30,3 +30,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `html_transforms` on `app.extensions`.
 - `tests/test_hookspecs.py` asserts the day-one hook surface is
   registered and that `resolve_redirect` is `firstresult`.
+- Foundational SQLAlchemy models (`Site`, `User`, `Post`) with
+  shared `IdMixin` / `TimestampsMixin`. `Base` lives in
+  `bragi/core/models/_base.py`; individual models live in their
+  own modules and re-export through `bragi.core.models`.
+- Initial alembic migration creates `sites`, `users`, `posts`.
+  Migration script template upgraded to modern type syntax
+  (`X | Y`, `collections.abc.Sequence`). Post-write hook now
+  invokes `ruff check --fix` and `ruff format` on generated
+  revisions via the `exec` hook type.
+- CI lint / format checks now cover `alembic/` too, plus a
+  migration smoke run (`upgrade -> downgrade -> upgrade` on a
+  fresh SQLite). Makefile `lint` / `fmt` targets include
+  `alembic/`.

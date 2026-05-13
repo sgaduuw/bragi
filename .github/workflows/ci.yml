@@ -28,13 +28,20 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Lint (ruff check)
-        run: poetry run ruff check src/ tests/
+        run: poetry run ruff check src/ tests/ alembic/
 
       - name: Format check (ruff format)
-        run: poetry run ruff format --check src/ tests/
+        run: poetry run ruff format --check src/ tests/ alembic/
 
       - name: Type check (mypy)
         run: poetry run mypy src/
 
       - name: Test (pytest)
         run: poetry run pytest
+
+      - name: Migration smoke (fresh DB)
+        run: |
+          rm -f bragi.db bragi.db-wal bragi.db-shm
+          poetry run alembic upgrade head
+          poetry run alembic downgrade base
+          poetry run alembic upgrade head

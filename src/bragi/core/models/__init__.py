@@ -3,17 +3,23 @@
 Every model inherits from `Base`. Models live here (NOT inside
 contrib plugins) so alembic autogenerate has one source of truth.
 
-Individual model modules (site.py, user.py, content.py, ...) land
-here as the corresponding features ship.
+To register a new model: add a module under this package, import
+its class below, and re-export via `__all__`. The model's
+`__tablename__` is then visible to `Base.metadata` which alembic
+walks for autogenerate diffs.
 """
 
 from __future__ import annotations
 
-from sqlalchemy.orm import DeclarativeBase
+from bragi.core.models._base import Base
+from bragi.core.models.post import Post, PostStatus
+from bragi.core.models.site import Site
+from bragi.core.models.user import User
 
-
-class Base(DeclarativeBase):
-    """Declarative base for all bragi models."""
-
-
-__all__ = ["Base"]
+__all__ = [
+    "Base",
+    "Post",
+    "PostStatus",
+    "Site",
+    "User",
+]

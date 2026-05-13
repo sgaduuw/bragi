@@ -16,12 +16,12 @@ test-fast:  ## Run only unit tests (no DB, no app)
 	poetry run pytest tests/unit
 
 lint:  ## Lint and format-check
-	poetry run ruff check src/ tests/
-	poetry run ruff format --check src/ tests/
+	poetry run ruff check src/ tests/ alembic/
+	poetry run ruff format --check src/ tests/ alembic/
 
 fmt:  ## Auto-fix lint and apply formatting
-	poetry run ruff check --fix src/ tests/
-	poetry run ruff format src/ tests/
+	poetry run ruff check --fix src/ tests/ alembic/
+	poetry run ruff format src/ tests/ alembic/
 
 typecheck:  ## Run mypy
 	poetry run mypy src/
