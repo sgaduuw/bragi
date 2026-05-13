@@ -1,0 +1,2 @@
+admin:    poetry run bragi-admin    --port 8001
+delivery: poetry run bragi-delivery --port 8002
