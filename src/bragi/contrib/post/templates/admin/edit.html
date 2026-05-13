@@ -6,6 +6,7 @@
 
 <form method="post"
       action="{{ url_for('post_admin.edit_post', post_id=post.id) if is_edit else url_for('post_admin.new_post') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   <fieldset>
     <label for="title">Title</label>
     <input type="text" name="title" id="title" required

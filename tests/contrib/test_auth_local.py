@@ -26,6 +26,7 @@ from bragi.contrib.auth_local.passwords import (
 )
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user import User
+from tests.conftest import csrf_token
 
 TEST_EMAIL = "ada@example.com"
 TEST_PASSWORD = "correct-horse-battery-staple"
@@ -50,6 +51,7 @@ def admin_app(
     _seed_user(db_session)
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
 
@@ -85,9 +87,15 @@ def test_login_get_serves_form(admin_app: Flask) -> None:
 
 def test_login_post_with_valid_creds_sets_session(admin_app: Flask) -> None:
     client = admin_app.test_client()
+    token = csrf_token(client)
     resp = client.post(
         "/auth/login",
-        data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "next": "/some-page"},
+        data={
+            "email": TEST_EMAIL,
+            "password": TEST_PASSWORD,
+            "next": "/some-page",
+            "_csrf_token": token,
+        },
         follow_redirects=False,
     )
     assert resp.status_code == 302
@@ -98,9 +106,14 @@ def test_login_post_with_valid_creds_sets_session(admin_app: Flask) -> None:
 
 def test_login_post_rejects_unknown_email(admin_app: Flask) -> None:
     client = admin_app.test_client()
+    token = csrf_token(client)
     resp = client.post(
         "/auth/login",
-        data={"email": "nobody@example.com", "password": TEST_PASSWORD},
+        data={
+            "email": "nobody@example.com",
+            "password": TEST_PASSWORD,
+            "_csrf_token": token,
+        },
     )
     assert resp.status_code == 200
     assert b"Invalid email or password" in resp.data
@@ -110,9 +123,10 @@ def test_login_post_rejects_unknown_email(admin_app: Flask) -> None:
 
 def test_login_post_rejects_bad_password(admin_app: Flask) -> None:
     client = admin_app.test_client()
+    token = csrf_token(client)
     resp = client.post(
         "/auth/login",
-        data={"email": TEST_EMAIL, "password": "wrong"},
+        data={"email": TEST_EMAIL, "password": "wrong", "_csrf_token": token},
     )
     assert resp.status_code == 200
     assert b"Invalid email or password" in resp.data
@@ -122,7 +136,11 @@ def test_login_post_rejects_bad_password(admin_app: Flask) -> None:
 
 def test_login_post_missing_fields_returns_form(admin_app: Flask) -> None:
     client = admin_app.test_client()
-    resp = client.post("/auth/login", data={"email": "", "password": ""})
+    token = csrf_token(client)
+    resp = client.post(
+        "/auth/login",
+        data={"email": "", "password": "", "_csrf_token": token},
+    )
     assert resp.status_code == 200
     assert b"required" in resp.data.lower()
 
@@ -130,12 +148,14 @@ def test_login_post_missing_fields_returns_form(admin_app: Flask) -> None:
 def test_login_next_redirect_must_be_relative(admin_app: Flask) -> None:
     """An attacker-controlled `next` URL must not become a redirect off-site."""
     client = admin_app.test_client()
+    token = csrf_token(client)
     resp = client.post(
         "/auth/login",
         data={
             "email": TEST_EMAIL,
             "password": TEST_PASSWORD,
             "next": "https://evil.example/take-over",
+            "_csrf_token": token,
         },
         follow_redirects=False,
     )
@@ -150,14 +170,19 @@ def test_login_next_redirect_must_be_relative(admin_app: Flask) -> None:
 
 def test_logout_clears_session(admin_app: Flask) -> None:
     client = admin_app.test_client()
+    token = csrf_token(client)
     client.post(
         "/auth/login",
-        data={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+        data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": token},
     )
     with client.session_transaction() as sess:
         assert "user_id" in sess
 
-    resp = client.post("/auth/logout", follow_redirects=False)
+    # Re-read the token; the post-login session may have rotated it.
+    token = csrf_token(client, path="/")
+    resp = client.post(
+        "/auth/logout", data={"_csrf_token": token}, follow_redirects=False
+    )
     assert resp.status_code == 302
     with client.session_transaction() as sess:
         assert "user_id" not in sess
@@ -180,7 +205,11 @@ def test_anonymous_admin_hit_redirects_to_login(admin_app: Flask) -> None:
 
 def test_authenticated_admin_hit_passes_through(admin_app: Flask) -> None:
     client = admin_app.test_client()
-    client.post("/auth/login", data={"email": TEST_EMAIL, "password": TEST_PASSWORD})
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": token},
+    )
     resp = client.get("/")
     assert resp.status_code == 200
     assert b"bragi admin" in resp.data

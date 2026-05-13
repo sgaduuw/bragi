@@ -14,6 +14,8 @@ from flask import Flask, session
 
 from bragi import __version__
 from bragi.cli import cms
+from bragi.core.middleware.csrf import register_csrf
+from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
@@ -40,6 +42,12 @@ def create_admin_app() -> Flask:
     app = Flask("bragi-admin")
     app.config["SECRET_KEY"] = settings.secret_key
 
+    # Server-side sessions back the admin's session storage. Replaces
+    # Flask's signed-cookie default; cookie carries only an opaque
+    # UUID. Must be installed before any before_request hook reads
+    # the session (CSRF middleware in particular).
+    register_server_sessions(app)
+
     # Make `bragi/templates/` reachable via the Jinja loader chain
     # so plugin templates can `{% extends "admin/base.html" %}`.
     package_loader = jinja2.PackageLoader("bragi", "templates")
@@ -57,8 +65,13 @@ def create_admin_app() -> Flask:
     app.extensions["md_transforms"] = md_transforms
     app.extensions["html_transforms"] = html_transforms
 
-    # Core middleware: resolve Host -> Site on every request.
+    # Core middleware: resolve Host -> Site, then enforce CSRF on
+    # unsafe methods. Both fire as before_request hooks; ordering
+    # follows registration order, so site_resolver runs first and
+    # the CSRF check sees the resolved site (not that it needs it,
+    # but the request shape is predictable downstream).
     register_site_resolver(app)
+    register_csrf(app)
 
     # Register the top-level `cms` CLI group so plugin commands
     # land under `flask --app bragi.apps.admin cms <subcommand>`.

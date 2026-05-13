@@ -1,0 +1,18 @@
+{% extends "delivery/base.html" %}
+{% block title %}{{ post.meta_title or post.title }} &middot; {{ site.title }}{% endblock %}
+{% block content %}
+<article>
+  <header>
+    <h1>{{ post.title }}</h1>
+    {% if post.subtitle %}<p class="subtitle">{{ post.subtitle }}</p>{% endif %}
+    <p class="meta">
+      {% if post.published_at %}
+        Published <time datetime="{{ post.published_at.isoformat() }}">{{ post.published_at.strftime('%Y-%m-%d') }}</time>
+      {% endif %}
+    </p>
+  </header>
+  <div class="body">
+    {{ post.body_html | safe }}
+  </div>
+</article>
+{% endblock %}

@@ -200,6 +200,18 @@ def register_admin_blueprint() -> Blueprint:
 
 
 @hookspec
+def register_delivery_blueprint() -> Blueprint:
+    """Return a Flask Blueprint to mount under the delivery app.
+
+    Content-type plugins own their public URL space and register
+    the Blueprint that resolves a slug to an entity and renders it
+    via `ContentTypeSpec.render`. Only fires on the delivery app;
+    the admin app does not call this hook.
+    """
+    ...
+
+
+@hookspec
 def register_admin_nav() -> list[NavItem]:
     """Return navigation entries for the admin sidebar. A plugin
     contributing multiple sections returns multiple NavItems in

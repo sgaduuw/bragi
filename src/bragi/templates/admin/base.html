@@ -54,6 +54,7 @@
     {% if current_user_email %}
       <span class="user">{{ current_user_display_name or current_user_email }}</span>
       <form method="post" action="{{ url_for('auth_local.logout') }}" class="logout">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <button type="submit">Log out</button>
       </form>
     {% endif %}

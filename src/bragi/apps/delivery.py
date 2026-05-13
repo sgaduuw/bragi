@@ -8,6 +8,7 @@ event sink are wired in this app as the corresponding plugins ship.
 from __future__ import annotations
 
 import click
+import jinja2
 from flask import Flask
 
 from bragi import __version__
@@ -23,11 +24,12 @@ def create_delivery_app() -> Flask:
     """Build the delivery Flask app.
 
     Hook flow at boot:
-        1. on_app_init                          (one-time wiring)
-        2. register_content_type  -> Registry   (for URL/render lookup)
-        3. register_template_globals(env=app.jinja_env)
-        4. register_markdown_transform(registry=md_transforms)
-        5. register_html_transform(registry=html_transforms)
+        1. on_app_init                             (one-time wiring)
+        2. register_content_type     -> Registry  (URL/render lookup)
+        3. register_delivery_blueprint -> app.register_blueprint()
+        4. register_template_globals(env=app.jinja_env)
+        5. register_markdown_transform(registry=md_transforms)
+        6. register_html_transform(registry=html_transforms)
 
     Delivery deliberately does NOT call register_admin_blueprint,
     register_admin_nav, register_cli_command, register_importer,
@@ -36,6 +38,14 @@ def create_delivery_app() -> Flask:
     """
     app = Flask("bragi-delivery")
     app.config["SECRET_KEY"] = settings.secret_key
+
+    # Make `bragi/templates/` reachable via the Jinja loader chain so
+    # plugin delivery templates can `{% extends "delivery/base.html" %}`.
+    package_loader = jinja2.PackageLoader("bragi", "templates")
+    if app.jinja_loader is not None:
+        app.jinja_loader = jinja2.ChoiceLoader([app.jinja_loader, package_loader])
+    else:
+        app.jinja_loader = package_loader
 
     pm = create_plugin_manager()
     registry = Registry()
@@ -56,12 +66,19 @@ def create_delivery_app() -> Flask:
     for spec in pm.hook.register_content_type():
         registry.add_content_type(spec)
 
+    # Mount plugin-contributed delivery Blueprints. Each content-type
+    # plugin owns its public URL space; the delivery app stays empty
+    # of routing logic beyond the index and the redirect chain.
+    for bp in pm.hook.register_delivery_blueprint():
+        app.register_blueprint(bp)
+
     pm.hook.register_template_globals(env=app.jinja_env)
     pm.hook.register_markdown_transform(registry=md_transforms)
     pm.hook.register_html_transform(registry=html_transforms)
 
-    # Scaffold sanity route; real public content rendering lands as
-    # plugins ship.
+    # Index sanity route. A real per-site landing page (post list,
+    # featured content, etc.) lands when a site needs more than a
+    # version stamp on `/`.
     @app.route("/")
     def index() -> str:
         return (

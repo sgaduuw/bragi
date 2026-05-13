@@ -9,11 +9,28 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from flask.testing import FlaskClient
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.core.models import Base
+
+
+def csrf_token(client: FlaskClient, *, path: str = "/auth/login") -> str:
+    """Fetch the session's CSRF token via the test client.
+
+    The CSRF guard fires as a before_request hook on every request,
+    including GETs; hitting any path is enough to populate the
+    session. The default `/auth/login` is a public endpoint on the
+    admin app, so the call works pre-auth. Tests against the
+    delivery app should pass `path="/"`.
+    """
+    client.get(path)
+    with client.session_transaction() as sess:
+        token = sess.get("_csrf_token")
+    assert isinstance(token, str) and token, "CSRF token was not populated on the session"
+    return token
 
 
 @pytest.fixture

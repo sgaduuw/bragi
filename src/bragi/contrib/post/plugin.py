@@ -4,6 +4,7 @@ Owns:
 - the ContentTypeSpec for Post (registered via
   register_content_type)
 - the admin Blueprint at /admin/posts (register_admin_blueprint)
+- the delivery Blueprint at /posts/<slug>/ (register_delivery_blueprint)
 - the admin nav entry (register_admin_nav)
 """
 
@@ -11,10 +12,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from flask import Blueprint
+from flask import Blueprint, g, render_template
 
 from bragi.api import ContentTypeSpec, FieldSpec, NavItem, hookimpl
 from bragi.contrib.post.admin import bp as post_admin_bp
+from bragi.contrib.post.delivery import bp as post_delivery_bp
 from bragi.core.models.post import Post
 
 POST_EDIT_FIELDS: list[FieldSpec] = [
@@ -37,12 +39,26 @@ def _url_for_post(post: Any) -> str:
 
 
 def _render_post(post: Any, _request: Any) -> str:
-    """Stub render until delivery-side templates land.
+    """Render a Post into a full HTML page via Jinja.
 
-    The body_html cached on the Post is what the renderer
-    pipeline produces; this just wraps it in an h1.
+    Pulls the resolved Site off `g.site` (site_resolver runs in
+    the before_request chain). Per-post SEO overrides (meta_title,
+    meta_description, canonical_url, noindex) thread into the
+    template; defaults fall back to body_excerpt and the computed
+    canonical URL when fields are blank.
     """
-    return f"<h1>{post.title}</h1>\n{post.body_html}"
+    site = g.get("site")
+    canonical = post.canonical_url or (
+        f"{site.canonical_url}/posts/{post.slug}/" if site and site.canonical_url else None
+    )
+    return render_template(
+        "delivery/post.html",
+        post=post,
+        site=site,
+        meta_description=post.meta_description or post.body_excerpt or None,
+        canonical_url=canonical,
+        noindex=post.noindex,
+    )
 
 
 @hookimpl
@@ -67,6 +83,12 @@ def register_content_type() -> ContentTypeSpec:
 def register_admin_blueprint() -> Blueprint:
     """Mount the post admin Blueprint at /admin/posts."""
     return post_admin_bp
+
+
+@hookimpl
+def register_delivery_blueprint() -> Blueprint:
+    """Mount the post delivery Blueprint at /posts/<slug>/."""
+    return post_delivery_bp
 
 
 @hookimpl

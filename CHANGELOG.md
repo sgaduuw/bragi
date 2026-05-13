@@ -123,3 +123,48 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   flash messages, and a styled form area. The admin app's Jinja
   loader chains `bragi.templates` so plugin templates can
   `{% extends "admin/base.html" %}`.
+- `bragi.contrib.sites` plugin: contributes `cms site create
+  --slug --hostname --title [--locale] [--timezone]
+  [--canonical-url]` and `cms site list`. Slug and hostname are
+  lower-cased to match the site_resolver's Host lookup. No admin
+  UI yet; CLI is the only path to seed a Site until a second one
+  matters.
+- Delivery render view for Posts. New `register_delivery_blueprint`
+  hookspec lets content-type plugins own their public URL space.
+  The post plugin's delivery Blueprint mounts `/posts/<slug>/`
+  (slash and no-slash forms), filters by `(site_id, slug,
+  status=published)`, and renders through
+  `ContentTypeSpec.render`. Drafts, scheduled, and archived posts
+  are not served publicly. Includes a shared
+  `delivery/base.html` and a `delivery/post.html` with canonical
+  URL, meta description (falling back to the body excerpt), and
+  conditional `<meta name="robots" content="noindex">`.
+- CSRF protection on the admin app
+  (`bragi.core.middleware.csrf`). Hand-rolled, no Flask-WTF
+  dependency: a `before_request` hook ensures `session["_csrf_token"]`,
+  validates the `_csrf_token` form field or `X-CSRF-Token`
+  header on POST / PUT / PATCH / DELETE in constant time, aborts
+  400 on mismatch, and exposes `csrf_token()` as a Jinja global.
+  Endpoints can opt out via `app.config["CSRF_EXEMPT_ENDPOINTS"]`.
+  Login, post create / edit, delete, and logout forms now carry
+  the hidden input. Delivery has no write endpoints and so does
+  not install the guard.
+- Server-side sessions backing the admin app
+  (`bragi.core.middleware.sessions`). New `Session` model
+  (`bragi.core.models.session.Session`) with `id` UUID PK,
+  nullable `user_id` FK, `expires_at`, `last_seen_at`, `ip`,
+  `user_agent`, and a JSON `data` blob. Custom `SessionInterface`
+  replaces Flask's signed-cookie default: cookie carries only
+  `bragi_sid` (32-char hex UUID, `HttpOnly`, `SameSite=Lax`); all
+  state lives in the row. Logout calls `session.clear()` which
+  rotates to a new sid (the old row is deleted, the post-logout
+  flash lands on a fresh row): the leaked-cookie risk after
+  logout is closed. Default lifetime 14 days; sliding via
+  `last_seen_at`. Delivery keeps Flask's default cookie session
+  to stay write-free on the read path.
+- alembic migration `add_sessions` (revision `38aa6fec0409`)
+  adds the `sessions` table with indexes on `user_id` and
+  `expires_at`.
+- `flask --app bragi.apps.admin cms session purge` deletes
+  expired session rows; intended for a cron job. Reports the
+  count of removed rows; exit 0 on no-op.

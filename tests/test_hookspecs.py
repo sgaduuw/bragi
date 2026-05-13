@@ -31,6 +31,7 @@ DAY_ONE_HOOKS: frozenset[str] = frozenset(
         "resolve_redirect",
         # Admin UI
         "register_admin_blueprint",
+        "register_delivery_blueprint",
         "register_admin_nav",
         # Content lifecycle
         "on_post_published",

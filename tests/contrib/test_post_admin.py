@@ -20,6 +20,7 @@ from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from tests.conftest import csrf_token
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -61,6 +62,7 @@ def admin_app(
     db_session.commit()
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
@@ -69,7 +71,11 @@ def admin_app(
 
 
 def _login(client: FlaskClient) -> None:
-    client.post("/auth/login", data={"email": EMAIL, "password": PASSWORD})
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": EMAIL, "password": PASSWORD, "_csrf_token": token},
+    )
 
 
 def test_list_requires_auth(admin_app: Flask) -> None:
@@ -100,6 +106,7 @@ def test_new_get_serves_form(admin_app: Flask) -> None:
 def test_new_post_creates_row(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     client = admin_app.test_client()
     _login(client)
+    token = csrf_token(client, path="/admin/posts/new")
     resp = client.post(
         "/admin/posts/new",
         data={
@@ -107,6 +114,7 @@ def test_new_post_creates_row(admin_app: Flask, db_session_factory: sessionmaker
             "slug": "brand-new",
             "body_markdown": "# Hi\n\nA body.",
             "status": "draft",
+            "_csrf_token": token,
         },
         follow_redirects=False,
     )
@@ -121,7 +129,11 @@ def test_new_post_creates_row(admin_app: Flask, db_session_factory: sessionmaker
 def test_new_requires_title_and_slug(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    resp = client.post("/admin/posts/new", data={"title": "", "slug": ""})
+    token = csrf_token(client, path="/admin/posts/new")
+    resp = client.post(
+        "/admin/posts/new",
+        data={"title": "", "slug": "", "_csrf_token": token},
+    )
     assert resp.status_code == 200
     assert b"required" in resp.data.lower()
 
@@ -146,6 +158,7 @@ def test_edit_post_updates(admin_app: Flask, db_session_factory: sessionmaker[Se
 
     client = admin_app.test_client()
     _login(client)
+    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
     resp = client.post(
         f"/admin/posts/{post_id}/edit",
         data={
@@ -153,6 +166,7 @@ def test_edit_post_updates(admin_app: Flask, db_session_factory: sessionmaker[Se
             "slug": "hello",
             "body_markdown": "Updated body.",
             "status": "published",
+            "_csrf_token": token,
         },
         follow_redirects=False,
     )
@@ -175,7 +189,12 @@ def test_delete_post_removes_row(
 
     client = admin_app.test_client()
     _login(client)
-    resp = client.post(f"/admin/posts/{post_id}/delete", follow_redirects=False)
+    token = csrf_token(client, path="/admin/posts/")
+    resp = client.post(
+        f"/admin/posts/{post_id}/delete",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
     assert resp.status_code == 302
 
     with db_session_factory() as db:

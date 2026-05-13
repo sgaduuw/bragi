@@ -31,6 +31,7 @@
               action="{{ url_for('post_admin.delete_post', post_id=post.id) }}"
               onsubmit="return confirm('Delete this post?');"
               style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="danger">Delete</button>
         </form>
       </td>
