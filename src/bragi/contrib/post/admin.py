@@ -1,0 +1,136 @@
+"""Admin Blueprint for managing Posts.
+
+Mounted under /admin/posts on the admin app. The auth_local
+before_request guard protects all admin URLs, so these views
+assume an authenticated user (session["user_id"] is set).
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from flask.typing import ResponseReturnValue
+from sqlalchemy import select
+
+from bragi.core.db import SessionLocal
+from bragi.core.models.post import Post, PostStatus
+from bragi.core.models.site import Site
+from bragi.core.render.markdown import make_excerpt, render_markdown
+
+bp = Blueprint(
+    "post_admin",
+    __name__,
+    template_folder="templates",
+    url_prefix="/admin/posts",
+)
+
+
+def _form_from_request() -> dict[str, str]:
+    """Pull the post-edit form fields off the current request."""
+    return {
+        "title": (request.form.get("title") or "").strip(),
+        "slug": (request.form.get("slug") or "").strip(),
+        "body_markdown": request.form.get("body_markdown") or "",
+        "status": request.form.get("status") or PostStatus.DRAFT,
+    }
+
+
+@bp.route("/", methods=["GET"])
+def list_posts() -> ResponseReturnValue:
+    with SessionLocal() as db:
+        posts = db.execute(select(Post).order_by(Post.created_at.desc())).scalars().all()
+    return render_template("admin/list.html", posts=posts)
+
+
+@bp.route("/new", methods=["GET", "POST"])
+def new_post() -> ResponseReturnValue:
+    if request.method == "GET":
+        return render_template("admin/edit.html", post=None, form={})
+
+    form = _form_from_request()
+    if not form["title"] or not form["slug"]:
+        flash("Title and slug are required.", "error")
+        return render_template("admin/edit.html", post=None, form=form)
+
+    with SessionLocal() as db:
+        # First-Site-wins for now; a real site picker lands when
+        # multi-site UI is built.
+        site = db.execute(select(Site).limit(1)).scalar_one_or_none()
+        if site is None:
+            flash("No site exists yet. Create one via the CLI.", "error")
+            return render_template("admin/edit.html", post=None, form=form)
+
+        body_markdown = form["body_markdown"]
+        new_status = form["status"]
+        db.add(
+            Post(
+                site_id=site.id,
+                slug=form["slug"],
+                title=form["title"],
+                body_markdown=body_markdown,
+                body_html=render_markdown(body_markdown),
+                body_excerpt=make_excerpt(body_markdown),
+                author_id=int(session["user_id"]),
+                status=new_status,
+                published_at=(datetime.now(UTC) if new_status == PostStatus.PUBLISHED else None),
+            )
+        )
+        db.commit()
+        flash(f"Post '{form['title']}' created.", "success")
+
+    return redirect(url_for("post_admin.list_posts"))
+
+
+@bp.route("/<int:post_id>/edit", methods=["GET", "POST"])
+def edit_post(post_id: int) -> ResponseReturnValue:
+    with SessionLocal() as db:
+        post = db.get(Post, post_id)
+        if post is None:
+            flash("Post not found.", "error")
+            return redirect(url_for("post_admin.list_posts"))
+
+        if request.method == "GET":
+            form = {
+                "title": post.title,
+                "slug": post.slug,
+                "body_markdown": post.body_markdown,
+                "status": post.status,
+            }
+            return render_template("admin/edit.html", post=post, form=form)
+
+        form = _form_from_request()
+        if not form["title"] or not form["slug"]:
+            flash("Title and slug are required.", "error")
+            return render_template("admin/edit.html", post=post, form=form)
+
+        post.title = form["title"]
+        post.slug = form["slug"]
+        post.body_markdown = form["body_markdown"]
+        post.body_html = render_markdown(form["body_markdown"])
+        post.body_excerpt = make_excerpt(form["body_markdown"])
+
+        # Transition to published sets published_at the first time
+        # the status flips. Re-publishing doesn't reset the timestamp.
+        if post.status != PostStatus.PUBLISHED and form["status"] == PostStatus.PUBLISHED:
+            post.published_at = datetime.now(UTC)
+        post.status = form["status"]
+
+        db.commit()
+        flash(f"Post '{form['title']}' updated.", "success")
+
+    return redirect(url_for("post_admin.list_posts"))
+
+
+@bp.route("/<int:post_id>/delete", methods=["POST"])
+def delete_post(post_id: int) -> ResponseReturnValue:
+    with SessionLocal() as db:
+        post = db.get(Post, post_id)
+        if post is None:
+            flash("Post not found.", "error")
+            return redirect(url_for("post_admin.list_posts"))
+        title = post.title
+        db.delete(post)
+        db.commit()
+        flash(f"Post '{title}' deleted.", "success")
+    return redirect(url_for("post_admin.list_posts"))

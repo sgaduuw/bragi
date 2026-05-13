@@ -105,3 +105,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Sessions use Flask's signed cookies for v1. Server-side
     sessions (in the `sessions` table) are reserved for a
     follow-up when logout-invalidates-everywhere matters.
+- Post admin Blueprint (`bragi.contrib.post.admin`): list / new /
+  edit / delete views under `/admin/posts`. Plain HTML forms with
+  textarea-based markdown editing (TipTap lands later). Title and
+  slug are required; status transitions to `published` set
+  `published_at` the first time. Delete shows a JS confirm.
+  Registered via `register_admin_blueprint` and
+  `register_admin_nav` on the post plugin.
+- Markdown rendering pipeline stub
+  (`bragi.core.render.markdown`): `markdown-it-py` configured
+  with CommonMark + linkify + tables. Used by the post admin to
+  populate `body_html` on save. Plugin-contributed transforms
+  (Pygments code highlighting, anchor IDs, etc.) land here in a
+  follow-up.
+- Shared admin chrome at `bragi/templates/admin/base.html`:
+  topbar with plugin-contributed nav items, current-user display,
+  flash messages, and a styled form area. The admin app's Jinja
+  loader chains `bragi.templates` so plugin templates can
+  `{% extends "admin/base.html" %}`.

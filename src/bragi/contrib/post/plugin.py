@@ -1,14 +1,20 @@
 """Post plugin hook implementations.
 
-The Post type's admin / delivery surfaces land in follow-up
-commits; this module is the registration point.
+Owns:
+- the ContentTypeSpec for Post (registered via
+  register_content_type)
+- the admin Blueprint at /admin/posts (register_admin_blueprint)
+- the admin nav entry (register_admin_nav)
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from bragi.api import ContentTypeSpec, FieldSpec, hookimpl
+from flask import Blueprint
+
+from bragi.api import ContentTypeSpec, FieldSpec, NavItem, hookimpl
+from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.core.models.post import Post
 
 POST_EDIT_FIELDS: list[FieldSpec] = [
@@ -31,11 +37,10 @@ def _url_for_post(post: Any) -> str:
 
 
 def _render_post(post: Any, _request: Any) -> str:
-    """Stub render until templates and the renderer pipeline land.
+    """Stub render until delivery-side templates land.
 
-    Returns minimal HTML so the delivery side can demonstrate the
-    plugin lookup works. Real rendering will go through the
-    `register_html_transform` pipeline and a Jinja template.
+    The body_html cached on the Post is what the renderer
+    pipeline produces; this just wraps it in an h1.
     """
     return f"<h1>{post.title}</h1>\n{post.body_html}"
 
@@ -56,3 +61,22 @@ def register_content_type() -> ContentTypeSpec:
         feed_eligible=True,
         sitemap_eligible=True,
     )
+
+
+@hookimpl
+def register_admin_blueprint() -> Blueprint:
+    """Mount the post admin Blueprint at /admin/posts."""
+    return post_admin_bp
+
+
+@hookimpl
+def register_admin_nav() -> list[NavItem]:
+    """Add a Posts entry to the admin sidebar."""
+    return [
+        NavItem(
+            label="Posts",
+            endpoint="post_admin.list_posts",
+            section="content",
+            weight=10,
+        ),
+    ]

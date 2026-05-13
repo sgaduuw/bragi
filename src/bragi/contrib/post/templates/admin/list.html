@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+{% block title %}Posts &middot; bragi admin{% endblock %}
+{% block content %}
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+  <h1 style="margin: 0;">Posts</h1>
+  <a href="{{ url_for('post_admin.new_post') }}" class="btn">New post</a>
+</div>
+
+{% if posts %}
+<table>
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Slug</th>
+      <th>Status</th>
+      <th>Published</th>
+      <th>Updated</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for post in posts %}
+    <tr>
+      <td><a href="{{ url_for('post_admin.edit_post', post_id=post.id) }}">{{ post.title }}</a></td>
+      <td><code>{{ post.slug }}</code></td>
+      <td>{{ post.status }}</td>
+      <td>{{ post.published_at.strftime('%Y-%m-%d') if post.published_at else '(none)' }}</td>
+      <td>{{ post.updated_at.strftime('%Y-%m-%d') }}</td>
+      <td>
+        <form method="post"
+              action="{{ url_for('post_admin.delete_post', post_id=post.id) }}"
+              onsubmit="return confirm('Delete this post?');"
+              style="display: inline; margin: 0;">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No posts yet. <a href="{{ url_for('post_admin.new_post') }}">Create your first one.</a></p>
+{% endif %}
+{% endblock %}

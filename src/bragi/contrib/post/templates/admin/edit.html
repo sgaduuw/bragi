@@ -1,0 +1,42 @@
+{% extends "admin/base.html" %}
+{% set is_edit = post is not none %}
+{% block title %}{{ 'Edit' if is_edit else 'New' }} post &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>{{ 'Edit post' if is_edit else 'New post' }}</h1>
+
+<form method="post"
+      action="{{ url_for('post_admin.edit_post', post_id=post.id) if is_edit else url_for('post_admin.new_post') }}">
+  <fieldset>
+    <label for="title">Title</label>
+    <input type="text" name="title" id="title" required
+           value="{{ form.get('title', '') }}">
+  </fieldset>
+
+  <fieldset>
+    <label for="slug">Slug</label>
+    <input type="text" name="slug" id="slug" required pattern="[a-z0-9-]+"
+           value="{{ form.get('slug', '') }}">
+  </fieldset>
+
+  <fieldset>
+    <label for="body_markdown">Body (markdown)</label>
+    <textarea name="body_markdown" id="body_markdown">{{ form.get('body_markdown', '') }}</textarea>
+  </fieldset>
+
+  <fieldset>
+    <label for="status">Status</label>
+    <select name="status" id="status">
+      {% set current_status = form.get('status', 'draft') %}
+      <option value="draft" {% if current_status == 'draft' %}selected{% endif %}>Draft</option>
+      <option value="scheduled" {% if current_status == 'scheduled' %}selected{% endif %}>Scheduled</option>
+      <option value="published" {% if current_status == 'published' %}selected{% endif %}>Published</option>
+      <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archived</option>
+    </select>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit">{{ 'Save' if is_edit else 'Create' }}</button>
+    <a href="{{ url_for('post_admin.list_posts') }}" class="btn secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

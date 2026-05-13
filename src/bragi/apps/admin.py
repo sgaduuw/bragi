@@ -9,7 +9,8 @@ lives here, so management commands are invoked as
 from __future__ import annotations
 
 import click
-from flask import Flask
+import jinja2
+from flask import Flask, session
 
 from bragi import __version__
 from bragi.cli import cms
@@ -38,6 +39,14 @@ def create_admin_app() -> Flask:
     """
     app = Flask("bragi-admin")
     app.config["SECRET_KEY"] = settings.secret_key
+
+    # Make `bragi/templates/` reachable via the Jinja loader chain
+    # so plugin templates can `{% extends "admin/base.html" %}`.
+    package_loader = jinja2.PackageLoader("bragi", "templates")
+    if app.jinja_loader is not None:
+        app.jinja_loader = jinja2.ChoiceLoader([app.jinja_loader, package_loader])
+    else:
+        app.jinja_loader = package_loader
 
     pm = create_plugin_manager()
     registry = Registry()
@@ -79,10 +88,22 @@ def create_admin_app() -> Flask:
     pm.hook.register_markdown_transform(registry=md_transforms)
     pm.hook.register_html_transform(registry=html_transforms)
 
-    # Scaffold sanity route; real admin UI lands as plugins ship.
+    # Expose registry-derived bits to every template (admin chrome,
+    # logged-in user). Plugins that need additional template
+    # variables register them via `register_template_globals`.
+    @app.context_processor
+    def _inject_admin_context() -> dict[str, object]:
+        return {
+            "nav_items": sorted(registry.admin_nav, key=lambda i: (i.section, i.weight)),
+            "current_user_email": session.get("user_email"),
+            "current_user_display_name": session.get("user_display_name"),
+        }
+
+    # Index lands at the first nav entry when authenticated;
+    # otherwise the auth guard redirects to /auth/login.
     @app.route("/")
     def index() -> str:
-        return f"<h1>bragi admin</h1><p>v{__version__}. Scaffold only, no UI yet.</p>"
+        return f"<h1>bragi admin</h1><p>v{__version__}. Pick a section from the top nav.</p>"
 
     return app
 
