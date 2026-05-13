@@ -55,3 +55,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unique constraint on `(site_id, source_path, match_type)`.
 - alembic migration `add_redirects` (revision `36a0ec65ddbf`)
   adds the `redirects` table.
+- `bragi.contrib.redirects` plugin: implements `resolve_redirect`
+  (firstresult, exact-match table lookup filtered by
+  `active=True`). Site-scoped via `site_id`; returns None when no
+  site context is provided. Prefix and regex matching,
+  hit-count tracking, admin Blueprint, and the slug-change
+  auto-301 land in follow-up commits.
+- Test DB fixtures (`db_engine`, `db_session_factory`,
+  `db_session`) live in `tests/conftest.py`. In-memory SQLite,
+  fresh per test, with all tables created via
+  `Base.metadata.create_all`. The CI migration smoke step is the
+  cross-check that schema and migrations agree.
