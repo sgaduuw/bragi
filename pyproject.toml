@@ -35,11 +35,11 @@ honcho = "^1.1"
 bragi-admin    = "bragi.apps.admin:run"
 bragi-delivery = "bragi.apps.delivery:run"
 
-# Plugin entry-point group: built-ins land here as they ship.
-# Each entry activates one plugin; comment a line to disable.
-# Example, once cms.contrib.post exists:
-# [tool.poetry.plugins."bragi.plugins"]
-# post = "bragi.contrib.post.plugin"
+# Plugin entry-point group: built-ins are activated here. Comment
+# a line to disable a built-in (it stays on disk; just doesn't
+# register on app boot).
+[tool.poetry.plugins."bragi.plugins"]
+post = "bragi.contrib.post.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

@@ -43,3 +43,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   migration smoke run (`upgrade -> downgrade -> upgrade` on a
   fresh SQLite). Makefile `lint` / `fmt` targets include
   `alembic/`.
+- First built-in plugin: `bragi.contrib.post`. Registers a
+  `ContentTypeSpec` for Post via `register_content_type` with a
+  stub `url_for` and `render`. Activated through the
+  `[tool.poetry.plugins."bragi.plugins"]` entry-point group;
+  visible in `app.extensions["registry"].content_types` on both
+  admin and delivery apps. Real admin Blueprint and delivery
+  templates land in follow-up commits.
