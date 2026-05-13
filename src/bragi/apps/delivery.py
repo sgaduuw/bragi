@@ -11,6 +11,8 @@ import click
 from flask import Flask
 
 from bragi import __version__
+from bragi.core.middleware.redirects import register_redirect_handler
+from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
 from bragi.plugins import create_plugin_manager
@@ -43,6 +45,11 @@ def create_delivery_app() -> Flask:
     app.extensions["registry"] = registry
     app.extensions["md_transforms"] = md_transforms
     app.extensions["html_transforms"] = html_transforms
+
+    # Core middleware: resolve Host -> Site, then run the redirect
+    # chain on every 404 before falling through to a real Not Found.
+    register_site_resolver(app)
+    register_redirect_handler(app)
 
     pm.hook.on_app_init(app=app, registry=registry)
 

@@ -13,6 +13,7 @@ from flask import Flask
 
 from bragi import __version__
 from bragi.cli import cms
+from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
 from bragi.plugins import create_plugin_manager
@@ -46,6 +47,9 @@ def create_admin_app() -> Flask:
     app.extensions["registry"] = registry
     app.extensions["md_transforms"] = md_transforms
     app.extensions["html_transforms"] = html_transforms
+
+    # Core middleware: resolve Host -> Site on every request.
+    register_site_resolver(app)
 
     # Register the top-level `cms` CLI group so plugin commands
     # land under `flask --app bragi.apps.admin cms <subcommand>`.

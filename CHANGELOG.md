@@ -66,3 +66,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fresh per test, with all tables created via
   `Base.metadata.create_all`. The CI migration smoke step is the
   cross-check that schema and migrations agree.
+- Site resolver middleware (`bragi.core.middleware.site_resolver`):
+  before_request hook that resolves the Host header to a Site row
+  via the DB and attaches it to `flask.g.site`. Installed on both
+  admin and delivery apps.
+- Redirect 404-fallback handler
+  (`bragi.core.middleware.redirects`): errorhandler that calls
+  `pm.hook.resolve_redirect` on every 404 with `g.site` and the
+  requested path. Emits 301 / 302 / 307 / 308 on hit, 410 on a
+  Gone-typed redirect, or a real 404 on miss. Installed on the
+  delivery app only; admin URLs are statically defined.
+- Integration test (`tests/integration/test_redirects_flow.py`)
+  exercises the full pipeline: Host header resolution, 301 + 410
+  emission, and 404 fallthrough for unknown hosts / paths.
