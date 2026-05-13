@@ -41,6 +41,7 @@ bragi-delivery = "bragi.apps.delivery:run"
 [tool.poetry.plugins."bragi.plugins"]
 post = "bragi.contrib.post.plugin"
 redirects = "bragi.contrib.redirects.plugin"
+auth_local = "bragi.contrib.auth_local.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

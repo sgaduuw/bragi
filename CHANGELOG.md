@@ -85,3 +85,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   flag for forcing a rotation at next login.
 - alembic migration `add_local_credentials` (revision
   `52631645e3c1`) adds the `local_credentials` table.
+- `bragi.contrib.auth_local` plugin (third built-in): bootstrap
+  authentication via email + argon2id password.
+  - `register_admin_blueprint`: `/auth/login` (GET + POST),
+    `/auth/logout` (POST).
+  - `register_auth_method`: AuthMethodSpec with `bootstrap=True`.
+  - `register_cli_command`: `flask --app bragi.apps.admin cms
+    user create --email --display-name [--password] [--superuser]`.
+    Generates a strong random password when `--password` is
+    omitted; prints to stderr.
+  - `on_app_init`: installs a `before_request` auth guard on the
+    admin app that redirects anonymous hits to `/auth/login`,
+    preserving the original path as `?next=`. Delivery is
+    unaffected. Public endpoints whitelist: `auth_local.login`,
+    `auth_local.logout`, `static`.
+  - `_safe_next` restricts the post-login redirect target to
+    relative paths so an attacker-controlled `next` cannot become
+    an open-redirect off-site.
+  - Sessions use Flask's signed cookies for v1. Server-side
+    sessions (in the `sessions` table) are reserved for a
+    follow-up when logout-invalidates-everywhere matters.
