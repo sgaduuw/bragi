@@ -79,3 +79,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Integration test (`tests/integration/test_redirects_flow.py`)
   exercises the full pipeline: Host header resolution, 301 + 410
   emission, and 404 fallthrough for unknown hosts / paths.
+- `LocalCredential` model (`bragi.core.models.local_credential`):
+  argon2id password storage for the bootstrap auth path. One row
+  per User (`user_id` as both PK and FK), with a `must_change`
+  flag for forcing a rotation at next login.
+- alembic migration `add_local_credentials` (revision
+  `52631645e3c1`) adds the `local_credentials` table.
