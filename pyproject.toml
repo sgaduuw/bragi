@@ -68,6 +68,14 @@ warn_unused_ignores = true
 disallow_untyped_defs = true
 no_implicit_optional = true
 
+# Hookspec functions are stubs: pluggy replaces them with a
+# dispatcher at registration time. mypy's empty-body check would
+# otherwise fire on every spec that returns a non-None concrete
+# type, even with the `...` stub idiom.
+[[tool.mypy.overrides]]
+module = "bragi.hookspecs"
+disable_error_code = ["empty-body"]
+
 # mypy overrides for libraries without type stubs land here as the
 # plugins that import them ship. The pattern:
 #   [[tool.mypy.overrides]]
