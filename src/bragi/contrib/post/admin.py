@@ -9,7 +9,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
@@ -136,6 +145,16 @@ def edit_post(post_id: int) -> ResponseReturnValue:
         updated_id = post.id
         updated_site_id = post.site_id
         after = {"slug": post.slug, "title": post.title, "status": post.status}
+        skip_redirect = request.form.get("skip_redirect") == "1"
+
+        # Fire the on_post_updated plugin hook (e.g., redirects'
+        # slug-change auto-301). Skip when the editor opts out via
+        # the form checkbox: typo-in-draft renames don't need a
+        # stale-URL redirect.
+        if not skip_redirect:
+            pm = current_app.extensions["plugin_manager"]
+            pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+
         flash(f"Post '{form['title']}' updated.", "success")
 
     audit(

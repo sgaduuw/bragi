@@ -293,3 +293,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `-2`, `-3`, ... suffixes; existing explicit ids on a heading
   are honoured AND count toward the dedup pool. Transform runs
   at priority 200 (after the highlighter).
+- Slug-change auto-301. `post_admin.edit_post` now fires the
+  `on_post_updated` plugin hook with `before` / `after`
+  snapshots. `bragi.contrib.redirects` adds an `on_post_updated`
+  hookimpl that inserts a 301 from `/posts/<old>/` to
+  `/posts/<new>/` when the slug changes, with
+  `source=RedirectSource.SLUG_CHANGE`. The post edit form has a
+  "Skip redirect when slug changes" checkbox for typo fixes on
+  drafts. Idempotent: a row that already exists for the same
+  (site, source, match_type) is updated in place rather than
+  failing the UNIQUE constraint.
+- `resolve_redirect` now supports `MatchType.PREFIX` and
+  `MatchType.REGEX` in addition to EXACT. Resolution order:
+  exact -> longest-prefix -> first-regex-match. PREFIX appends
+  the unmatched tail to the target; REGEX uses Python's
+  `match.expand` so `\1`, `\2`, ... in the target slot in
+  capture groups. A bad regex pattern logs a warning and is
+  skipped so one malformed row never 500s the resolver.
