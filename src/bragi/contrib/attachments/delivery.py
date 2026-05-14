@@ -8,13 +8,13 @@ change for a given key.
 
 from __future__ import annotations
 
-from flask import Blueprint, Response, abort, g
+from flask import Blueprint, Response, abort, current_app, g
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
-from bragi.core.storage import read_bytes
+from bragi.core.storage import resolve as resolve_storage
 
 bp = Blueprint(
     "attachment_delivery",
@@ -42,7 +42,7 @@ def serve_attachment(storage_key: str) -> ResponseReturnValue:
         filename = row.filename
 
     try:
-        data = read_bytes(site.slug, storage_key)
+        data = resolve_storage(current_app).read(site.slug, storage_key)
     except FileNotFoundError:
         abort(404)
 

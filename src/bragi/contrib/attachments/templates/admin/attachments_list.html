@@ -27,6 +27,8 @@
       <td>{{ r.size_bytes }} B</td>
       <td>{{ r.created_at.strftime('%Y-%m-%d') }}</td>
       <td>
+        <a href="{{ url_for('attachment_admin.edit_attachment', attachment_id=r.id) }}"
+           class="btn secondary">Edit</a>
         <form method="post"
               action="{{ url_for('attachment_admin.delete_attachment', attachment_id=r.id) }}"
               onsubmit="return confirm('Delete this attachment? The file bytes are removed only when no other attachment row references the same SHA-256.');"

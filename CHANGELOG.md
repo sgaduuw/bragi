@@ -6,6 +6,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Media library foundation (#41 Phase 1). The `Attachment` model
+  gains `width`, `height`, `alt_text`, `title`, `focal_x`,
+  `focal_y` columns; image uploads now populate width / height
+  automatically via Pillow. The `bragi.contrib.attachments` admin
+  gains an edit view for alt text / title / focal point (focal
+  coordinates are clamped to `[0.0, 1.0]`). Two reserved hooks go
+  live: `register_storage_backend` (default: local-disk under
+  `Settings.attachments_root`) and `register_image_processor`
+  (default: Pillow). Storage access in the attachments admin and
+  delivery routes now goes through `bragi.core.storage.resolve()`,
+  which reads the active backend from the Registry and falls back
+  to the local default. Pillow is a new runtime dependency.
+  Migration `add_attachment_image_fields` (rev `44fe91537fd5`).
+  Renditions, the richer media-library admin, and the TipTap embed
+  picker land in later phases of #41.
+
 ## [1.2.0] - 2026-05-14
 
 ### Added

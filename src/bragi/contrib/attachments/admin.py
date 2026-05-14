@@ -18,6 +18,7 @@ import mimetypes
 
 from flask import (
     Blueprint,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -33,8 +34,7 @@ from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.site import Site
-from bragi.core.storage import remove as storage_remove
-from bragi.core.storage import store_bytes
+from bragi.core.storage import resolve as resolve_storage
 from bragi.settings import settings
 
 bp = Blueprint(
@@ -152,9 +152,10 @@ def upload_attachment() -> ResponseReturnValue:
                 sites=sites,
                 default_site_id=sites[0].id,
             )
-        # Store first so the row's storage_key matches the on-disk
-        # path. Idempotent: a duplicate upload reuses the file.
-        storage_key, size = store_bytes(site.slug, data)
+        # Store first so the row's storage_key matches the backend
+        # location. Idempotent: a duplicate upload reuses the file.
+        backend = resolve_storage(current_app)
+        storage_key, size = backend.store(site.slug, data)
         existing = db.execute(
             select(Attachment).where(
                 Attachment.site_id == site_id,
@@ -167,6 +168,20 @@ def upload_attachment() -> ResponseReturnValue:
             flash(f"Already uploaded; reused existing row #{existing.id}.", "success")
             return redirect(url_for("attachment_admin.list_attachments"))
 
+        # Image probe: ask the registered processor for dimensions.
+        # Non-image content types skip this branch entirely (the
+        # processor's can_process returns False, lookup yields None).
+        width: int | None = None
+        height: int | None = None
+        registry = current_app.extensions.get("registry")
+        if registry is not None:
+            processor = registry.image_processor_for(content_type)
+            if processor is not None:
+                meta = processor.probe(data)
+                if meta is not None:
+                    width = meta.width
+                    height = meta.height
+
         actor_id = session.get("user_id")
         attachment = Attachment(
             site_id=site_id,
@@ -174,6 +189,8 @@ def upload_attachment() -> ResponseReturnValue:
             content_type=content_type,
             size_bytes=size,
             storage_key=storage_key,
+            width=width,
+            height=height,
             uploaded_by=actor_id if isinstance(actor_id, int) else None,
         )
         db.add(attachment)
@@ -189,6 +206,68 @@ def upload_attachment() -> ResponseReturnValue:
     )
     flash(f"Uploaded {filename}.", "success")
     return redirect(url_for("attachment_admin.list_attachments"))
+
+
+@bp.route("/<int:attachment_id>/edit", methods=["GET", "POST"])
+def edit_attachment(attachment_id: int) -> ResponseReturnValue:
+    """Edit alt text / title / focal point on an Attachment.
+
+    Width / height / size / content-type / storage_key are
+    derived facts about the underlying bytes and are not editable
+    from this view; an operator who wants different bytes
+    re-uploads (which produces a fresh row with its own metadata).
+    """
+    with SessionLocal() as db:
+        row = db.get(Attachment, attachment_id)
+        if row is None:
+            flash("Attachment not found.", "error")
+            return redirect(url_for("attachment_admin.list_attachments"))
+
+        if request.method == "GET":
+            return render_template("admin/attachment_edit.html", row=row)
+
+        # POST
+        alt_text = (request.form.get("alt_text") or "").strip() or None
+        title = (request.form.get("title") or "").strip() or None
+        focal_x = _parse_focal(request.form.get("focal_x"))
+        focal_y = _parse_focal(request.form.get("focal_y"))
+
+        row.alt_text = alt_text
+        row.title = title
+        row.focal_x = focal_x
+        row.focal_y = focal_y
+        db.commit()
+        site_id = row.site_id
+        filename = row.filename
+
+    audit(
+        "attachment.metadata_updated",
+        target_type="attachment",
+        target_id=attachment_id,
+        site_id=site_id,
+        extra={"filename": filename},
+    )
+    flash(f"Updated metadata for {filename}.", "success")
+    return redirect(url_for("attachment_admin.list_attachments"))
+
+
+def _parse_focal(raw: str | None) -> float | None:
+    """Parse a focal-point coordinate from form input.
+
+    Empty / non-numeric inputs map to None (centre crop). Values
+    are clamped to [0.0, 1.0] so the operator can't poison
+    theme code with out-of-range coordinates.
+    """
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return max(0.0, min(1.0, value))
 
 
 @bp.route("/<int:attachment_id>/delete", methods=["POST"])
@@ -213,7 +292,7 @@ def delete_attachment(attachment_id: int) -> ResponseReturnValue:
             select(Attachment).where(Attachment.storage_key == storage_key).limit(1)
         ).scalar_one_or_none()
         if refcount is None:
-            storage_remove(site_slug, storage_key)
+            resolve_storage(current_app).remove(site_slug, storage_key)
 
     audit(
         "attachment.deleted",
