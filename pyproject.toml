@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bragi"
-version = "1.3.0"
+version = "1.4.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = ["Eelco Wesemann <6771014+sgaduuw@users.noreply.github.com>"]
 license = "MIT"
