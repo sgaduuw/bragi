@@ -53,5 +53,11 @@ class Settings(BaseSettings):
     github_client_id: str | None = None
     github_client_secret: str | None = None
 
+    # IndexNow push-crawl endpoint. `api.indexnow.org` is the
+    # provider-agnostic router that fans out to every participating
+    # search engine (Bing, Yandex, Seznam, Naver, ...); set this to
+    # a specific provider's endpoint when only one matters.
+    indexnow_endpoint: str = "https://api.indexnow.org/indexnow"
+
 
 settings = Settings()

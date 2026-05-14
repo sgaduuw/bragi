@@ -56,6 +56,7 @@ seo = "bragi.contrib.seo.plugin"
 analytics = "bragi.contrib.analytics.plugin"
 import_hugo = "bragi.contrib.import_hugo.plugin"
 import_ghost = "bragi.contrib.import_ghost.plugin"
+indexnow = "bragi.contrib.indexnow.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]
