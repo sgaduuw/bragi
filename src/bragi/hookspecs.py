@@ -26,10 +26,12 @@ from bragi.api import (
     AnalyticsEvent,
     AuthMethodSpec,
     ContentTypeSpec,
+    ImageProcessorSpec,
     ImporterSpec,
     NavItem,
     OAuthProviderSpec,
     RedirectTarget,
+    StorageBackendSpec,
 )
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
@@ -267,6 +269,46 @@ def on_cache_purge(scope: str, key: str) -> None:
     Subscribers wire this to a CDN purge API (Cloudflare, Fastly,
     Caddy's cache.handler, ...). Core ships no implementation;
     the hook is a zero-cost pass-through until plugins listen.
+    """
+    ...
+
+
+# ============================================================
+# Media / storage
+# ============================================================
+
+
+@hookspec
+def register_storage_backend() -> StorageBackendSpec:
+    """Register an attachment storage backend.
+
+    A backend stores blob bytes content-addressed by SHA-256.
+    Day-one ships `bragi.contrib.attachments` with the `local`
+    backend (writes under `Settings.attachments_root`); S3 / R2 /
+    GCS backends land as separate plugins.
+
+    Multiple registrations are allowed; `core.storage.resolve()`
+    returns the first non-`local` backend if any, else the local
+    fallback. Selecting a non-default backend on a per-Site basis
+    lands in a later phase.
+    """
+    ...
+
+
+@hookspec
+def register_image_processor() -> ImageProcessorSpec:
+    """Register an image processor (Pillow, libvips, ...).
+
+    Phase 1: probe-only. The processor reports image dimensions
+    and format on upload so the Attachment row can record them.
+
+    Phase 2 extends the spec with resize / format-convert hooks
+    for rendition generation; existing probe-only impls get
+    default-skip behaviour for the new operations.
+
+    Resolution: the first processor whose `can_process(content_type)`
+    returns True wins; Pillow (registered by
+    `bragi.contrib.attachments`) is the fallback.
     """
     ...
 

@@ -31,9 +31,7 @@ class Session(TimestampsMixin, Base):
     __tablename__ = "sessions"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"), default=None, index=True
-    )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None, index=True)
     expires_at: Mapped[datetime] = mapped_column(index=True)
     last_seen_at: Mapped[datetime]
     ip: Mapped[str | None] = mapped_column(String(64), default=None)

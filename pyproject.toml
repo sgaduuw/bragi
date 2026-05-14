@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bragi"
-version = "1.2.0"
+version = "1.3.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = ["Eelco Wesemann <6771014+sgaduuw@users.noreply.github.com>"]
 license = "MIT"
@@ -26,6 +26,7 @@ markdownify = "^0.13"
 click = "^8.1"
 requests = "^2.34.1"
 pyyaml = "^6.0.3"
+pillow = "^12.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
@@ -56,6 +57,7 @@ seo = "bragi.contrib.seo.plugin"
 analytics = "bragi.contrib.analytics.plugin"
 import_hugo = "bragi.contrib.import_hugo.plugin"
 import_ghost = "bragi.contrib.import_ghost.plugin"
+import_wordpress = "bragi.contrib.import_wordpress.plugin"
 indexnow = "bragi.contrib.indexnow.plugin"
 
 [build-system]

@@ -18,10 +18,18 @@ def app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Flask:
-    blog = Site(slug="blog", hostname="blog.example.com", title="Blog",
-                canonical_url="https://blog.example.com")
-    other = Site(slug="other", hostname="other.example.com", title="Other",
-                 canonical_url="https://other.example.com")
+    blog = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+    )
+    other = Site(
+        slug="other",
+        hostname="other.example.com",
+        title="Other",
+        canonical_url="https://other.example.com",
+    )
     db_session.add_all([blog, other])
     db_session.flush()
     plain = User(email="plain@example.com", display_name="Plain", is_active=True)
@@ -42,12 +50,14 @@ def app(
 
 def _site_id(db_session_factory: sessionmaker[Session], slug: str) -> int:
     from sqlalchemy import select
+
     with db_session_factory() as db:
         return db.execute(select(Site).where(Site.slug == slug)).scalar_one().id
 
 
 def _user_id(db_session_factory: sessionmaker[Session], email: str) -> int:
     from sqlalchemy import select
+
     with db_session_factory() as db:
         return db.execute(select(User).where(User.email == email)).scalar_one().id
 
@@ -71,9 +81,7 @@ def test_superuser_passes_every_check(
         assert has_role("admin", 999999) is True
 
 
-def test_role_matrix_editor_on_blog(
-    app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_role_matrix_editor_on_blog(app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     plain_id = _user_id(db_session_factory, "plain@example.com")
     blog_id = _site_id(db_session_factory, "blog")
     with app.test_request_context("/") as ctx:
@@ -83,9 +91,7 @@ def test_role_matrix_editor_on_blog(
         assert has_role("admin", blog_id) is False
 
 
-def test_role_matrix_author_on_other(
-    app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_role_matrix_author_on_other(app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     plain_id = _user_id(db_session_factory, "plain@example.com")
     other_id = _site_id(db_session_factory, "other")
     with app.test_request_context("/") as ctx:

@@ -127,7 +127,7 @@ def test_maybe_304_returns_304_when_not_modified_since() -> None:
     with _ctx(app, **{"If-Modified-Since": "Thu, 14 May 2026 13:00:00 GMT"}):
         from flask import request
 
-        resp = maybe_304(request, etag="W/\"x\"", last_modified=lm)
+        resp = maybe_304(request, etag='W/"x"', last_modified=lm)
     assert resp is not None
     assert resp.status_code == 304
 
@@ -138,7 +138,7 @@ def test_maybe_304_returns_none_when_modified_after_since() -> None:
     with _ctx(app, **{"If-Modified-Since": "Thu, 14 May 2026 13:00:00 GMT"}):
         from flask import request
 
-        resp = maybe_304(request, etag="W/\"x\"", last_modified=lm)
+        resp = maybe_304(request, etag='W/"x"', last_modified=lm)
     assert resp is None
 
 
@@ -149,7 +149,7 @@ def test_maybe_304_ignores_naive_timestamps_correctly() -> None:
     with _ctx(app, **{"If-Modified-Since": "Thu, 14 May 2026 13:00:00 GMT"}):
         from flask import request
 
-        resp = maybe_304(request, etag="W/\"x\"", last_modified=lm_naive)
+        resp = maybe_304(request, etag='W/"x"', last_modified=lm_naive)
     assert resp is not None
     assert resp.status_code == 304
 
@@ -159,7 +159,7 @@ def test_maybe_304_returns_none_with_no_conditional_headers() -> None:
     with _ctx(app):
         from flask import request
 
-        resp = maybe_304(request, etag="W/\"x\"", last_modified=datetime.now(UTC))
+        resp = maybe_304(request, etag='W/"x"', last_modified=datetime.now(UTC))
     assert resp is None
 
 

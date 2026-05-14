@@ -19,12 +19,8 @@ from bragi.core.models._mixins import IdMixin, TimestampsMixin
 class PageRevision(IdMixin, TimestampsMixin, Base):
     __tablename__ = "page_revisions"
 
-    page_id: Mapped[int] = mapped_column(
-        ForeignKey("pages.id", ondelete="CASCADE"), index=True
-    )
-    editor_user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"), default=None
-    )
+    page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), index=True)
+    editor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
 
     title: Mapped[str] = mapped_column(String(255))
     slug: Mapped[str] = mapped_column(String(255))

@@ -65,9 +65,7 @@ class Post(IdMixin, TimestampsMixin, Base):
     featured_image_id: Mapped[int | None] = mapped_column(
         ForeignKey("attachments.id"), default=None
     )
-    og_image_id: Mapped[int | None] = mapped_column(
-        ForeignKey("attachments.id"), default=None
-    )
+    og_image_id: Mapped[int | None] = mapped_column(ForeignKey("attachments.id"), default=None)
 
     # Import provenance: `(site_id, source_id)` is unique enough
     # that importers can update-or-insert idempotently without a

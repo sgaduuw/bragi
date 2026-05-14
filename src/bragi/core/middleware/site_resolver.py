@@ -36,9 +36,7 @@ def register_site_resolver(app: Flask) -> None:
             g.site = None
             return
         with SessionLocal() as session:
-            site = session.execute(
-                select(Site).where(Site.hostname == host)
-            ).scalar_one_or_none()
+            site = session.execute(select(Site).where(Site.hostname == host)).scalar_one_or_none()
             if site is None:
                 # Alias fallback: a row in site_aliases points at
                 # its parent Site via FK.

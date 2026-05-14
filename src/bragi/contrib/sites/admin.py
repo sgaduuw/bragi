@@ -132,9 +132,7 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 .scalars()
                 .all()
             )
-            return render_template(
-                "admin/sites_edit.html", site=site, form=form, aliases=aliases
-            )
+            return render_template("admin/sites_edit.html", site=site, form=form, aliases=aliases)
 
         form = _form_from_request()
         errors = _validate(form)
@@ -203,9 +201,7 @@ def add_alias(site_id: int) -> ResponseReturnValue:
             return redirect(url_for("site_admin.list_sites"))
         # Conflict checks across both `sites.hostname` and
         # `site_aliases.hostname`; either match is a violation.
-        clash_site = db.execute(
-            select(Site).where(Site.hostname == hostname)
-        ).scalar_one_or_none()
+        clash_site = db.execute(select(Site).where(Site.hostname == hostname)).scalar_one_or_none()
         clash_alias = db.execute(
             select(SiteAlias).where(SiteAlias.hostname == hostname)
         ).scalar_one_or_none()

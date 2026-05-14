@@ -139,9 +139,7 @@ def _resolve_author(
     email = primary.get("email")
     if not email:
         return fallback_author_id
-    existing = db.execute(
-        select(User).where(User.email == email.lower())
-    ).scalar_one_or_none()
+    existing = db.execute(select(User).where(User.email == email.lower())).scalar_one_or_none()
     return existing.id if existing else fallback_author_id
 
 
@@ -196,9 +194,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             resolved_author_id = _resolve_author(db, data, raw_post, author_id)
 
             existing = db.execute(
-                select(Post).where(
-                    Post.site_id == site_id, Post.source_id == ghost_id
-                )
+                select(Post).where(Post.site_id == site_id, Post.source_id == ghost_id)
             ).scalar_one_or_none()
 
             if existing is None:
@@ -224,9 +220,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 existing.title = title
                 existing.body_markdown = body_md
                 existing.body_html = render_markdown(body_md)
-                existing.body_excerpt = (
-                    raw_post.get("custom_excerpt") or make_excerpt(body_md)
-                )
+                existing.body_excerpt = raw_post.get("custom_excerpt") or make_excerpt(body_md)
                 existing.status = status
                 if published_at is not None:
                     existing.published_at = published_at

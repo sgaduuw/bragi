@@ -187,9 +187,7 @@ def test_edit_post_removing_tag_detaches_it(
         post = db.get(Post, post_id)
         assert post.tags == []
         # Tag row itself stays on disk; only the junction was rewritten.
-        assert (
-            db.execute(select(Tag).where(Tag.slug == "python")).scalar_one() is not None
-        )
+        assert db.execute(select(Tag).where(Tag.slug == "python")).scalar_one() is not None
 
 
 # ============================================================
@@ -220,23 +218,35 @@ def delivery_app(
     db_session.flush()
     post_a = Post(
         site_id=site.id,
-        slug="a", title="Post A",
-        body_markdown="A", body_html="<p>A</p>", body_excerpt="A",
-        author_id=user.id, status=PostStatus.PUBLISHED,
+        slug="a",
+        title="Post A",
+        body_markdown="A",
+        body_html="<p>A</p>",
+        body_excerpt="A",
+        author_id=user.id,
+        status=PostStatus.PUBLISHED,
         published_at=datetime(2026, 5, 14, tzinfo=UTC),
     )
     post_b = Post(
         site_id=site.id,
-        slug="b", title="Post B",
-        body_markdown="B", body_html="<p>B</p>", body_excerpt="B",
-        author_id=user.id, status=PostStatus.PUBLISHED,
+        slug="b",
+        title="Post B",
+        body_markdown="B",
+        body_html="<p>B</p>",
+        body_excerpt="B",
+        author_id=user.id,
+        status=PostStatus.PUBLISHED,
         published_at=datetime(2026, 5, 13, tzinfo=UTC),
     )
     draft = Post(
         site_id=site.id,
-        slug="c", title="Draft",
-        body_markdown="C", body_html="<p>C</p>", body_excerpt="C",
-        author_id=user.id, status=PostStatus.DRAFT,
+        slug="c",
+        title="Draft",
+        body_markdown="C",
+        body_html="<p>C</p>",
+        body_excerpt="C",
+        author_id=user.id,
+        status=PostStatus.DRAFT,
     )
     db_session.add_all([post_a, post_b, draft])
     db_session.flush()
@@ -254,9 +264,7 @@ def delivery_app(
 
 
 def test_tag_page_lists_published_posts(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/tags/python/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/tags/python/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "Post A" in body
@@ -264,29 +272,21 @@ def test_tag_page_lists_published_posts(delivery_app: Flask) -> None:
 
 
 def test_tag_page_excludes_drafts(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/tags/python/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/tags/python/", headers={"Host": "blog.example.com"})
     assert b"Draft" not in resp.data
 
 
 def test_tag_page_empty_for_unused_tag(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/tags/rust/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/tags/rust/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert b"No published posts" in resp.data
 
 
 def test_tag_page_unknown_slug_returns_404(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/tags/nope/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/tags/nope/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
 
 
 def test_tag_page_unknown_host_returns_404(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/tags/python/", headers={"Host": "nope.example.com"}
-    )
+    resp = delivery_app.test_client().get("/tags/python/", headers={"Host": "nope.example.com"})
     assert resp.status_code == 404

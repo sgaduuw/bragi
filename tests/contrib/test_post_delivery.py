@@ -22,6 +22,7 @@ from bragi.core.models.user import User
 
 @pytest.fixture
 def delivery_app(
+    patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,

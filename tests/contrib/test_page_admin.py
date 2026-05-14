@@ -66,9 +66,7 @@ def test_list_requires_auth(admin_app: Flask) -> None:
     assert resp.status_code == 302
 
 
-def test_new_creates_root_page(
-    admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_new_creates_root_page(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/pages/new")
@@ -100,9 +98,14 @@ def test_new_rejects_duplicate_slug_under_same_parent(
         user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
         db.add(
             Page(
-                site_id=site_id, slug="about", title="A",
-                body_markdown="", body_html="", body_excerpt="",
-                author_id=user_id, status=PageStatus.DRAFT,
+                site_id=site_id,
+                slug="about",
+                title="A",
+                body_markdown="",
+                body_html="",
+                body_excerpt="",
+                author_id=user_id,
+                status=PageStatus.DRAFT,
             )
         )
         db.commit()
@@ -127,21 +130,29 @@ def test_new_rejects_duplicate_slug_under_same_parent(
     assert len(rows) == 1
 
 
-def test_edit_changes_parent(
-    admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_edit_changes_parent(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     with db_session_factory() as db:
         site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
         user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
         about = Page(
-            site_id=site_id, slug="about", title="About",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user_id, status=PageStatus.PUBLISHED,
+            site_id=site_id,
+            slug="about",
+            title="About",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user_id,
+            status=PageStatus.PUBLISHED,
         )
         child = Page(
-            site_id=site_id, slug="team", title="Team",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user_id, status=PageStatus.DRAFT,
+            site_id=site_id,
+            slug="team",
+            title="Team",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user_id,
+            status=PageStatus.DRAFT,
         )
         db.add_all([about, child])
         db.flush()
@@ -176,9 +187,14 @@ def test_edit_rejects_self_as_parent(
         site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
         user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
         page = Page(
-            site_id=site_id, slug="about", title="About",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user_id, status=PageStatus.PUBLISHED,
+            site_id=site_id,
+            slug="about",
+            title="About",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user_id,
+            status=PageStatus.PUBLISHED,
         )
         db.add(page)
         db.commit()
@@ -211,17 +227,30 @@ def test_delete_blocked_when_children_exist(
         site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
         user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
         about = Page(
-            site_id=site_id, slug="about", title="About",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user_id, status=PageStatus.PUBLISHED,
+            site_id=site_id,
+            slug="about",
+            title="About",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user_id,
+            status=PageStatus.PUBLISHED,
         )
         db.add(about)
         db.flush()
-        db.add(Page(
-            site_id=site_id, parent_id=about.id, slug="team", title="Team",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user_id, status=PageStatus.PUBLISHED,
-        ))
+        db.add(
+            Page(
+                site_id=site_id,
+                parent_id=about.id,
+                slug="team",
+                title="Team",
+                body_markdown="",
+                body_html="",
+                body_excerpt="",
+                author_id=user_id,
+                status=PageStatus.PUBLISHED,
+            )
+        )
         db.commit()
         about_id = about.id
 

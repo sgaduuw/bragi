@@ -4,7 +4,28 @@
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
   <h1 style="margin: 0;">Attachments</h1>
   <a href="{{ url_for('attachment_admin.upload_attachment') }}" class="btn">Upload</a>
+  {% if missing_alt %}
+    <a href="{{ url_for('attachment_admin.list_attachments') }}" class="btn secondary">
+      All attachments
+    </a>
+  {% elif missing_alt_count > 0 %}
+    <a href="{{ url_for('attachment_admin.list_attachments', missing_alt='1') }}"
+       class="btn secondary">
+      Images missing alt text ({{ missing_alt_count }})
+    </a>
+  {% endif %}
 </div>
+
+{% if missing_alt %}
+  <p>
+    {% if rows %}
+      Fill in alt text inline. Each save updates the row without
+      leaving this page.
+    {% else %}
+      All images on this site have alt text. Nothing to do here.
+    {% endif %}
+  </p>
+{% endif %}
 
 {% if rows %}
 <table>
@@ -13,43 +34,34 @@
       <th>Filename</th>
       <th>Site</th>
       <th>Type</th>
-      <th>Size</th>
-      <th>Uploaded</th>
+      {% if missing_alt %}
+        <th colspan="2">Alt text</th>
+      {% else %}
+        <th>Size</th>
+        <th>Uploaded</th>
+      {% endif %}
       <th></th>
     </tr>
   </thead>
   <tbody>
     {% for r in rows %}
-    <tr>
-      <td><code>{{ r.filename }}</code></td>
-      <td><small>{{ sites_by_id.get(r.site_id).slug if sites_by_id.get(r.site_id) else r.site_id }}</small></td>
-      <td><small>{{ r.content_type }}</small></td>
-      <td>{{ r.size_bytes }} B</td>
-      <td>{{ r.created_at.strftime('%Y-%m-%d') }}</td>
-      <td>
-        <form method="post"
-              action="{{ url_for('attachment_admin.delete_attachment', attachment_id=r.id) }}"
-              onsubmit="return confirm('Delete this attachment? The file bytes are removed only when no other attachment row references the same SHA-256.');"
-              style="display: inline; margin: 0;">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="danger">Delete</button>
-        </form>
-      </td>
-    </tr>
+      {% include "admin/_attachment_row.html" %}
     {% endfor %}
   </tbody>
 </table>
 
 <nav style="margin-top: 1rem;">
   {% if page > 1 %}
-    <a class="btn secondary" href="{{ url_for('attachment_admin.list_attachments', page=page-1) }}">&laquo; Prev</a>
+    <a class="btn secondary" href="{{ url_for('attachment_admin.list_attachments', page=page-1, missing_alt='1' if missing_alt else None) }}">&laquo; Prev</a>
   {% endif %}
   <span style="margin: 0 1rem;">Page {{ page }}</span>
   {% if has_more %}
-    <a class="btn secondary" href="{{ url_for('attachment_admin.list_attachments', page=page+1) }}">Next &raquo;</a>
+    <a class="btn secondary" href="{{ url_for('attachment_admin.list_attachments', page=page+1, missing_alt='1' if missing_alt else None) }}">Next &raquo;</a>
   {% endif %}
 </nav>
 {% else %}
-<p>No attachments yet. <a href="{{ url_for('attachment_admin.upload_attachment') }}">Upload one.</a></p>
+  {% if not missing_alt %}
+    <p>No attachments yet. <a href="{{ url_for('attachment_admin.upload_attachment') }}">Upload one.</a></p>
+  {% endif %}
 {% endif %}
 {% endblock %}

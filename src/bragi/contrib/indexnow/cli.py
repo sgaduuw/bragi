@@ -39,14 +39,10 @@ def setup(site_slug: str, key: str | None) -> None:
     site_slug = site_slug.strip().lower()
     fresh_key = key or secrets.token_hex(16)
     if not (8 <= len(fresh_key) <= 128 and fresh_key.replace("-", "").isalnum()):
-        click.echo(
-            "Key must be 8-128 chars, alphanumeric (hyphens allowed).", err=True
-        )
+        click.echo("Key must be 8-128 chars, alphanumeric (hyphens allowed).", err=True)
         sys.exit(1)
     with SessionLocal() as db:
-        site = db.execute(
-            select(Site).where(Site.slug == site_slug)
-        ).scalar_one_or_none()
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
         if site is None:
             click.echo(f"No site with slug {site_slug!r}.", err=True)
             sys.exit(1)
@@ -58,7 +54,6 @@ def setup(site_slug: str, key: str | None) -> None:
         click.echo(f"Verification URL: {canonical}/{fresh_key}.txt")
     else:
         click.echo(
-            "Site has no canonical_url set; configure one so the verification URL "
-            "is reachable.",
+            "Site has no canonical_url set; configure one so the verification URL " "is reachable.",
             err=True,
         )

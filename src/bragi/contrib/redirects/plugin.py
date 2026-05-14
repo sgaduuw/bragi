@@ -62,9 +62,7 @@ def _resolve_exact(session: Any, site_id: int, path: str) -> Redirect | None:
     )
 
 
-def _resolve_prefix(
-    session: Any, site_id: int, path: str
-) -> tuple[Redirect, str] | None:
+def _resolve_prefix(session: Any, site_id: int, path: str) -> tuple[Redirect, str] | None:
     """Find the longest active PREFIX rule whose source_path the
     request path starts with. Returns `(row, resolved_target)`
     where `resolved_target` is `row.target` with the unmatched
@@ -84,14 +82,12 @@ def _resolve_prefix(
     )
     for row in candidates:
         if path.startswith(row.source_path):
-            tail = path[len(row.source_path):]
+            tail = path[len(row.source_path) :]
             return row, row.target + tail
     return None
 
 
-def _resolve_regex(
-    session: Any, site_id: int, path: str
-) -> tuple[Redirect, str] | None:
+def _resolve_regex(session: Any, site_id: int, path: str) -> tuple[Redirect, str] | None:
     """First active REGEX rule whose pattern fully-matches the path
     wins. Capture groups expand into the target via `match.expand`.
     Uncompilable patterns are logged and skipped."""

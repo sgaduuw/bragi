@@ -59,11 +59,7 @@ def list_audit() -> ResponseReturnValue:
         # Cache actor users in a single query so the template doesn't N+1.
         actor_ids = {r.actor_user_id for r in rows if r.actor_user_id is not None}
         if actor_ids:
-            users = (
-                db.execute(select(User).where(User.id.in_(actor_ids)))
-                .scalars()
-                .all()
-            )
+            users = db.execute(select(User).where(User.id.in_(actor_ids))).scalars().all()
             users_by_id = {u.id: u for u in users}
         else:
             users_by_id = {}

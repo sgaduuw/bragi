@@ -87,9 +87,7 @@ def on_post_published(item: Any, session: Any) -> None:
 
 
 @hookimpl
-def on_post_updated(
-    item: Any, before: dict[str, Any], after: dict[str, Any], session: Any
-) -> None:
+def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], session: Any) -> None:
     del before, after
     _push_url_for_item(item, session)
 
@@ -119,7 +117,7 @@ __all__ = [
 ]
 
 
-# Silence the "unused import" complaint on `select` — the import
+# Silence the "unused import" complaint on `select`: the import
 # stays because callers may want a session-bound site lookup
 # helper to land here next.
 _ = select

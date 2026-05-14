@@ -1,7 +1,7 @@
 """PostRevision: pre-edit snapshot of a Post row.
 
 One row per save. The snapshot captures the post's state at the
-moment BEFORE the edit applied — so the live `posts.body_markdown`
+moment BEFORE the edit applied, so the live `posts.body_markdown`
 is always "current" and the most recent revision is "the version
 prior to the most recent save." This makes diff views ("what
 changed in this edit?") a single-row compare against the live
@@ -29,12 +29,8 @@ from bragi.core.models._mixins import IdMixin, TimestampsMixin
 class PostRevision(IdMixin, TimestampsMixin, Base):
     __tablename__ = "post_revisions"
 
-    post_id: Mapped[int] = mapped_column(
-        ForeignKey("posts.id", ondelete="CASCADE"), index=True
-    )
-    editor_user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"), default=None
-    )
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), index=True)
+    editor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
 
     # Snapshot fields. Mirrors the subset of `Post` that an editor
     # would want to inspect or roll back to. Body is kept as

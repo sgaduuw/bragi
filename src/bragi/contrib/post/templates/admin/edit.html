@@ -43,7 +43,26 @@
       <span class="sep">|</span>
       <button type="button" data-action="link" title="Link">Link</button>
       <button type="button" data-action="unlink" title="Remove link">Unlink</button>
+      <span class="sep">|</span>
+      <button type="button" data-action="image" title="Insert image">&#128247; Image</button>
     </div>
+
+    <dialog id="image-picker-dialog"
+            style="max-width: 800px; width: 90vw; padding: 0;
+                   border: 1px solid #bbb; border-radius: 4px;">
+      <div style="display: flex; align-items: center; justify-content: space-between;
+                  padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee;">
+        <strong>Insert image</strong>
+        <button type="button"
+                data-action="close-picker"
+                style="background: none; border: 0; font-size: 1.2em; cursor: pointer;">
+          &times;
+        </button>
+      </div>
+      <div id="image-picker-target">
+        <p style="padding: 1rem; color: #888;">Loading...</p>
+      </div>
+    </dialog>
     <div id="post-editor" class="editor-mount" hidden></div>
     <textarea name="body_markdown" id="body_markdown">{{ form.get('body_markdown', '') }}</textarea>
   </fieldset>
@@ -199,8 +218,56 @@
           break;
         }
         case 'unlink': chain.unsetLink().run(); break;
+        case 'image': openImagePicker(); break;
       }
     });
+
+    // Image picker: open the `<dialog>`, lazy-load the grid via
+    // htmx so the page weight stays light when the operator isn't
+    // embedding images. Selecting a card inserts a markdown image
+    // link at the cursor and closes the dialog.
+    const pickerDialog = document.getElementById('image-picker-dialog');
+    const pickerTarget = document.getElementById('image-picker-target');
+    const pickerUrl = '{{ url_for("attachment_admin.picker") }}';
+
+    function openImagePicker() {
+      if (!pickerDialog || !pickerTarget) return;
+      // Load the grid into the dialog body. htmx.ajax replaces
+      // innerHTML and processes any hx-* attributes in the loaded
+      // markup (pagination, site filter).
+      if (window.htmx) {
+        window.htmx.ajax('GET', pickerUrl, { target: pickerTarget, swap: 'innerHTML' });
+      } else {
+        pickerTarget.innerHTML = '<p style="padding: 1rem;">htmx unavailable; close and try again.</p>';
+      }
+      pickerDialog.showModal();
+    }
+
+    if (pickerDialog) {
+      pickerDialog.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="close-picker"]')) {
+          pickerDialog.close();
+          return;
+        }
+        const card = e.target.closest('.picker-card');
+        if (!card) return;
+        e.preventDefault();
+        const key = card.dataset.storageKey || '';
+        const filename = card.dataset.filename || '';
+        const alt = card.dataset.altText || filename || 'image';
+        if (!key) return;
+        editor
+          .chain()
+          .focus()
+          .insertContent(`![${alt}](/attachments/${key})\n\n`)
+          .run();
+        pickerDialog.close();
+      });
+      // Click on the backdrop closes; <dialog> doesn't do this by default.
+      pickerDialog.addEventListener('click', (e) => {
+        if (e.target === pickerDialog) pickerDialog.close();
+      });
+    }
 
     // Belt-and-braces: even if onUpdate hasn't fired yet (rare race
     // when submitting immediately after typing), serialize one more

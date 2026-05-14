@@ -110,18 +110,14 @@ def delivery_app(
 
 
 def test_feed_xml_returns_atom_content_type(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("application/atom+xml")
 
 
 def test_feed_xml_is_well_formed_atom(delivery_app: Flask) -> None:
     """The body parses as XML and is shaped as an Atom feed."""
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     root = ET.fromstring(resp.data)
     assert root.tag == f"{ATOM_NS}feed"
     title = root.find(f"{ATOM_NS}title")
@@ -129,9 +125,7 @@ def test_feed_xml_is_well_formed_atom(delivery_app: Flask) -> None:
 
 
 def test_feed_xml_lists_only_published(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     root = ET.fromstring(resp.data)
     entries = root.findall(f"{ATOM_NS}entry")
     titles = {e.find(f"{ATOM_NS}title").text for e in entries}  # type: ignore[union-attr]
@@ -143,9 +137,7 @@ def test_feed_xml_lists_only_published(delivery_app: Flask) -> None:
 
 
 def test_feed_xml_orders_newest_first(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     root = ET.fromstring(resp.data)
     entries = root.findall(f"{ATOM_NS}entry")
     titles = [e.find(f"{ATOM_NS}title").text for e in entries]  # type: ignore[union-attr]
@@ -154,9 +146,7 @@ def test_feed_xml_orders_newest_first(delivery_app: Flask) -> None:
 
 
 def test_feed_xml_entry_has_author_name(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     root = ET.fromstring(resp.data)
     first = root.find(f"{ATOM_NS}entry")
     assert first is not None
@@ -167,18 +157,14 @@ def test_feed_xml_entry_has_author_name(delivery_app: Flask) -> None:
 
 def test_feed_xml_entry_carries_html_content(delivery_app: Flask) -> None:
     """Entry content is wrapped in CDATA, with type=html."""
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
     assert "<![CDATA[<p>B body</p>]]>" in body
     assert 'type="html"' in body
 
 
 def test_feed_xml_per_site_isolation(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "other.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "other.example.com"})
     root = ET.fromstring(resp.data)
     entries = root.findall(f"{ATOM_NS}entry")
     titles = {e.find(f"{ATOM_NS}title").text for e in entries}  # type: ignore[union-attr]
@@ -187,9 +173,7 @@ def test_feed_xml_per_site_isolation(delivery_app: Flask) -> None:
 
 
 def test_feed_xml_unknown_host_404s(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "nope.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "nope.example.com"})
     assert resp.status_code == 404
 
 
@@ -222,9 +206,7 @@ def test_feed_caps_at_limit(
             )
         db.commit()
 
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     root = ET.fromstring(resp.data)
     entries = root.findall(f"{ATOM_NS}entry")
     assert len(entries) == FEED_ENTRY_LIMIT

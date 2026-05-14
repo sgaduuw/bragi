@@ -74,10 +74,7 @@ def _slug_in_use(
 ) -> bool:
     """App-level slug-uniqueness pre-flight (covers the root-level
     case SQLite UNIQUE leaves open)."""
-    stmt = (
-        select(Page)
-        .where(Page.site_id == site_id, Page.slug == slug)
-    )
+    stmt = select(Page).where(Page.site_id == site_id, Page.slug == slug)
     stmt = (
         stmt.where(Page.parent_id.is_(None))
         if parent_id is None
@@ -144,17 +141,13 @@ def new_page() -> ResponseReturnValue:
 
         if request.method == "GET":
             parents = _all_pages_for_picker(db, site_id)
-            return render_template(
-                "admin/page_edit.html", page=None, form={}, parents=parents
-            )
+            return render_template("admin/page_edit.html", page=None, form={}, parents=parents)
 
         form = _form_from_request()
         parents = _all_pages_for_picker(db, site_id)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template(
-                "admin/page_edit.html", page=None, form=form, parents=parents
-            )
+            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
 
         parent_id = _normalized_parent_id(form["parent_id"])
         slug = str(form["slug"])
@@ -163,9 +156,7 @@ def new_page() -> ResponseReturnValue:
                 f"A page with slug {slug!r} already exists under that parent.",
                 "error",
             )
-            return render_template(
-                "admin/page_edit.html", page=None, form=form, parents=parents
-            )
+            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
 
         body_markdown = str(form["body_markdown"])
         new_status = str(form["status"])
@@ -219,31 +210,23 @@ def edit_page(page_id: int) -> ResponseReturnValue:
                 "status": page.status,
                 "parent_id": str(page.parent_id) if page.parent_id else "",
             }
-            return render_template(
-                "admin/page_edit.html", page=page, form=form, parents=parents
-            )
+            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template(
-                "admin/page_edit.html", page=page, form=form, parents=parents
-            )
+            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
         parent_id = _normalized_parent_id(form["parent_id"])
         if parent_id == page.id:
             flash("A page cannot be its own parent.", "error")
-            return render_template(
-                "admin/page_edit.html", page=page, form=form, parents=parents
-            )
+            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
         slug = str(form["slug"])
         if _slug_in_use(db, page.site_id, parent_id, slug, exclude_page_id=page.id):
             flash(
                 f"A page with slug {slug!r} already exists under that parent.",
                 "error",
             )
-            return render_template(
-                "admin/page_edit.html", page=page, form=form, parents=parents
-            )
+            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
 
         # Capture pre-edit state before mutating; mirrors the
         # post admin's snapshot semantics so a rollback returns
@@ -285,9 +268,7 @@ def delete_page(page_id: int) -> ResponseReturnValue:
         # A page with children blocks deletion; archive the children
         # or re-parent them first. Keeps tree consistency without a
         # cascade rule on the FK.
-        children = db.execute(
-            select(Page).where(Page.parent_id == page.id)
-        ).scalars().all()
+        children = db.execute(select(Page).where(Page.parent_id == page.id)).scalars().all()
         if children:
             flash(
                 f"Cannot delete page with {len(children)} child page(s). "
@@ -336,9 +317,7 @@ def list_page_revisions(page_id: int) -> ResponseReturnValue:
             .scalars()
             .all()
         )
-        return render_template(
-            "admin/page_revisions.html", page=page, revisions=revisions
-        )
+        return render_template("admin/page_revisions.html", page=page, revisions=revisions)
 
 
 @bp.route("/<int:page_id>/revisions/<int:rev_id>", methods=["GET"])
@@ -351,12 +330,8 @@ def show_page_revision(page_id: int, rev_id: int) -> ResponseReturnValue:
         revision = db.get(PageRevision, rev_id)
         if revision is None or revision.page_id != page.id:
             flash("Revision not found.", "error")
-            return redirect(
-                url_for("page_admin.list_page_revisions", page_id=page.id)
-            )
-        return render_template(
-            "admin/page_revision_detail.html", page=page, revision=revision
-        )
+            return redirect(url_for("page_admin.list_page_revisions", page_id=page.id))
+        return render_template("admin/page_revision_detail.html", page=page, revision=revision)
 
 
 @bp.route("/<int:page_id>/revisions/<int:rev_id>/restore", methods=["POST"])
@@ -369,9 +344,7 @@ def restore_page_revision(page_id: int, rev_id: int) -> ResponseReturnValue:
         revision = db.get(PageRevision, rev_id)
         if revision is None or revision.page_id != page.id:
             flash("Revision not found.", "error")
-            return redirect(
-                url_for("page_admin.list_page_revisions", page_id=page.id)
-            )
+            return redirect(url_for("page_admin.list_page_revisions", page_id=page.id))
         editor_user_id = int(session["user_id"])
         _snapshot_page(db, page, editor_user_id=editor_user_id)
         page.title = revision.title

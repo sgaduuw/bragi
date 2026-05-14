@@ -111,9 +111,7 @@ def alias_add(site_slug: str, hostname: str) -> None:
             sys.exit(1)
         # A hostname is unique across both `sites.hostname` and
         # `site_aliases.hostname`. Either match is a conflict.
-        clash_site = db.execute(
-            select(Site).where(Site.hostname == hostname)
-        ).scalar_one_or_none()
+        clash_site = db.execute(select(Site).where(Site.hostname == hostname)).scalar_one_or_none()
         if clash_site is not None:
             click.echo(
                 f"Hostname {hostname!r} is already the canonical hostname of "

@@ -56,11 +56,7 @@ def detect(path: Any) -> bool:
 
 def _iter_content_files(root: Path) -> list[Path]:
     """Markdown files under `content/`, excluding section indexes."""
-    return [
-        p
-        for p in (root / "content").rglob("*.md")
-        if p.is_file() and p.name != "_index.md"
-    ]
+    return [p for p in (root / "content").rglob("*.md") if p.is_file() and p.name != "_index.md"]
 
 
 def _resolve_status(meta: dict[str, Any]) -> str:
@@ -181,9 +177,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             # source tree.
             source_id = str(relative).replace("\\", "/")
             existing = db.execute(
-                select(Post).where(
-                    Post.site_id == site_id, Post.source_id == source_id
-                )
+                select(Post).where(Post.site_id == site_id, Post.source_id == source_id)
             ).scalar_one_or_none()
 
             if existing is None:
@@ -229,9 +223,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                     if not tag_slug:
                         continue
                     tag = db.execute(
-                        select(Tag).where(
-                            Tag.site_id == site_id, Tag.slug == tag_slug
-                        )
+                        select(Tag).where(Tag.site_id == site_id, Tag.slug == tag_slug)
                     ).scalar_one_or_none()
                     if tag is None:
                         tag = Tag(site_id=site_id, slug=tag_slug, label=label)
@@ -275,9 +267,11 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
         db.commit()
 
     return ImportResult(
-        counts={"posts": posts_created + posts_updated,
-                "posts_created": posts_created,
-                "posts_updated": posts_updated},
+        counts={
+            "posts": posts_created + posts_updated,
+            "posts_created": posts_created,
+            "posts_updated": posts_updated,
+        },
         warnings=warnings,
         redirects_inserted=redirects_inserted,
         duration_seconds=time.monotonic() - start,

@@ -144,18 +144,14 @@ def test_plan_counts_posts_and_aliases(tmp_path: Path) -> None:
 
 def test_plan_warns_on_missing_date(tmp_path: Path) -> None:
     root = _make_hugo_tree(tmp_path)
-    (root / "content" / "no-date.md").write_text(
-        "---\ntitle: Untimed\n---\nBody.\n"
-    )
+    (root / "content" / "no-date.md").write_text("---\ntitle: Untimed\n---\nBody.\n")
     result = plan(root)
     assert any("missing date" in w for w in result.warnings)
 
 
 def test_plan_skips_section_index(tmp_path: Path) -> None:
     root = _make_hugo_tree(tmp_path)
-    (root / "content" / "_index.md").write_text(
-        "---\ntitle: Home\n---\nLanding.\n"
-    )
+    (root / "content" / "_index.md").write_text("---\ntitle: Home\n---\nLanding.\n")
     (root / "content" / "real-post.md").write_text(
         "---\ntitle: Real\ndate: 2026-01-01\n---\nBody.\n"
     )
@@ -233,9 +229,7 @@ def test_apply_creates_posts_and_redirects(
         tags = db.execute(select(Tag).order_by(Tag.slug)).scalars().all()
         assert [t.slug for t in tags] == ["python", "web"]
         # Redirects inserted with normalised paths
-        rows = db.execute(
-            select(Redirect).order_by(Redirect.source_path)
-        ).scalars().all()
+        rows = db.execute(select(Redirect).order_by(Redirect.source_path)).scalars().all()
         sources = [r.source_path for r in rows]
         assert sources == ["/hello-2024/", "/old-hello/"]
         for r in rows:
@@ -255,9 +249,7 @@ def test_apply_is_idempotent_via_source_id(
 
     root = _make_hugo_tree(tmp_path)
     md = root / "content" / "post.md"
-    md.write_text(
-        "---\ntitle: First\ndate: 2026-01-01\n---\nBody one.\n"
-    )
+    md.write_text("---\ntitle: First\ndate: 2026-01-01\n---\nBody one.\n")
 
     with db_session_factory() as db:
         site = db.get(Site, site_id)
@@ -266,9 +258,7 @@ def test_apply_is_idempotent_via_source_id(
     apply(root, site, {})
 
     # Re-run with edited content; the row updates in place.
-    md.write_text(
-        "---\ntitle: Edited\ndate: 2026-01-01\n---\nBody two.\n"
-    )
+    md.write_text("---\ntitle: Edited\ndate: 2026-01-01\n---\nBody two.\n")
     result = apply(root, site, {})
     assert result.counts["posts_created"] == 0
     assert result.counts["posts_updated"] == 1
@@ -309,8 +299,9 @@ def test_apply_no_users_returns_friendly_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("bragi.contrib.import_hugo.importer.SessionLocal", db_session_factory)
-    site = Site(slug="blog", hostname="b.example.com", title="B",
-                canonical_url="https://b.example.com")
+    site = Site(
+        slug="blog", hostname="b.example.com", title="B", canonical_url="https://b.example.com"
+    )
     db_session.add(site)
     db_session.commit()
     db_session.refresh(site)

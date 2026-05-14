@@ -104,11 +104,7 @@ def revoke_other_self_sessions() -> ResponseReturnValue:
     current_sid = _current_sid()
 
     with SessionLocal() as db:
-        rows = (
-            db.execute(select(SessionRow).where(SessionRow.user_id == user.id))
-            .scalars()
-            .all()
-        )
+        rows = db.execute(select(SessionRow).where(SessionRow.user_id == user.id)).scalars().all()
         removed = 0
         for row in rows:
             if row.id == current_sid:

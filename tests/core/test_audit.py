@@ -123,9 +123,7 @@ def test_login_success_emits_audit_row(
     _login(client)
     with db_session_factory() as db:
         rows = (
-            db.execute(
-                select(AuditLog).where(AuditLog.action == AuditAction.AUTH_LOGIN_SUCCESS)
-            )
+            db.execute(select(AuditLog).where(AuditLog.action == AuditAction.AUTH_LOGIN_SUCCESS))
             .scalars()
             .all()
         )
@@ -150,9 +148,7 @@ def test_login_failure_emits_audit_row_with_email(
     )
     with db_session_factory() as db:
         rows = (
-            db.execute(
-                select(AuditLog).where(AuditLog.action == AuditAction.AUTH_LOGIN_FAILURE)
-            )
+            db.execute(select(AuditLog).where(AuditLog.action == AuditAction.AUTH_LOGIN_FAILURE))
             .scalars()
             .all()
         )
@@ -173,9 +169,7 @@ def test_logout_emits_audit_row(
 
     with db_session_factory() as db:
         rows = (
-            db.execute(
-                select(AuditLog).where(AuditLog.action == AuditAction.AUTH_LOGOUT)
-            )
+            db.execute(select(AuditLog).where(AuditLog.action == AuditAction.AUTH_LOGOUT))
             .scalars()
             .all()
         )

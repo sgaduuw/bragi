@@ -6,12 +6,93 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-14
+
+### Added
+- WordPress (WXR) importer (#39). New
+  `bragi.contrib.import_wordpress` reads a WP export, lands posts
+  and pages with HTML bodies converted to markdown via
+  `markdownify`, and preserves source URLs as 301 redirect rows
+  (Source `import:wordpress`). Tags and categories collapse into
+  `Tag`; categories get a `category:` slug prefix so they survive
+  round-trips. Shortcodes are stripped with a one-line warning
+  per unique shortcode name; comments and attachments are
+  counted and warned (out of scope for v1). Idempotent re-import
+  via `(site_id, source_id)`. CLI: `cms import wordpress --site
+  <slug> [--author <email>] [--dry-run] <wxr.xml>`.
+  Schema: `pages.source_id` and `pages.source_meta` added (parity
+  with Post; migration `add_page_source_id`, rev
+  `17c7f26e8fde`) so page idempotency works the same way.
+- TipTap image picker + responsive image rendering (#41 Phase 4,
+  closing the issue). New endpoint `GET /admin/attachments/picker`
+  returns an htmx-loaded grid of image attachments with a per-site
+  filter and pagination; each card carries the storage_key, alt
+  text, and filename in data attributes. The post edit page gains
+  an "Image" toolbar button that opens a native `<dialog>` hosting
+  the picker; clicking a card inserts a markdown image link
+  (`![alt](/attachments/<key>)`) at the cursor and closes the
+  dialog. A new HTML transform `pictureify` runs at delivery time:
+  it walks rendered post / page HTML, finds `<img>` tags pointing
+  at `/attachments/<key>`, and rewrites them into a `<picture>`
+  block with a `<source srcset>` that includes the full rendition
+  ladder plus the original. The transform adds `width`, `height`,
+  and `loading="lazy"` from the Attachment row (markdown can't
+  express them) but preserves the author's `alt` verbatim
+  (`alt=""` stays empty for decorative images per WCAG).
+- Bulk alt-text editing + reindex CLI (#41 Phase 3). The
+  attachments admin list view gains a `?missing_alt=1` filter
+  that lists image rows lacking alt text, with an inline
+  htmx-driven save form per row so an operator can fill in
+  many at once without leaving the page. The header surfaces a
+  count badge linking to the filtered view. A new endpoint
+  `POST /admin/attachments/<id>/alt-text` saves a single row
+  (htmx returns the row partial; non-htmx redirects). New CLI:
+  `flask cms media reindex [--site SLUG] [--dry-run]` walks
+  image attachments and fills in any rendition slots missing
+  from the current ladder (purely additive; existing slots
+  untouched). The list view partial is now extracted to
+  `admin/_attachment_row.html` so htmx and full-page renders
+  share markup.
+- Image rendition ladder (#41 Phase 2). Uploads now generate one
+  `AttachmentRendition` per configured target width (default
+  `[320, 800, 1600]`, override via
+  `BRAGI_ATTACHMENT_RENDITION_WIDTHS`). Widths at or above the
+  source skip (no upscale); the ladder runs synchronously on
+  upload because the day-one workload is small and a job queue
+  would be premature. `ImageProcessorSpec` gains an optional
+  `resize(data, target_width) -> bytes | None`; the default
+  Pillow processor implements it with aspect-preserving thumbnail
+  scaling (LANCZOS, quality 85 for JPEGs). New Jinja global
+  `srcset_for(attachment)` emits a `<picture srcset>`-compatible
+  value spanning each rendition plus the original. The delivery
+  route at `/attachments/<key>` now also serves rendition bytes
+  (matched against `AttachmentRendition.storage_key`, joined to
+  the parent attachment for per-site isolation). Delete cascades
+  the rendition rows and unlinks orphan storage keys across both
+  tables. Migration `add_attachment_renditions`
+  (rev `25c6f95918c4`).
+- Media library foundation (#41 Phase 1). The `Attachment` model
+  gains `width`, `height`, `alt_text`, `title`, `focal_x`,
+  `focal_y` columns; image uploads now populate width / height
+  automatically via Pillow. The `bragi.contrib.attachments` admin
+  gains an edit view for alt text / title / focal point (focal
+  coordinates are clamped to `[0.0, 1.0]`). Two reserved hooks go
+  live: `register_storage_backend` (default: local-disk under
+  `Settings.attachments_root`) and `register_image_processor`
+  (default: Pillow). Storage access in the attachments admin and
+  delivery routes now goes through `bragi.core.storage.resolve()`,
+  which reads the active backend from the Registry and falls back
+  to the local default. Pillow is a new runtime dependency.
+  Migration `add_attachment_image_fields` (rev `44fe91537fd5`).
+  Renditions, the richer media-library admin, and the TipTap embed
+  picker land in later phases of #41.
+
 ## [1.2.0] - 2026-05-14
 
 ### Added
 - IndexNow push-crawl plugin (#36). New `bragi.contrib.indexnow`
   fires on `on_post_published`, `on_post_updated`, and
-  `on_post_deleted` (which covers pages too — the page admin
+  `on_post_deleted` (which covers pages too, since the page admin
   reuses the post lifecycle hooks). For each event, the plugin
   resolves the item's site, reads `extra_settings['indexnow_key']`,
   builds the public URL via the content-type registry's

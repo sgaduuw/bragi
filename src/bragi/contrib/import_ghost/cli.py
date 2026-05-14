@@ -21,7 +21,9 @@ from bragi.core.models.user import User
 @click.command("ghost", help="Import a Ghost JSON export into a site.")
 @click.option("--site", "site_slug", required=True, help="Target site slug.")
 @click.option(
-    "--author", "author_email", default=None,
+    "--author",
+    "author_email",
+    default=None,
     help="Email of the fallback author; first user in DB if omitted.",
 )
 @click.option("--dry-run", is_flag=True, help="Plan only; don't write rows.")
@@ -30,9 +32,7 @@ def ghost_command(
     site_slug: str, author_email: str | None, dry_run: bool, source_path: str
 ) -> None:
     if not detect(source_path):
-        click.echo(
-            f"{source_path!r} does not look like a Ghost export.", err=True
-        )
+        click.echo(f"{source_path!r} does not look like a Ghost export.", err=True)
         sys.exit(1)
 
     if dry_run:

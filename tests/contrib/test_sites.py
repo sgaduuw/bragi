@@ -338,9 +338,7 @@ def test_alias_remove(db_session_factory: sessionmaker[Session]) -> None:
         db.add(SiteAlias(site_id=site_id, hostname="www.blog.example.com"))
         db.commit()
     runner = CliRunner()
-    result = runner.invoke(
-        site_group, ["alias", "remove", "--hostname", "www.blog.example.com"]
-    )
+    result = runner.invoke(site_group, ["alias", "remove", "--hostname", "www.blog.example.com"])
     assert result.exit_code == 0
     with db_session_factory() as db:
         remaining = db.execute(

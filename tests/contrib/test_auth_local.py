@@ -182,9 +182,7 @@ def test_logout_clears_session(admin_app: Flask) -> None:
 
     # Re-read the token; the post-login session may have rotated it.
     token = csrf_token(client, path="/")
-    resp = client.post(
-        "/auth/logout", data={"_csrf_token": token}, follow_redirects=False
-    )
+    resp = client.post("/auth/logout", data={"_csrf_token": token}, follow_redirects=False)
     assert resp.status_code == 302
     with client.session_transaction() as sess:
         assert "user_id" not in sess
@@ -250,6 +248,7 @@ def _seed_user_must_change(
 
 @pytest.fixture
 def must_change_admin_app(
+    patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
@@ -317,6 +316,7 @@ def test_change_password_rotates_and_clears_flag(
     )
     assert resp.status_code == 302
     from sqlalchemy import select
+
     with db_session_factory() as db:
         cred = db.execute(select(LocalCredential)).scalar_one()
     assert cred.must_change is False
@@ -431,6 +431,7 @@ def test_user_create_with_generated_password_defaults_to_must_change(
     )
     assert result.exit_code == 0
     from sqlalchemy import select
+
     with db_session_factory() as db:
         cred = db.execute(select(LocalCredential)).scalar_one()
     assert cred.must_change is True
@@ -449,13 +450,17 @@ def test_user_create_with_supplied_password_defaults_to_no_must_change(
         user_group,
         [
             "create",
-            "--email", "ada@example.com",
-            "--display-name", "Ada",
-            "--password", "user-supplied-password",
+            "--email",
+            "ada@example.com",
+            "--display-name",
+            "Ada",
+            "--password",
+            "user-supplied-password",
         ],
     )
     assert result.exit_code == 0
     from sqlalchemy import select
+
     with db_session_factory() as db:
         cred = db.execute(select(LocalCredential)).scalar_one()
     assert cred.must_change is False
@@ -475,14 +480,18 @@ def test_user_create_explicit_must_change_flag_overrides_default(
         user_group,
         [
             "create",
-            "--email", "ada@example.com",
-            "--display-name", "Ada",
-            "--password", "user-supplied",
+            "--email",
+            "ada@example.com",
+            "--display-name",
+            "Ada",
+            "--password",
+            "user-supplied",
             "--must-change",
         ],
     )
     assert result.exit_code == 0
     from sqlalchemy import select
+
     with db_session_factory() as db:
         cred = db.execute(select(LocalCredential)).scalar_one()
     assert cred.must_change is True
@@ -506,8 +515,9 @@ def test_user_grant_creates_role_row(
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         user = User(email="ada@example.com", display_name="Ada", is_active=True)
-        site = Site(slug="blog", hostname="b.example.com", title="B",
-                    canonical_url="https://b.example.com")
+        site = Site(
+            slug="blog", hostname="b.example.com", title="B", canonical_url="https://b.example.com"
+        )
         db.add_all([user, site])
         db.commit()
 
@@ -538,8 +548,9 @@ def test_user_grant_updates_existing_row(
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         user = User(email="ada@example.com", display_name="Ada", is_active=True)
-        site = Site(slug="blog", hostname="b.example.com", title="B",
-                    canonical_url="https://b.example.com")
+        site = Site(
+            slug="blog", hostname="b.example.com", title="B", canonical_url="https://b.example.com"
+        )
         db.add_all([user, site])
         db.flush()
         db.add(UserSiteRole(user_id=user.id, site_id=site.id, role="author"))
@@ -567,8 +578,14 @@ def test_user_grant_unknown_user_errors(
 
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
-        db.add(Site(slug="blog", hostname="b.example.com", title="B",
-                    canonical_url="https://b.example.com"))
+        db.add(
+            Site(
+                slug="blog",
+                hostname="b.example.com",
+                title="B",
+                canonical_url="https://b.example.com",
+            )
+        )
         db.commit()
 
     runner = CliRunner()

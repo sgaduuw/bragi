@@ -88,9 +88,7 @@ def test_prefix_appends_unmatched_tail(
         match_type=MatchType.PREFIX,
     )
 
-    resp = delivery_app.test_client().get(
-        "/old/foo/bar", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/old/foo/bar", headers={"Host": "blog.example.com"})
     assert resp.status_code == 301
     assert resp.headers["Location"].endswith("/new/foo/bar")
 
@@ -115,9 +113,7 @@ def test_prefix_longest_wins(
         match_type=MatchType.PREFIX,
     )
 
-    resp = delivery_app.test_client().get(
-        "/old/sub/x", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/old/sub/x", headers={"Host": "blog.example.com"})
     assert resp.status_code == 301
     assert resp.headers["Location"].endswith("/B/x")
 
@@ -137,9 +133,7 @@ def test_regex_capture_groups_expand_into_target(
         match_type=MatchType.REGEX,
     )
 
-    resp = delivery_app.test_client().get(
-        "/blog/42/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/blog/42/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 301
     assert resp.headers["Location"].endswith("/posts/42/")
 
@@ -157,9 +151,7 @@ def test_regex_requires_full_match(
         match_type=MatchType.REGEX,
     )
     # Partial: trailing slash means the pattern doesn't fullmatch.
-    resp = delivery_app.test_client().get(
-        "/blog/42/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/blog/42/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
 
 
@@ -183,9 +175,7 @@ def test_bad_regex_is_skipped_not_500(
         match_type=MatchType.REGEX,
     )
 
-    resp = delivery_app.test_client().get(
-        "/legacy/article", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/legacy/article", headers={"Host": "blog.example.com"})
     assert resp.status_code == 301
     assert resp.headers["Location"].endswith("/new/article")
 
@@ -219,16 +209,12 @@ def test_exact_beats_prefix_and_regex(
         match_type=MatchType.REGEX,
     )
 
-    resp = delivery_app.test_client().get(
-        "/foo/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/foo/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 301
     assert resp.headers["Location"].endswith("/exact-target/")
 
 
-def test_prefix_beats_regex(
-    delivery_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_prefix_beats_regex(delivery_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     site_id = _site_id(db_session_factory)
     _add(
         db_session_factory,
@@ -245,9 +231,7 @@ def test_prefix_beats_regex(
         match_type=MatchType.REGEX,
     )
 
-    resp = delivery_app.test_client().get(
-        "/section/page", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/section/page", headers={"Host": "blog.example.com"})
     assert resp.status_code == 301
     assert resp.headers["Location"].endswith("/prefix/page")
 
@@ -266,9 +250,7 @@ def test_prefix_match_bumps_hit_count(
         target="/new/",
         match_type=MatchType.PREFIX,
     )
-    delivery_app.test_client().get(
-        "/legacy/article", headers={"Host": "blog.example.com"}
-    )
+    delivery_app.test_client().get("/legacy/article", headers={"Host": "blog.example.com"})
     with db_session_factory() as db:
         row = db.get(Redirect, rid)
     assert row is not None
@@ -314,7 +296,5 @@ def test_inactive_prefix_rule_ignored(
             )
         )
         db.commit()
-    resp = delivery_app.test_client().get(
-        "/dead/page", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/dead/page", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404

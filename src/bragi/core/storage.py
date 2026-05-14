@@ -7,9 +7,18 @@ Content-addressed: an identical second upload reuses the file.
 The Attachment row distinguishes filename / metadata; the bytes
 are deduped per site.
 
-The S3 / object-store backend is a reserved hook
-(`register_storage_backend`); when it ships this module is the
-fallback for installations without one configured.
+`LocalStorageBackend` is the `StorageBackendSpec` value wrapping
+the local impl. The `bragi.contrib.attachments` plugin registers
+it as the day-one backend; an S3 / R2 / GCS backend ships as a
+separate plugin returning its own spec from
+`register_storage_backend`.
+
+Callers resolve through `core.storage.resolve(app)`, which reads
+the Registry's active backend (first non-`local` if any, else
+the local fallback) and returns the spec. Module-level functions
+(`store_bytes`, `read_bytes`, `remove`) remain as the local impl
+that the spec delegates to; tests pinned to the local backend
+keep working without going through the registry.
 """
 
 from __future__ import annotations
@@ -17,8 +26,13 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from bragi.api import StorageBackendSpec
 from bragi.settings import settings
+
+if TYPE_CHECKING:
+    from flask import Flask
 
 
 def _root() -> Path:
@@ -69,3 +83,33 @@ def remove(site_slug: str, storage_key: str) -> None:
     """
     path = storage_path_for(site_slug, storage_key)
     path.unlink(missing_ok=True)
+
+
+LocalStorageBackend = StorageBackendSpec(
+    name="local",
+    store=store_bytes,
+    read=read_bytes,
+    remove=remove,
+)
+
+
+def resolve(app: Flask | None = None) -> StorageBackendSpec:
+    """Return the active storage backend.
+
+    Reads from the Registry on `app.extensions["registry"]` when
+    one is present and any backends have been registered; falls
+    back to `LocalStorageBackend` when the app context is missing
+    (CLI tools, early-boot code, tests that don't load the
+    attachments plugin).
+    """
+    if app is None:
+        try:
+            from flask import current_app
+
+            app = current_app._get_current_object()  # type: ignore[attr-defined]
+        except RuntimeError:
+            return LocalStorageBackend
+    registry = app.extensions.get("registry") if app is not None else None
+    if registry is None:
+        return LocalStorageBackend
+    return registry.storage_backend() or LocalStorageBackend
