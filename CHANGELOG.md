@@ -412,6 +412,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   require `editor+`. New CLI subcommand `cms user grant` upserts
   the `(user_id, site_id)` row. Migration `add_user_site_roles`
   (revision `2ecc724d6dfb`).
+- Hugo importer (`bragi.contrib.import_hugo`). Detects a Hugo
+  source tree by looking for `config.{toml,yaml,yml}` /
+  `hugo.{toml,yaml,yml}` plus a `content/` directory, walks
+  `content/**/*.md` (skipping section indexes `_index.md`),
+  parses TOML / YAML frontmatter, and creates Post rows. Every
+  `aliases:` entry becomes a 301 Redirect from the legacy URL
+  to the post's bragi canonical (`/posts/<slug>/`). Idempotent
+  via `Post.source_id` keyed on the repo-relative path:
+  re-running an import updates rows in place. New runtime dep:
+  `pyyaml`. CLI: `cms import hugo --site <slug> [--author
+  <email>] [--dry-run] <path>`.
+- Ghost importer (`bragi.contrib.import_ghost`). Detects either
+  a `.json` export file or a directory containing one. Bodies
+  arrive as HTML and get converted to markdown via
+  `markdownify(heading_style="ATX")`; the rendered HTML is
+  re-derived from that markdown so the rest of bragi's render
+  pipeline (highlight, anchors, etc.) applies. Tags come from
+  `data.tags` + `data.posts_tags`; authors match existing
+  Users by email (else fall back to the first user). For every
+  published post a 301 Redirect from Ghost's permalink
+  (`/<slug>/`) to bragi's (`/posts/<slug>/`) lands so legacy
+  bookmarks survive. Idempotent via `Post.source_id` = Ghost
+  post id. CLI: `cms import ghost --site <slug> [--author
+  <email>] [--dry-run] <path>`.
 - GitHub OAuth via Authlib + `UserIdentity` table.
   `bragi.contrib.auth_github` plugin registers an OAuth provider
   spec and a Blueprint with `/auth/github/login` and
