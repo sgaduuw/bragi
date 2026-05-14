@@ -1,0 +1,49 @@
+{# Search results partial. Wrapped in #search-results so the
+   htmx swap on the form's hx-target lands cleanly. The snippet
+   field carries `<mark>` markers from FTS5 already escaped; we
+   render it `| safe` so the highlighting reaches the page. #}
+<section id="search-results" style="margin-top: 1.5rem;">
+  {% if not query %}
+    <p style="color: #666;">Type a query above to search.</p>
+  {% elif not results.hits %}
+    <p>No results for &ldquo;{{ query }}&rdquo;.</p>
+  {% else %}
+    <p style="color: #666;">
+      {{ results.total }} result{% if results.total != 1 %}s{% endif %} for
+      &ldquo;{{ query }}&rdquo;.
+    </p>
+    <ul style="list-style: none; padding: 0;">
+      {% for hit in results.hits %}
+      <li style="margin: 1rem 0; padding: 0.75rem; border: 1px solid #eee; border-radius: 4px;">
+        <a href="{% if hit.scope == 'post' %}/posts/{{ hit.slug }}/{% elif hit.scope == 'page' %}/pages/{{ hit.slug }}/{% else %}/{{ hit.scope }}s/{{ hit.slug }}/{% endif %}"
+           style="font-size: 1.1em; font-weight: bold;">
+          {{ hit.title }}
+        </a>
+        <small style="color: #888; margin-left: 0.5rem;">{{ hit.scope }}</small>
+        <p style="margin: 0.4rem 0 0; color: #444;">{{ hit.snippet | safe }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+
+    {% if results.total > results.page_size %}
+      {% set last_page = ((results.total - 1) // results.page_size) + 1 %}
+      <nav style="margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: center;">
+        {% if results.page > 1 %}
+          <a href="{{ url_for('search.search', q=query, page=results.page - 1) }}"
+             hx-get="{{ url_for('search.search', q=query, page=results.page - 1) }}"
+             hx-target="#search-results"
+             hx-swap="outerHTML"
+             hx-push-url="true">&laquo; Prev</a>
+        {% endif %}
+        <span>Page {{ results.page }} of {{ last_page }}</span>
+        {% if results.page < last_page %}
+          <a href="{{ url_for('search.search', q=query, page=results.page + 1) }}"
+             hx-get="{{ url_for('search.search', q=query, page=results.page + 1) }}"
+             hx-target="#search-results"
+             hx-swap="outerHTML"
+             hx-push-url="true">Next &raquo;</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  {% endif %}
+</section>
