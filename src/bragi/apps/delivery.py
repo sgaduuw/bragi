@@ -17,6 +17,7 @@ from bragi.core.middleware.redirects import register_redirect_handler
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
+from bragi.core.themes import ThemeAwareLoader
 from bragi.plugins import create_plugin_manager
 from bragi.settings import settings
 
@@ -42,11 +43,15 @@ def create_delivery_app() -> Flask:
 
     # Make `bragi/templates/` reachable via the Jinja loader chain so
     # plugin delivery templates can `{% extends "delivery/base.html" %}`.
+    # Then wrap the whole chain in `ThemeAwareLoader`: themes registered
+    # via `register_theme` shadow templates for sites that opted in
+    # (`Site.theme`), and fall through to the default chain otherwise.
     package_loader = jinja2.PackageLoader("bragi", "templates")
     if app.jinja_loader is not None:
-        app.jinja_loader = jinja2.ChoiceLoader([app.jinja_loader, package_loader])
+        chain: jinja2.BaseLoader = jinja2.ChoiceLoader([app.jinja_loader, package_loader])
     else:
-        app.jinja_loader = package_loader
+        chain = package_loader
+    app.jinja_loader = ThemeAwareLoader(chain)
 
     pm = create_plugin_manager()
     registry = Registry()
@@ -84,6 +89,8 @@ def create_delivery_app() -> Flask:
         registry.add_image_processor(spec)
     for spec in pm.hook.register_search_backend():
         registry.add_search_backend(spec)
+    for spec in pm.hook.register_theme():
+        registry.add_theme(spec)
 
     # Mount plugin-contributed delivery Blueprints. Each content-type
     # plugin owns its public URL space; the delivery app stays empty

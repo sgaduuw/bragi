@@ -15,8 +15,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+import jinja2
 import pluggy
 
 hookimpl = pluggy.HookimplMarker("bragi")
@@ -284,6 +286,43 @@ class SearchBackendSpec:
 
 
 # ============================================================
+# Themes
+# ============================================================
+
+
+@dataclass
+class ThemeSpec:
+    """Registration record for a file-based theme.
+
+    A theme is a Python package (or in-tree subpackage during
+    bootstrap) shipping Jinja templates and optionally a
+    `static/` directory of CSS / JS / fonts. Operators select a
+    theme per-Site through `Site.theme` (NULL means "use the
+    default plugin templates with no theme override").
+
+    `template_loader` is consulted before the bragi default
+    template chain on every request for a site that picked this
+    theme, so the theme can shadow any template name a plugin
+    or the core publishes. Theme template paths mirror the
+    plugin layout the operator wants to override
+    (`delivery/post.html`, `delivery/_search_results.html`,
+    etc.); the theme need only ship the templates it actually
+    overrides, the rest fall through.
+
+    `static_dir` is optional; when set, the delivery app
+    exposes its contents at `/theme/<slug>/static/<path>`.
+    Database-stored templates were explicitly rejected
+    (CONTEXT.md "Deferred surfaces") so themes ARE filesystem
+    packages, full stop.
+    """
+
+    slug: str  # 'minimal', 'fediverse', operator-installable name
+    display_name: str  # human-readable label for the admin dropdown
+    template_loader: jinja2.BaseLoader
+    static_dir: Path | None = None
+
+
+# ============================================================
 # Analytics
 # ============================================================
 
@@ -321,4 +360,5 @@ __all__ = [
     "SearchHit",
     "SearchResults",
     "StorageBackendSpec",
+    "ThemeSpec",
 ]

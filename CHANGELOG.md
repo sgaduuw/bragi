@@ -7,6 +7,28 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- File-based theme registry (#40). New `bragi.contrib.themes`
+  ships the consumer surface (delivery blueprint serving theme
+  static assets at `/theme/<slug>/static/<path>`, and a
+  `cms theme list` CLI). The contract itself lives in core: a
+  `ThemeSpec` dataclass in `bragi.api`, a `register_theme`
+  hookspec, and a `ThemeAwareLoader` wrapping the delivery
+  app's Jinja loader chain. When the active site's `theme`
+  matches a registered ThemeSpec, the theme's loader is
+  consulted before the plugin / default chain, so the theme can
+  shadow any template name (Hugo-style override granularity).
+  Sites with `theme=NULL` render with the default chain
+  exactly as before; an orphaned slug (theme uninstalled while
+  the site still references it) falls back without 500'ing.
+  Admin: the site edit form gains a Theme dropdown listing
+  discovered themes; unknown slugs are rejected with a friendly
+  error rather than persisted. v1 ships the contract only with
+  no in-tree theme; a `bragi-theme-foo` package slots in via
+  the `bragi.plugins` entry-point group like every other
+  plugin. Database-stored templates remain rejected (CONTEXT.md
+  "Deferred surfaces"). Schema: `sites.theme` nullable string
+  (migration `add_site_theme`, rev `2a429b18c1d8`).
+
 - SQLite FTS5 search backend (#43). New `bragi.contrib.search`
   ships the day-one default backend (`name="sqlite-fts5"`),
   registered via the `register_search_backend` hookspec that
