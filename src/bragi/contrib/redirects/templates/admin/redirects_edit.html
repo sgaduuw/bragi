@@ -1,0 +1,79 @@
+{% extends "admin/base.html" %}
+{% set is_edit = redirect_row is not none %}
+{% block title %}{{ 'Edit' if is_edit else 'New' }} redirect &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>{{ 'Edit redirect' if is_edit else 'New redirect' }}</h1>
+
+<form method="post"
+      action="{{ url_for('redirect_admin.edit_redirect', redirect_id=redirect_row.id) if is_edit else url_for('redirect_admin.new_redirect') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <fieldset>
+    <label for="site_id">Site</label>
+    <select name="site_id" id="site_id" required>
+      {% for s in sites %}
+      <option value="{{ s.id }}" {% if form.get('site_id') == (s.id | string) %}selected{% endif %}>{{ s.slug }} ({{ s.hostname }})</option>
+      {% endfor %}
+    </select>
+  </fieldset>
+
+  <fieldset>
+    <label for="source_path">Source path</label>
+    <input type="text" name="source_path" id="source_path" required
+           pattern="/.*" placeholder="/old-url/"
+           value="{{ form.get('source_path', '') }}">
+    <small>Must start with <code>/</code>. The hostname is implied by the site.</small>
+  </fieldset>
+
+  <fieldset>
+    <label for="target">Target</label>
+    <input type="text" name="target" id="target" required
+           placeholder="/new-url/ or https://example.com/elsewhere"
+           value="{{ form.get('target', '') }}">
+    <small>Relative path or absolute URL.</small>
+  </fieldset>
+
+  <fieldset>
+    <label for="status_code">Status code</label>
+    <select name="status_code" id="status_code">
+      {% set sc = form.get('status_code') | int %}
+      <option value="301" {% if sc == 301 %}selected{% endif %}>301 Moved Permanently</option>
+      <option value="302" {% if sc == 302 %}selected{% endif %}>302 Found</option>
+      <option value="307" {% if sc == 307 %}selected{% endif %}>307 Temporary Redirect</option>
+      <option value="308" {% if sc == 308 %}selected{% endif %}>308 Permanent Redirect</option>
+      <option value="410" {% if sc == 410 %}selected{% endif %}>410 Gone</option>
+    </select>
+    <small>410 short-circuits to a Gone response; the target field is ignored at request time.</small>
+  </fieldset>
+
+  <fieldset>
+    <label for="match_type">Match type</label>
+    <select name="match_type" id="match_type">
+      {% set mt = form.get('match_type', 'exact') %}
+      <option value="exact" {% if mt == 'exact' %}selected{% endif %}>Exact</option>
+      <option value="prefix" {% if mt == 'prefix' %}selected{% endif %}>Prefix (stored only; resolver wires in #13)</option>
+      <option value="regex" {% if mt == 'regex' %}selected{% endif %}>Regex (stored only; resolver wires in #13)</option>
+    </select>
+  </fieldset>
+
+  <fieldset style="flex-direction: row; align-items: center; gap: 0.5rem;">
+    <input type="checkbox" name="active" id="active" {% if form.get('active') %}checked{% endif %}>
+    <label for="active" style="margin: 0;">Active</label>
+  </fieldset>
+
+  <fieldset>
+    <label for="note">Note (optional)</label>
+    <input type="text" name="note" id="note" value="{{ form.get('note') or '' }}"
+           placeholder="Why this redirect exists; visible only here.">
+  </fieldset>
+
+  {% if is_edit %}
+  <p><small>Hits: {{ redirect_row.hit_count }} &middot; Last hit: {{ redirect_row.last_hit_at.strftime('%Y-%m-%d %H:%M') if redirect_row.last_hit_at else '(none)' }} &middot; Origin: {{ redirect_row.source }}</small></p>
+  {% endif %}
+
+  <div class="actions">
+    <button type="submit">{{ 'Save' if is_edit else 'Create' }}</button>
+    <a href="{{ url_for('redirect_admin.list_redirects') }}" class="btn secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

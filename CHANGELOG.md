@@ -197,3 +197,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/admin/sessions` is superuser-only and lists every session
   with the same revoke shape. Both nav entries under section
   `system`; the all-sessions entry hides itself for non-superusers.
+- Redirects admin Blueprint at `/admin/redirects`: list / new /
+  edit / delete views with CSRF on every POST, optional
+  per-site filter, pagination at 50 rows. The new/edit form
+  validates source_path starts with `/`, status_code is one of
+  301/302/307/308/410, and surfaces the per-(site, source,
+  match_type) UNIQUE constraint as a friendly flash rather than
+  a 500. Admin nav entry under section `site`.
+- `bragi.contrib.redirects.plugin.resolve_redirect` now bumps the
+  hit row's `hit_count` and writes `last_hit_at` on every served
+  redirect. The bump is best-effort: a DB error logs and the
+  redirect is still served (a counter glitch never becomes a 500).
