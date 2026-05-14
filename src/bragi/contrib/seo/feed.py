@@ -91,8 +91,10 @@ def feed_xml() -> ResponseReturnValue:
 
         feed_updated = _iso(posts[0].updated_at) if posts else _iso(None)
 
-    parts: list[str] = ['<?xml version="1.0" encoding="utf-8"?>',
-                        '<feed xmlns="http://www.w3.org/2005/Atom">']
+    parts: list[str] = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<feed xmlns="http://www.w3.org/2005/Atom">',
+    ]
     parts.append(f"  <title>{escape(site.title)}</title>")
     parts.append(f'  <link rel="self" href="{escape(base)}/feed.xml"/>')
     parts.append(f'  <link href="{escape(base)}/"/>')

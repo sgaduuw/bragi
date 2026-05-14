@@ -39,8 +39,12 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
-    site = Site(slug="blog", hostname="blog.example.com", title="Blog",
-                canonical_url="https://blog.example.com")
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+    )
     db_session.add(site)
     db_session.flush()
     user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
@@ -49,9 +53,14 @@ def admin_app(
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
         Post(
-            site_id=site.id, slug="hello", title="Hello",
-            body_markdown="h", body_html="<p>h</p>", body_excerpt="h",
-            author_id=user.id, status=PostStatus.DRAFT,
+            site_id=site.id,
+            slug="hello",
+            title="Hello",
+            body_markdown="h",
+            body_html="<p>h</p>",
+            body_excerpt="h",
+            author_id=user.id,
+            status=PostStatus.DRAFT,
         )
     )
     db_session.commit()
@@ -91,9 +100,7 @@ def _post_id(db_session_factory: sessionmaker[Session]) -> int:
         return db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
 
 
-def test_purge_fires_on_post_create(
-    admin_app: Flask, purge_recorder: _PurgeRecorder
-) -> None:
+def test_purge_fires_on_post_create(admin_app: Flask, purge_recorder: _PurgeRecorder) -> None:
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/posts/new")
@@ -162,9 +169,7 @@ def test_purge_fires_on_post_delete(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/posts/")
-    client.post(
-        f"/admin/posts/{post_id}/delete", data={"_csrf_token": token}
-    )
+    client.post(f"/admin/posts/{post_id}/delete", data={"_csrf_token": token})
     assert ("post", str(post_id)) in purge_recorder.calls
 
 
@@ -201,9 +206,14 @@ def test_purge_fires_on_page_delete(
         site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
         user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
         page = Page(
-            site_id=site_id, slug="about", title="About",
-            body_markdown="a", body_html="<p>a</p>", body_excerpt="a",
-            author_id=user_id, status=PageStatus.PUBLISHED,
+            site_id=site_id,
+            slug="about",
+            title="About",
+            body_markdown="a",
+            body_html="<p>a</p>",
+            body_excerpt="a",
+            author_id=user_id,
+            status=PageStatus.PUBLISHED,
         )
         db.add(page)
         db.commit()
@@ -211,7 +221,5 @@ def test_purge_fires_on_page_delete(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/pages/")
-    client.post(
-        f"/admin/pages/{page_id}/delete", data={"_csrf_token": token}
-    )
+    client.post(f"/admin/pages/{page_id}/delete", data={"_csrf_token": token})
     assert ("page", str(page_id)) in purge_recorder.calls

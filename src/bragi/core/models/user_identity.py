@@ -25,9 +25,7 @@ from bragi.core.models._mixins import IdMixin, TimestampsMixin
 class UserIdentity(IdMixin, TimestampsMixin, Base):
     __tablename__ = "user_identities"
     __table_args__ = (
-        UniqueConstraint(
-            "provider", "provider_user_id", name="uq_user_identities_provider_pk"
-        ),
+        UniqueConstraint("provider", "provider_user_id", name="uq_user_identities_provider_pk"),
     )
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)

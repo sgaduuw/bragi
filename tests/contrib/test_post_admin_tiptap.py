@@ -189,9 +189,7 @@ def test_post_create_still_works_via_textarea_submission(
     )
     assert resp.status_code == 302
     with db_session_factory() as db:
-        created = db.execute(
-            select(Post).where(Post.slug == "tiptap-roundtrip")
-        ).scalar_one()
+        created = db.execute(select(Post).where(Post.slug == "tiptap-roundtrip")).scalar_one()
     assert created.body_markdown == "# Heading\n\nA paragraph."
     # Render pipeline produced HTML; the anchors transform attaches an id.
     assert '<h1 id="heading">Heading</h1>' in created.body_html

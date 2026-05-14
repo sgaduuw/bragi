@@ -28,8 +28,12 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
-    site = Site(slug="blog", hostname="blog.example.com", title="Blog",
-                canonical_url="https://blog.example.com")
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+    )
     db_session.add(site)
     db_session.flush()
     # Three users: ada (author of the post + author role),
@@ -40,9 +44,7 @@ def admin_app(
     db_session.add_all([ada, bob, charlie])
     db_session.flush()
     for user in (ada, bob, charlie):
-        db_session.add(
-            LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD))
-        )
+        db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(UserSiteRole(user_id=ada.id, site_id=site.id, role="author"))
     db_session.add(UserSiteRole(user_id=bob.id, site_id=site.id, role="editor"))
     db_session.add(
@@ -50,7 +52,9 @@ def admin_app(
             site_id=site.id,
             slug="hello",
             title="Hello",
-            body_markdown="h", body_html="<p>h</p>", body_excerpt="h",
+            body_markdown="h",
+            body_html="<p>h</p>",
+            body_excerpt="h",
             author_id=ada.id,
             status=PostStatus.DRAFT,
         )
@@ -105,16 +109,12 @@ def test_author_can_edit_own_post(
     assert resp.status_code == 200
 
 
-def test_author_cannot_delete(
-    admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_author_cannot_delete(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "ada@example.com")
     token = csrf_token(client, path="/admin/posts/")
-    resp = client.post(
-        f"/admin/posts/{post_id}/delete", data={"_csrf_token": token}
-    )
+    resp = client.post(f"/admin/posts/{post_id}/delete", data={"_csrf_token": token})
     assert resp.status_code == 403
 
 
@@ -129,15 +129,14 @@ def test_editor_can_edit_any_post(
     assert resp.status_code == 200
 
 
-def test_editor_can_delete(
-    admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_editor_can_delete(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "bob@example.com")
     token = csrf_token(client, path="/admin/posts/")
     resp = client.post(
-        f"/admin/posts/{post_id}/delete", data={"_csrf_token": token},
+        f"/admin/posts/{post_id}/delete",
+        data={"_csrf_token": token},
         follow_redirects=False,
     )
     assert resp.status_code == 302  # redirect after delete

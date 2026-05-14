@@ -137,9 +137,7 @@ def _user_can_act_anywhere(min_role: str) -> bool:
         return True
     with SessionLocal() as db:
         rows = (
-            db.execute(select(UserSiteRole).where(UserSiteRole.user_id == user.id))
-            .scalars()
-            .all()
+            db.execute(select(UserSiteRole).where(UserSiteRole.user_id == user.id)).scalars().all()
         )
     return any(has_role(min_role, row.site_id) for row in rows)
 
@@ -232,10 +230,7 @@ def edit_post(post_id: int) -> ResponseReturnValue:
         # short-circuit both checks via `has_role`.
         active = current_user()
         is_own = bool(active and active.id == post.author_id)
-        if not (
-            (is_own and has_role("author", post.site_id))
-            or has_role("editor", post.site_id)
-        ):
+        if not ((is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)):
             abort(403)
 
         if request.method == "GET":
@@ -268,8 +263,7 @@ def edit_post(post_id: int) -> ResponseReturnValue:
         # Transition to published sets published_at the first time
         # the status flips. Re-publishing doesn't reset the timestamp.
         is_first_publish = (
-            post.status != PostStatus.PUBLISHED
-            and form["status"] == PostStatus.PUBLISHED
+            post.status != PostStatus.PUBLISHED and form["status"] == PostStatus.PUBLISHED
         )
         if is_first_publish:
             post.published_at = datetime.now(UTC)
@@ -354,9 +348,7 @@ def _can_view_post(post: Post) -> bool:
     revision views are edit-power operations."""
     active = current_user()
     is_own = bool(active and active.id == post.author_id)
-    return (is_own and has_role("author", post.site_id)) or has_role(
-        "editor", post.site_id
-    )
+    return (is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)
 
 
 @bp.route("/<int:post_id>/revisions", methods=["GET"])
@@ -377,9 +369,7 @@ def list_revisions(post_id: int) -> ResponseReturnValue:
             .scalars()
             .all()
         )
-        return render_template(
-            "admin/post_revisions.html", post=post, revisions=revisions
-        )
+        return render_template("admin/post_revisions.html", post=post, revisions=revisions)
 
 
 @bp.route("/<int:post_id>/revisions/<int:rev_id>", methods=["GET"])

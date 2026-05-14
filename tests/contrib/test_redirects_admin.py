@@ -151,9 +151,7 @@ def test_new_redirect_round_trip(
     )
     assert resp.status_code == 302
     with db_session_factory() as db:
-        row = db.execute(
-            select(Redirect).where(Redirect.source_path == "/old/")
-        ).scalar_one()
+        row = db.execute(select(Redirect).where(Redirect.source_path == "/old/")).scalar_one()
     assert row.target == "/new/"
     assert row.status_code == 301
     assert row.match_type == MatchType.EXACT
@@ -200,9 +198,7 @@ def test_new_rejects_invalid_status_code(admin_app: Flask) -> None:
     assert b"status code must be one of" in resp.data.lower()
 
 
-def test_new_uniqueness_check(
-    admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_new_uniqueness_check(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     site_id = _blog_id(db_session_factory)
     with db_session_factory() as db:
         db.add(
@@ -251,9 +247,7 @@ def test_edit_redirect_round_trip(
             )
         )
         db.commit()
-        rid = db.execute(
-            select(Redirect).where(Redirect.source_path == "/before/")
-        ).scalar_one().id
+        rid = db.execute(select(Redirect).where(Redirect.source_path == "/before/")).scalar_one().id
 
     client = admin_app.test_client()
     _login(client)
@@ -279,9 +273,7 @@ def test_edit_redirect_round_trip(
         assert row.status_code == 301
 
 
-def test_delete_redirect(
-    admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_delete_redirect(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     site_id = _blog_id(db_session_factory)
     with db_session_factory() as db:
         db.add(
@@ -295,9 +287,7 @@ def test_delete_redirect(
             )
         )
         db.commit()
-        rid = db.execute(
-            select(Redirect).where(Redirect.source_path == "/zap/")
-        ).scalar_one().id
+        rid = db.execute(select(Redirect).where(Redirect.source_path == "/zap/")).scalar_one().id
 
     client = admin_app.test_client()
     _login(client)
@@ -312,9 +302,7 @@ def test_delete_redirect(
         assert db.get(Redirect, rid) is None
 
 
-def test_list_filters_by_site(
-    admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
+def test_list_filters_by_site(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     with db_session_factory() as db:
         blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
         other = db.execute(select(Site).where(Site.slug == "other")).scalar_one()
@@ -406,9 +394,7 @@ def test_hit_count_bumps_on_resolve(
     assert resp.headers["Location"].endswith("/elsewhere/")
 
     with db_session_factory() as db:
-        row = db.execute(
-            select(Redirect).where(Redirect.source_path == "/track/")
-        ).scalar_one()
+        row = db.execute(select(Redirect).where(Redirect.source_path == "/track/")).scalar_one()
     assert row.hit_count == 1
     assert row.last_hit_at is not None
     assert row.last_hit_at >= pre
@@ -436,9 +422,7 @@ def test_hit_count_increments_on_repeated_resolves(
         client.get("/many/", headers={"Host": "blog.example.com"})
 
     with db_session_factory() as db:
-        row = db.execute(
-            select(Redirect).where(Redirect.source_path == "/many/")
-        ).scalar_one()
+        row = db.execute(select(Redirect).where(Redirect.source_path == "/many/")).scalar_one()
     assert row.hit_count == 3
 
 

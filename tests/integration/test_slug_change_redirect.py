@@ -92,9 +92,7 @@ def _login(client: FlaskClient) -> None:
     )
 
 
-def _rename(
-    admin_client: FlaskClient, post_id: int, new_slug: str, *, skip: bool = False
-) -> None:
+def _rename(admin_client: FlaskClient, post_id: int, new_slug: str, *, skip: bool = False) -> None:
     token = csrf_token(admin_client, path=f"/admin/posts/{post_id}/edit")
     data: dict[str, str] = {
         "title": "Original",
@@ -191,10 +189,7 @@ def test_rename_chain_produces_separate_hops(
     _rename(admin, post_id, "baz")
 
     with db_session_factory() as db:
-        rows = {
-            r.source_path: r
-            for r in db.execute(select(Redirect)).scalars().all()
-        }
+        rows = {r.source_path: r for r in db.execute(select(Redirect)).scalars().all()}
     assert set(rows.keys()) == {"/posts/original/", "/posts/bar/"}
     assert rows["/posts/original/"].target == "/posts/bar/"
     assert rows["/posts/bar/"].target == "/posts/baz/"

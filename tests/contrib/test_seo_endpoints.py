@@ -96,9 +96,7 @@ def delivery_app(
 
 
 def test_sitemap_lists_published_posts(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/sitemap.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/sitemap.xml", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("application/xml")
     body = resp.data.decode()
@@ -114,9 +112,7 @@ def test_sitemap_lists_published_posts(delivery_app: Flask) -> None:
 
 
 def test_sitemap_isolates_other_site(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/sitemap.xml", headers={"Host": "other.example.com"}
-    )
+    resp = delivery_app.test_client().get("/sitemap.xml", headers={"Host": "other.example.com"})
     body = resp.data.decode()
     assert "https://other.example.com/posts/leak-check/" in body
     # blog.example.com's URLs must not appear here.
@@ -124,9 +120,7 @@ def test_sitemap_isolates_other_site(delivery_app: Flask) -> None:
 
 
 def test_sitemap_unknown_host_404s(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/sitemap.xml", headers={"Host": "nope.example.com"}
-    )
+    resp = delivery_app.test_client().get("/sitemap.xml", headers={"Host": "nope.example.com"})
     assert resp.status_code == 404
 
 
@@ -134,9 +128,7 @@ def test_sitemap_unknown_host_404s(delivery_app: Flask) -> None:
 
 
 def test_robots_emits_allow_all_plus_sitemap_line(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/robots.txt", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/robots.txt", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("text/plain")
     body = resp.data.decode()
@@ -146,9 +138,7 @@ def test_robots_emits_allow_all_plus_sitemap_line(delivery_app: Flask) -> None:
 
 
 def test_robots_unknown_host_404s(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/robots.txt", headers={"Host": "nope.example.com"}
-    )
+    resp = delivery_app.test_client().get("/robots.txt", headers={"Host": "nope.example.com"})
     assert resp.status_code == 404
 
 
@@ -170,9 +160,7 @@ def test_security_txt_served_when_configured(
     delivery_app: Flask,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.settings.settings.security_contact", "mailto:security@example.com"
-    )
+    monkeypatch.setattr("bragi.settings.settings.security_contact", "mailto:security@example.com")
     resp = delivery_app.test_client().get(
         "/.well-known/security.txt", headers={"Host": "blog.example.com"}
     )

@@ -73,9 +73,7 @@ def _login_as(client: FlaskClient, email: str) -> None:
     )
 
 
-def _seed_extra_session(
-    db_session_factory: sessionmaker[Session], user_id: int, sid: str
-) -> None:
+def _seed_extra_session(db_session_factory: sessionmaker[Session], user_id: int, sid: str) -> None:
     """Drop an extra Session row directly into the DB."""
     now = datetime.now(UTC).replace(tzinfo=None)
     with db_session_factory() as db:
@@ -105,12 +103,8 @@ def test_self_list_shows_only_my_sessions(
 ) -> None:
     # Alice logs in (creates her session). Bob has a stale-seeded session.
     with db_session_factory() as db:
-        alice_id = db.execute(
-            select(User).where(User.email == "alice@example.com")
-        ).scalar_one().id
-        bob_id = db.execute(
-            select(User).where(User.email == "bob@example.com")
-        ).scalar_one().id
+        alice_id = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one().id
+        bob_id = db.execute(select(User).where(User.email == "bob@example.com")).scalar_one().id
     _seed_extra_session(db_session_factory, bob_id, sid="b" * 32)
 
     client = admin_app.test_client()
@@ -131,9 +125,7 @@ def test_self_revoke_other_session_keeps_current_alive(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
     with db_session_factory() as db:
-        alice_id = db.execute(
-            select(User).where(User.email == "alice@example.com")
-        ).scalar_one().id
+        alice_id = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one().id
     other_sid = "a" * 32
     _seed_extra_session(db_session_factory, alice_id, sid=other_sid)
 
@@ -186,9 +178,7 @@ def test_self_cannot_revoke_someone_elses_session(
     """Posting to /admin/account/sessions/<bob-sid>/revoke as Alice must NOT
     delete Bob's row. The view uniformly refuses without leaking existence."""
     with db_session_factory() as db:
-        bob_id = db.execute(
-            select(User).where(User.email == "bob@example.com")
-        ).scalar_one().id
+        bob_id = db.execute(select(User).where(User.email == "bob@example.com")).scalar_one().id
     bob_sid = "b" * 32
     _seed_extra_session(db_session_factory, bob_id, sid=bob_sid)
 
@@ -210,9 +200,7 @@ def test_revoke_others_clears_every_other_row(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
     with db_session_factory() as db:
-        alice_id = db.execute(
-            select(User).where(User.email == "alice@example.com")
-        ).scalar_one().id
+        alice_id = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one().id
     for sid in ("c" * 32, "d" * 32, "e" * 32):
         _seed_extra_session(db_session_factory, alice_id, sid=sid)
 
@@ -231,9 +219,7 @@ def test_revoke_others_clears_every_other_row(
 
     with db_session_factory() as db:
         remaining = (
-            db.execute(select(SessionRow.id).where(SessionRow.user_id == alice_id))
-            .scalars()
-            .all()
+            db.execute(select(SessionRow.id).where(SessionRow.user_id == alice_id)).scalars().all()
         )
     assert set(remaining) == {current.value}
 
@@ -249,9 +235,7 @@ def test_all_sessions_shown_for_superuser(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
     with db_session_factory() as db:
-        alice_id = db.execute(
-            select(User).where(User.email == "alice@example.com")
-        ).scalar_one().id
+        alice_id = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one().id
     _seed_extra_session(db_session_factory, alice_id, sid="a" * 32)
 
     client = admin_app.test_client()
@@ -266,9 +250,7 @@ def test_superuser_can_revoke_any_session(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
     with db_session_factory() as db:
-        alice_id = db.execute(
-            select(User).where(User.email == "alice@example.com")
-        ).scalar_one().id
+        alice_id = db.execute(select(User).where(User.email == "alice@example.com")).scalar_one().id
     alice_sid = "a" * 32
     _seed_extra_session(db_session_factory, alice_id, sid=alice_sid)
 

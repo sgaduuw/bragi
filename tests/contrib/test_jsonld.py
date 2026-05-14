@@ -78,9 +78,7 @@ def _jsonld_block(html: str) -> dict[str, object]:
 
 
 def test_post_page_has_jsonld_block(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/posts/welcome/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/posts/welcome/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     data = _jsonld_block(resp.data.decode())
     assert data["@context"] == "https://schema.org"
@@ -88,18 +86,14 @@ def test_post_page_has_jsonld_block(delivery_app: Flask) -> None:
 
 
 def test_jsonld_has_canonical_url_and_headline(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/posts/welcome/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/posts/welcome/", headers={"Host": "blog.example.com"})
     data = _jsonld_block(resp.data.decode())
     assert data["headline"] == "Welcome"
     assert data["url"] == "https://blog.example.com/posts/welcome/"
 
 
 def test_jsonld_has_dates(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/posts/welcome/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/posts/welcome/", headers={"Host": "blog.example.com"})
     data = _jsonld_block(resp.data.decode())
     assert isinstance(data["datePublished"], str)
     assert data["datePublished"].startswith("2026-05-14")
@@ -107,9 +101,7 @@ def test_jsonld_has_dates(delivery_app: Flask) -> None:
 
 
 def test_jsonld_has_author_person(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/posts/welcome/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/posts/welcome/", headers={"Host": "blog.example.com"})
     data = _jsonld_block(resp.data.decode())
     author = data["author"]
     assert isinstance(author, dict)
@@ -118,9 +110,7 @@ def test_jsonld_has_author_person(delivery_app: Flask) -> None:
 
 
 def test_jsonld_has_publisher_organization(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/posts/welcome/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/posts/welcome/", headers={"Host": "blog.example.com"})
     data = _jsonld_block(resp.data.decode())
     publisher = data["publisher"]
     assert isinstance(publisher, dict)
@@ -130,18 +120,14 @@ def test_jsonld_has_publisher_organization(delivery_app: Flask) -> None:
 
 def test_jsonld_description_falls_back_to_excerpt(delivery_app: Flask) -> None:
     """Without meta_description, the JSON-LD description equals the excerpt."""
-    resp = delivery_app.test_client().get(
-        "/posts/welcome/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/posts/welcome/", headers={"Host": "blog.example.com"})
     data = _jsonld_block(resp.data.decode())
     assert data["description"] == "hi"
 
 
 def test_jsonld_block_is_in_head_not_body(delivery_app: Flask) -> None:
     """The JSON-LD goes inside <head>, before any content."""
-    resp = delivery_app.test_client().get(
-        "/posts/welcome/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/posts/welcome/", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
     head_end = body.find("</head>")
     jsonld_pos = body.find("application/ld+json")

@@ -37,9 +37,7 @@ PASSWORD = "correct-horse-battery-staple"
 
 
 @pytest.fixture
-def tmp_attachments_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[Path]:
+def tmp_attachments_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Redirect the storage backend to a per-test tmp directory."""
     monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
     yield tmp_path
@@ -237,9 +235,7 @@ def test_upload_rejects_missing_file(admin_app: Flask) -> None:
     assert b"choose a file" in resp.data.lower()
 
 
-def test_upload_rejects_oversized_file(
-    admin_app: Flask, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_upload_rejects_oversized_file(admin_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
     """Lower the size limit so the test stays fast."""
     monkeypatch.setattr("bragi.settings.settings.attachments_max_bytes", 16)
     client = admin_app.test_client()
@@ -343,9 +339,7 @@ def test_delete_preserves_file_when_other_rows_reference_it(
 
     with db_session_factory() as db:
         blog_aid = (
-            db.execute(select(Attachment).where(Attachment.site_id == blog.id))
-            .scalar_one()
-            .id
+            db.execute(select(Attachment).where(Attachment.site_id == blog.id)).scalar_one().id
         )
 
     token = csrf_token(client, path="/admin/attachments/")

@@ -45,16 +45,26 @@ def admin_app(
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
         Post(
-            site_id=site.id, slug="hello", title="Hello",
-            body_markdown="v1 body", body_html="<p>v1 body</p>", body_excerpt="v1 body",
-            author_id=user.id, status=PostStatus.PUBLISHED,
+            site_id=site.id,
+            slug="hello",
+            title="Hello",
+            body_markdown="v1 body",
+            body_html="<p>v1 body</p>",
+            body_excerpt="v1 body",
+            author_id=user.id,
+            status=PostStatus.PUBLISHED,
         )
     )
     db_session.add(
         Page(
-            site_id=site.id, slug="about", title="About",
-            body_markdown="v1 page", body_html="<p>v1 page</p>", body_excerpt="v1 page",
-            author_id=user.id, status=PageStatus.PUBLISHED,
+            site_id=site.id,
+            slug="about",
+            title="About",
+            body_markdown="v1 page",
+            body_html="<p>v1 page</p>",
+            body_excerpt="v1 page",
+            author_id=user.id,
+            status=PageStatus.PUBLISHED,
         )
     )
     db_session.commit()
@@ -112,9 +122,7 @@ def test_post_edit_captures_a_revision(
     )
     with db_session_factory() as db:
         revs = (
-            db.execute(select(PostRevision).where(PostRevision.post_id == post_id))
-            .scalars()
-            .all()
+            db.execute(select(PostRevision).where(PostRevision.post_id == post_id)).scalars().all()
         )
         post = db.get(Post, post_id)
     # One revision captured (= pre-edit state). Live row has the v2.
@@ -178,9 +186,7 @@ def test_page_edit_captures_a_revision(
     )
     with db_session_factory() as db:
         revs = (
-            db.execute(select(PageRevision).where(PageRevision.page_id == page_id))
-            .scalars()
-            .all()
+            db.execute(select(PageRevision).where(PageRevision.page_id == page_id)).scalars().all()
         )
         page = db.get(Page, page_id)
     assert len(revs) == 1
@@ -313,9 +319,14 @@ def test_restore_page_swaps_parent_too(
         user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
         site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
         new_parent = Page(
-            site_id=site_id, slug="docs", title="Docs",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user_id, status=PageStatus.PUBLISHED,
+            site_id=site_id,
+            slug="docs",
+            title="Docs",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user_id,
+            status=PageStatus.PUBLISHED,
         )
         db.add(new_parent)
         db.commit()

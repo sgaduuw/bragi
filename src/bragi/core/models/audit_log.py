@@ -33,9 +33,7 @@ class AuditLog(IdMixin, Base):
     action: Mapped[str] = mapped_column(String(64), index=True)
     target_type: Mapped[str | None] = mapped_column(String(32), default=None)
     target_id: Mapped[int | None] = mapped_column(default=None)
-    site_id: Mapped[int | None] = mapped_column(
-        ForeignKey("sites.id"), default=None
-    )
+    site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), default=None)
     occurred_at: Mapped[datetime] = mapped_column(index=True)
     ip: Mapped[str | None] = mapped_column(String(64), default=None)
     user_agent: Mapped[str | None] = mapped_column(String(512), default=None)

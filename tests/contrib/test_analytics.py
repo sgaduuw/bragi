@@ -271,9 +271,7 @@ def test_analytics_admin_requires_superuser(
 ) -> None:
     """Demote Ada and verify 403."""
     with db_session_factory() as db:
-        u = db.execute(
-            select(User).where(User.email == "ada@example.com")
-        ).scalar_one()
+        u = db.execute(select(User).where(User.email == "ada@example.com")).scalar_one()
         u.is_superuser = False
         db.commit()
     client = admin_app.test_client()
@@ -285,16 +283,9 @@ def test_analytics_admin_requires_superuser(
 def test_analytics_admin_renders_for_superuser(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    site_id = (
-        db_session_factory()
-        .execute(select(Site).where(Site.slug == "blog"))
-        .scalar_one()
-        .id
-    )
+    site_id = db_session_factory().execute(select(Site).where(Site.slug == "blog")).scalar_one().id
     _seed_events(db_session_factory, site_id, day_offset=0, ua_class="browser", count=3)
-    _seed_events(
-        db_session_factory, site_id, day_offset=0, ua_class="feed-reader", count=2
-    )
+    _seed_events(db_session_factory, site_id, day_offset=0, ua_class="feed-reader", count=2)
     _seed_events(db_session_factory, site_id, day_offset=2, ua_class="browser", count=1)
 
     client = admin_app.test_client()
@@ -312,12 +303,7 @@ def test_analytics_admin_renders_for_superuser(
 def test_analytics_excludes_events_outside_window(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    site_id = (
-        db_session_factory()
-        .execute(select(Site).where(Site.slug == "blog"))
-        .scalar_one()
-        .id
-    )
+    site_id = db_session_factory().execute(select(Site).where(Site.slug == "blog")).scalar_one().id
     _seed_events(db_session_factory, site_id, day_offset=10, ua_class="browser", count=5)
     _seed_events(db_session_factory, site_id, day_offset=50, ua_class="browser", count=99)
 
@@ -334,9 +320,7 @@ def test_analytics_nav_entry_hidden_for_non_superuser(
     db_session_factory: sessionmaker[Session],
 ) -> None:
     with db_session_factory() as db:
-        u = db.execute(
-            select(User).where(User.email == "ada@example.com")
-        ).scalar_one()
+        u = db.execute(select(User).where(User.email == "ada@example.com")).scalar_one()
         u.is_superuser = False
         db.commit()
     client = admin_app.test_client()

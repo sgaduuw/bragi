@@ -59,18 +59,14 @@ def delivery_app(
 
 
 def test_key_file_returns_key_when_configured(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        f"/{KEY}.txt", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get(f"/{KEY}.txt", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert resp.data.decode().strip() == KEY
     assert resp.headers["Content-Type"].startswith("text/plain")
 
 
 def test_key_file_404s_on_wrong_key(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/wrong-key.txt", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/wrong-key.txt", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
 
 
@@ -96,9 +92,7 @@ def test_key_file_404s_when_unconfigured(
     monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
 
     app = create_delivery_app()
-    resp = app.test_client().get(
-        f"/{KEY}.txt", headers={"Host": "blog.example.com"}
-    )
+    resp = app.test_client().get(f"/{KEY}.txt", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
 
 
@@ -128,9 +122,14 @@ def admin_app(
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
         Post(
-            site_id=site.id, slug="hello", title="Hello",
-            body_markdown="h", body_html="<p>h</p>", body_excerpt="h",
-            author_id=user.id, status=PostStatus.DRAFT,
+            site_id=site.id,
+            slug="hello",
+            title="Hello",
+            body_markdown="h",
+            body_html="<p>h</p>",
+            body_excerpt="h",
+            author_id=user.id,
+            status=PostStatus.DRAFT,
         )
     )
     db_session.commit()
@@ -219,9 +218,7 @@ def test_delete_fires_indexnow_post_with_pre_delete_url(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/posts/")
-    client.post(
-        f"/admin/posts/{post_id}/delete", data={"_csrf_token": token}
-    )
+    client.post(f"/admin/posts/{post_id}/delete", data={"_csrf_token": token})
     assert len(calls) == 1
     assert calls[0]["json"]["urlList"] == ["https://blog.example.com/posts/hello/"]
 
@@ -246,9 +243,14 @@ def test_no_key_means_no_post(
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
         Post(
-            site_id=site.id, slug="hello", title="Hello",
-            body_markdown="h", body_html="<p>h</p>", body_excerpt="h",
-            author_id=user.id, status=PostStatus.DRAFT,
+            site_id=site.id,
+            slug="hello",
+            title="Hello",
+            body_markdown="h",
+            body_html="<p>h</p>",
+            body_excerpt="h",
+            author_id=user.id,
+            status=PostStatus.DRAFT,
         )
     )
     db_session.commit()
@@ -327,9 +329,7 @@ def test_cli_setup_writes_key_into_extra_settings(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.indexnow.cli.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         db.add(
             Site(
@@ -356,9 +356,7 @@ def test_cli_setup_accepts_explicit_key(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.indexnow.cli.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         db.add(
             Site(
@@ -384,9 +382,7 @@ def test_cli_setup_rejects_invalid_key(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.indexnow.cli.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         db.add(
             Site(
@@ -398,9 +394,7 @@ def test_cli_setup_rejects_invalid_key(
         )
         db.commit()
     runner = CliRunner()
-    result = runner.invoke(
-        indexnow_group, ["setup", "--site", "blog", "--key", "short"]
-    )
+    result = runner.invoke(indexnow_group, ["setup", "--site", "blog", "--key", "short"])
     assert result.exit_code == 1
     assert "Key must be" in result.output
 
@@ -409,9 +403,7 @@ def test_cli_setup_rejects_unknown_site(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.indexnow.cli.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     runner = CliRunner()
     result = runner.invoke(indexnow_group, ["setup", "--site", "nope"])
     assert result.exit_code == 1

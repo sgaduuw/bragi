@@ -22,19 +22,17 @@ from bragi.core.models.user import User
 @click.command("hugo", help="Import a Hugo content tree into a site.")
 @click.option("--site", "site_slug", required=True, help="Target site slug.")
 @click.option(
-    "--author", "author_email", default=None,
+    "--author",
+    "author_email",
+    default=None,
     help="Email of the fallback author; first user in DB if omitted.",
 )
 @click.option("--dry-run", is_flag=True, help="Plan only; don't write rows.")
 @click.argument("source_path", type=click.Path(exists=True, file_okay=False))
-def hugo_command(
-    site_slug: str, author_email: str | None, dry_run: bool, source_path: str
-) -> None:
+def hugo_command(site_slug: str, author_email: str | None, dry_run: bool, source_path: str) -> None:
     """Run the Hugo importer against `SOURCE_PATH` for the given site."""
     if not detect(source_path):
-        click.echo(
-            f"{source_path!r} does not look like a Hugo source tree.", err=True
-        )
+        click.echo(f"{source_path!r} does not look like a Hugo source tree.", err=True)
         sys.exit(1)
 
     if dry_run:

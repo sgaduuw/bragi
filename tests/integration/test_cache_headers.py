@@ -37,8 +37,12 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
-    site = Site(slug="blog", hostname="blog.example.com", title="Blog",
-                canonical_url="https://blog.example.com")
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+    )
     db_session.add(site)
     db_session.flush()
     user = User(email=EMAIL, display_name="Ada", is_active=True)
@@ -46,17 +50,27 @@ def delivery_app(
     db_session.flush()
     db_session.add(
         Post(
-            site_id=site.id, slug="hello", title="Hello",
-            body_markdown="h", body_html="<p>h</p>", body_excerpt="h",
-            author_id=user.id, status=PostStatus.PUBLISHED,
+            site_id=site.id,
+            slug="hello",
+            title="Hello",
+            body_markdown="h",
+            body_html="<p>h</p>",
+            body_excerpt="h",
+            author_id=user.id,
+            status=PostStatus.PUBLISHED,
             published_at=datetime(2026, 5, 14, tzinfo=UTC),
         )
     )
     db_session.add(
         Page(
-            site_id=site.id, slug="about", title="About",
-            body_markdown="a", body_html="<p>a</p>", body_excerpt="a",
-            author_id=user.id, status=PageStatus.PUBLISHED,
+            site_id=site.id,
+            slug="about",
+            title="About",
+            body_markdown="a",
+            body_html="<p>a</p>",
+            body_excerpt="a",
+            author_id=user.id,
+            status=PageStatus.PUBLISHED,
         )
     )
     db_session.commit()
@@ -113,25 +127,19 @@ def test_page_revalidation_returns_304(delivery_app: Flask) -> None:
 
 
 def test_feed_uses_feed_cache_policy(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/feed.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert resp.headers["Cache-Control"] == "public, max-age=600, s-maxage=600"
 
 
 def test_sitemap_uses_sitemap_cache_policy(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/sitemap.xml", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/sitemap.xml", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert resp.headers["Cache-Control"] == "public, max-age=600, s-maxage=600"
 
 
 def test_robots_uses_long_cache(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/robots.txt", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/robots.txt", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert resp.headers["Cache-Control"] == "public, max-age=86400"
 
@@ -140,9 +148,7 @@ def test_404_response_has_no_cache_header(delivery_app: Flask) -> None:
     """The default after_request only sets cache headers on 2xx; a
     404 might be in flux (a slug-change redirect could land any
     moment) and shouldn't be aggressively cached."""
-    resp = delivery_app.test_client().get(
-        "/posts/nope/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/posts/nope/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
     assert resp.headers.get("Cache-Control") in (None, "")
 
@@ -163,8 +169,12 @@ def admin_app(
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
-        Site(slug="blog", hostname="blog.example.com", title="Blog",
-             canonical_url="https://blog.example.com")
+        Site(
+            slug="blog",
+            hostname="blog.example.com",
+            title="Blog",
+            canonical_url="https://blog.example.com",
+        )
     )
     db_session.commit()
 

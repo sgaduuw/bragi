@@ -89,7 +89,7 @@ def test_full_page_includes_chrome_and_partial(admin_app: Flask) -> None:
     assert resp.status_code == 200
     # Chrome from the base template.
     assert "<!DOCTYPE html>" in body
-    assert "<nav class=\"topbar\">" in body
+    assert '<nav class="topbar">' in body
     # And the partial wrapper.
     assert 'id="post-list-table"' in body
     # And the seeded row.
@@ -105,7 +105,7 @@ def test_htmx_get_returns_partial_only(admin_app: Flask) -> None:
     assert resp.status_code == 200
     # No full-document chrome.
     assert "<!DOCTYPE html>" not in body
-    assert "<nav class=\"topbar\">" not in body
+    assert '<nav class="topbar">' not in body
     # The partial wrapper IS present.
     assert 'id="post-list-table"' in body
     # And the seeded row.

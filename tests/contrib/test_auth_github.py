@@ -71,9 +71,7 @@ def _mock_authlib_client(
     # functions by-name from `client`, so the local reference in
     # views.py is a fresh symbol the test must replace separately.
     monkeypatch.setattr(gh_client, "build_github_client", lambda: fake_client)
-    monkeypatch.setattr(
-        "bragi.contrib.auth_github.views.build_github_client", lambda: fake_client
-    )
+    monkeypatch.setattr("bragi.contrib.auth_github.views.build_github_client", lambda: fake_client)
     # `fetch_user_info` calls `build_github_client()` internally, so
     # replacing it lazily through gh_client is enough; no extra
     # patch needed.
@@ -224,9 +222,7 @@ def test_callback_links_to_user_by_email_when_no_identity(
     """`cms user create` seeded a User; first OAuth login attaches an
     identity rather than creating a duplicate."""
     with db_session_factory() as db:
-        db.add(
-            User(email="ada@example.com", display_name="Ada (seeded)", is_active=True)
-        )
+        db.add(User(email="ada@example.com", display_name="Ada (seeded)", is_active=True))
         db.commit()
     _mock_authlib_client(monkeypatch)
 

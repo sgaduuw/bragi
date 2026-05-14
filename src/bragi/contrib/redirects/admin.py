@@ -37,9 +37,7 @@ bp = Blueprint(
 )
 
 VALID_STATUS_CODES: frozenset[int] = frozenset({301, 302, 307, 308, 410})
-VALID_MATCH_TYPES: frozenset[str] = frozenset(
-    {MatchType.EXACT, MatchType.PREFIX, MatchType.REGEX}
-)
+VALID_MATCH_TYPES: frozenset[str] = frozenset({MatchType.EXACT, MatchType.PREFIX, MatchType.REGEX})
 PAGE_SIZE = 50
 
 

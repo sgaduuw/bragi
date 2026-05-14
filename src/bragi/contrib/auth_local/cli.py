@@ -122,9 +122,7 @@ def grant_role(email: str, site_slug: str, role: str) -> None:
     email_normalized = email.strip().lower()
     site_slug_normalized = site_slug.strip().lower()
     with SessionLocal() as db:
-        user = db.execute(
-            select(User).where(User.email == email_normalized)
-        ).scalar_one_or_none()
+        user = db.execute(select(User).where(User.email == email_normalized)).scalar_one_or_none()
         if user is None:
             click.echo(f"No user with email {email_normalized!r}.", err=True)
             sys.exit(1)

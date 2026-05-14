@@ -45,9 +45,7 @@ class Page(IdMixin, TimestampsMixin, Base):
     )
 
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
-    parent_id: Mapped[int | None] = mapped_column(
-        ForeignKey("pages.id"), default=None, index=True
-    )
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("pages.id"), default=None, index=True)
     slug: Mapped[str] = mapped_column(String(255))
     title: Mapped[str] = mapped_column(String(255))
 

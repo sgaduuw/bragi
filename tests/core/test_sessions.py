@@ -115,9 +115,7 @@ def test_logout_invalidates_authenticated_session(
         assert db.get(SessionRow, pre_logout_sid.value) is None
         # No surviving row carries the logged-out user_id.
         any_with_user = (
-            db.execute(select(SessionRow).where(SessionRow.user_id.is_not(None)))
-            .scalars()
-            .first()
+            db.execute(select(SessionRow).where(SessionRow.user_id.is_not(None))).scalars().first()
         )
         assert any_with_user is None
 

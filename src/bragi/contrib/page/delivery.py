@@ -43,13 +43,10 @@ def _resolve_page_chain(site_id: int, slugs: list[str]) -> Page | None:
     page: Page | None = None
     with SessionLocal() as db:
         for slug in slugs:
-            stmt = (
-                select(Page)
-                .where(
-                    Page.site_id == site_id,
-                    Page.slug == slug,
-                    Page.status == PageStatus.PUBLISHED,
-                )
+            stmt = select(Page).where(
+                Page.site_id == site_id,
+                Page.slug == slug,
+                Page.status == PageStatus.PUBLISHED,
             )
             stmt = (
                 stmt.where(Page.parent_id.is_(None))

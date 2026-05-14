@@ -140,9 +140,7 @@ def upload_attachment() -> ResponseReturnValue:
 
     filename = secure_filename(upload.filename) or "upload"
     content_type = (
-        upload.mimetype
-        or mimetypes.guess_type(filename)[0]
-        or "application/octet-stream"
+        upload.mimetype or mimetypes.guess_type(filename)[0] or "application/octet-stream"
     )
 
     with SessionLocal() as db:

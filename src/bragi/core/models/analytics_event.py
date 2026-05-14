@@ -29,11 +29,7 @@ class AnalyticsEvent(IdMixin, Base):
     event_type: Mapped[str] = mapped_column(String(32), index=True)
     path: Mapped[str | None] = mapped_column(String(1024), default=None)
     referrer: Mapped[str | None] = mapped_column(String(1024), default=None)
-    user_agent_class: Mapped[str | None] = mapped_column(
-        String(32), default=None, index=True
-    )
-    user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"), default=None
-    )
+    user_agent_class: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
     occurred_at: Mapped[datetime] = mapped_column(index=True)
     extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

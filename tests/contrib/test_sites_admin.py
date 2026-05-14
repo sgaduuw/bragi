@@ -245,9 +245,7 @@ def test_edit_rejects_duplicate_hostname_against_other_row(
             )
         )
         db.commit()
-        second_id = (
-            db.execute(select(Site).where(Site.slug == "second")).scalar_one().id
-        )
+        second_id = db.execute(select(Site).where(Site.slug == "second")).scalar_one().id
 
     client = admin_app.test_client()
     _login(client)

@@ -85,41 +85,31 @@ def delivery_app(
 
 
 def test_top_level_page_resolves(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/about/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/about/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert b"About" in resp.data
     assert b"About us." in resp.data
 
 
 def test_nested_page_resolves(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/about/team/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/about/team/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert b"The Team" in resp.data
 
 
 def test_draft_page_returns_404(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/secret/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/secret/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
 
 
 def test_nested_path_without_parent_returns_404(delivery_app: Flask) -> None:
     """Child slug under wrong parent: no such page."""
-    resp = delivery_app.test_client().get(
-        "/secret/team/", headers={"Host": "blog.example.com"}
-    )
+    resp = delivery_app.test_client().get("/secret/team/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
 
 
 def test_unknown_host_returns_404(delivery_app: Flask) -> None:
-    resp = delivery_app.test_client().get(
-        "/about/", headers={"Host": "nope.example.com"}
-    )
+    resp = delivery_app.test_client().get("/about/", headers={"Host": "nope.example.com"})
     assert resp.status_code == 404
 
 
@@ -141,28 +131,54 @@ def test_same_slug_under_different_parents_allowed(
         db.flush()
 
         parent_a = Page(
-            site_id=site.id, slug="docs", title="Docs",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user.id, status=PageStatus.PUBLISHED,
+            site_id=site.id,
+            slug="docs",
+            title="Docs",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user.id,
+            status=PageStatus.PUBLISHED,
         )
         parent_b = Page(
-            site_id=site.id, slug="guides", title="Guides",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user.id, status=PageStatus.PUBLISHED,
+            site_id=site.id,
+            slug="guides",
+            title="Guides",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user.id,
+            status=PageStatus.PUBLISHED,
         )
         db.add_all([parent_a, parent_b])
         db.flush()
         # Both children share slug 'overview' but sit under different parents.
-        db.add(Page(
-            site_id=site.id, parent_id=parent_a.id, slug="overview",
-            title="Docs overview", body_markdown="", body_html="",
-            body_excerpt="", author_id=user.id, status=PageStatus.PUBLISHED,
-        ))
-        db.add(Page(
-            site_id=site.id, parent_id=parent_b.id, slug="overview",
-            title="Guides overview", body_markdown="", body_html="",
-            body_excerpt="", author_id=user.id, status=PageStatus.PUBLISHED,
-        ))
+        db.add(
+            Page(
+                site_id=site.id,
+                parent_id=parent_a.id,
+                slug="overview",
+                title="Docs overview",
+                body_markdown="",
+                body_html="",
+                body_excerpt="",
+                author_id=user.id,
+                status=PageStatus.PUBLISHED,
+            )
+        )
+        db.add(
+            Page(
+                site_id=site.id,
+                parent_id=parent_b.id,
+                slug="overview",
+                title="Guides overview",
+                body_markdown="",
+                body_html="",
+                body_excerpt="",
+                author_id=user.id,
+                status=PageStatus.PUBLISHED,
+            )
+        )
         db.commit()
         # Both committed without violating the UNIQUE constraint.
 
@@ -184,24 +200,45 @@ def test_same_parent_same_slug_rejected(
         db.add(user)
         db.flush()
         parent = Page(
-            site_id=site.id, slug="docs", title="Docs",
-            body_markdown="", body_html="", body_excerpt="",
-            author_id=user.id, status=PageStatus.PUBLISHED,
+            site_id=site.id,
+            slug="docs",
+            title="Docs",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user.id,
+            status=PageStatus.PUBLISHED,
         )
         db.add(parent)
         db.flush()
-        db.add(Page(
-            site_id=site.id, parent_id=parent.id, slug="overview",
-            title="A", body_markdown="", body_html="", body_excerpt="",
-            author_id=user.id, status=PageStatus.PUBLISHED,
-        ))
+        db.add(
+            Page(
+                site_id=site.id,
+                parent_id=parent.id,
+                slug="overview",
+                title="A",
+                body_markdown="",
+                body_html="",
+                body_excerpt="",
+                author_id=user.id,
+                status=PageStatus.PUBLISHED,
+            )
+        )
         db.commit()
 
-        db.add(Page(
-            site_id=site.id, parent_id=parent.id, slug="overview",
-            title="B", body_markdown="", body_html="", body_excerpt="",
-            author_id=user.id, status=PageStatus.PUBLISHED,
-        ))
+        db.add(
+            Page(
+                site_id=site.id,
+                parent_id=parent.id,
+                slug="overview",
+                title="B",
+                body_markdown="",
+                body_html="",
+                body_excerpt="",
+                author_id=user.id,
+                status=PageStatus.PUBLISHED,
+            )
+        )
         with pytest.raises(IntegrityError):
             db.commit()
 

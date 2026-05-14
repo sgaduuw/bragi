@@ -87,10 +87,8 @@ def test_plan_counts_posts_and_redirects(tmp_path: Path) -> None:
     p = _make_export(
         tmp_path,
         [
-            {"id": "1", "slug": "a", "title": "A", "html": "<p>A</p>",
-             "status": "published"},
-            {"id": "2", "slug": "b", "title": "B", "html": "<p>B</p>",
-             "status": "draft"},
+            {"id": "1", "slug": "a", "title": "A", "html": "<p>A</p>", "status": "published"},
+            {"id": "2", "slug": "b", "title": "B", "html": "<p>B</p>", "status": "draft"},
         ],
     )
     result = plan(p)
@@ -143,9 +141,7 @@ def test_apply_creates_post_with_markdown_body(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -181,16 +177,18 @@ def test_apply_inserts_permalink_redirect_for_published(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
-            {"id": "gp1", "slug": "alpha", "title": "Alpha",
-             "html": "<p>A</p>", "status": "published"},
-            {"id": "gp2", "slug": "beta", "title": "Beta",
-             "html": "<p>B</p>", "status": "draft"},
+            {
+                "id": "gp1",
+                "slug": "alpha",
+                "title": "Alpha",
+                "html": "<p>A</p>",
+                "status": "published",
+            },
+            {"id": "gp2", "slug": "beta", "title": "Beta", "html": "<p>B</p>", "status": "draft"},
         ],
     )
     site = _detached_site(db_session_factory, site_id)
@@ -213,13 +211,10 @@ def test_apply_is_idempotent_via_source_id(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
-        [{"id": "gp1", "slug": "x", "title": "First",
-          "html": "<p>A</p>", "status": "published"}],
+        [{"id": "gp1", "slug": "x", "title": "First", "html": "<p>A</p>", "status": "published"}],
     )
     site = _detached_site(db_session_factory, site_id)
     apply(p, site, {})
@@ -245,13 +240,10 @@ def test_apply_attaches_tags(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
-        [{"id": "gp1", "slug": "a", "title": "A",
-          "html": "<p>A</p>", "status": "published"}],
+        [{"id": "gp1", "slug": "a", "title": "A", "html": "<p>A</p>", "status": "published"}],
         tags=[
             {"id": "gt1", "name": "Python", "slug": "python"},
             {"id": "gt2", "name": "Web", "slug": "web"},
@@ -279,14 +271,19 @@ def test_apply_matches_author_by_email(
 ) -> None:
     """Ghost author with email 'ada@example.com' matches the seeded
     User row; the post lands attributed to Ada."""
-    monkeypatch.setattr(
-        "bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
-        [{"id": "gp1", "slug": "a", "title": "A",
-          "html": "<p>A</p>", "status": "published",
-          "primary_author_id": "gu1"}],
+        [
+            {
+                "id": "gp1",
+                "slug": "a",
+                "title": "A",
+                "html": "<p>A</p>",
+                "status": "published",
+                "primary_author_id": "gu1",
+            }
+        ],
         users=[{"id": "gu1", "name": "Ada", "email": "ada@example.com"}],
     )
     site = _detached_site(db_session_factory, site_id)
@@ -303,14 +300,19 @@ def test_apply_falls_back_to_first_user_when_author_unmatched(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
-        [{"id": "gp1", "slug": "a", "title": "A",
-          "html": "<p>A</p>", "status": "published",
-          "primary_author_id": "gu-unknown"}],
+        [
+            {
+                "id": "gp1",
+                "slug": "a",
+                "title": "A",
+                "html": "<p>A</p>",
+                "status": "published",
+                "primary_author_id": "gu-unknown",
+            }
+        ],
     )
     site = _detached_site(db_session_factory, site_id)
     apply(p, site, {})
@@ -327,16 +329,26 @@ def test_apply_skips_pages_for_now(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory
-    )
+    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
-            {"id": "gp1", "slug": "a", "title": "A", "type": "post",
-             "html": "<p>A</p>", "status": "published"},
-            {"id": "gp2", "slug": "about", "title": "About", "type": "page",
-             "html": "<p>About</p>", "status": "published"},
+            {
+                "id": "gp1",
+                "slug": "a",
+                "title": "A",
+                "type": "post",
+                "html": "<p>A</p>",
+                "status": "published",
+            },
+            {
+                "id": "gp2",
+                "slug": "about",
+                "title": "About",
+                "type": "page",
+                "html": "<p>About</p>",
+                "status": "published",
+            },
         ],
     )
     site = _detached_site(db_session_factory, site_id)

@@ -35,6 +35,4 @@ class Attachment(IdMixin, TimestampsMixin, Base):
     content_type: Mapped[str] = mapped_column(String(127))
     size_bytes: Mapped[int] = mapped_column(Integer)
     storage_key: Mapped[str] = mapped_column(String(128))  # sha256 hex
-    uploaded_by: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"), default=None
-    )
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
