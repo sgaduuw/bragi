@@ -40,6 +40,7 @@ bragi-delivery = "bragi.apps.delivery:run"
 # register on app boot).
 [tool.poetry.plugins."bragi.plugins"]
 post = "bragi.contrib.post.plugin"
+page = "bragi.contrib.page.plugin"
 redirects = "bragi.contrib.redirects.plugin"
 auth_local = "bragi.contrib.auth_local.plugin"
 sites = "bragi.contrib.sites.plugin"

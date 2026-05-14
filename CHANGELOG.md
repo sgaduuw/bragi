@@ -352,3 +352,47 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rolling-monthly-table upgrade path
   (`analytics_events_2026_05`) once the single table starts to
   hurt under vacuum / time-range queries.
+- `Site.extra_settings`: schemaless JSON blob on `sites` for
+  plugin-contributed flat config. `MutableDict.as_mutable`
+  tracks in-place mutations so `site.extra_settings["x"] = 1`
+  survives commit without manual reassignment. Migration
+  `add_extra_settings_to_sites` (revision `f679d5fc62bb`),
+  with a `server_default='{}'` so existing rows backfill cleanly
+  on upgrade.
+- Lifecycle hooks wired into the post admin:
+  `pm.hook.on_post_published` fires on first publish transition
+  (both `new_post` when status starts as published and
+  `edit_post` when status flips), and `pm.hook.on_post_deleted`
+  fires before commit in `delete_post` so subscribers see the
+  row in-session (useful for emitting a 410 tombstone redirect).
+  `on_post_updated` was already wired by #11.
+- `SiteAlias` model: extra hostnames that resolve to a Site via
+  the site_resolver's fallback lookup
+  (`bragi.core.middleware.site_resolver`). UNIQUE constraint
+  spans `sites.hostname` and `site_aliases.hostname` so a
+  hostname is never ambiguous. New CLI subgroup
+  `cms site alias add/list/remove`; admin alias management on
+  the Site edit form. Migration `add_site_aliases` (revision
+  `0e57d255f32d`).
+- `Page` content type for static / hierarchical content.
+  `bragi.contrib.page` plugin: ContentTypeSpec, admin at
+  `/admin/pages`, delivery catch-all that resolves slash-joined
+  slug chains by walking `parent_id` step-by-step. Slug
+  uniqueness is `(site_id, parent_id, slug)`; the DB UNIQUE
+  constraint catches non-root collisions while the admin's
+  app-level pre-flight covers the root case (SQLite UNIQUE
+  treats NULL as distinct). Delete refuses to remove a page
+  with children. Migration `add_pages` (revision
+  `6275dd6feda6`).
+- `Tag` model + `post_tags` junction with `ON DELETE CASCADE`.
+  Tags are per-site (`UniqueConstraint(site_id, slug)`); the
+  CSV input on the post edit form upserts by slug so existing
+  tags get re-used. The post tag relationship is
+  `selectin`-loaded to keep the list view a single query.
+  Delivery surfaces a per-tag listing at `/tags/<slug>/` that
+  shows the published posts attached to the tag, ordered
+  newest-first; drafts and other-site posts never leak. The
+  shared slug helper moved from `bragi.contrib.anchors.transform`
+  to `bragi.core.text.slugify` so post / tag / anchor code can
+  reuse it without crossing the plugin boundary. Migration
+  `add_tags` (revision `46fe76487384`).

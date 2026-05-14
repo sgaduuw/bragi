@@ -1,0 +1,215 @@
+"""Tests for the Page content type (#14)."""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+
+import pytest
+from flask import Flask
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
+
+from bragi.apps.delivery import create_delivery_app
+from bragi.core.models.page import Page, PageStatus
+from bragi.core.models.site import Site
+from bragi.core.models.user import User
+
+
+@pytest.fixture
+def delivery_app(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Flask]:
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+    )
+    db_session.add(site)
+    db_session.flush()
+    user = User(email="ada@example.com", display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
+
+    # Top-level page
+    about = Page(
+        site_id=site.id,
+        slug="about",
+        title="About",
+        body_markdown="About us.",
+        body_html="<p>About us.</p>",
+        body_excerpt="About us.",
+        author_id=user.id,
+        status=PageStatus.PUBLISHED,
+    )
+    db_session.add(about)
+    db_session.flush()
+    # Nested page
+    db_session.add(
+        Page(
+            site_id=site.id,
+            parent_id=about.id,
+            slug="team",
+            title="The Team",
+            body_markdown="Team.",
+            body_html="<p>Team.</p>",
+            body_excerpt="Team.",
+            author_id=user.id,
+            status=PageStatus.PUBLISHED,
+        )
+    )
+    # Draft (should 404 publicly)
+    db_session.add(
+        Page(
+            site_id=site.id,
+            slug="secret",
+            title="Secret",
+            body_markdown="Draft.",
+            body_html="<p>Draft.</p>",
+            body_excerpt="Draft.",
+            author_id=user.id,
+            status=PageStatus.DRAFT,
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.page.plugin.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
+
+    yield create_delivery_app()
+
+
+def test_top_level_page_resolves(delivery_app: Flask) -> None:
+    resp = delivery_app.test_client().get(
+        "/about/", headers={"Host": "blog.example.com"}
+    )
+    assert resp.status_code == 200
+    assert b"About" in resp.data
+    assert b"About us." in resp.data
+
+
+def test_nested_page_resolves(delivery_app: Flask) -> None:
+    resp = delivery_app.test_client().get(
+        "/about/team/", headers={"Host": "blog.example.com"}
+    )
+    assert resp.status_code == 200
+    assert b"The Team" in resp.data
+
+
+def test_draft_page_returns_404(delivery_app: Flask) -> None:
+    resp = delivery_app.test_client().get(
+        "/secret/", headers={"Host": "blog.example.com"}
+    )
+    assert resp.status_code == 404
+
+
+def test_nested_path_without_parent_returns_404(delivery_app: Flask) -> None:
+    """Child slug under wrong parent: no such page."""
+    resp = delivery_app.test_client().get(
+        "/secret/team/", headers={"Host": "blog.example.com"}
+    )
+    assert resp.status_code == 404
+
+
+def test_unknown_host_returns_404(delivery_app: Flask) -> None:
+    resp = delivery_app.test_client().get(
+        "/about/", headers={"Host": "nope.example.com"}
+    )
+    assert resp.status_code == 404
+
+
+def test_same_slug_under_different_parents_allowed(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Two pages with slug 'overview' under different parents must coexist."""
+    with db_session_factory() as db:
+        site = Site(
+            slug="blog",
+            hostname="blog.example.com",
+            title="Blog",
+            canonical_url="https://blog.example.com",
+        )
+        db.add(site)
+        db.flush()
+        user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
+
+        parent_a = Page(
+            site_id=site.id, slug="docs", title="Docs",
+            body_markdown="", body_html="", body_excerpt="",
+            author_id=user.id, status=PageStatus.PUBLISHED,
+        )
+        parent_b = Page(
+            site_id=site.id, slug="guides", title="Guides",
+            body_markdown="", body_html="", body_excerpt="",
+            author_id=user.id, status=PageStatus.PUBLISHED,
+        )
+        db.add_all([parent_a, parent_b])
+        db.flush()
+        # Both children share slug 'overview' but sit under different parents.
+        db.add(Page(
+            site_id=site.id, parent_id=parent_a.id, slug="overview",
+            title="Docs overview", body_markdown="", body_html="",
+            body_excerpt="", author_id=user.id, status=PageStatus.PUBLISHED,
+        ))
+        db.add(Page(
+            site_id=site.id, parent_id=parent_b.id, slug="overview",
+            title="Guides overview", body_markdown="", body_html="",
+            body_excerpt="", author_id=user.id, status=PageStatus.PUBLISHED,
+        ))
+        db.commit()
+        # Both committed without violating the UNIQUE constraint.
+
+
+def test_same_parent_same_slug_rejected(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Two pages with the same slug under the same parent must fail."""
+    with db_session_factory() as db:
+        site = Site(
+            slug="blog",
+            hostname="blog.example.com",
+            title="Blog",
+            canonical_url="https://blog.example.com",
+        )
+        db.add(site)
+        db.flush()
+        user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
+        parent = Page(
+            site_id=site.id, slug="docs", title="Docs",
+            body_markdown="", body_html="", body_excerpt="",
+            author_id=user.id, status=PageStatus.PUBLISHED,
+        )
+        db.add(parent)
+        db.flush()
+        db.add(Page(
+            site_id=site.id, parent_id=parent.id, slug="overview",
+            title="A", body_markdown="", body_html="", body_excerpt="",
+            author_id=user.id, status=PageStatus.PUBLISHED,
+        ))
+        db.commit()
+
+        db.add(Page(
+            site_id=site.id, parent_id=parent.id, slug="overview",
+            title="B", body_markdown="", body_html="", body_excerpt="",
+            author_id=user.id, status=PageStatus.PUBLISHED,
+        ))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+
+def test_page_plugin_registers_content_type(delivery_app: Flask) -> None:
+    registry = delivery_app.extensions["registry"]
+    spec = registry.content_type("page")
+    assert spec is not None
+    assert spec.label == "Page"
+    assert spec.sitemap_eligible is True
+    assert spec.feed_eligible is False

@@ -13,7 +13,8 @@ Two callables:
 from __future__ import annotations
 
 import re
-import unicodedata
+
+from bragi.core.text import slugify
 
 # Capture: 1=level (1..6), 2=existing attributes (may be empty), 3=inner HTML.
 # The attribute group is non-greedy on `[^>]*` so we don't swallow the
@@ -25,24 +26,6 @@ _HEADING_RE = re.compile(
 )
 
 _TAG_RE = re.compile(r"<[^>]+>")
-
-
-def slugify(text: str) -> str:
-    """Return a URL-safe slug for `text`.
-
-    Strategy:
-        1. NFKD-normalise + drop non-ASCII (`Naïve` -> `Naive`).
-        2. Lowercase.
-        3. Replace runs of non-[a-z0-9] with a single `-`.
-        4. Trim leading and trailing `-`.
-
-    Returns `""` if no sluggable characters remain.
-    """
-    normalised = unicodedata.normalize("NFKD", text)
-    ascii_only = normalised.encode("ascii", "ignore").decode("ascii")
-    lowered = ascii_only.lower()
-    hyphenated = re.sub(r"[^a-z0-9]+", "-", lowered)
-    return hyphenated.strip("-")
 
 
 def _heading_has_id(attrs: str) -> bool:

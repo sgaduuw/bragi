@@ -1,0 +1,21 @@
+{% extends "delivery/base.html" %}
+{% block title %}Posts tagged "{{ tag.label }}" &middot; {{ site.title }}{% endblock %}
+{% block content %}
+<h1>Posts tagged &ldquo;{{ tag.label }}&rdquo;</h1>
+{% if posts %}
+<ul class="post-list">
+  {% for post in posts %}
+  <li>
+    <a href="/posts/{{ post.slug }}/">{{ post.title }}</a>
+    {% if post.published_at %}
+      <time datetime="{{ post.published_at.isoformat() }}" class="meta">
+        {{ post.published_at.strftime('%Y-%m-%d') }}
+      </time>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>No published posts have this tag.</p>
+{% endif %}
+{% endblock %}

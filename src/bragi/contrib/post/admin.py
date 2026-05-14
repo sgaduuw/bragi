@@ -21,13 +21,16 @@ from flask import (
 )
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
+from bragi.core.models.tag import Tag
 from bragi.core.render.markdown import make_excerpt, render_markdown
+from bragi.core.text import slugify
 
 bp = Blueprint(
     "post_admin",
@@ -44,7 +47,52 @@ def _form_from_request() -> dict[str, str]:
         "slug": (request.form.get("slug") or "").strip(),
         "body_markdown": request.form.get("body_markdown") or "",
         "status": request.form.get("status") or PostStatus.DRAFT,
+        "tags": (request.form.get("tags") or "").strip(),
     }
+
+
+def _parse_tag_csv(raw: str) -> list[tuple[str, str]]:
+    """Split a "Foo, bar, BAZ Q" string into [(slug, label), ...].
+
+    Labels with no sluggable characters drop out. Duplicate slugs
+    are deduplicated, keeping the first label seen.
+    """
+    seen: dict[str, str] = {}
+    for chunk in raw.split(","):
+        label = chunk.strip()
+        if not label:
+            continue
+        slug = slugify(label)
+        if slug and slug not in seen:
+            seen[slug] = label
+    return list(seen.items())
+
+
+def _sync_post_tags(
+    db: Session,
+    post: Post,
+    raw_tags: str,
+    site_id: int,
+) -> None:
+    """Upsert Tag rows from the CSV input and assign them to `post`.
+
+    The junction is rewritten on every save: missing tags get
+    detached, new tags get attached. Tag rows themselves are not
+    deleted when they fall off a post (other posts may still use
+    them; orphan cleanup is a later admin command).
+    """
+    parsed = _parse_tag_csv(raw_tags)
+    tags: list[Tag] = []
+    for slug, label in parsed:
+        existing = db.execute(
+            select(Tag).where(Tag.site_id == site_id, Tag.slug == slug)
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = Tag(site_id=site_id, slug=slug, label=label)
+            db.add(existing)
+            db.flush()
+        tags.append(existing)
+    post.tags = tags
 
 
 @bp.route("/", methods=["GET"])
@@ -91,9 +139,18 @@ def new_post() -> ResponseReturnValue:
             published_at=(datetime.now(UTC) if new_status == PostStatus.PUBLISHED else None),
         )
         db.add(new_post_row)
+        db.flush()
+        _sync_post_tags(db, new_post_row, form["tags"], site_id)
         db.commit()
         new_id = new_post_row.id
         new_slug = new_post_row.slug
+
+        # A brand-new post that starts published triggers
+        # on_post_published just like an edit-time transition does.
+        if new_status == PostStatus.PUBLISHED:
+            pm = current_app.extensions["plugin_manager"]
+            pm.hook.on_post_published(item=new_post_row, session=db)
+
         flash(f"Post '{form['title']}' created.", "success")
 
     audit(
@@ -120,6 +177,7 @@ def edit_post(post_id: int) -> ResponseReturnValue:
                 "slug": post.slug,
                 "body_markdown": post.body_markdown,
                 "status": post.status,
+                "tags": ", ".join(t.label for t in post.tags),
             }
             return render_template("admin/edit.html", post=post, form=form)
 
@@ -137,23 +195,33 @@ def edit_post(post_id: int) -> ResponseReturnValue:
 
         # Transition to published sets published_at the first time
         # the status flips. Re-publishing doesn't reset the timestamp.
-        if post.status != PostStatus.PUBLISHED and form["status"] == PostStatus.PUBLISHED:
+        is_first_publish = (
+            post.status != PostStatus.PUBLISHED
+            and form["status"] == PostStatus.PUBLISHED
+        )
+        if is_first_publish:
             post.published_at = datetime.now(UTC)
         post.status = form["status"]
 
+        _sync_post_tags(db, post, form["tags"], post.site_id)
         db.commit()
         updated_id = post.id
         updated_site_id = post.site_id
         after = {"slug": post.slug, "title": post.title, "status": post.status}
         skip_redirect = request.form.get("skip_redirect") == "1"
 
+        pm = current_app.extensions["plugin_manager"]
         # Fire the on_post_updated plugin hook (e.g., redirects'
         # slug-change auto-301). Skip when the editor opts out via
         # the form checkbox: typo-in-draft renames don't need a
         # stale-URL redirect.
         if not skip_redirect:
-            pm = current_app.extensions["plugin_manager"]
             pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        # Lifecycle: first time a post transitions to published,
+        # let subscribers act (sitemap rebuild, search index,
+        # webhook fans, ...).
+        if is_first_publish:
+            pm.hook.on_post_published(item=post, session=db)
 
         flash(f"Post '{form['title']}' updated.", "success")
 
@@ -177,6 +245,11 @@ def delete_post(post_id: int) -> ResponseReturnValue:
         title = post.title
         deleted_site_id = post.site_id
         deleted_slug = post.slug
+        # Fire on_post_deleted BEFORE commit so subscribers see the
+        # row in-session (e.g. for emitting a tombstone redirect
+        # row, computing the slug to 410, etc).
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_deleted(item=post, session=db)
         db.delete(post)
         db.commit()
         flash(f"Post '{title}' deleted.", "success")

@@ -22,6 +22,7 @@ from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.site import Site
+from bragi.core.models.site_alias import SiteAlias
 
 bp = Blueprint(
     "site_admin",
@@ -122,7 +123,18 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 "timezone": site.timezone,
                 "canonical_url": site.canonical_url,
             }
-            return render_template("admin/sites_edit.html", site=site, form=form)
+            aliases = (
+                db.execute(
+                    select(SiteAlias)
+                    .where(SiteAlias.site_id == site.id)
+                    .order_by(SiteAlias.hostname)
+                )
+                .scalars()
+                .all()
+            )
+            return render_template(
+                "admin/sites_edit.html", site=site, form=form, aliases=aliases
+            )
 
         form = _form_from_request()
         errors = _validate(form)
@@ -176,3 +188,45 @@ def activate_site(site_id: int) -> ResponseReturnValue:
         db.commit()
         flash(f"Site '{site.slug}' activated.", "success")
     return redirect(url_for("site_admin.list_sites"))
+
+
+@bp.route("/<int:site_id>/aliases", methods=["POST"])
+def add_alias(site_id: int) -> ResponseReturnValue:
+    hostname = (request.form.get("hostname") or "").strip().lower()
+    if not hostname:
+        flash("Hostname is required.", "error")
+        return redirect(url_for("site_admin.edit_site", site_id=site_id))
+    with SessionLocal() as db:
+        site = db.get(Site, site_id)
+        if site is None:
+            flash("Site not found.", "error")
+            return redirect(url_for("site_admin.list_sites"))
+        # Conflict checks across both `sites.hostname` and
+        # `site_aliases.hostname`; either match is a violation.
+        clash_site = db.execute(
+            select(Site).where(Site.hostname == hostname)
+        ).scalar_one_or_none()
+        clash_alias = db.execute(
+            select(SiteAlias).where(SiteAlias.hostname == hostname)
+        ).scalar_one_or_none()
+        if clash_site is not None or clash_alias is not None:
+            flash(f"Hostname {hostname!r} is already in use.", "error")
+            return redirect(url_for("site_admin.edit_site", site_id=site_id))
+        db.add(SiteAlias(site_id=site.id, hostname=hostname))
+        db.commit()
+        flash(f"Alias {hostname} added.", "success")
+    return redirect(url_for("site_admin.edit_site", site_id=site_id))
+
+
+@bp.route("/<int:site_id>/aliases/<int:alias_id>/remove", methods=["POST"])
+def remove_alias(site_id: int, alias_id: int) -> ResponseReturnValue:
+    with SessionLocal() as db:
+        alias = db.get(SiteAlias, alias_id)
+        if alias is None or alias.site_id != site_id:
+            flash("Alias not found.", "error")
+            return redirect(url_for("site_admin.edit_site", site_id=site_id))
+        hostname = alias.hostname
+        db.delete(alias)
+        db.commit()
+        flash(f"Alias {hostname} removed.", "success")
+    return redirect(url_for("site_admin.edit_site", site_id=site_id))

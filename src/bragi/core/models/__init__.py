@@ -16,10 +16,13 @@ from bragi.core.models.analytics_event import AnalyticsEvent
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.local_credential import LocalCredential
+from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.session import Session
 from bragi.core.models.site import Site
+from bragi.core.models.site_alias import SiteAlias
+from bragi.core.models.tag import Tag, post_tags
 from bragi.core.models.user import User
 
 __all__ = [
@@ -29,11 +32,16 @@ __all__ = [
     "Base",
     "LocalCredential",
     "MatchType",
+    "Page",
+    "PageStatus",
     "Post",
     "PostStatus",
     "Redirect",
     "RedirectSource",
     "Session",
     "Site",
+    "SiteAlias",
+    "Tag",
     "User",
+    "post_tags",
 ]

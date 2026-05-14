@@ -16,10 +16,11 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bragi.core.models._base import Base
 from bragi.core.models._mixins import IdMixin, TimestampsMixin
+from bragi.core.models.tag import Tag, post_tags
 
 
 class PostStatus:
@@ -73,3 +74,8 @@ class Post(IdMixin, TimestampsMixin, Base):
     # separate mapping table.
     source_id: Mapped[str | None] = mapped_column(String(255), default=None, index=True)
     source_meta: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+
+    # Tags via the post_tags junction. CONTEXT.md is explicit that
+    # tagging stays per-content-type; pages would add their own
+    # `page_tags` later if the need arises.
+    tags: Mapped[list[Tag]] = relationship(secondary=post_tags, lazy="selectin")

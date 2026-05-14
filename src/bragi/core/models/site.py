@@ -8,7 +8,10 @@ migrations as the features that need them ship.
 
 from __future__ import annotations
 
-from sqlalchemy import String
+from typing import Any
+
+from sqlalchemy import JSON, String
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
@@ -25,3 +28,12 @@ class Site(IdMixin, TimestampsMixin, Base):
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     canonical_url: Mapped[str] = mapped_column(String(255), default="")
     active: Mapped[bool] = mapped_column(default=True)
+    # Plugin-contributed flat key/value bag. Deliberately
+    # schemaless: reads are always "all settings for this site",
+    # never "sites where setting X == Y", so a flat JSON column is
+    # cheaper than a key-value table. MutableDict tracks in-place
+    # mutations so `site.extra_settings["x"] = 1` survives commit
+    # without a manual reassignment.
+    extra_settings: Mapped[dict[str, Any]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )

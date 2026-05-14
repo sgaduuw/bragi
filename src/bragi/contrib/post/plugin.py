@@ -17,6 +17,7 @@ from flask import Blueprint, g, render_template
 from bragi.api import ContentTypeSpec, FieldSpec, NavItem, hookimpl
 from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.contrib.post.delivery import bp as post_delivery_bp
+from bragi.contrib.post.delivery import tag_bp as post_tag_delivery_bp
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
 from bragi.core.models.user import User
@@ -99,6 +100,12 @@ def register_admin_blueprint() -> Blueprint:
 def register_delivery_blueprint() -> Blueprint:
     """Mount the post delivery Blueprint at /posts/<slug>/."""
     return post_delivery_bp
+
+
+@hookimpl(specname="register_delivery_blueprint")
+def _register_tag_bp() -> Blueprint:
+    """Mount the per-tag listing at /tags/<slug>/."""
+    return post_tag_delivery_bp
 
 
 @hookimpl

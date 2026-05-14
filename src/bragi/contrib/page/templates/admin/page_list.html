@@ -1,0 +1,15 @@
+{% extends "admin/base.html" %}
+{% block title %}Pages &middot; bragi admin{% endblock %}
+{% block content %}
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+  <h1 style="margin: 0;">Pages</h1>
+  <a href="{{ url_for('page_admin.new_page') }}" class="btn">New page</a>
+  <button type="button"
+          class="btn secondary"
+          hx-get="{{ url_for('page_admin.list_pages') }}"
+          hx-target="#page-list-table"
+          hx-swap="outerHTML">Refresh</button>
+</div>
+
+{% include "admin/_page_list_table.html" %}
+{% endblock %}

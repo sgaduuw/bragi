@@ -54,4 +54,43 @@
     <a href="{{ url_for('site_admin.list_sites') }}" class="btn secondary">Cancel</a>
   </div>
 </form>
+
+{% if is_edit %}
+<section class="aliases">
+  <h2>Hostname aliases</h2>
+  <p>Extra hostnames that resolve to this site. Useful for legacy
+     <code>www.</code> prefixes or vanity domains.</p>
+
+  {% if aliases %}
+  <table>
+    <thead><tr><th>Hostname</th><th></th></tr></thead>
+    <tbody>
+    {% for alias in aliases %}
+      <tr>
+        <td>{{ alias.hostname }}</td>
+        <td>
+          <form method="post"
+                action="{{ url_for('site_admin.remove_alias', site_id=site.id, alias_id=alias.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p><em>No aliases.</em></p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('site_admin.add_alias', site_id=site.id) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <fieldset>
+      <label for="alias_hostname">Add alias</label>
+      <input type="text" name="hostname" id="alias_hostname" required>
+    </fieldset>
+    <button type="submit">Add alias</button>
+  </form>
+</section>
+{% endif %}
 {% endblock %}

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.contrib.sites.cli import site_group
 from bragi.core.models.site import Site
+from bragi.core.models.site_alias import SiteAlias
 
 
 @pytest.fixture(autouse=True)
@@ -203,3 +204,146 @@ def test_sites_plugin_registers_cli(db_session_factory: sessionmaker[Session]) -
     app = create_admin_app()
     cms_group = app.cli.commands["cms"]
     assert "site" in cms_group.commands  # type: ignore[attr-defined]
+
+
+def test_site_extra_settings_defaults_to_empty_dict(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    with db_session_factory() as db:
+        db.add(
+            Site(
+                slug="blog",
+                hostname="blog.example.com",
+                title="Blog",
+                canonical_url="https://blog.example.com",
+            )
+        )
+        db.commit()
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+    assert site.extra_settings == {}
+
+
+def test_site_extra_settings_in_place_mutation_persists(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """`MutableDict.as_mutable` tracks in-place sets without reassignment."""
+    with db_session_factory() as db:
+        db.add(
+            Site(
+                slug="blog",
+                hostname="blog.example.com",
+                title="Blog",
+                canonical_url="https://blog.example.com",
+            )
+        )
+        db.commit()
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.extra_settings["robots_txt_override"] = "User-agent: *\nDisallow: /private/\n"
+        site.extra_settings["analytics_enabled"] = False
+        db.commit()
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+    assert site.extra_settings["robots_txt_override"].startswith("User-agent:")
+    assert site.extra_settings["analytics_enabled"] is False
+
+
+# ============================================================
+# alias subcommands (#25)
+# ============================================================
+
+
+def _seed_blog(db_session_factory: sessionmaker[Session]) -> int:
+    with db_session_factory() as db:
+        site = Site(
+            slug="blog",
+            hostname="blog.example.com",
+            title="Blog",
+            canonical_url="https://blog.example.com",
+        )
+        db.add(site)
+        db.commit()
+        return site.id
+
+
+def test_alias_add_persists_row(db_session_factory: sessionmaker[Session]) -> None:
+    _seed_blog(db_session_factory)
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group,
+        ["alias", "add", "--site", "blog", "--hostname", "www.blog.example.com"],
+    )
+    assert result.exit_code == 0, result.output
+    with db_session_factory() as db:
+        alias = db.execute(
+            select(SiteAlias).where(SiteAlias.hostname == "www.blog.example.com")
+        ).scalar_one()
+    assert alias.site_id is not None
+
+
+def test_alias_add_rejects_unknown_site(db_session_factory: sessionmaker[Session]) -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group,
+        ["alias", "add", "--site", "nope", "--hostname", "x.example.com"],
+    )
+    assert result.exit_code == 1
+    assert "No site with slug" in result.output
+
+
+def test_alias_add_rejects_existing_canonical_hostname(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    _seed_blog(db_session_factory)
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group,
+        ["alias", "add", "--site", "blog", "--hostname", "blog.example.com"],
+    )
+    assert result.exit_code == 1
+    assert "canonical hostname" in result.output
+
+
+def test_alias_add_rejects_duplicate_alias(db_session_factory: sessionmaker[Session]) -> None:
+    site_id = _seed_blog(db_session_factory)
+    with db_session_factory() as db:
+        db.add(SiteAlias(site_id=site_id, hostname="www.blog.example.com"))
+        db.commit()
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group,
+        ["alias", "add", "--site", "blog", "--hostname", "www.blog.example.com"],
+    )
+    assert result.exit_code == 1
+    assert "already an alias" in result.output
+
+
+def test_alias_list_filters_by_site(db_session_factory: sessionmaker[Session]) -> None:
+    site_id = _seed_blog(db_session_factory)
+    with db_session_factory() as db:
+        db.add(SiteAlias(site_id=site_id, hostname="www.blog.example.com"))
+        db.add(SiteAlias(site_id=site_id, hostname="legacy.example.com"))
+        db.commit()
+    runner = CliRunner()
+    result = runner.invoke(site_group, ["alias", "list", "--site", "blog"])
+    assert result.exit_code == 0
+    assert "www.blog.example.com" in result.output
+    assert "legacy.example.com" in result.output
+
+
+def test_alias_remove(db_session_factory: sessionmaker[Session]) -> None:
+    site_id = _seed_blog(db_session_factory)
+    with db_session_factory() as db:
+        db.add(SiteAlias(site_id=site_id, hostname="www.blog.example.com"))
+        db.commit()
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group, ["alias", "remove", "--hostname", "www.blog.example.com"]
+    )
+    assert result.exit_code == 0
+    with db_session_factory() as db:
+        remaining = db.execute(
+            select(SiteAlias).where(SiteAlias.hostname == "www.blog.example.com")
+        ).scalar_one_or_none()
+    assert remaining is None

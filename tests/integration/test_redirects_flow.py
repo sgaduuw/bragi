@@ -65,6 +65,7 @@ def app(
     with (
         patch("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory),
         patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory),
+        patch("bragi.contrib.page.delivery.SessionLocal", db_session_factory),
     ):
         yield create_delivery_app()
 

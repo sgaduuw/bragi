@@ -19,6 +19,7 @@ from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
+from bragi.core.models.site_alias import SiteAlias
 from bragi.core.models.user import User
 from tests.conftest import csrf_token
 
@@ -317,3 +318,89 @@ def test_sites_nav_entry_registered(admin_app: Flask) -> None:
 def test_sites_plugin_registers_admin_blueprint(admin_app: Flask) -> None:
     """`/admin/sites/...` resolves; the Blueprint is registered."""
     assert "site_admin" in admin_app.blueprints
+
+
+# ============================================================
+# Alias management on the Site edit view (#25)
+# ============================================================
+
+
+def _site_id(db_session_factory: sessionmaker[Session], slug: str = "blog") -> int:
+    with db_session_factory() as db:
+        return db.execute(select(Site).where(Site.slug == slug)).scalar_one().id
+
+
+def test_add_alias_persists_and_redirects(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    site_id = _site_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    resp = client.post(
+        f"/admin/sites/{site_id}/aliases",
+        data={"hostname": "www.blog.example.com", "_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        alias = db.execute(
+            select(SiteAlias).where(SiteAlias.hostname == "www.blog.example.com")
+        ).scalar_one()
+    assert alias.site_id == site_id
+
+
+def test_add_alias_rejects_conflict_with_canonical_hostname(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    site_id = _site_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    client.post(
+        f"/admin/sites/{site_id}/aliases",
+        data={"hostname": "blog.example.com", "_csrf_token": token},
+    )
+    with db_session_factory() as db:
+        rows = (
+            db.execute(select(SiteAlias).where(SiteAlias.hostname == "blog.example.com"))
+            .scalars()
+            .all()
+        )
+    assert rows == []
+
+
+def test_edit_page_lists_aliases(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    site_id = _site_id(db_session_factory)
+    with db_session_factory() as db:
+        db.add(SiteAlias(site_id=site_id, hostname="legacy.example.com"))
+        db.commit()
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/{site_id}/edit")
+    assert resp.status_code == 200
+    assert b"legacy.example.com" in resp.data
+
+
+def test_remove_alias_deletes_row(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    site_id = _site_id(db_session_factory)
+    with db_session_factory() as db:
+        alias = SiteAlias(site_id=site_id, hostname="legacy.example.com")
+        db.add(alias)
+        db.commit()
+        alias_id = alias.id
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    resp = client.post(
+        f"/admin/sites/{site_id}/aliases/{alias_id}/remove",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        assert db.get(SiteAlias, alias_id) is None

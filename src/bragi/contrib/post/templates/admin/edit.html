@@ -59,6 +59,14 @@
     </select>
   </fieldset>
 
+  <fieldset>
+    <label for="tags">Tags</label>
+    <input type="text" name="tags" id="tags"
+           value="{{ form.get('tags', '') }}">
+    <small>Comma-separated. New tags are created on save; existing
+       tags are re-used by slug.</small>
+  </fieldset>
+
   {% if is_edit %}
   <fieldset style="flex-direction: row; align-items: center; gap: 0.5rem;">
     <input type="checkbox" name="skip_redirect" id="skip_redirect" value="1">

@@ -1,0 +1,39 @@
+{# Page list partial. Wrapped in #page-list-table for hx-swap. #}
+<div id="page-list-table">
+{% if pages %}
+<table>
+  <thead>
+    <tr>
+      <th>Title</th>
+      <th>Slug</th>
+      <th>Parent</th>
+      <th>Status</th>
+      <th>Updated</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for page in pages %}
+    <tr>
+      <td><a href="{{ url_for('page_admin.edit_page', page_id=page.id) }}">{{ page.title }}</a></td>
+      <td><code>{{ page.slug }}</code></td>
+      <td>{{ page.parent_id or '(root)' }}</td>
+      <td>{{ page.status }}</td>
+      <td>{{ page.updated_at.strftime('%Y-%m-%d') }}</td>
+      <td>
+        <form method="post"
+              action="{{ url_for('page_admin.delete_page', page_id=page.id) }}"
+              onsubmit="return confirm('Delete this page?');"
+              style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No pages yet. <a href="{{ url_for('page_admin.new_page') }}">Create your first one.</a></p>
+{% endif %}
+</div>

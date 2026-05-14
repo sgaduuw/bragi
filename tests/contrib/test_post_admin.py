@@ -14,6 +14,7 @@ from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from bragi.api import hookimpl
 from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
@@ -220,3 +221,143 @@ def test_authenticated_index_has_logout_form(admin_app: Flask) -> None:
     assert resp.status_code == 200
     assert b"/auth/logout" in resp.data
     assert b"Log out" in resp.data
+
+
+# ============================================================
+# Lifecycle hooks (#17)
+# ============================================================
+
+
+class _HookRecorder:
+    """Captures on_post_published / on_post_deleted / on_post_updated calls."""
+
+    def __init__(self) -> None:
+        self.published: list[dict[str, str]] = []
+        self.deleted: list[dict[str, str]] = []
+        self.updated: list[tuple[dict[str, str], dict[str, str]]] = []
+
+    @hookimpl
+    def on_post_published(self, item: object, session: object) -> None:
+        self.published.append({"slug": item.slug, "title": item.title})  # type: ignore[attr-defined]
+
+    @hookimpl
+    def on_post_deleted(self, item: object, session: object) -> None:
+        self.deleted.append({"slug": item.slug, "title": item.title})  # type: ignore[attr-defined]
+
+    @hookimpl
+    def on_post_updated(
+        self,
+        item: object,
+        before: dict[str, str],
+        after: dict[str, str],
+        session: object,
+    ) -> None:
+        self.updated.append((before, after))
+
+
+@pytest.fixture
+def lifecycle_recorder(admin_app: Flask) -> Iterator[_HookRecorder]:
+    """Register a recorder hookimpl for the duration of the test."""
+    rec = _HookRecorder()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(rec)
+    try:
+        yield rec
+    finally:
+        pm.unregister(rec)
+
+
+def test_on_post_published_fires_on_first_publish_via_edit(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    lifecycle_recorder: _HookRecorder,
+) -> None:
+    with db_session_factory() as db:
+        post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    client.post(
+        f"/admin/posts/{post_id}/edit",
+        data={
+            "title": "Hello World",
+            "slug": "hello",
+            "body_markdown": "Hello!",
+            "status": "published",
+            "_csrf_token": token,
+        },
+    )
+    assert len(lifecycle_recorder.published) == 1
+    assert lifecycle_recorder.published[0]["slug"] == "hello"
+
+
+def test_on_post_published_skips_when_already_published(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    lifecycle_recorder: _HookRecorder,
+) -> None:
+    """Re-saving an already-published post must not refire on_post_published."""
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        db.commit()
+        post_id = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    client.post(
+        f"/admin/posts/{post_id}/edit",
+        data={
+            "title": "Hello World (edited)",
+            "slug": "hello",
+            "body_markdown": "Edited.",
+            "status": "published",
+            "_csrf_token": token,
+        },
+    )
+    assert lifecycle_recorder.published == []
+    # on_post_updated must still fire on every save.
+    assert len(lifecycle_recorder.updated) == 1
+
+
+def test_on_post_published_fires_on_new_post_created_published(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    lifecycle_recorder: _HookRecorder,
+) -> None:
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/posts/new")
+    client.post(
+        "/admin/posts/new",
+        data={
+            "title": "Born Public",
+            "slug": "born-public",
+            "body_markdown": "Hi.",
+            "status": "published",
+            "_csrf_token": token,
+        },
+    )
+    assert len(lifecycle_recorder.published) == 1
+    assert lifecycle_recorder.published[0]["slug"] == "born-public"
+
+
+def test_on_post_deleted_fires_with_row_still_in_session(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    lifecycle_recorder: _HookRecorder,
+) -> None:
+    with db_session_factory() as db:
+        post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/posts/")
+    client.post(
+        f"/admin/posts/{post_id}/delete",
+        data={"_csrf_token": token},
+    )
+    assert len(lifecycle_recorder.deleted) == 1
+    assert lifecycle_recorder.deleted[0]["slug"] == "hello"
