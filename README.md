@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-1.1.0 shipped 2026-05-14. All day-one built-in plugins are in
+1.2.0 shipped 2026-05-14. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost importers, redirects
 with prefix / regex matching and slug-change auto-301,
@@ -14,8 +14,9 @@ analytics (with UA classification), attachments, server-side
 sessions, audit log, Pygments highlighting, heading anchors,
 per-site `sitemap.xml` / `robots.txt` / `security.txt` / Atom
 `feed.xml`, BlogPosting JSON-LD, TipTap editor, per-site roles,
-post / page revision history, and HTTP cache management with an
-`on_cache_purge` plugin hookspec.
+post / page revision history, HTTP cache management with an
+`on_cache_purge` plugin hookspec, and IndexNow push-crawl on
+publish / update / delete.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and

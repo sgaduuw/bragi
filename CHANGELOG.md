@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-05-14
+
 ### Added
 - IndexNow push-crawl plugin (#36). New `bragi.contrib.indexnow`
   fires on `on_post_published`, `on_post_updated`, and
