@@ -7,6 +7,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- WordPress (WXR) importer (#39). New
+  `bragi.contrib.import_wordpress` reads a WP export, lands posts
+  and pages with HTML bodies converted to markdown via
+  `markdownify`, and preserves source URLs as 301 redirect rows
+  (Source `import:wordpress`). Tags and categories collapse into
+  `Tag`; categories get a `category:` slug prefix so they survive
+  round-trips. Shortcodes are stripped with a one-line warning
+  per unique shortcode name; comments and attachments are
+  counted and warned (out of scope for v1). Idempotent re-import
+  via `(site_id, source_id)`. CLI: `cms import wordpress --site
+  <slug> [--author <email>] [--dry-run] <wxr.xml>`.
+  Schema: `pages.source_id` and `pages.source_meta` added (parity
+  with Post; migration `add_page_source_id`, rev
+  `17c7f26e8fde`) so page idempotency works the same way.
 - TipTap image picker + responsive image rendering (#41 Phase 4,
   closing the issue). New endpoint `GET /admin/attachments/picker`
   returns an htmx-loaded grid of image attachments with a per-site

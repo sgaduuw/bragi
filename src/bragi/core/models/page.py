@@ -22,7 +22,9 @@ as distinct under UNIQUE).
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from typing import Any
+
+from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
@@ -60,3 +62,11 @@ class Page(IdMixin, TimestampsMixin, Base):
     meta_description: Mapped[str | None] = mapped_column(Text, default=None)
     canonical_url: Mapped[str | None] = mapped_column(String(255), default=None)
     noindex: Mapped[bool] = mapped_column(default=False)
+
+    # Import provenance: `(site_id, source_id)` is the idempotency
+    # key for re-imports (a second run updates in place rather than
+    # creating a duplicate row). source_meta is a JSON blob for
+    # importer-specific context (e.g. the WP post id alongside its
+    # GUID).
+    source_id: Mapped[str | None] = mapped_column(String(255), default=None, index=True)
+    source_meta: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
