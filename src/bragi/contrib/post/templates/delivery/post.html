@@ -1,5 +1,22 @@
 {% extends "delivery/base.html" %}
 {% block title %}{{ post.meta_title or post.title }} &middot; {{ site.title }}{% endblock %}
+{% block jsonld %}
+  {#- BlogPosting JSON-LD. `canonical_url` is precomputed by the
+     view; `author_name` is loaded alongside the post so the
+     template stays render-only. -#}
+  {%- set jsonld = {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "headline": post.title,
+        "url": canonical_url,
+        "datePublished": post.published_at.isoformat() if post.published_at else None,
+        "dateModified": (post.updated_at or post.published_at).isoformat() if (post.updated_at or post.published_at) else None,
+        "author": {"@type": "Person", "name": author_name} if author_name else None,
+        "publisher": {"@type": "Organization", "name": site.title} if site else None,
+        "description": post.meta_description or post.body_excerpt or None,
+  } -%}
+  <script type="application/ld+json">{{ jsonld | tojson }}</script>
+{% endblock %}
 {% block content %}
 <article>
   <header>

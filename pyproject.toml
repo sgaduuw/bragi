@@ -48,6 +48,8 @@ audit = "bragi.contrib.audit.plugin"
 attachments = "bragi.contrib.attachments.plugin"
 highlight = "bragi.contrib.highlight.plugin"
 anchors = "bragi.contrib.anchors.plugin"
+seo = "bragi.contrib.seo.plugin"
+analytics = "bragi.contrib.analytics.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

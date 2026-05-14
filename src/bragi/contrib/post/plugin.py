@@ -17,7 +17,9 @@ from flask import Blueprint, g, render_template
 from bragi.api import ContentTypeSpec, FieldSpec, NavItem, hookimpl
 from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.contrib.post.delivery import bp as post_delivery_bp
+from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
+from bragi.core.models.user import User
 
 POST_EDIT_FIELDS: list[FieldSpec] = [
     FieldSpec(name="title", label="Title", field_type="text", required=True),
@@ -45,16 +47,24 @@ def _render_post(post: Any, _request: Any) -> str:
     the before_request chain). Per-post SEO overrides (meta_title,
     meta_description, canonical_url, noindex) thread into the
     template; defaults fall back to body_excerpt and the computed
-    canonical URL when fields are blank.
+    canonical URL when fields are blank. The author display name
+    is loaded for the JSON-LD `author` field.
     """
     site = g.get("site")
     canonical = post.canonical_url or (
         f"{site.canonical_url}/posts/{post.slug}/" if site and site.canonical_url else None
     )
+    author_name: str | None = None
+    if post.author_id:
+        with SessionLocal() as db:
+            author = db.get(User, post.author_id)
+            if author is not None:
+                author_name = author.display_name
     return render_template(
         "delivery/post.html",
         post=post,
         site=site,
+        author_name=author_name,
         meta_description=post.meta_description or post.body_excerpt or None,
         canonical_url=canonical,
         noindex=post.noindex,

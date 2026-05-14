@@ -310,3 +310,45 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `match.expand` so `\1`, `\2`, ... in the target slot in
   capture groups. A bad regex pattern logs a warning and is
   skipped so one malformed row never 500s the resolver.
+- `bragi.contrib.seo` plugin: per-site delivery endpoints for
+  `/sitemap.xml` (sitemaps.org XML over published posts),
+  `/robots.txt` (allow-all + `Sitemap:` pointing at the site's
+  canonical URL), and `/.well-known/security.txt` (RFC 9116;
+  404 unless `Settings.security_contact` is set, with
+  `Settings.security_expires_days` controlling the `Expires:`
+  horizon). Multiple Blueprints registered from one plugin via
+  the `@hookimpl(specname="register_delivery_blueprint")`
+  pattern.
+- Per-site Atom 1.0 feed at `/feed.xml` in the SEO plugin. Lists
+  the `FEED_ENTRY_LIMIT = 50` most-recent published posts, with
+  author display name from `User.display_name`, CDATA-wrapped
+  HTML content (`type="html"`), and self/alternate links built
+  from `site.canonical_url`. Per-site isolation via the resolved
+  `g.site`; unknown hosts 404.
+- BlogPosting JSON-LD on `/posts/<slug>/`. The delivery base
+  template gained a `{% block jsonld %}`; the post template
+  emits a `<script type="application/ld+json">` carrying
+  `@type=BlogPosting` with headline, url, datePublished,
+  dateModified, author (Person), publisher (Organization from
+  `site.title`), and description (falls back
+  meta_description -> body_excerpt). Rendered via the `tojson`
+  filter for safe escaping.
+- Analytics events sink. New `AnalyticsEvent` model
+  (`site_id`, `event_type`, `path`, `referrer`,
+  `user_agent_class`, `user_id`, `occurred_at`, `extra` JSON)
+  with indexes on the discriminator and time columns. Migration
+  `add_analytics_events` (revision `1f966d693a2d`). User-agent
+  classifier in `bragi.core.useragent` returns one of
+  `browser` / `bot` / `feed-reader` / `other`; bots are
+  filtered at emit time so they never pollute the table.
+  `bragi.contrib.analytics` registers an `after_request` hook
+  on the delivery app that records a `pageview` for HTML GET
+  responses (skips 4xx/5xx, non-HTML, non-GET). Plugins emit
+  their own events through the `record_analytics_event` hook.
+- Analytics admin dashboard at `/admin/analytics/`,
+  superuser-gated (403 otherwise; nav entry hidden when not
+  superuser). Renders pageviews-by-day-and-UA-class over the
+  last 30 days as a pivot table. `CONTEXT.md` calls out the
+  rolling-monthly-table upgrade path
+  (`analytics_events_2026_05`) once the single table starts to
+  hurt under vacuum / time-range queries.

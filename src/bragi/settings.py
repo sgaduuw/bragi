@@ -40,5 +40,11 @@ class Settings(BaseSettings):
     attachments_root: str = "var/uploads"
     attachments_max_bytes: int = 20 * 1024 * 1024  # 20 MiB
 
+    # SEO. `security_contact` is what the /.well-known/security.txt
+    # endpoint advertises; unset -> 404 rather than emit a fake
+    # contact. Format: `mailto:...` or `https://...` per RFC 9116.
+    security_contact: str | None = None
+    security_expires_days: int = 365
+
 
 settings = Settings()
