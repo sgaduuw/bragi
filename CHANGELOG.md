@@ -173,3 +173,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `flask --app bragi.apps.admin cms session purge` deletes
   expired session rows; intended for a cron job. Reports the
   count of removed rows; exit 0 on no-op.
+- Site admin Blueprint at `/admin/sites`: list / new / edit views
+  plus deactivate / activate POST endpoints. Deactivating sets
+  `active=False` so requests to that hostname stop resolving
+  without losing config; hard delete is intentionally not exposed
+  (would cascade into orphaned content). Hostname and slug edits
+  guard against UNIQUE violations with friendly errors. Admin nav
+  entry under section `site`.
+- `bragi.core.security` helpers: `current_user()` returns the
+  logged-in User row (or None), memoized per request via `g`;
+  `is_superuser()` is a convenience wrapper. Admin views that
+  need DB-coherent role checks call these rather than caching
+  `is_superuser` in the session blob.
+- NavItem.permission gating in the admin context processor.
+  Items with `permission="superuser"` are filtered out of the
+  rendered nav for non-superusers. Per-site role values land
+  alongside #9.
+- `bragi.contrib.sessions` plugin: admin Blueprint covering two
+  surfaces. `/admin/account/sessions` lists the current user's
+  active sessions with per-row revoke and a 'revoke everywhere
+  except this' action; the current session is marked. Revoking
+  the current row also clears the cookie and redirects to login.
+  `/admin/sessions` is superuser-only and lists every session
+  with the same revoke shape. Both nav entries under section
+  `system`; the all-sessions entry hides itself for non-superusers.

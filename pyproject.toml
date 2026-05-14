@@ -43,6 +43,7 @@ post = "bragi.contrib.post.plugin"
 redirects = "bragi.contrib.redirects.plugin"
 auth_local = "bragi.contrib.auth_local.plugin"
 sites = "bragi.contrib.sites.plugin"
+sessions = "bragi.contrib.sessions.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

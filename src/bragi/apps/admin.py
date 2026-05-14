@@ -19,6 +19,7 @@ from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
+from bragi.core.security import is_superuser
 from bragi.plugins import create_plugin_manager
 from bragi.settings import settings
 
@@ -106,8 +107,20 @@ def create_admin_app() -> Flask:
     # variables register them via `register_template_globals`.
     @app.context_processor
     def _inject_admin_context() -> dict[str, object]:
+        # NavItem.permission gates visibility. None = always show;
+        # 'superuser' = current user must have is_superuser=True;
+        # other values (per-site roles) land alongside #9.
+        def _visible(item: object) -> bool:
+            perm = getattr(item, "permission", None)
+            if perm is None:
+                return True
+            if perm == "superuser":
+                return is_superuser()
+            return False  # unknown permission strings hide by default
+
+        visible_nav = [i for i in registry.admin_nav if _visible(i)]
         return {
-            "nav_items": sorted(registry.admin_nav, key=lambda i: (i.section, i.weight)),
+            "nav_items": sorted(visible_nav, key=lambda i: (i.section, i.weight)),
             "current_user_email": session.get("user_email"),
             "current_user_display_name": session.get("user_display_name"),
         }
