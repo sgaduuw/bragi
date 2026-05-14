@@ -135,6 +135,25 @@ make typecheck
 make test
 ```
 
+## Quick start (production / docker compose)
+
+The repo ships an example [compose.yml](compose.yml) that pulls
+the published images from GHCR. The tag is parameterised via
+`BRAGI_TAG` (default `latest`); pin to a specific release in
+production:
+
+```sh
+BRAGI_TAG=v1.1.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+```
+
+A one-shot `migrate` service runs `alembic upgrade head` before
+the two app services start, so a fresh deploy and a schema-bump
+deploy work the same way. The shared `bragi-data` volume backs
+both `/data/bragi.db` and `/data/uploads/` (attachments) — back
+that up. Ports bind to `127.0.0.1` only; front the apps with a
+reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
+routing.
+
 ## Project layout
 
 ```
