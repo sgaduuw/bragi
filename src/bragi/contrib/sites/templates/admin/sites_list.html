@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+{% block title %}Sites &middot; bragi admin{% endblock %}
+{% block content %}
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+  <h1 style="margin: 0;">Sites</h1>
+  <a href="{{ url_for('site_admin.new_site') }}" class="btn">New site</a>
+</div>
+
+{% if sites %}
+<table>
+  <thead>
+    <tr>
+      <th>Slug</th>
+      <th>Hostname</th>
+      <th>Title</th>
+      <th>Locale</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for site in sites %}
+    <tr>
+      <td><a href="{{ url_for('site_admin.edit_site', site_id=site.id) }}"><code>{{ site.slug }}</code></a></td>
+      <td>{{ site.hostname }}</td>
+      <td>{{ site.title }}</td>
+      <td>{{ site.locale }}</td>
+      <td>{{ 'active' if site.active else 'inactive' }}</td>
+      <td>
+        {% if site.active %}
+        <form method="post"
+              action="{{ url_for('site_admin.deactivate_site', site_id=site.id) }}"
+              onsubmit="return confirm('Deactivate this site? Requests to {{ site.hostname }} will stop resolving.');"
+              style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">Deactivate</button>
+        </form>
+        {% else %}
+        <form method="post"
+              action="{{ url_for('site_admin.activate_site', site_id=site.id) }}"
+              style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Activate</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No sites yet. <a href="{{ url_for('site_admin.new_site') }}">Create the first one.</a></p>
+{% endif %}
+{% endblock %}

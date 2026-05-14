@@ -126,9 +126,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `bragi.contrib.sites` plugin: contributes `cms site create
   --slug --hostname --title [--locale] [--timezone]
   [--canonical-url]` and `cms site list`. Slug and hostname are
-  lower-cased to match the site_resolver's Host lookup. No admin
-  UI yet; CLI is the only path to seed a Site until a second one
-  matters.
+  lower-cased to match the site_resolver's Host lookup.
+- Site admin Blueprint at `/admin/sites`: list / new / edit views
+  plus deactivate / activate POST endpoints. Deactivating sets
+  `active=False` so requests to that hostname stop resolving
+  without losing config; hard delete is intentionally not exposed
+  (would cascade into orphaned content). Hostname and slug edits
+  guard against UNIQUE violations with friendly errors. Admin nav
+  entry under section `site`.
 - Delivery render view for Posts. New `register_delivery_blueprint`
   hookspec lets content-type plugins own their public URL space.
   The post plugin's delivery Blueprint mounts `/posts/<slug>/`
