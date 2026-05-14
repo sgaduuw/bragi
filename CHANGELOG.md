@@ -233,3 +233,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `is_superuser()` newly added in the previous batch are now the
   basis for the audit-view authorisation check and the
   NavItem.permission gate.
+- `Attachment` model (`bragi.core.models.attachment.Attachment`)
+  plus migration `add_attachments_and_post_image_fks` (revision
+  `9f3fd65db818`). Migration also adds `featured_image_id` and
+  `og_image_id` FKs to `posts` (both nullable). SQLite-compatible
+  via `op.batch_alter_table` for the FK additions.
+- `bragi.core.storage` local-disk backend. Content-addressed
+  layout under `Settings.attachments_root`:
+  `<site_slug>/<sha256[:2]>/<sha256>`. Uploads are deduped per
+  site by SHA-256. `Settings.attachments_max_bytes` defaults to
+  20 MiB. The reserved `register_storage_backend` /
+  `register_image_processor` hooks point at this surface for the
+  later `bragi.contrib.media` plugin (S3, renditions, alt-text).
+- `bragi.contrib.attachments` plugin: admin Blueprint at
+  `/admin/attachments` with upload form, paginated list, and a
+  delete view that drops the on-disk file only when no other
+  Attachment row references the same `storage_key`. Delivery
+  Blueprint at `/attachments/<storage_key>` serves the bytes
+  with a far-future `Cache-Control` (content-addressed; bytes
+  never change for a given key). Admin nav entry under content.
+  Audit emits for `attachment.uploaded` / `attachment.deleted`.

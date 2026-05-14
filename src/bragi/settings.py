@@ -35,5 +35,10 @@ class Settings(BaseSettings):
     delivery_host: str = "0.0.0.0"
     delivery_port: int = 8002
 
+    # Attachments storage. v1 backend is local disk; S3 / renditions
+    # land as `bragi.contrib.media` (per CONTEXT.md "Deferred surfaces").
+    attachments_root: str = "var/uploads"
+    attachments_max_bytes: int = 20 * 1024 * 1024  # 20 MiB
+
 
 settings = Settings()

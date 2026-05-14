@@ -5,9 +5,9 @@ cached HTML render (`body_html`) regenerated on save. The
 `body_excerpt` field is the first N words used for previews and
 the default OG description.
 
-Foreign keys to attachments (featured image, OG image) are
-deferred until the attachment subsystem lands; the columns can be
-added in a follow-up migration without disturbing existing rows.
+`featured_image_id` and `og_image_id` are FKs into `attachments`
+populated by the attachments subsystem. Both are nullable; the
+admin form picks an existing Attachment or leaves them blank.
 """
 
 from __future__ import annotations
@@ -57,6 +57,16 @@ class Post(IdMixin, TimestampsMixin, Base):
     meta_description: Mapped[str | None] = mapped_column(Text, default=None)
     canonical_url: Mapped[str | None] = mapped_column(String(255), default=None)
     noindex: Mapped[bool] = mapped_column(default=False)
+
+    # Featured / OG image FKs into `attachments`. Nullable so a post
+    # without media works; the delivery template falls back to
+    # `(site.canonical_url)` social previews when og_image is unset.
+    featured_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attachments.id"), default=None
+    )
+    og_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attachments.id"), default=None
+    )
 
     # Import provenance: `(site_id, source_id)` is unique enough
     # that importers can update-or-insert idempotently without a

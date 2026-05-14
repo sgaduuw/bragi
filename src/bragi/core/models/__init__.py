@@ -12,6 +12,7 @@ walks for autogenerate diffs.
 from __future__ import annotations
 
 from bragi.core.models._base import Base
+from bragi.core.models.attachment import Attachment
 from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.post import Post, PostStatus
@@ -21,6 +22,7 @@ from bragi.core.models.site import Site
 from bragi.core.models.user import User
 
 __all__ = [
+    "Attachment",
     "AuditLog",
     "Base",
     "LocalCredential",
