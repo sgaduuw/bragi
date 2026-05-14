@@ -1237,6 +1237,239 @@ def test_reindex_cli_unknown_site_errors(admin_app: Flask) -> None:
     assert "no site with slug" in result.output.lower()
 
 
+# --------------------------- picker endpoint (phase 4) ---------------------------
+
+
+def test_picker_requires_auth(admin_app: Flask) -> None:
+    resp = admin_app.test_client().get("/admin/attachments/picker", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "/auth/login" in resp.headers["Location"]
+
+
+def test_picker_lists_image_attachments(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    # Two image attachments + one non-image (docs aren't pickable).
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        db.add_all(
+            [
+                Attachment(
+                    site_id=site.id,
+                    filename="hero.png",
+                    content_type="image/png",
+                    size_bytes=128,
+                    storage_key="a" * 64,
+                    width=800,
+                    height=600,
+                    alt_text="A hero",
+                ),
+                Attachment(
+                    site_id=site.id,
+                    filename="thumb.jpg",
+                    content_type="image/jpeg",
+                    size_bytes=64,
+                    storage_key="b" * 64,
+                    width=320,
+                    height=240,
+                ),
+                Attachment(
+                    site_id=site.id,
+                    filename="doc.pdf",
+                    content_type="application/pdf",
+                    size_bytes=2048,
+                    storage_key="c" * 64,
+                ),
+            ]
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/attachments/picker")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "hero.png" in body
+    assert "thumb.jpg" in body
+    assert "doc.pdf" not in body  # non-image filtered out
+    # data attributes for the JS to pick up.
+    assert 'data-storage-key="aaa' in body
+    assert 'data-alt-text="A hero"' in body
+
+
+def test_picker_site_filter(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    with db_session_factory() as db:
+        blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        other = db.execute(select(Site).where(Site.slug == "other")).scalar_one()
+        db.add_all(
+            [
+                Attachment(
+                    site_id=blog.id,
+                    filename="blog-img.png",
+                    content_type="image/png",
+                    size_bytes=64,
+                    storage_key="d" * 64,
+                    width=800,
+                    height=600,
+                ),
+                Attachment(
+                    site_id=other.id,
+                    filename="other-img.png",
+                    content_type="image/png",
+                    size_bytes=64,
+                    storage_key="e" * 64,
+                    width=800,
+                    height=600,
+                ),
+            ]
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/attachments/picker?site=blog")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "blog-img.png" in body
+    assert "other-img.png" not in body
+
+
+# --------------------------- pictureify HTML transform ---------------------------
+
+
+def test_pictureify_expands_attachment_img(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """An <img> pointing at /attachments/<key> becomes a <picture>."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="hero.png",
+            content_type="image/png",
+            size_bytes=128,
+            storage_key="f" * 64,
+            width=1200,
+            height=800,
+            alt_text="Hero",
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                storage_key="0" * 64,
+                content_type="image/png",
+                width=320,
+                height=213,
+                bytes_size=64,
+            )
+        )
+        db.commit()
+
+    from bragi.contrib.attachments.transforms import pictureify
+
+    # markdown-it emits `alt="Hero"` from `![Hero](url)`.
+    html = f'<p>Look: <img src="/attachments/{"f" * 64}" alt="Hero"></p>'
+    with delivery_app.test_request_context("/", base_url="http://blog.example.com"):
+        from flask import g
+
+        with db_session_factory() as db:
+            real_blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+            g.site = real_blog
+        rendered = pictureify(html)
+
+    assert "<picture>" in rendered
+    assert "320w" in rendered
+    assert f"/attachments/{'f' * 64}" in rendered
+    assert f"/attachments/{'0' * 64} 320w" in rendered
+    # Author-provided alt is preserved verbatim.
+    assert 'alt="Hero"' in rendered
+    # CLS-prevention dimensions added from the row.
+    assert 'width="1200"' in rendered
+    assert 'height="800"' in rendered
+
+
+def test_pictureify_leaves_non_matching_img_alone(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """An <img> not pointing at /attachments/<key> stays untouched."""
+    from bragi.contrib.attachments.transforms import pictureify
+
+    html = '<p><img src="https://cdn.example.com/foo.png" alt="x"></p>'
+    with delivery_app.test_request_context("/", base_url="http://blog.example.com"):
+        from flask import g
+
+        with db_session_factory() as db:
+            real_blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+            g.site = real_blog
+        out = pictureify(html)
+    assert out == html
+
+
+def test_pictureify_no_op_without_app_context(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Called outside a Flask app context, returns the input unchanged."""
+    from bragi.contrib.attachments.transforms import pictureify
+
+    html = '<p><img src="/attachments/' + "a" * 64 + '"></p>'
+    assert pictureify(html) == html
+
+
+def test_pictureify_no_renditions_returns_bare_img(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """An attachment with no renditions still gets width/height + loading,
+    but no <picture> wrapper (nothing to srcset)."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        db.add(
+            Attachment(
+                site_id=site.id,
+                filename="solo.png",
+                content_type="image/png",
+                size_bytes=64,
+                storage_key="9" * 64,
+                width=400,
+                height=300,
+                alt_text="Solo",
+            )
+        )
+        db.commit()
+
+    from bragi.contrib.attachments.transforms import pictureify
+
+    html = f'<p><img src="/attachments/{"9" * 64}" alt=""></p>'
+    with delivery_app.test_request_context("/", base_url="http://blog.example.com"):
+        from flask import g
+
+        with db_session_factory() as db:
+            real_blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+            g.site = real_blog
+        out = pictureify(html)
+    assert "<picture" not in out
+    # Explicit decorative-image marker preserved.
+    assert 'alt=""' in out
+    assert 'width="400"' in out
+    assert 'height="300"' in out
+    assert 'loading="lazy"' in out
+
+
+def test_pictureify_registered_via_html_transform_hook(delivery_app: Flask) -> None:
+    """The transform is in the delivery-app pipeline at priority 150."""
+    html_transforms = delivery_app.extensions["html_transforms"]
+    assert "pictureify-attachments" in html_transforms.names()
+
+
 def test_srcset_helper_returns_empty_for_non_image(
     delivery_app: Flask,
     db_session_factory: sessionmaker[Session],
