@@ -262,3 +262,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sibling so the markup isn't duplicated. Admin base template
   loads htmx from a CDN; a self-hosted bundle + Subresource
   Integrity hash is a follow-up. Documented in CLAUDE.md.
+- TipTap editor on the post edit form, loaded from esm.sh as ES
+  modules. Toolbar covers H1/H2/H3, bold, italic, inline code,
+  bullet / ordered lists, blockquote, code block, link, unlink.
+  The textarea is preserved as the canonical form input: the
+  editor's `onUpdate` writes serialized markdown back into it
+  via the `tiptap-markdown` extension, so the existing
+  `body_markdown` POST path is unchanged. Submitting without
+  JS still works (textarea visible). A self-hosted bundle and a
+  Subresource Integrity hash are the follow-up to harden the
+  v1 CDN dependency.
