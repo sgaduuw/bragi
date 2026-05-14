@@ -7,6 +7,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- TipTap image picker + responsive image rendering (#41 Phase 4,
+  closing the issue). New endpoint `GET /admin/attachments/picker`
+  returns an htmx-loaded grid of image attachments with a per-site
+  filter and pagination; each card carries the storage_key, alt
+  text, and filename in data attributes. The post edit page gains
+  an "Image" toolbar button that opens a native `<dialog>` hosting
+  the picker; clicking a card inserts a markdown image link
+  (`![alt](/attachments/<key>)`) at the cursor and closes the
+  dialog. A new HTML transform `pictureify` runs at delivery time:
+  it walks rendered post / page HTML, finds `<img>` tags pointing
+  at `/attachments/<key>`, and rewrites them into a `<picture>`
+  block with a `<source srcset>` that includes the full rendition
+  ladder plus the original. The transform adds `width`, `height`,
+  and `loading="lazy"` from the Attachment row (markdown can't
+  express them) but preserves the author's `alt` verbatim
+  (`alt=""` stays empty for decorative images per WCAG).
 - Bulk alt-text editing + reindex CLI (#41 Phase 3). The
   attachments admin list view gains a `?missing_alt=1` filter
   that lists image rows lacking alt text, with an inline

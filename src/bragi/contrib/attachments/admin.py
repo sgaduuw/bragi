@@ -95,6 +95,55 @@ def list_attachments() -> ResponseReturnValue:
     )
 
 
+@bp.route("/picker", methods=["GET"])
+def picker() -> ResponseReturnValue:
+    """Image picker grid for the post / page TipTap editor.
+
+    Returns an HTML grid (htmx-friendly) of image attachments,
+    optionally filtered by site slug via `?site=<slug>`. Each
+    card carries `data-storage-key` / `data-alt-text` /
+    `data-filename` so the editor's client-side script can pull
+    the values needed to insert the markdown snippet.
+
+    Auth piggybacks on the admin login_required guard installed
+    on this Blueprint at app boot.
+    """
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    site_slug = (request.args.get("site") or "").strip().lower() or None
+
+    with SessionLocal() as db:
+        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
+        offset = (page - 1) * PAGE_SIZE
+        query = (
+            select(Attachment)
+            .where(Attachment.width.is_not(None))
+            .order_by(Attachment.created_at.desc(), Attachment.id.desc())
+        )
+        peek_query = select(Attachment).where(Attachment.width.is_not(None))
+        if site_slug is not None:
+            site_row = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+            if site_row is not None:
+                query = query.where(Attachment.site_id == site_row.id)
+                peek_query = peek_query.where(Attachment.site_id == site_row.id)
+        rows = db.execute(query.limit(PAGE_SIZE).offset(offset)).scalars().all()
+        peek = db.execute(peek_query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
+        has_more = peek is not None
+        sites_by_id = {s.id: s for s in sites}
+
+    return render_template(
+        "admin/attachments_picker.html",
+        rows=rows,
+        sites=sites,
+        sites_by_id=sites_by_id,
+        page=page,
+        has_more=has_more,
+        site_slug=site_slug,
+    )
+
+
 @bp.route("/new", methods=["GET", "POST"])
 def upload_attachment() -> ResponseReturnValue:
     with SessionLocal() as db:
