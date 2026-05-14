@@ -252,6 +252,26 @@ def on_post_deleted(item: Any, session: Any) -> None:
 
 
 # ============================================================
+# Cache invalidation
+# ============================================================
+
+
+@hookspec
+def on_cache_purge(scope: str, key: str) -> None:
+    """Fired by core lifecycle code after a content row's commit.
+
+    `scope` names the bucket being invalidated
+    (`post` / `page` / `site` / `feed` / `sitemap`); `key` is the
+    per-scope identifier (post id as string, site slug, etc.).
+
+    Subscribers wire this to a CDN purge API (Cloudflare, Fastly,
+    Caddy's cache.handler, ...). Core ships no implementation;
+    the hook is a zero-cost pass-through until plugins listen.
+    """
+    ...
+
+
+# ============================================================
 # Analytics
 # ============================================================
 

@@ -28,6 +28,7 @@ from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.post import Post, PostStatus
+from bragi.core.models.post_revision import PostRevision
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user_site_role import UserSiteRole
@@ -70,6 +71,33 @@ def _parse_tag_csv(raw: str) -> list[tuple[str, str]]:
         if slug and slug not in seen:
             seen[slug] = label
     return list(seen.items())
+
+
+def _snapshot_post(
+    db: Session,
+    post: Post,
+    editor_user_id: int | None,
+) -> None:
+    """Capture the current `post` state as a `PostRevision` row.
+
+    Caller is responsible for ordering: snapshot BEFORE mutating
+    the post if the goal is "preserve the pre-edit state", AFTER
+    if the goal is "preserve the post-edit state" (used by restore
+    so the restore itself stays undoable).
+    """
+    db.add(
+        PostRevision(
+            post_id=post.id,
+            editor_user_id=editor_user_id,
+            title=post.title,
+            slug=post.slug,
+            status=post.status,
+            body_markdown=post.body_markdown,
+            body_html=post.body_html,
+            body_excerpt=post.body_excerpt,
+            meta_description=post.meta_description,
+        )
+    )
 
 
 def _sync_post_tags(
@@ -177,6 +205,7 @@ def new_post() -> ResponseReturnValue:
         if new_status == PostStatus.PUBLISHED:
             pm = current_app.extensions["plugin_manager"]
             pm.hook.on_post_published(item=new_post_row, session=db)
+            pm.hook.on_cache_purge(scope="post", key=str(new_id))
 
         flash(f"Post '{form['title']}' created.", "success")
 
@@ -225,6 +254,11 @@ def edit_post(post_id: int) -> ResponseReturnValue:
             return render_template("admin/edit.html", post=post, form=form)
 
         before = {"slug": post.slug, "title": post.title, "status": post.status}
+        # Snapshot the pre-edit state so the editor can roll back
+        # later. Captured BEFORE the mutation: the live row stays
+        # "current" and the most recent revision is "what it was
+        # before this save".
+        _snapshot_post(db, post, editor_user_id=int(session["user_id"]))
         post.title = form["title"]
         post.slug = form["slug"]
         post.body_markdown = form["body_markdown"]
@@ -260,6 +294,12 @@ def edit_post(post_id: int) -> ResponseReturnValue:
         # webhook fans, ...).
         if is_first_publish:
             pm.hook.on_post_published(item=post, session=db)
+        # Any save invalidates the post's cached page. A slug
+        # change also invalidates the old slug, but that one's
+        # routed via the slug-change Redirect row and the redirect
+        # response itself isn't cached (handled by the 3xx skip in
+        # the delivery after_request).
+        pm.hook.on_cache_purge(scope="post", key=str(updated_id))
 
         flash(f"Post '{form['title']}' updated.", "success")
 
@@ -291,6 +331,7 @@ def delete_post(post_id: int) -> ResponseReturnValue:
         pm.hook.on_post_deleted(item=post, session=db)
         db.delete(post)
         db.commit()
+        pm.hook.on_cache_purge(scope="post", key=str(post_id))
         flash(f"Post '{title}' deleted.", "success")
 
     audit(
@@ -301,3 +342,102 @@ def delete_post(post_id: int) -> ResponseReturnValue:
         extra={"slug": deleted_slug, "title": title},
     )
     return redirect(url_for("post_admin.list_posts"))
+
+
+# ============================================================
+# Revision history (#32)
+# ============================================================
+
+
+def _can_view_post(post: Post) -> bool:
+    """Mirror edit_post's allow-list. Both restore and the
+    revision views are edit-power operations."""
+    active = current_user()
+    is_own = bool(active and active.id == post.author_id)
+    return (is_own and has_role("author", post.site_id)) or has_role(
+        "editor", post.site_id
+    )
+
+
+@bp.route("/<int:post_id>/revisions", methods=["GET"])
+def list_revisions(post_id: int) -> ResponseReturnValue:
+    with SessionLocal() as db:
+        post = db.get(Post, post_id)
+        if post is None:
+            flash("Post not found.", "error")
+            return redirect(url_for("post_admin.list_posts"))
+        if not _can_view_post(post):
+            abort(403)
+        revisions = (
+            db.execute(
+                select(PostRevision)
+                .where(PostRevision.post_id == post.id)
+                .order_by(PostRevision.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        return render_template(
+            "admin/post_revisions.html", post=post, revisions=revisions
+        )
+
+
+@bp.route("/<int:post_id>/revisions/<int:rev_id>", methods=["GET"])
+def show_revision(post_id: int, rev_id: int) -> ResponseReturnValue:
+    with SessionLocal() as db:
+        post = db.get(Post, post_id)
+        if post is None:
+            flash("Post not found.", "error")
+            return redirect(url_for("post_admin.list_posts"))
+        if not _can_view_post(post):
+            abort(403)
+        revision = db.get(PostRevision, rev_id)
+        if revision is None or revision.post_id != post.id:
+            flash("Revision not found.", "error")
+            return redirect(url_for("post_admin.list_revisions", post_id=post.id))
+        return render_template(
+            "admin/post_revision_detail.html",
+            post=post,
+            revision=revision,
+        )
+
+
+@bp.route("/<int:post_id>/revisions/<int:rev_id>/restore", methods=["POST"])
+def restore_revision(post_id: int, rev_id: int) -> ResponseReturnValue:
+    """Swap the live post's mutable fields with the revision's,
+    after capturing the now-current state as a fresh revision so
+    the restore is itself undoable."""
+    with SessionLocal() as db:
+        post = db.get(Post, post_id)
+        if post is None:
+            flash("Post not found.", "error")
+            return redirect(url_for("post_admin.list_posts"))
+        if not _can_view_post(post):
+            abort(403)
+        revision = db.get(PostRevision, rev_id)
+        if revision is None or revision.post_id != post.id:
+            flash("Revision not found.", "error")
+            return redirect(url_for("post_admin.list_revisions", post_id=post.id))
+
+        editor_user_id = int(session["user_id"])
+        _snapshot_post(db, post, editor_user_id=editor_user_id)
+        post.title = revision.title
+        post.slug = revision.slug
+        post.status = revision.status
+        post.body_markdown = revision.body_markdown
+        post.body_html = revision.body_html
+        post.body_excerpt = revision.body_excerpt
+        post.meta_description = revision.meta_description
+        db.commit()
+        restored_id = post.id
+        site_id_for_audit = post.site_id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="post",
+        target_id=restored_id,
+        site_id=site_id_for_audit,
+        extra={"event": "revision-restore", "revision_id": rev_id},
+    )
+    flash("Revision restored.", "success")
+    return redirect(url_for("post_admin.edit_post", post_id=restored_id))

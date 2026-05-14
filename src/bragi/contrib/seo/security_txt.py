@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from flask import Blueprint, Response, abort
 from flask.typing import ResponseReturnValue
 
+from bragi.core.cache import apply_cache_policy
 from bragi.settings import settings
 
 bp = Blueprint("seo_security_txt", __name__)
@@ -26,4 +27,6 @@ def security_txt() -> ResponseReturnValue:
         abort(404)
     expires = datetime.now(UTC) + timedelta(days=settings.security_expires_days)
     body = f"Contact: {contact}\nExpires: {expires.strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
-    return Response(body, mimetype="text/plain")
+    response = Response(body, mimetype="text/plain")
+    apply_cache_policy(response, "security")
+    return response

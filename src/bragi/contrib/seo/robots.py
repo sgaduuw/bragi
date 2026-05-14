@@ -12,6 +12,8 @@ from __future__ import annotations
 from flask import Blueprint, Response, abort, g
 from flask.typing import ResponseReturnValue
 
+from bragi.core.cache import apply_cache_policy
+
 bp = Blueprint("seo_robots", __name__)
 
 
@@ -25,4 +27,6 @@ def robots_txt() -> ResponseReturnValue:
     body = "User-agent: *\nAllow: /\n"
     if sitemap_line:
         body += f"\n{sitemap_line}\n"
-    return Response(body, mimetype="text/plain")
+    response = Response(body, mimetype="text/plain")
+    apply_cache_policy(response, "robots")
+    return response

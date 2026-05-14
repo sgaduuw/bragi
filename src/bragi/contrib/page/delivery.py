@@ -15,10 +15,11 @@ from __future__ import annotations
 
 from typing import cast
 
-from flask import Blueprint, abort, current_app, g, request
+from flask import Blueprint, abort, current_app, g, make_response, request
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.core.cache import attach_validators, etag_for, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.models.page import Page, PageStatus
 
@@ -76,6 +77,14 @@ def show_page(slug_path: str) -> ResponseReturnValue:
     if page is None:
         abort(404)
 
+    etag = etag_for("page", page.id, page.updated_at)
+    not_modified = maybe_304(request, etag=etag, last_modified=page.updated_at)
+    if not_modified is not None:
+        return not_modified
+
     registry = current_app.extensions["registry"]
     spec = registry.content_type("page")
-    return cast(str, spec.render(page, request))
+    body = cast(str, spec.render(page, request))
+    response = make_response(body)
+    attach_validators(response, etag=etag, last_modified=page.updated_at)
+    return response

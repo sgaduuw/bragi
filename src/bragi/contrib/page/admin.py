@@ -22,11 +22,13 @@ from flask import (
 )
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.page import Page, PageStatus
+from bragi.core.models.page_revision import PageRevision
 from bragi.core.models.site import Site
 from bragi.core.render.markdown import make_excerpt, render_markdown
 
@@ -84,6 +86,28 @@ def _slug_in_use(
     if exclude_page_id is not None:
         stmt = stmt.where(Page.id != exclude_page_id)
     return db.execute(stmt).scalar_one_or_none() is not None  # type: ignore[attr-defined]
+
+
+def _snapshot_page(
+    db: Session,
+    page: Page,
+    editor_user_id: int | None,
+) -> None:
+    """Capture the current `page` state as a `PageRevision` row."""
+    db.add(
+        PageRevision(
+            page_id=page.id,
+            editor_user_id=editor_user_id,
+            title=page.title,
+            slug=page.slug,
+            status=page.status,
+            parent_id=page.parent_id,
+            body_markdown=page.body_markdown,
+            body_html=page.body_html,
+            body_excerpt=page.body_excerpt,
+            meta_description=page.meta_description,
+        )
+    )
 
 
 def _all_pages_for_picker(db: object, site_id: int) -> list[Page]:
@@ -160,6 +184,9 @@ def new_page() -> ResponseReturnValue:
         db.commit()
         new_id = page_row.id
         new_slug = page_row.slug
+        if new_status == PageStatus.PUBLISHED:
+            pm = current_app.extensions["plugin_manager"]
+            pm.hook.on_cache_purge(scope="page", key=str(new_id))
         flash(f"Page '{form['title']}' created.", "success")
 
     audit(
@@ -218,6 +245,11 @@ def edit_page(page_id: int) -> ResponseReturnValue:
                 "admin/page_edit.html", page=page, form=form, parents=parents
             )
 
+        # Capture pre-edit state before mutating; mirrors the
+        # post admin's snapshot semantics so a rollback returns
+        # the page to its prior shape (including parent).
+        _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+
         page.title = str(form["title"])
         page.slug = slug
         page.parent_id = parent_id
@@ -229,6 +261,8 @@ def edit_page(page_id: int) -> ResponseReturnValue:
         db.commit()
         updated_id = page.id
         updated_site_id = page.site_id
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_cache_purge(scope="page", key=str(updated_id))
         flash(f"Page '{form['title']}' updated.", "success")
 
     audit(
@@ -268,6 +302,7 @@ def delete_page(page_id: int) -> ResponseReturnValue:
         pm.hook.on_post_deleted(item=page, session=db)
         db.delete(page)
         db.commit()
+        pm.hook.on_cache_purge(scope="page", key=str(page_id))
         flash(f"Page '{title}' deleted.", "success")
 
     audit(
@@ -278,3 +313,87 @@ def delete_page(page_id: int) -> ResponseReturnValue:
         extra={"slug": deleted_slug, "title": title},
     )
     return redirect(url_for("page_admin.list_pages"))
+
+
+# ============================================================
+# Revision history (#32)
+# ============================================================
+
+
+@bp.route("/<int:page_id>/revisions", methods=["GET"])
+def list_page_revisions(page_id: int) -> ResponseReturnValue:
+    with SessionLocal() as db:
+        page = db.get(Page, page_id)
+        if page is None:
+            flash("Page not found.", "error")
+            return redirect(url_for("page_admin.list_pages"))
+        revisions = (
+            db.execute(
+                select(PageRevision)
+                .where(PageRevision.page_id == page.id)
+                .order_by(PageRevision.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        return render_template(
+            "admin/page_revisions.html", page=page, revisions=revisions
+        )
+
+
+@bp.route("/<int:page_id>/revisions/<int:rev_id>", methods=["GET"])
+def show_page_revision(page_id: int, rev_id: int) -> ResponseReturnValue:
+    with SessionLocal() as db:
+        page = db.get(Page, page_id)
+        if page is None:
+            flash("Page not found.", "error")
+            return redirect(url_for("page_admin.list_pages"))
+        revision = db.get(PageRevision, rev_id)
+        if revision is None or revision.page_id != page.id:
+            flash("Revision not found.", "error")
+            return redirect(
+                url_for("page_admin.list_page_revisions", page_id=page.id)
+            )
+        return render_template(
+            "admin/page_revision_detail.html", page=page, revision=revision
+        )
+
+
+@bp.route("/<int:page_id>/revisions/<int:rev_id>/restore", methods=["POST"])
+def restore_page_revision(page_id: int, rev_id: int) -> ResponseReturnValue:
+    with SessionLocal() as db:
+        page = db.get(Page, page_id)
+        if page is None:
+            flash("Page not found.", "error")
+            return redirect(url_for("page_admin.list_pages"))
+        revision = db.get(PageRevision, rev_id)
+        if revision is None or revision.page_id != page.id:
+            flash("Revision not found.", "error")
+            return redirect(
+                url_for("page_admin.list_page_revisions", page_id=page.id)
+            )
+        editor_user_id = int(session["user_id"])
+        _snapshot_page(db, page, editor_user_id=editor_user_id)
+        page.title = revision.title
+        page.slug = revision.slug
+        page.status = revision.status
+        page.parent_id = revision.parent_id
+        page.body_markdown = revision.body_markdown
+        page.body_html = revision.body_html
+        page.body_excerpt = revision.body_excerpt
+        page.meta_description = revision.meta_description
+        db.commit()
+        restored_id = page.id
+        site_id_for_audit = page.site_id
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_cache_purge(scope="page", key=str(restored_id))
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=restored_id,
+        site_id=site_id_for_audit,
+        extra={"event": "revision-restore", "revision_id": rev_id},
+    )
+    flash("Revision restored.", "success")
+    return redirect(url_for("page_admin.edit_page", page_id=restored_id))

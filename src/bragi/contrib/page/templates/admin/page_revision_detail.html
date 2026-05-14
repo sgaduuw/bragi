@@ -1,0 +1,46 @@
+{% extends "admin/base.html" %}
+{% block title %}Revision &middot; {{ page.title }} &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Revision of &ldquo;{{ page.title }}&rdquo;</h1>
+<p>
+  Captured at {{ revision.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC.
+  <a href="{{ url_for('page_admin.list_page_revisions', page_id=page.id) }}">&larr; All revisions</a>
+</p>
+
+<form method="post"
+      action="{{ url_for('page_admin.restore_page_revision', page_id=page.id, rev_id=revision.id) }}"
+      onsubmit="return confirm('Restore this revision? The current state will be saved as a new revision so the restore is reversible.');">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="danger">Restore this revision</button>
+</form>
+
+<section class="rev-compare" style="margin-top: 2rem;">
+  <h2>Side-by-side</h2>
+  <table>
+    <thead>
+      <tr><th>Field</th><th>This revision</th><th>Live</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Title</td><td>{{ revision.title }}</td><td>{{ page.title }}</td></tr>
+      <tr><td>Slug</td><td><code>{{ revision.slug }}</code></td><td><code>{{ page.slug }}</code></td></tr>
+      <tr><td>Status</td><td>{{ revision.status }}</td><td>{{ page.status }}</td></tr>
+      <tr><td>Parent</td><td>{{ revision.parent_id or '(root)' }}</td><td>{{ page.parent_id or '(root)' }}</td></tr>
+      <tr>
+        <td>Meta description</td>
+        <td>{{ revision.meta_description or '(none)' }}</td>
+        <td>{{ page.meta_description or '(none)' }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Body (markdown)</h3>
+  <details open>
+    <summary>This revision</summary>
+    <pre style="white-space: pre-wrap;">{{ revision.body_markdown }}</pre>
+  </details>
+  <details>
+    <summary>Live</summary>
+    <pre style="white-space: pre-wrap;">{{ page.body_markdown }}</pre>
+  </details>
+</section>
+{% endblock %}

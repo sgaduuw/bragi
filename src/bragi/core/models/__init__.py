@@ -17,7 +17,9 @@ from bragi.core.models.attachment import Attachment
 from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
+from bragi.core.models.page_revision import PageRevision
 from bragi.core.models.post import Post, PostStatus
+from bragi.core.models.post_revision import PostRevision
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.session import Session
 from bragi.core.models.site import Site
@@ -35,8 +37,10 @@ __all__ = [
     "LocalCredential",
     "MatchType",
     "Page",
+    "PageRevision",
     "PageStatus",
     "Post",
+    "PostRevision",
     "PostStatus",
     "Redirect",
     "RedirectSource",

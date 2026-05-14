@@ -1,0 +1,36 @@
+{% extends "admin/base.html" %}
+{% block title %}Revisions of {{ post.title }} &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Revisions of &ldquo;{{ post.title }}&rdquo;</h1>
+<p><a href="{{ url_for('post_admin.edit_post', post_id=post.id) }}">&larr; Back to edit</a></p>
+
+{% if revisions %}
+<table>
+  <thead>
+    <tr>
+      <th>Captured at</th>
+      <th>Title</th>
+      <th>Slug</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for rev in revisions %}
+    <tr>
+      <td>{{ rev.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</td>
+      <td>{{ rev.title }}</td>
+      <td><code>{{ rev.slug }}</code></td>
+      <td>{{ rev.status }}</td>
+      <td>
+        <a href="{{ url_for('post_admin.show_revision', post_id=post.id, rev_id=rev.id) }}"
+           class="btn secondary">View</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No revisions yet. The first one will land the next time this post is edited.</p>
+{% endif %}
+{% endblock %}

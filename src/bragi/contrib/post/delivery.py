@@ -14,10 +14,11 @@ from __future__ import annotations
 
 from typing import cast
 
-from flask import Blueprint, abort, current_app, g, render_template, request
+from flask import Blueprint, abort, current_app, g, make_response, render_template, request
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.core.cache import attach_validators, etag_for, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.tag import Tag
@@ -49,14 +50,21 @@ def show_post(slug: str) -> ResponseReturnValue:
         if post is None:
             abort(404)
 
-        # Render goes through the ContentTypeSpec so a plugin can
-        # swap the renderer (custom theme, A/B test, etc.) without
-        # touching this view.
+        # Conditional GET: if the client already has this version
+        # cached, short-circuit before re-rendering. The `(post,
+        # updated_at)` pair changes every time the post is saved,
+        # so the ETag invalidates naturally.
+        etag = etag_for("post", post.id, post.updated_at)
+        not_modified = maybe_304(request, etag=etag, last_modified=post.updated_at)
+        if not_modified is not None:
+            return not_modified
+
         registry = current_app.extensions["registry"]
         spec = registry.content_type("post")
-        # The spec is typed Callable[[Any, Any], str]; the cast pins
-        # the return for the view's typed-return contract.
-        return cast(str, spec.render(post, request))
+        body = cast(str, spec.render(post, request))
+        response = make_response(body)
+        attach_validators(response, etag=etag, last_modified=post.updated_at)
+        return response
 
 
 tag_bp = Blueprint(
