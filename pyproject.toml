@@ -59,6 +59,7 @@ import_hugo = "bragi.contrib.import_hugo.plugin"
 import_ghost = "bragi.contrib.import_ghost.plugin"
 import_wordpress = "bragi.contrib.import_wordpress.plugin"
 indexnow = "bragi.contrib.indexnow.plugin"
+search = "bragi.contrib.search.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

@@ -1,0 +1,289 @@
+"""SQLite FTS5 search backend.
+
+Holds two FTS5 virtual tables (`posts_fts`, `pages_fts`) created
+by the `add_search_fts` alembic migration. The rowid in each FTS
+table is the corresponding content row's primary key (`posts.id`
+/ `pages.id`), so cross-site filtering is done by joining back to
+the content table at query time.
+
+The tables are NOT contentless: FTS5's `snippet()` auxiliary
+requires the source text to highlight, and contentless tables
+don't keep it. Storage cost is irrelevant at personal-blog scale.
+
+Public surface: `SQLiteFTS5SearchBackend` is a `SearchBackendSpec`
+value the plugin registers via `register_search_backend`.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from sqlalchemy import select, text
+
+from bragi.api import SearchBackendSpec, SearchHit, SearchResults
+from bragi.contrib.search.text import strip_code_fences
+from bragi.core.db import SessionLocal
+from bragi.core.models.page import Page
+from bragi.core.models.post import Post, PostStatus
+
+# Allowed scopes; one FTS table per scope. Map keeps the SQL
+# parametrisation tight (table name has to be interpolated, not
+# bound, since SQLite doesn't accept bound table names; this
+# allow-list prevents injection from a future caller passing
+# arbitrary scope strings).
+_FTS_TABLES = {
+    "post": "posts_fts",
+    "page": "pages_fts",
+}
+
+_BAD_QUERY_RE = re.compile(r"[^\w\s\-]")
+
+
+def _safe_query(raw: str) -> str | None:
+    """Convert a raw user query into a safe FTS5 MATCH expression.
+
+    FTS5 reserves several punctuation characters as query operators
+    (`:` for column filter, `*` for prefix, `(`, `)` for grouping,
+    `"` for phrases, etc). Letting any of those reach the parser
+    risks a `SQLITE_ERROR` from the user, or worse, an interpreted
+    operator that surprises them. We replace each disallowed
+    character with whitespace, so `"title:hello"` becomes the
+    two-token AND search `"title" AND "hello"` instead of one
+    concatenated token. Each surviving token is wrapped in double
+    quotes (phrase syntax) so FTS5 sees it as a literal, not an
+    operator keyword. Returns None for the empty case so the
+    caller can short-circuit to "no results".
+    """
+    if not raw:
+        return None
+    cleaned = _BAD_QUERY_RE.sub(" ", raw)
+    tokens: list[str] = []
+    for token in cleaned.split():
+        # A token that's entirely dashes after stripping carries no
+        # signal and would confuse FTS5's NEAR operator parsing.
+        if token.strip("-"):
+            tokens.append(f'"{token}"')
+    if not tokens:
+        return None
+    return " AND ".join(tokens)
+
+
+def _index(scope: str, entity_id: int, fields: dict[str, Any]) -> None:
+    """Upsert a single row into the scope's FTS table.
+
+    Idempotent: DELETE-then-INSERT in one transaction. FTS5 has no
+    UPSERT shorthand for virtual tables, so the two-statement form
+    is the simplest path. `fields` must carry `title`, `body`,
+    `meta_description`, `excerpt`; `body` should already be
+    code-fence-stripped (the caller decides whether to apply
+    `strip_code_fences` so a future plugin with different
+    pre-processing isn't locked in).
+    """
+    table = _FTS_TABLES.get(scope)
+    if table is None:
+        return
+    with SessionLocal() as db:
+        db.execute(text(f"DELETE FROM {table} WHERE rowid = :rid"), {"rid": entity_id})
+        db.execute(
+            text(
+                f"INSERT INTO {table} (rowid, title, body, meta_description, excerpt)"
+                " VALUES (:rid, :title, :body, :meta_desc, :excerpt)"
+            ),
+            {
+                "rid": entity_id,
+                "title": fields.get("title") or "",
+                "body": fields.get("body") or "",
+                "meta_desc": fields.get("meta_description") or "",
+                "excerpt": fields.get("excerpt") or "",
+            },
+        )
+        db.commit()
+
+
+def _remove(scope: str, entity_id: int) -> None:
+    table = _FTS_TABLES.get(scope)
+    if table is None:
+        return
+    with SessionLocal() as db:
+        db.execute(text(f"DELETE FROM {table} WHERE rowid = :rid"), {"rid": entity_id})
+        db.commit()
+
+
+def _search(site_id: int, query: str, page: int, page_size: int) -> SearchResults:
+    """Mixed post + page search, bm25-ranked, scoped to one site.
+
+    Two separate FTS queries (one per scope) merged in memory and
+    re-sorted by `rank`. The page is then sliced; total count is
+    the sum of matching rows across both scopes. Fine for the v1
+    expected corpus size (a personal blog is well under any
+    threshold where merge-in-memory hurts).
+    """
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+    safe = _safe_query(query)
+    if safe is None:
+        return SearchResults(page=page, page_size=page_size, query=query)
+
+    hits: list[SearchHit] = []
+    total = 0
+    with SessionLocal() as db:
+        # Posts: only include published rows. snippet() args:
+        # (table, col_idx, start_marker, end_marker, ellipsis, n_tokens).
+        # col_idx -1 means "pick the first column whose tokens
+        # matched", so a hit on `title` snippets the title, a hit on
+        # `body` snippets the body. Pinning to a specific column
+        # would return NULL for hits that didn't include that column.
+        rows = db.execute(
+            text(
+                "SELECT posts.id AS id, posts.site_id AS site_id,"
+                " posts.title AS title, posts.slug AS slug,"
+                " snippet(posts_fts, -1, '<mark>', '</mark>', '…', 24) AS snippet,"
+                " bm25(posts_fts) AS rank"
+                " FROM posts_fts"
+                " JOIN posts ON posts.id = posts_fts.rowid"
+                " WHERE posts_fts MATCH :q"
+                " AND posts.site_id = :site_id"
+                " AND posts.status = :published"
+            ),
+            {"q": safe, "site_id": site_id, "published": PostStatus.PUBLISHED},
+        ).all()
+        for row in rows:
+            hits.append(
+                SearchHit(
+                    scope="post",
+                    entity_id=row.id,
+                    site_id=row.site_id,
+                    title=row.title,
+                    slug=row.slug,
+                    snippet=row.snippet,
+                    score=row.rank,
+                )
+            )
+        total += len(rows)
+
+        # Pages: same shape, joined to the pages table.
+        page_rows = db.execute(
+            text(
+                "SELECT pages.id AS id, pages.site_id AS site_id,"
+                " pages.title AS title, pages.slug AS slug,"
+                " snippet(pages_fts, -1, '<mark>', '</mark>', '…', 24) AS snippet,"
+                " bm25(pages_fts) AS rank"
+                " FROM pages_fts"
+                " JOIN pages ON pages.id = pages_fts.rowid"
+                " WHERE pages_fts MATCH :q"
+                " AND pages.site_id = :site_id"
+                " AND pages.status = :published"
+            ),
+            {"q": safe, "site_id": site_id, "published": "published"},
+        ).all()
+        for row in page_rows:
+            hits.append(
+                SearchHit(
+                    scope="page",
+                    entity_id=row.id,
+                    site_id=row.site_id,
+                    title=row.title,
+                    slug=row.slug,
+                    snippet=row.snippet,
+                    score=row.rank,
+                )
+            )
+        total += len(page_rows)
+
+    # bm25 returns negative numbers; lower is better. Sort ascending.
+    hits.sort(key=lambda h: h.score)
+    start = (page - 1) * page_size
+    return SearchResults(
+        hits=hits[start : start + page_size],
+        total=total,
+        page=page,
+        page_size=page_size,
+        query=query,
+    )
+
+
+def _post_fields(post: Post) -> dict[str, Any]:
+    return {
+        "title": post.title,
+        "body": strip_code_fences(post.body_markdown or ""),
+        "meta_description": post.meta_description or "",
+        "excerpt": post.body_excerpt or "",
+    }
+
+
+def _page_fields(page: Page) -> dict[str, Any]:
+    return {
+        "title": page.title,
+        "body": strip_code_fences(page.body_markdown or ""),
+        "meta_description": page.meta_description or "",
+        "excerpt": page.body_excerpt or "",
+    }
+
+
+def _reindex_all(site_id: int | None) -> dict[str, int]:
+    """Wipe and rebuild the FTS index for every post and page.
+
+    Used by `cms search reindex` and by the test suite. Wiping is
+    coarse on purpose: contentless FTS5 has no `OPTIMIZE` or
+    incremental rebuild, and a personal-blog-scale corpus is
+    well within the "drop and rebuild" budget.
+    """
+    counts = {"posts": 0, "pages": 0}
+    with SessionLocal() as db:
+        # Index only published posts; drafts shouldn't surface in
+        # public search. Same for pages.
+        post_query = select(Post).where(Post.status == PostStatus.PUBLISHED)
+        page_query = select(Page).where(Page.status == "published")
+        if site_id is not None:
+            post_query = post_query.where(Post.site_id == site_id)
+            page_query = page_query.where(Page.site_id == site_id)
+
+        if site_id is None:
+            db.execute(text("DELETE FROM posts_fts"))
+            db.execute(text("DELETE FROM pages_fts"))
+        else:
+            # Per-site reindex: drop only the rows whose entity_id
+            # is in scope. JOIN through the content table.
+            db.execute(
+                text(
+                    "DELETE FROM posts_fts WHERE rowid IN ("
+                    " SELECT id FROM posts WHERE site_id = :site_id)"
+                ),
+                {"site_id": site_id},
+            )
+            db.execute(
+                text(
+                    "DELETE FROM pages_fts WHERE rowid IN ("
+                    " SELECT id FROM pages WHERE site_id = :site_id)"
+                ),
+                {"site_id": site_id},
+            )
+        db.commit()
+
+        for post in db.execute(post_query).scalars():
+            _index("post", post.id, _post_fields(post))
+            counts["posts"] += 1
+        for page in db.execute(page_query).scalars():
+            _index("page", page.id, _page_fields(page))
+            counts["pages"] += 1
+    return counts
+
+
+SQLiteFTS5SearchBackend = SearchBackendSpec(
+    name="sqlite-fts5",
+    index=_index,
+    remove=_remove,
+    search=_search,
+    reindex_all=_reindex_all,
+)
+
+
+def index_post(post: Post) -> None:
+    """Index a Post via the default backend's `_index` callable."""
+    _index("post", post.id, _post_fields(post))
+
+
+def index_page(page: Page) -> None:
+    """Index a Page via the default backend's `_index` callable."""
+    _index("page", page.id, _page_fields(page))

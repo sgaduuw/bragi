@@ -1,0 +1,25 @@
+{% extends "delivery/base.html" %}
+{% block title %}{% if query %}Search: {{ query }}{% else %}Search{% endif %} &middot; {{ g.site.title }}{% endblock %}
+{% block content %}
+<header>
+  <h1>Search</h1>
+  <form method="get"
+        action="{{ url_for('search.search') }}"
+        hx-get="{{ url_for('search.search') }}"
+        hx-target="#search-results"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+        style="display: flex; gap: 0.5rem; align-items: center;">
+    <input type="search"
+           name="q"
+           value="{{ query }}"
+           placeholder="Search posts and pages..."
+           autocomplete="off"
+           autofocus
+           style="flex: 1; padding: 0.4rem 0.6rem; font-size: 1rem;">
+    <button type="submit">Search</button>
+  </form>
+</header>
+
+{% include "delivery/_search_results.html" %}
+{% endblock %}
