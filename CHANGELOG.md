@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-14
+
 ### Added
 - HTTP cache management on the delivery app (#33). All 2xx HTML
   responses now carry `Cache-Control: public, max-age=60,
