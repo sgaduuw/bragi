@@ -1,7 +1,7 @@
 """PostRevision: pre-edit snapshot of a Post row.
 
 One row per save. The snapshot captures the post's state at the
-moment BEFORE the edit applied — so the live `posts.body_markdown`
+moment BEFORE the edit applied, so the live `posts.body_markdown`
 is always "current" and the most recent revision is "the version
 prior to the most recent save." This makes diff views ("what
 changed in this edit?") a single-row compare against the live

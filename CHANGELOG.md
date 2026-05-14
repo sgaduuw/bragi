@@ -11,7 +11,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - IndexNow push-crawl plugin (#36). New `bragi.contrib.indexnow`
   fires on `on_post_published`, `on_post_updated`, and
-  `on_post_deleted` (which covers pages too — the page admin
+  `on_post_deleted` (which covers pages too, since the page admin
   reuses the post lifecycle hooks). For each event, the plugin
   resolves the item's site, reads `extra_settings['indexnow_key']`,
   builds the public URL via the content-type registry's

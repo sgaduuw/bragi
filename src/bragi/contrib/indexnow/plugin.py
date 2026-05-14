@@ -119,7 +119,7 @@ __all__ = [
 ]
 
 
-# Silence the "unused import" complaint on `select` — the import
+# Silence the "unused import" complaint on `select`: the import
 # stays because callers may want a session-bound site lookup
 # helper to land here next.
 _ = select

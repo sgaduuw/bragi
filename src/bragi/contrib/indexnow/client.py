@@ -18,7 +18,7 @@ LOG = logging.getLogger(__name__)
 
 # IndexNow tolerates up to 10s; 5s keeps the publish UX snappy
 # even when the endpoint is slow. The protocol is fire-and-forget
-# so a missed retry is OK — the next edit re-pushes.
+# so a missed retry is OK; the next edit re-pushes.
 _TIMEOUT_SECONDS = 5.0
 
 
