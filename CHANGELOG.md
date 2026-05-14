@@ -272,3 +272,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   JS still works (textarea visible). A self-hosted bundle and a
   Subresource Integrity hash are the follow-up to harden the
   v1 CDN dependency.
+- `render_markdown` now applies plugin-contributed transforms.
+  Pipeline: `md_transforms.apply` -> markdown-it-py ->
+  `html_transforms.apply`. Registries are pulled from
+  `current_app.extensions`; outside an app context the renderer
+  still works with no transforms applied.
+- `bragi.contrib.highlight` plugin: registers an html transform
+  that rewrites markdown-it-py code blocks
+  (`<pre><code class="language-X">`) into Pygments-tokenised
+  HTML with span-class runs. Unknown languages fall back to
+  `TextLexer` (no highlight, no crash). The plugin's delivery
+  Blueprint serves the generated stylesheet at
+  `/static/pygments.css`; the delivery base template emits the
+  `<link>` when the plugin is loaded via the `pygments_css_url`
+  Jinja global. Transform runs at priority 50.
+- `bragi.contrib.anchors` plugin: registers an html transform
+  that injects `id="<slug>"` on `<h1>` through `<h6>` lacking
+  one. Slugify rule is NFKD-ASCII + lowercase + non-alphanumerics
+  collapse to `-`. Duplicates within a single document get
+  `-2`, `-3`, ... suffixes; existing explicit ids on a heading
+  are honoured AND count toward the dedup pool. Transform runs
+  at priority 200 (after the highlighter).

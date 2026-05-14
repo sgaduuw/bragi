@@ -193,5 +193,5 @@ def test_post_create_still_works_via_textarea_submission(
             select(Post).where(Post.slug == "tiptap-roundtrip")
         ).scalar_one()
     assert created.body_markdown == "# Heading\n\nA paragraph."
-    # And the render pipeline produced HTML from it.
-    assert "<h1>Heading</h1>" in created.body_html
+    # Render pipeline produced HTML; the anchors transform attaches an id.
+    assert '<h1 id="heading">Heading</h1>' in created.body_html

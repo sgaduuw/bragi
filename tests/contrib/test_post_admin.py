@@ -125,7 +125,8 @@ def test_new_post_creates_row(admin_app: Flask, db_session_factory: sessionmaker
     with db_session_factory() as db:
         created = db.execute(select(Post).where(Post.slug == "brand-new")).scalar_one()
     assert created.title == "Brand New"
-    assert "<h1>Hi</h1>" in created.body_html  # markdown actually rendered
+    # Markdown actually rendered; the anchors transform tags h1 with an id.
+    assert '<h1 id="hi">Hi</h1>' in created.body_html
 
 
 def test_new_requires_title_and_slug(admin_app: Flask) -> None:
