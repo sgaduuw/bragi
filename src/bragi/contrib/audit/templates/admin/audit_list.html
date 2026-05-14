@@ -1,0 +1,69 @@
+{% extends "admin/base.html" %}
+{% block title %}Audit log &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+
+<form method="get" action="{{ url_for('audit_admin.list_audit') }}"
+      style="display: flex; gap: 0.75rem; margin-bottom: 1rem; align-items: flex-end;">
+  <fieldset style="margin: 0;">
+    <label for="action">Action contains</label>
+    <input type="text" name="action" id="action"
+           value="{{ action_filter }}" placeholder="e.g. auth or post.">
+  </fieldset>
+  <fieldset style="margin: 0;">
+    <label for="actor">Actor user id</label>
+    <input type="text" name="actor" id="actor"
+           value="{{ actor_filter }}" placeholder="numeric id">
+  </fieldset>
+  <button type="submit">Filter</button>
+  {% if action_filter or actor_filter %}
+    <a href="{{ url_for('audit_admin.list_audit') }}" class="btn secondary">Clear</a>
+  {% endif %}
+</form>
+
+{% if rows %}
+<table>
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>Actor</th>
+      <th>Action</th>
+      <th>Target</th>
+      <th>IP</th>
+      <th>Extra</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><time datetime="{{ r.occurred_at.isoformat() }}">{{ r.occurred_at.strftime('%Y-%m-%d %H:%M:%S') }}</time></td>
+      <td>
+        {% set actor = users_by_id.get(r.actor_user_id) %}
+        {% if actor %}{{ actor.display_name }} <small>&lt;{{ actor.email }}&gt;</small>
+        {% elif r.actor_user_id %}<small>user #{{ r.actor_user_id }} (gone)</small>
+        {% else %}<small>(system)</small>
+        {% endif %}
+      </td>
+      <td><code>{{ r.action }}</code></td>
+      <td>{% if r.target_type %}{{ r.target_type }} #{{ r.target_id }}{% else %}-{% endif %}</td>
+      <td><small>{{ r.ip or '-' }}</small></td>
+      <td><small><code>{{ r.extra | tojson }}</code></small></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<nav style="margin-top: 1rem;">
+  {% set base_args = {'action': action_filter, 'actor': actor_filter} %}
+  {% if page > 1 %}
+    <a class="btn secondary" href="{{ url_for('audit_admin.list_audit', page=page-1, **base_args) }}">&laquo; Prev</a>
+  {% endif %}
+  <span style="margin: 0 1rem;">Page {{ page }}</span>
+  {% if has_more %}
+    <a class="btn secondary" href="{{ url_for('audit_admin.list_audit', page=page+1, **base_args) }}">Next &raquo;</a>
+  {% endif %}
+</nav>
+{% else %}
+<p>No audit rows {% if action_filter or actor_filter %}match the filter{% endif %}.</p>
+{% endif %}
+{% endblock %}

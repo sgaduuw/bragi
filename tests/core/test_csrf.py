@@ -44,6 +44,8 @@ def admin_app(
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
 

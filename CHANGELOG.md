@@ -208,3 +208,28 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hit row's `hit_count` and writes `last_hit_at` on every served
   redirect. The bump is best-effort: a DB error logs and the
   redirect is still served (a counter glitch never becomes a 500).
+- `AuditLog` model (`bragi.core.models.audit_log.AuditLog`) and
+  alembic migration `add_audit_log` (revision `9dbc52ee17a8`).
+  Polymorphic target via `(target_type, target_id)` weakly
+  referenced (no FK to the target table) so audit rows survive
+  the deletion they document. Indexed on `occurred_at`, `action`,
+  and `actor_user_id` for the typical filter shapes.
+- `bragi.core.audit.audit(action, ...)` writer pulls actor /
+  ip / user_agent from the request context, falling back to None
+  when called from a CLI or background worker. Write is
+  best-effort: a DB failure logs and swallows so the operation
+  being audited never dies because of audit-side trouble.
+  `AuditAction` constants live next to the helper so call sites
+  don't sprinkle string literals.
+- Call-site emits: post create / edit / delete in
+  `bragi.contrib.post.admin`; login success, login failure (with
+  the attempted email), logout in `bragi.contrib.auth_local.views`.
+- `bragi.contrib.audit` plugin: admin Blueprint at `/admin/audit`
+  showing the log most-recent-first, with substring filter on
+  action and exact-match filter on actor id. Superuser-only;
+  paginated at 50 rows. Nav entry under section `system`,
+  permission-gated.
+- `bragi.core.security` helpers `current_user()` /
+  `is_superuser()` newly added in the previous batch are now the
+  basis for the audit-view authorisation check and the
+  NavItem.permission gate.

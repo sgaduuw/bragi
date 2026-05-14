@@ -13,6 +13,7 @@ from flask import Blueprint, flash, redirect, render_template, request, session,
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
@@ -63,22 +64,31 @@ def new_post() -> ResponseReturnValue:
 
         body_markdown = form["body_markdown"]
         new_status = form["status"]
-        db.add(
-            Post(
-                site_id=site.id,
-                slug=form["slug"],
-                title=form["title"],
-                body_markdown=body_markdown,
-                body_html=render_markdown(body_markdown),
-                body_excerpt=make_excerpt(body_markdown),
-                author_id=int(session["user_id"]),
-                status=new_status,
-                published_at=(datetime.now(UTC) if new_status == PostStatus.PUBLISHED else None),
-            )
+        site_id = site.id
+        new_post_row = Post(
+            site_id=site_id,
+            slug=form["slug"],
+            title=form["title"],
+            body_markdown=body_markdown,
+            body_html=render_markdown(body_markdown),
+            body_excerpt=make_excerpt(body_markdown),
+            author_id=int(session["user_id"]),
+            status=new_status,
+            published_at=(datetime.now(UTC) if new_status == PostStatus.PUBLISHED else None),
         )
+        db.add(new_post_row)
         db.commit()
+        new_id = new_post_row.id
+        new_slug = new_post_row.slug
         flash(f"Post '{form['title']}' created.", "success")
 
+    audit(
+        AuditAction.POST_CREATED,
+        target_type="post",
+        target_id=new_id,
+        site_id=site_id,
+        extra={"slug": new_slug, "status": new_status},
+    )
     return redirect(url_for("post_admin.list_posts"))
 
 
@@ -104,6 +114,7 @@ def edit_post(post_id: int) -> ResponseReturnValue:
             flash("Title and slug are required.", "error")
             return render_template("admin/edit.html", post=post, form=form)
 
+        before = {"slug": post.slug, "title": post.title, "status": post.status}
         post.title = form["title"]
         post.slug = form["slug"]
         post.body_markdown = form["body_markdown"]
@@ -117,8 +128,18 @@ def edit_post(post_id: int) -> ResponseReturnValue:
         post.status = form["status"]
 
         db.commit()
+        updated_id = post.id
+        updated_site_id = post.site_id
+        after = {"slug": post.slug, "title": post.title, "status": post.status}
         flash(f"Post '{form['title']}' updated.", "success")
 
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="post",
+        target_id=updated_id,
+        site_id=updated_site_id,
+        extra={"before": before, "after": after},
+    )
     return redirect(url_for("post_admin.list_posts"))
 
 
@@ -130,7 +151,17 @@ def delete_post(post_id: int) -> ResponseReturnValue:
             flash("Post not found.", "error")
             return redirect(url_for("post_admin.list_posts"))
         title = post.title
+        deleted_site_id = post.site_id
+        deleted_slug = post.slug
         db.delete(post)
         db.commit()
         flash(f"Post '{title}' deleted.", "success")
+
+    audit(
+        AuditAction.POST_DELETED,
+        target_type="post",
+        target_id=post_id,
+        site_id=deleted_site_id,
+        extra={"slug": deleted_slug, "title": title},
+    )
     return redirect(url_for("post_admin.list_posts"))
