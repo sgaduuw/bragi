@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-14
+
 ### Added
 - Initial project scaffold: Poetry config, alembic setup, src/bragi/
   skeleton (apps, core, contrib), Makefile, Procfile.dev, Docker
