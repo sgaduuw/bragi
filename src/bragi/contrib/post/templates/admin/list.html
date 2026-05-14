@@ -1,0 +1,15 @@
+{% extends "admin/base.html" %}
+{% block title %}Posts &middot; bragi admin{% endblock %}
+{% block content %}
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+  <h1 style="margin: 0;">Posts</h1>
+  <a href="{{ url_for('post_admin.new_post') }}" class="btn">New post</a>
+  <button type="button"
+          class="btn secondary"
+          hx-get="{{ url_for('post_admin.list_posts') }}"
+          hx-target="#post-list-table"
+          hx-swap="outerHTML">Refresh</button>
+</div>
+
+{% include "admin/_post_list_table.html" %}
+{% endblock %}

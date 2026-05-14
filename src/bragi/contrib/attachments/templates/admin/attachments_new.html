@@ -1,0 +1,31 @@
+{% extends "admin/base.html" %}
+{% block title %}Upload attachment &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Upload attachment</h1>
+
+<form method="post" enctype="multipart/form-data"
+      action="{{ url_for('attachment_admin.upload_attachment') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <fieldset>
+    <label for="site_id">Site</label>
+    <select name="site_id" id="site_id" required>
+      {% for s in sites %}
+      <option value="{{ s.id }}" {% if s.id == default_site_id %}selected{% endif %}>{{ s.slug }} ({{ s.hostname }})</option>
+      {% endfor %}
+    </select>
+  </fieldset>
+
+  <fieldset>
+    <label for="file">File</label>
+    <input type="file" name="file" id="file" required>
+    <small>The bytes are content-addressed by SHA-256. Re-uploading
+    the same file under the same site is a no-op.</small>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit">Upload</button>
+    <a href="{{ url_for('attachment_admin.list_attachments') }}" class="btn secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

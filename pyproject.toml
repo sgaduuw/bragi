@@ -1,0 +1,102 @@
+[tool.poetry]
+name = "bragi"
+version = "1.0.0"
+description = "Multisite CMS with htmx, plugins, and SEO baked in."
+authors = ["Eelco Wesemann <6771014+sgaduuw@users.noreply.github.com>"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/sgaduuw/bragi"
+repository = "https://github.com/sgaduuw/bragi"
+packages = [{include = "bragi", from = "src"}]
+# Not published to PyPI; ship via Docker on GHCR. The `bragi`
+# distribution name is held by an unrelated project.
+
+[tool.poetry.dependencies]
+python = "^3.12"
+flask = "^3.0"
+sqlalchemy = "^2.0"
+alembic = "^1.13"
+pluggy = "^1.5"
+pydantic-settings = "^2.2"
+authlib = "^1.3"
+argon2-cffi = "^23.1"
+markdown-it-py = "^3.0"
+pygments = "^2.18"
+markdownify = "^0.13"
+click = "^8.1"
+requests = "^2.34.1"
+pyyaml = "^6.0.3"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+ruff = "^0.5"
+mypy = "^1.10"
+honcho = "^1.1"
+
+[tool.poetry.scripts]
+bragi-admin    = "bragi.apps.admin:run"
+bragi-delivery = "bragi.apps.delivery:run"
+
+# Plugin entry-point group: built-ins are activated here. Comment
+# a line to disable a built-in (it stays on disk; just doesn't
+# register on app boot).
+[tool.poetry.plugins."bragi.plugins"]
+post = "bragi.contrib.post.plugin"
+page = "bragi.contrib.page.plugin"
+redirects = "bragi.contrib.redirects.plugin"
+auth_local = "bragi.contrib.auth_local.plugin"
+auth_github = "bragi.contrib.auth_github.plugin"
+sites = "bragi.contrib.sites.plugin"
+sessions = "bragi.contrib.sessions.plugin"
+audit = "bragi.contrib.audit.plugin"
+attachments = "bragi.contrib.attachments.plugin"
+highlight = "bragi.contrib.highlight.plugin"
+anchors = "bragi.contrib.anchors.plugin"
+seo = "bragi.contrib.seo.plugin"
+analytics = "bragi.contrib.analytics.plugin"
+import_hugo = "bragi.contrib.import_hugo.plugin"
+import_ghost = "bragi.contrib.import_ghost.plugin"
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",  # pycodestyle, pyflakes
+    "I",            # isort
+    "B",            # flake8-bugbear
+    "UP",           # pyupgrade
+    "SIM",          # flake8-simplify
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+
+# Hookspec functions are stubs: pluggy replaces them with a
+# dispatcher at registration time. mypy's empty-body check would
+# otherwise fire on every spec that returns a non-None concrete
+# type, even with the `...` stub idiom.
+[[tool.mypy.overrides]]
+module = "bragi.hookspecs"
+disable_error_code = ["empty-body"]
+
+# Libraries without type stubs.
+[[tool.mypy.overrides]]
+module = ["pygments.*", "authlib.*", "yaml", "markdownify"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]

@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Personal docs trio (rsync'd between workspaces, not committed; see CLAUDE.md)
+/CLAUDE.md
+/CONTEXT.md
+/MEMORY.md
+
+# Local SQLite databases (WAL mode produces -wal and -shm siblings)
+/bragi.db
+/bragi.db-wal
+/bragi.db-shm
+*.db
+*.db-wal
+*.db-shm
+

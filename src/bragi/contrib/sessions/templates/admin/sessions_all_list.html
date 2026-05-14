@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+{% block title %}All sessions &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>All sessions</h1>
+
+<p>Every active session row in the database. Use sparingly; this view is
+intended for incident response, not routine browsing.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>User</th>
+      <th>Last seen</th>
+      <th>IP</th>
+      <th>User agent</th>
+      <th>Expires</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s, u in pairs %}
+    <tr>
+      <td>
+        {% if u %}
+          {{ u.display_name }} &lt;{{ u.email }}&gt;
+        {% else %}
+          <em>(anonymous)</em>
+        {% endif %}
+        {% if s.id == current_sid %} <strong>(this session)</strong>{% endif %}
+      </td>
+      <td>{{ s.last_seen_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ s.ip or '(unknown)' }}</td>
+      <td><code>{{ (s.user_agent or '(unknown)')[:60] }}</code></td>
+      <td>{{ s.expires_at.strftime('%Y-%m-%d') }}</td>
+      <td>
+        <form method="post"
+              action="{{ url_for('sessions_admin.revoke_any_session', sid=s.id) }}"
+              onsubmit="return confirm('Revoke this session?{% if s.id == current_sid %} You will be logged out.{% endif %}');"
+              style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">Revoke</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

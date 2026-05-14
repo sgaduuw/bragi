@@ -1,0 +1,53 @@
+{% extends "admin/base.html" %}
+{% block title %}My sessions &middot; bragi admin{% endblock %}
+{% block content %}
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+  <h1 style="margin: 0;">My sessions</h1>
+  {% if sessions|length > 1 %}
+  <form method="post"
+        action="{{ url_for('sessions_admin.revoke_other_self_sessions') }}"
+        onsubmit="return confirm('Log out every other browser?');"
+        style="margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="danger">Revoke everywhere except this</button>
+  </form>
+  {% endif %}
+</div>
+
+<p>One row per active sign-in. The row marked <strong>(this session)</strong>
+is the cookie that brought this request.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Last seen</th>
+      <th>IP</th>
+      <th>User agent</th>
+      <th>Expires</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sessions %}
+    <tr>
+      <td>
+        {{ s.last_seen_at.strftime('%Y-%m-%d %H:%M') }}
+        {% if s.id == current_sid %} <strong>(this session)</strong>{% endif %}
+      </td>
+      <td>{{ s.ip or '(unknown)' }}</td>
+      <td><code>{{ (s.user_agent or '(unknown)')[:80] }}</code></td>
+      <td>{{ s.expires_at.strftime('%Y-%m-%d') }}</td>
+      <td>
+        <form method="post"
+              action="{{ url_for('sessions_admin.revoke_self_session', sid=s.id) }}"
+              onsubmit="return confirm('Revoke this session?{% if s.id == current_sid %} You will be logged out.{% endif %}');"
+              style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">Revoke</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

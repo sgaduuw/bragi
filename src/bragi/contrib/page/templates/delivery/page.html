@@ -1,0 +1,25 @@
+{% extends "delivery/base.html" %}
+{% block title %}{{ page.meta_title or page.title }} &middot; {{ site.title }}{% endblock %}
+{% block jsonld %}
+  {%- set jsonld = {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": page.title,
+        "url": canonical_url,
+        "dateModified": page.updated_at.isoformat() if page.updated_at else None,
+        "author": {"@type": "Person", "name": author_name} if author_name else None,
+        "publisher": {"@type": "Organization", "name": site.title} if site else None,
+        "description": page.meta_description or page.body_excerpt or None,
+  } -%}
+  <script type="application/ld+json">{{ jsonld | tojson }}</script>
+{% endblock %}
+{% block content %}
+<article>
+  <header>
+    <h1>{{ page.title }}</h1>
+  </header>
+  <div class="body">
+    {{ page.body_html | safe }}
+  </div>
+</article>
+{% endblock %}
