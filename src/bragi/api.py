@@ -162,6 +162,61 @@ class RedirectTarget:
 
 
 # ============================================================
+# Media / storage
+# ============================================================
+
+
+@dataclass
+class StorageBackendSpec:
+    """Registration record for an attachment storage backend.
+
+    A backend stores blob bytes content-addressed by SHA-256 and
+    serves them back to a delivery / admin caller. The default
+    `local` backend writes under `Settings.attachments_root`; an
+    S3 / R2 / GCS backend ships as a plugin that returns its own
+    spec from `register_storage_backend`.
+
+    `store` is idempotent: the same bytes produce the same key
+    and the second call short-circuits. `remove` is also
+    idempotent (missing key is fine); the caller is responsible
+    for refcounting before unlinking shared bytes.
+    """
+
+    name: str  # 'local', 's3', 'r2'
+    store: Callable[[str, bytes], tuple[str, int]]
+    # (site_slug, data) -> (storage_key, size_bytes)
+    read: Callable[[str, str], bytes]
+    # (site_slug, storage_key) -> bytes; FileNotFoundError on miss
+    remove: Callable[[str, str], None]
+    # (site_slug, storage_key) -> None; missing key is a no-op
+
+
+@dataclass
+class ImageMetadata:
+    """Image dimensions + format extracted by `ImageProcessorSpec.probe`."""
+
+    width: int
+    height: int
+    format: str | None = None  # 'JPEG', 'PNG', 'WEBP', ...
+
+
+@dataclass
+class ImageProcessorSpec:
+    """Registration record for an image processor.
+
+    Phase 1 contract: only `probe` is required; it returns a
+    width / height / format triple or None for non-image blobs.
+    Phase 2 will extend the spec with `resize` and friends for
+    rendition generation; existing plugins that only implement
+    probe will get default-skip behaviour for renditions.
+    """
+
+    name: str  # 'pillow', 'libvips'
+    can_process: Callable[[str], bool]  # given a content_type, True if we handle it
+    probe: Callable[[bytes], ImageMetadata | None]
+
+
+# ============================================================
 # Analytics
 # ============================================================
 
@@ -187,10 +242,13 @@ __all__ = [
     "ContentTypeSpec",
     "ExternalUser",
     "FieldSpec",
+    "ImageMetadata",
+    "ImageProcessorSpec",
     "ImportPlan",
     "ImportResult",
     "ImporterSpec",
     "NavItem",
     "OAuthProviderSpec",
     "RedirectTarget",
+    "StorageBackendSpec",
 ]

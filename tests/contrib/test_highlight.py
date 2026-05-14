@@ -101,7 +101,9 @@ def test_plugin_registers_html_transform_in_delivery_app() -> None:
     assert "pygments-highlight" in html_transforms.names()
 
 
-def test_delivery_serves_pygments_css() -> None:
+def test_delivery_serves_pygments_css(
+    patched_session_locals: sessionmaker[Session],
+) -> None:
     app = create_delivery_app()
     resp = app.test_client().get("/static/pygments.css")
     assert resp.status_code == 200
@@ -123,6 +125,7 @@ def test_delivery_template_links_pygments_css() -> None:
 
 @pytest.fixture
 def delivery_app_with_post(
+    patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,

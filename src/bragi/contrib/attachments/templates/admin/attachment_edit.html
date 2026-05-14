@@ -1,0 +1,62 @@
+{% extends "admin/base.html" %}
+{% block title %}Edit attachment &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Edit attachment</h1>
+
+<table class="metadata">
+  <tr><th>Filename</th><td><code>{{ row.filename }}</code></td></tr>
+  <tr><th>Type</th><td>{{ row.content_type }}</td></tr>
+  <tr><th>Size</th><td>{{ row.size_bytes }} B</td></tr>
+  {% if row.width and row.height %}
+  <tr><th>Dimensions</th><td>{{ row.width }} &times; {{ row.height }}</td></tr>
+  {% endif %}
+  <tr><th>SHA-256</th><td><code>{{ row.storage_key }}</code></td></tr>
+</table>
+
+<form method="post"
+      action="{{ url_for('attachment_admin.edit_attachment', attachment_id=row.id) }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <fieldset>
+    <label for="alt_text">Alt text</label>
+    <input type="text" name="alt_text" id="alt_text" maxlength="512"
+           value="{{ row.alt_text or '' }}">
+    <small>Describe the image for screen readers and image-search
+    crawlers. Empty for purely decorative images.</small>
+  </fieldset>
+
+  <fieldset>
+    <label for="title">Title / caption</label>
+    <input type="text" name="title" id="title" maxlength="255"
+           value="{{ row.title or '' }}">
+    <small>Optional. Themes may render this as a figure caption.</small>
+  </fieldset>
+
+  {% if row.width and row.height %}
+  <fieldset>
+    <label>Focal point</label>
+    <div style="display: flex; gap: 1rem; align-items: center;">
+      <label for="focal_x" style="font-weight: normal;">X
+        <input type="number" name="focal_x" id="focal_x"
+               step="0.01" min="0" max="1"
+               value="{{ '%.2f' % row.focal_x if row.focal_x is not none else '' }}"
+               style="width: 6rem;">
+      </label>
+      <label for="focal_y" style="font-weight: normal;">Y
+        <input type="number" name="focal_y" id="focal_y"
+               step="0.01" min="0" max="1"
+               value="{{ '%.2f' % row.focal_y if row.focal_y is not none else '' }}"
+               style="width: 6rem;">
+      </label>
+    </div>
+    <small>0,0 is top-left; 1,1 is bottom-right. Empty values
+    mean centre. Themes use this for art-directed cropping.</small>
+  </fieldset>
+  {% endif %}
+
+  <div class="actions">
+    <button type="submit">Save</button>
+    <a href="{{ url_for('attachment_admin.list_attachments') }}" class="btn secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

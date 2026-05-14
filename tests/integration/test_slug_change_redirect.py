@@ -33,6 +33,7 @@ PASSWORD = "correct-horse-battery-staple"
 
 @pytest.fixture
 def admin_and_delivery(
+    patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,

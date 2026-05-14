@@ -248,6 +248,7 @@ def _seed_user_must_change(
 
 @pytest.fixture
 def must_change_admin_app(
+    patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,

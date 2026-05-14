@@ -6,15 +6,23 @@ storage means an identical second upload reuses the existing blob;
 the Attachment row distinguishes display names, but the underlying
 file is shared.
 
-Renditions (resized variants, alt-text mass edits, S3 backend)
-land later as `bragi.contrib.media`; those reserved hooks
-(`register_storage_backend`, `register_image_processor`) point at
-this model.
+Image fields (`width`, `height`, `alt_text`, `focal_x`, `focal_y`,
+`title`) are populated for image content types: dimensions by
+the registered `ImageProcessorSpec` on upload; alt text / title /
+focal point by the operator through the admin edit form. Non-
+image uploads leave the image fields NULL.
+
+Renditions (resized variants), the richer media-library admin
+(bulk alt-text edit, embed picker), and S3 / R2 backends land in
+the later phases of the `bragi.contrib.media` plan
+(see GitHub #41); the reserved hooks
+(`register_storage_backend`, `register_image_processor`) are now
+live and feed into this model.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
@@ -36,3 +44,13 @@ class Attachment(IdMixin, TimestampsMixin, Base):
     size_bytes: Mapped[int] = mapped_column(Integer)
     storage_key: Mapped[str] = mapped_column(String(128))  # sha256 hex
     uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
+
+    # Image-only fields; NULL for non-image uploads.
+    width: Mapped[int | None] = mapped_column(Integer, default=None)
+    height: Mapped[int | None] = mapped_column(Integer, default=None)
+    alt_text: Mapped[str | None] = mapped_column(String(512), default=None)
+    title: Mapped[str | None] = mapped_column(String(255), default=None)
+    # Focal point: [0.0, 1.0] in image-relative coordinates, used
+    # by themes for art-directed cropping. NULL means "centre".
+    focal_x: Mapped[float | None] = mapped_column(Float, default=None)
+    focal_y: Mapped[float | None] = mapped_column(Float, default=None)

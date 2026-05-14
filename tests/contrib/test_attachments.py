@@ -458,3 +458,233 @@ def test_attachments_plugin_registers(admin_app: Flask, delivery_app: Flask) -> 
     registry = admin_app.extensions["registry"]
     labels = {item.label for item in registry.admin_nav}
     assert "Attachments" in labels
+
+
+# --------------------------- image dimensions ---------------------------
+
+
+def _make_png(width: int = 7, height: int = 5) -> bytes:
+    """Produce a real PNG (Pillow-decodable) for probe tests."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height), color="red").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_upload_populates_image_dimensions(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=42, height=17)
+    resp = client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "shot.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        row = db.execute(select(Attachment)).scalar_one()
+    assert row.width == 42
+    assert row.height == 17
+
+
+def test_upload_non_image_leaves_dimensions_null(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    resp = client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(b"plain text body"), "note.txt"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        row = db.execute(select(Attachment)).scalar_one()
+    assert row.width is None
+    assert row.height is None
+
+
+def test_upload_malformed_image_bytes_does_not_break_upload(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Pillow probe returns None on garbage image bytes; the row still lands."""
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    resp = client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(b"\x89PNG\r\n\x1a\nnot really a png"), "bad.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        row = db.execute(select(Attachment)).scalar_one()
+    # No dimensions because Pillow couldn't decode, but the upload landed.
+    assert row.width is None
+    assert row.height is None
+    assert row.size_bytes > 0
+
+
+# --------------------------- edit metadata ---------------------------
+
+
+def _seed_image(db_session_factory: sessionmaker[Session]) -> int:
+    """Insert one image Attachment row with known dimensions; return id."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        row = Attachment(
+            site_id=site.id,
+            filename="hero.png",
+            content_type="image/png",
+            size_bytes=128,
+            storage_key="a" * 64,
+            width=800,
+            height=600,
+        )
+        db.add(row)
+        db.commit()
+        return row.id
+
+
+def test_edit_get_renders_form(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    aid = _seed_image(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/attachments/{aid}/edit")
+    assert resp.status_code == 200
+    assert b"Alt text" in resp.data
+    assert b"hero.png" in resp.data
+    assert b"800" in resp.data  # width surfaced
+
+
+def test_edit_post_persists_metadata(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    aid = _seed_image(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/attachments/{aid}/edit")
+    resp = client.post(
+        f"/admin/attachments/{aid}/edit",
+        data={
+            "alt_text": "Hero shot of the lake",
+            "title": "Lake at dawn",
+            "focal_x": "0.6",
+            "focal_y": "0.4",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        row = db.get(Attachment, aid)
+    assert row is not None
+    assert row.alt_text == "Hero shot of the lake"
+    assert row.title == "Lake at dawn"
+    assert row.focal_x == 0.6
+    assert row.focal_y == 0.4
+
+
+def test_edit_clamps_focal_to_unit_range(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    aid = _seed_image(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/attachments/{aid}/edit")
+    client.post(
+        f"/admin/attachments/{aid}/edit",
+        data={
+            "alt_text": "",
+            "title": "",
+            "focal_x": "1.7",
+            "focal_y": "-0.4",
+            "_csrf_token": token,
+        },
+    )
+    with db_session_factory() as db:
+        row = db.get(Attachment, aid)
+    assert row is not None
+    assert row.focal_x == 1.0
+    assert row.focal_y == 0.0
+
+
+def test_edit_empty_values_clear_fields(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    aid = _seed_image(db_session_factory)
+    # Pre-populate so we can observe the clear.
+    with db_session_factory() as db:
+        row = db.get(Attachment, aid)
+        assert row is not None
+        row.alt_text = "old"
+        row.title = "old"
+        row.focal_x = 0.5
+        row.focal_y = 0.5
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/attachments/{aid}/edit")
+    client.post(
+        f"/admin/attachments/{aid}/edit",
+        data={
+            "alt_text": "",
+            "title": "",
+            "focal_x": "",
+            "focal_y": "",
+            "_csrf_token": token,
+        },
+    )
+    with db_session_factory() as db:
+        row = db.get(Attachment, aid)
+    assert row is not None
+    assert row.alt_text is None
+    assert row.title is None
+    assert row.focal_x is None
+    assert row.focal_y is None
+
+
+# --------------------------- registry resolution ---------------------------
+
+
+def test_registry_exposes_local_storage_backend(admin_app: Flask) -> None:
+    registry = admin_app.extensions["registry"]
+    backend = registry.storage_backend()
+    assert backend is not None
+    assert backend.name == "local"
+
+
+def test_registry_image_processor_handles_image_types(admin_app: Flask) -> None:
+    registry = admin_app.extensions["registry"]
+    assert registry.image_processor_for("image/png") is not None
+    assert registry.image_processor_for("image/jpeg") is not None
+    assert registry.image_processor_for("application/pdf") is None
