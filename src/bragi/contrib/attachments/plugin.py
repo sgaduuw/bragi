@@ -15,12 +15,14 @@ compatible value at render time.
 
 from __future__ import annotations
 
+import click
 import jinja2
 from flask import Blueprint, url_for
 from sqlalchemy import select
 
 from bragi.api import ImageProcessorSpec, NavItem, StorageBackendSpec, hookimpl
 from bragi.contrib.attachments.admin import bp as attachment_admin_bp
+from bragi.contrib.attachments.cli import media_group
 from bragi.contrib.attachments.delivery import bp as attachment_delivery_bp
 from bragi.core.db import SessionLocal
 from bragi.core.image_processor import PillowImageProcessor
@@ -120,3 +122,9 @@ def register_template_globals(env: jinja2.Environment) -> None:
     ladder without pulling in plugin internals.
     """
     env.globals["srcset_for"] = srcset_for
+
+
+@hookimpl
+def register_cli_command(group: click.Group) -> None:
+    """Add `cms media reindex` for backfilling rendition slots."""
+    group.add_command(media_group)

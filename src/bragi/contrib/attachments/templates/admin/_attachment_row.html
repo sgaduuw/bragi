@@ -1,0 +1,48 @@
+{# One row of the attachments list. Renders both the standard read
+   view (Edit / Delete actions) and the bulk missing-alt edit form
+   (inline textarea + Save button). Wrapped in a stable id so the
+   htmx response from /alt-text can swap it in place. #}
+<tr id="attachment-row-{{ r.id }}">
+  <td>
+    <code>{{ r.filename }}</code>
+    {% if r.width and r.height %}
+      <br><small>{{ r.width }}&times;{{ r.height }}</small>
+    {% endif %}
+  </td>
+  <td><small>{{ sites_by_id.get(r.site_id).slug if sites_by_id.get(r.site_id) else r.site_id }}</small></td>
+  <td><small>{{ r.content_type }}</small></td>
+  {% if missing_alt %}
+    <td colspan="2">
+      <form hx-post="{{ url_for('attachment_admin.save_alt_text', attachment_id=r.id) }}"
+            hx-target="#attachment-row-{{ r.id }}"
+            hx-swap="outerHTML"
+            method="post"
+            action="{{ url_for('attachment_admin.save_alt_text', attachment_id=r.id) }}"
+            style="display: flex; gap: 0.5rem; align-items: center; margin: 0;">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="alt_text" maxlength="512"
+               value="{{ r.alt_text or '' }}"
+               placeholder="Describe this image..."
+               style="flex: 1;">
+        <button type="submit">Save</button>
+        {% if just_saved %}
+          <span class="success" style="font-size: 0.9em;">&check; Saved</span>
+        {% endif %}
+      </form>
+    </td>
+  {% else %}
+    <td>{{ r.size_bytes }} B</td>
+    <td>{{ r.created_at.strftime('%Y-%m-%d') }}</td>
+  {% endif %}
+  <td>
+    <a href="{{ url_for('attachment_admin.edit_attachment', attachment_id=r.id) }}"
+       class="btn secondary">Edit</a>
+    <form method="post"
+          action="{{ url_for('attachment_admin.delete_attachment', attachment_id=r.id) }}"
+          onsubmit="return confirm('Delete this attachment? The file bytes are removed only when no other attachment row references the same SHA-256.');"
+          style="display: inline; margin: 0;">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </td>
+</tr>

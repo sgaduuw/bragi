@@ -46,6 +46,7 @@ def tmp_attachments_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ite
 
 @pytest.fixture
 def admin_app(
+    patched_session_locals: sessionmaker[Session],
     tmp_attachments_root: Path,
     db_session: Session,
     db_session_factory: sessionmaker[Session],
@@ -971,6 +972,269 @@ def test_srcset_helper_emits_ordered_parts(
     # the original at 1200w.
     descriptors = [p.split()[-1] for p in parts]
     assert descriptors == ["320w", "800w", "1200w"]
+
+
+# --------------------------- missing-alt bulk admin (phase 3) ---------------------------
+
+
+def _seed_two_images_one_missing_alt(
+    db_session_factory: sessionmaker[Session],
+) -> tuple[int, int]:
+    """Plant two images, one with alt text, one without. Returns ids."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        without_alt = Attachment(
+            site_id=site.id,
+            filename="needs-alt.png",
+            content_type="image/png",
+            size_bytes=128,
+            storage_key="a" * 64,
+            width=800,
+            height=600,
+        )
+        with_alt = Attachment(
+            site_id=site.id,
+            filename="has-alt.png",
+            content_type="image/png",
+            size_bytes=128,
+            storage_key="b" * 64,
+            width=800,
+            height=600,
+            alt_text="A pleasant view.",
+        )
+        db.add_all([without_alt, with_alt])
+        db.commit()
+        return without_alt.id, with_alt.id
+
+
+def test_missing_alt_filter_lists_only_images_without_alt(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    without_alt_id, with_alt_id = _seed_two_images_one_missing_alt(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/attachments/?missing_alt=1")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "needs-alt.png" in body
+    assert "has-alt.png" not in body
+    # The form action points at the save endpoint for the missing row.
+    assert f"/admin/attachments/{without_alt_id}/alt-text" in body
+    assert f"/admin/attachments/{with_alt_id}/alt-text" not in body
+
+
+def test_missing_alt_count_surfaced_in_header(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    _seed_two_images_one_missing_alt(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/attachments/")
+    assert resp.status_code == 200
+    # Count of 1 (only the row missing alt text) surfaced as a link.
+    assert b"missing alt text (1)" in resp.data.lower()
+
+
+def test_save_alt_text_non_htmx_redirects(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    without_alt_id, _ = _seed_two_images_one_missing_alt(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/?missing_alt=1")
+    resp = client.post(
+        f"/admin/attachments/{without_alt_id}/alt-text",
+        data={"alt_text": "A clarifying caption.", "_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        row = db.get(Attachment, without_alt_id)
+    assert row is not None
+    assert row.alt_text == "A clarifying caption."
+
+
+def test_save_alt_text_htmx_returns_row_partial(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    without_alt_id, _ = _seed_two_images_one_missing_alt(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/?missing_alt=1")
+    resp = client.post(
+        f"/admin/attachments/{without_alt_id}/alt-text",
+        data={"alt_text": "Hero shot of the lake.", "_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert f'id="attachment-row-{without_alt_id}"' in body
+    assert "Hero shot of the lake." in body
+    # The "saved" badge appears so the operator gets visible feedback.
+    assert "Saved" in body
+
+
+def test_save_alt_text_empty_string_clears(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    _, with_alt_id = _seed_two_images_one_missing_alt(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/?missing_alt=1")
+    client.post(
+        f"/admin/attachments/{with_alt_id}/alt-text",
+        data={"alt_text": "", "_csrf_token": token},
+    )
+    with db_session_factory() as db:
+        row = db.get(Attachment, with_alt_id)
+    assert row is not None
+    assert row.alt_text is None
+
+
+# --------------------------- cms media reindex CLI ---------------------------
+
+
+def test_reindex_cli_adds_missing_slots(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """An image with no renditions gets the full ladder filled."""
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=2000, height=1500)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    # Strip the just-generated renditions so reindex has work to do.
+    with db_session_factory() as db:
+        db.execute(AttachmentRendition.__table__.delete())
+        db.commit()
+
+    runner = admin_app.test_cli_runner()
+    result = runner.invoke(args=["cms", "media", "reindex"])
+    assert result.exit_code == 0, result.output
+    assert "Reindex complete" in result.output
+
+    with db_session_factory() as db:
+        rendition_widths = sorted(
+            r.width for r in db.execute(select(AttachmentRendition)).scalars()
+        )
+    assert rendition_widths == [320, 800, 1600]
+
+
+def test_reindex_cli_dry_run_writes_nothing(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=2000, height=1500)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    with db_session_factory() as db:
+        db.execute(AttachmentRendition.__table__.delete())
+        db.commit()
+
+    runner = admin_app.test_cli_runner()
+    result = runner.invoke(args=["cms", "media", "reindex", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "would add" in result.output
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+    assert rows == []
+
+
+def test_reindex_cli_site_filter(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """--site limits the walk to one site's attachments."""
+    with db_session_factory() as db:
+        blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        other = db.execute(select(Site).where(Site.slug == "other")).scalar_one()
+        for s in (blog, other):
+            db.add(
+                Attachment(
+                    site_id=s.id,
+                    filename="x.png",
+                    content_type="image/png",
+                    size_bytes=128,
+                    storage_key=("c" if s is blog else "d") * 64,
+                    width=800,
+                    height=600,
+                )
+            )
+        db.commit()
+
+    runner = admin_app.test_cli_runner()
+    result = runner.invoke(args=["cms", "media", "reindex", "--site", "blog", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    # "blog/x.png" appears, "other/x.png" doesn't.
+    assert "blog/x.png" in result.output
+    assert "other/x.png" not in result.output
+
+
+def test_reindex_cli_skips_existing_slots(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """A second invocation is a no-op (idempotent)."""
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=2000, height=1500)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    with db_session_factory() as db:
+        rendition_count_before = len(db.execute(select(AttachmentRendition)).scalars().all())
+    assert rendition_count_before == 3
+
+    runner = admin_app.test_cli_runner()
+    result = runner.invoke(args=["cms", "media", "reindex"])
+    assert result.exit_code == 0, result.output
+
+    with db_session_factory() as db:
+        rendition_count_after = len(db.execute(select(AttachmentRendition)).scalars().all())
+    assert rendition_count_after == rendition_count_before
+
+
+def test_reindex_cli_unknown_site_errors(admin_app: Flask) -> None:
+    runner = admin_app.test_cli_runner()
+    result = runner.invoke(args=["cms", "media", "reindex", "--site", "nope"])
+    assert result.exit_code != 0
+    assert "no site with slug" in result.output.lower()
 
 
 def test_srcset_helper_returns_empty_for_non_image(

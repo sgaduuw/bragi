@@ -84,6 +84,7 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.contrib.analytics.admin.SessionLocal",
     "bragi.contrib.analytics.plugin.SessionLocal",
     "bragi.contrib.attachments.admin.SessionLocal",
+    "bragi.contrib.attachments.cli.SessionLocal",
     "bragi.contrib.attachments.delivery.SessionLocal",
     "bragi.contrib.attachments.plugin.SessionLocal",
     "bragi.contrib.audit.admin.SessionLocal",
