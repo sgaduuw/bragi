@@ -16,6 +16,7 @@ from flask import Blueprint, Response, abort, g
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.core.cache import apply_cache_policy
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.user import User
@@ -103,7 +104,6 @@ def feed_xml() -> ResponseReturnValue:
         parts.append(_entry_xml(post, author_name, base))
     parts.append("</feed>")
 
-    return Response(
-        "\n".join(parts),
-        mimetype="application/atom+xml",
-    )
+    response = Response("\n".join(parts), mimetype="application/atom+xml")
+    apply_cache_policy(response, "feed")
+    return response

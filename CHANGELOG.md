@@ -6,6 +6,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-14
+
+### Added
+- HTTP cache management on the delivery app (#33). All 2xx HTML
+  responses now carry `Cache-Control: public, max-age=60,
+  s-maxage=300` by default; post and page views additionally
+  emit `ETag` + `Last-Modified` and honour `If-None-Match` /
+  `If-Modified-Since` (returning a body-less 304 on a match).
+  The static SEO routes get longer policies (feed / sitemap:
+  10min shared; robots / security.txt: 24h). The admin app
+  forces `Cache-Control: private, no-store` on every response.
+  New hookspec `on_cache_purge(scope, key)` fires from post /
+  page lifecycle commits so a future CDN-invalidation plugin
+  has something to subscribe to; core ships no listener (it's a
+  zero-cost pass-through until somebody wires it).
+- Revision history for posts and pages (#32). New
+  `PostRevision` and `PageRevision` tables capture the pre-edit
+  state on every save (`title`, `slug`, `status`,
+  `body_markdown`, `body_html`, `body_excerpt`,
+  `meta_description`; pages additionally capture `parent_id`).
+  New admin views: `GET /admin/posts/<id>/revisions` list,
+  `GET /admin/posts/<id>/revisions/<rev_id>` side-by-side detail,
+  `POST /admin/posts/<id>/revisions/<rev_id>/restore` (which
+  itself writes a fresh revision of the now-current state so
+  restores stay reversible). Mirror routes for pages. Migration
+  `add_revisions` (revision `c9d608f87623`).
+
 ## [1.0.1] - 2026-05-14
 
 ### Fixed

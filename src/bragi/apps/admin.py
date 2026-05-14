@@ -14,6 +14,7 @@ from flask import Flask, session
 
 from bragi import __version__
 from bragi.cli import cms
+from bragi.core.cache import CACHE_POLICIES
 from bragi.core.middleware.csrf import register_csrf
 from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
@@ -22,6 +23,10 @@ from bragi.core.render.transforms import TransformRegistry
 from bragi.core.security import is_superuser
 from bragi.plugins import create_plugin_manager
 from bragi.settings import settings
+
+# Pulled out so the after_request hook stays a one-liner. The
+# admin response should never be cacheable, even on 3xx/4xx.
+CACHE_POLICIES_ADMIN = CACHE_POLICIES["admin"]
 
 
 def create_admin_app() -> Flask:
@@ -73,6 +78,14 @@ def create_admin_app() -> Flask:
     # but the request shape is predictable downstream).
     register_site_resolver(app)
     register_csrf(app)
+
+    # Every admin response is auth-bearing; force `no-store` on
+    # every status code so no intermediary or browser caches a
+    # page that includes session state.
+    @app.after_request
+    def _force_admin_no_store(response):  # type: ignore[no-untyped-def]
+        response.headers["Cache-Control"] = CACHE_POLICIES_ADMIN
+        return response
 
     # Register the top-level `cms` CLI group so plugin commands
     # land under `flask --app bragi.apps.admin cms <subcommand>`.

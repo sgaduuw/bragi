@@ -15,6 +15,7 @@ from flask import Blueprint, Response, abort, g
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.core.cache import apply_cache_policy
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post, PostStatus
 
@@ -60,4 +61,6 @@ def sitemap_xml() -> ResponseReturnValue:
         lines.append(f"    <lastmod>{lastmod}</lastmod>")
         lines.append("  </url>")
     lines.append("</urlset>")
-    return Response("\n".join(lines), mimetype="application/xml")
+    response = Response("\n".join(lines), mimetype="application/xml")
+    apply_cache_policy(response, "sitemap")
+    return response

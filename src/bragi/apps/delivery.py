@@ -12,6 +12,7 @@ import jinja2
 from flask import Flask
 
 from bragi import __version__
+from bragi.core.cache import apply_cache_policy
 from bragi.core.middleware.redirects import register_redirect_handler
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
@@ -60,6 +61,18 @@ def create_delivery_app() -> Flask:
     # chain on every 404 before falling through to a real Not Found.
     register_site_resolver(app)
     register_redirect_handler(app)
+
+    # Default cache policy for delivery HTML. Views that need a
+    # different profile (sitemap, feed, robots, security.txt) set
+    # `Cache-Control` themselves; `apply_cache_policy` respects an
+    # existing header. 3xx and 4xx responses skip the header — a
+    # 301 should not be cached as aggressively as a successful
+    # GET, and a 404 served by the redirect chain may still mutate.
+    @app.after_request
+    def _add_default_cache_headers(response):  # type: ignore[no-untyped-def]
+        if 200 <= response.status_code < 300:
+            apply_cache_policy(response, "default-html")
+        return response
 
     pm.hook.on_app_init(app=app, registry=registry)
 
