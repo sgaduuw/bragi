@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
+from bragi.core.htmx import is_htmx
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.render.markdown import make_excerpt, render_markdown
@@ -41,6 +42,10 @@ def _form_from_request() -> dict[str, str]:
 def list_posts() -> ResponseReturnValue:
     with SessionLocal() as db:
         posts = db.execute(select(Post).order_by(Post.created_at.desc())).scalars().all()
+    # htmx dispatch: return just the table partial for hx-get
+    # refreshes; full page for cold loads (and crawlers).
+    if is_htmx():
+        return render_template("admin/_post_list_table.html", posts=posts)
     return render_template("admin/list.html", posts=posts)
 
 

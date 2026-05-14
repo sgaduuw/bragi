@@ -253,3 +253,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with a far-future `Cache-Control` (content-addressed; bytes
   never change for a given key). Admin nav entry under content.
   Audit emits for `attachment.uploaded` / `attachment.deleted`.
+- htmx partial-rendering convention on the admin app. The post
+  list view dispatches on `HX-Request: true` (via
+  `bragi.core.htmx.is_htmx`) and returns just the table fragment
+  for htmx requests; cold loads still get the full page with
+  chrome. Partial template naming convention: a `_<name>.html`
+  partial wrapped in a stable id, included by the full-page
+  sibling so the markup isn't duplicated. Admin base template
+  loads htmx from a CDN; a self-hosted bundle + Subresource
+  Integrity hash is a follow-up. Documented in CLAUDE.md.

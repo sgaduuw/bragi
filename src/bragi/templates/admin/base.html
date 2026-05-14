@@ -67,5 +67,9 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
+  {# htmx, CDN-hosted for v1. Self-hosted bundle (and a Subresource
+     Integrity hash) is a follow-up; the admin is gated behind auth
+     so the surface is the operator's own browser, not the public. #}
+  <script src="https://unpkg.com/htmx.org@1.9.10" crossorigin="anonymous"></script>
 </body>
 </html>
