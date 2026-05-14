@@ -35,10 +35,17 @@ class Settings(BaseSettings):
     delivery_host: str = "0.0.0.0"
     delivery_port: int = 8002
 
-    # Attachments storage. v1 backend is local disk; S3 / renditions
-    # land as `bragi.contrib.media` (per CONTEXT.md "Deferred surfaces").
+    # Attachments storage. Local-disk backend by default; S3 / R2 /
+    # GCS plug in via `register_storage_backend`.
     attachments_root: str = "var/uploads"
     attachments_max_bytes: int = 20 * 1024 * 1024  # 20 MiB
+
+    # Image rendition ladder. Each width below the source produces
+    # one `AttachmentRendition` row on upload; widths >= source are
+    # skipped (no upscale). The default ladder covers the typical
+    # `<picture srcset>` slots: thumbnail, medium, large. Override
+    # with `BRAGI_ATTACHMENT_RENDITION_WIDTHS='[256,640,1280]'`.
+    attachment_rendition_widths: list[int] = [320, 800, 1600]
 
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake

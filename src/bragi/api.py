@@ -204,16 +204,22 @@ class ImageMetadata:
 class ImageProcessorSpec:
     """Registration record for an image processor.
 
-    Phase 1 contract: only `probe` is required; it returns a
-    width / height / format triple or None for non-image blobs.
-    Phase 2 will extend the spec with `resize` and friends for
-    rendition generation; existing plugins that only implement
-    probe will get default-skip behaviour for renditions.
+    `probe` is required; it returns a width / height / format
+    triple or None for non-image blobs.
+
+    `resize` is optional: returns the rescaled bytes (preserving
+    aspect ratio, fitting within `target_width`) or None if the
+    processor declines (e.g. plugin only implements probe, or the
+    source is smaller than target). The `bragi.contrib.attachments`
+    plugin uses this on upload to generate the rendition ladder
+    declared in `Settings.attachment_rendition_widths`.
     """
 
     name: str  # 'pillow', 'libvips'
     can_process: Callable[[str], bool]  # given a content_type, True if we handle it
     probe: Callable[[bytes], ImageMetadata | None]
+    resize: Callable[[bytes, int], bytes | None] | None = None
+    # (source_bytes, target_width) -> rescaled bytes or None
 
 
 # ============================================================

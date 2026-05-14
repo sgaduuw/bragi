@@ -33,6 +33,7 @@ from werkzeug.utils import secure_filename
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
+from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.site import Site
 from bragi.core.storage import resolve as resolve_storage
 from bragi.settings import settings
@@ -173,6 +174,7 @@ def upload_attachment() -> ResponseReturnValue:
         # processor's can_process returns False, lookup yields None).
         width: int | None = None
         height: int | None = None
+        processor = None
         registry = current_app.extensions.get("registry")
         if registry is not None:
             processor = registry.image_processor_for(content_type)
@@ -194,17 +196,63 @@ def upload_attachment() -> ResponseReturnValue:
             uploaded_by=actor_id if isinstance(actor_id, int) else None,
         )
         db.add(attachment)
-        db.commit()
+        db.flush()  # populate attachment.id for the rendition FKs
         new_id = attachment.id
+
+        # Rendition ladder: generate one rendition per configured
+        # width below the source. Synchronous on upload per #41's
+        # phase 2 design note ("start synchronous, revisit if it
+        # hurts"). Failures are logged and skipped so a single bad
+        # decode never blocks the upload.
+        rendition_count = 0
+        if (
+            processor is not None
+            and processor.resize is not None
+            and width is not None
+            and height is not None
+        ):
+            for target_width in settings.attachment_rendition_widths:
+                if target_width >= width:
+                    continue
+                resized = processor.resize(data, target_width)
+                if resized is None:
+                    continue
+                resized_meta = processor.probe(resized)
+                if resized_meta is None:
+                    continue
+                resized_key, resized_size = backend.store(site.slug, resized)
+                db.add(
+                    AttachmentRendition(
+                        attachment_id=new_id,
+                        size_label=f"{target_width}w",
+                        storage_key=resized_key,
+                        content_type=content_type,
+                        width=resized_meta.width,
+                        height=resized_meta.height,
+                        bytes_size=resized_size,
+                    )
+                )
+                rendition_count += 1
+
+        db.commit()
 
     audit(
         "attachment.uploaded",
         target_type="attachment",
         target_id=new_id,
         site_id=site_id,
-        extra={"filename": filename, "size_bytes": size},
+        extra={
+            "filename": filename,
+            "size_bytes": size,
+            "renditions": rendition_count,
+        },
     )
-    flash(f"Uploaded {filename}.", "success")
+    flash(
+        f"Uploaded {filename}."
+        if rendition_count == 0
+        else f"Uploaded {filename} ({rendition_count} renditions).",
+        "success",
+    )
     return redirect(url_for("attachment_admin.list_attachments"))
 
 
@@ -282,24 +330,46 @@ def delete_attachment(attachment_id: int) -> ResponseReturnValue:
         storage_key = row.storage_key
         filename = row.filename
         site_id = row.site_id
+        # Collect rendition storage_keys before CASCADE removes the
+        # rows. We refcount them against both tables after commit
+        # and unlink orphans.
+        rendition_keys = [
+            r.storage_key
+            for r in db.execute(
+                select(AttachmentRendition).where(AttachmentRendition.attachment_id == row.id)
+            ).scalars()
+        ]
         db.delete(row)
         db.commit()
 
-        # If no other Attachment row points at the same bytes, free
-        # the on-disk file. Otherwise leave it so the remaining
-        # rows still resolve.
-        refcount = db.execute(
-            select(Attachment).where(Attachment.storage_key == storage_key).limit(1)
-        ).scalar_one_or_none()
-        if refcount is None:
-            resolve_storage(current_app).remove(site_slug, storage_key)
+        # If no other row across attachments or renditions points
+        # at a key, free the on-disk file. Otherwise leave it; some
+        # surviving row still resolves through that key.
+        backend = resolve_storage(current_app)
+        for key in {storage_key, *rendition_keys}:
+            still_used = (
+                db.execute(
+                    select(Attachment).where(Attachment.storage_key == key).limit(1)
+                ).scalar_one_or_none()
+                or db.execute(
+                    select(AttachmentRendition)
+                    .where(AttachmentRendition.storage_key == key)
+                    .limit(1)
+                ).scalar_one_or_none()
+            )
+            if still_used is None:
+                backend.remove(site_slug, key)
 
     audit(
         "attachment.deleted",
         target_type="attachment",
         target_id=attachment_id,
         site_id=site_id,
-        extra={"filename": filename, "storage_key": storage_key},
+        extra={
+            "filename": filename,
+            "storage_key": storage_key,
+            "renditions": len(rendition_keys),
+        },
     )
     flash(f"Deleted {filename}.", "success")
     return redirect(url_for("attachment_admin.list_attachments"))
