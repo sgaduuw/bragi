@@ -31,6 +31,7 @@ from bragi.api import (
     NavItem,
     OAuthProviderSpec,
     RedirectTarget,
+    SearchBackendSpec,
     StorageBackendSpec,
 )
 from bragi.core.registry import Registry
@@ -309,6 +310,25 @@ def register_image_processor() -> ImageProcessorSpec:
     Resolution: the first processor whose `can_process(content_type)`
     returns True wins; Pillow (registered by
     `bragi.contrib.attachments`) is the fallback.
+    """
+    ...
+
+
+# ============================================================
+# Search
+# ============================================================
+
+
+@hookspec
+def register_search_backend() -> SearchBackendSpec:
+    """Register a search backend.
+
+    The day-one default is SQLite FTS5 (shipped by
+    `bragi.contrib.search`); Meilisearch / Tantivy / Elasticsearch
+    backends ship as separate plugins returning their own spec
+    from this hook. Resolution: the first non-`sqlite-fts5`
+    backend if any (installing a third-party one signals operator
+    intent), else the FTS5 fallback.
     """
     ...
 

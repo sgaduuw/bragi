@@ -82,6 +82,8 @@ def create_delivery_app() -> Flask:
         registry.add_storage_backend(spec)
     for spec in pm.hook.register_image_processor():
         registry.add_image_processor(spec)
+    for spec in pm.hook.register_search_backend():
+        registry.add_search_backend(spec)
 
     # Mount plugin-contributed delivery Blueprints. Each content-type
     # plugin owns its public URL space; the delivery app stays empty

@@ -6,6 +6,31 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- SQLite FTS5 search backend (#43). New `bragi.contrib.search`
+  ships the day-one default backend (`name="sqlite-fts5"`),
+  registered via the `register_search_backend` hookspec that
+  CONTEXT.md reserved. Two FTS5 virtual tables (`posts_fts`,
+  `pages_fts`) hold per-row inverted indexes over `title`, `body`,
+  `meta_description`, `excerpt` with `porter unicode61`
+  tokenisation; the body is fed through `strip_code_fences` first
+  so language hints in fenced blocks don't pollute the index.
+  Lifecycle is wired through `on_post_published`,
+  `on_post_updated`, and `on_post_deleted` (which page admin reuses
+  for pages, per the existing convention): the index follows
+  publish/unpublish/delete events. `GET /search?q=<query>&page=N`
+  renders results full-page on cold load and a partial on htmx
+  swaps, with `<mark>`-decorated `snippet()` excerpts and
+  bm25-sorted ranking; the route is mounted on the delivery app
+  with the standard `default-html` cache policy. CLI `cms search
+  reindex [--site <slug>] [--dry-run]` rebuilds the index from
+  scratch (drop-and-rebuild is fine at personal-blog scale).
+  `Registry.search_backend()` resolves the active backend with a
+  priority rule that lets a third-party backend override
+  `sqlite-fts5` by registering with any other `name`.
+  Migration `add_search_fts` (rev `1eff692ffe2b`) creates the
+  FTS5 tables; reversible.
+
 ## [1.3.0] - 2026-05-14
 
 ### Added

@@ -223,6 +223,67 @@ class ImageProcessorSpec:
 
 
 # ============================================================
+# Search
+# ============================================================
+
+
+@dataclass
+class SearchHit:
+    """One result row from a search backend.
+
+    The `scope` field discriminates posts from pages (and from
+    any future indexable content type) so a mixed result list
+    can dispatch URL building correctly.
+    """
+
+    scope: str  # 'post' | 'page' | ...
+    entity_id: int  # primary key in the scope's content table
+    site_id: int
+    title: str
+    slug: str
+    snippet: str  # query-aware excerpt with <mark> markers
+    score: float  # lower is better (bm25 convention)
+
+
+@dataclass
+class SearchResults:
+    """A paginated bundle of search hits."""
+
+    hits: list[SearchHit] = field(default_factory=list)
+    total: int = 0  # total matches across all pages
+    page: int = 1
+    page_size: int = 20
+    query: str = ""
+
+
+@dataclass
+class SearchBackendSpec:
+    """Registration record for a search backend.
+
+    A backend is responsible for maintaining its own index in
+    response to `index` / `remove` calls fired from the content
+    lifecycle, and serving paginated results from `search`.
+    `reindex_all` is the operator-facing path used by the
+    `cms search reindex` CLI; backends free to implement it as a
+    bulk-load over the same `index` machinery.
+
+    The contract is intentionally minimal so a future Meilisearch
+    or Tantivy plugin can drop in by implementing the four
+    callables.
+    """
+
+    name: str  # 'sqlite-fts5', 'meilisearch', 'tantivy'
+    index: Callable[[str, int, dict[str, Any]], None]
+    # (scope, entity_id, fields) -> None; idempotent upsert
+    remove: Callable[[str, int], None]
+    # (scope, entity_id) -> None; missing rows are a no-op
+    search: Callable[[int, str, int, int], SearchResults]
+    # (site_id, query, page, page_size) -> SearchResults
+    reindex_all: Callable[[int | None], dict[str, int]]
+    # (optional site_id filter) -> {"posts": n, "pages": m}
+
+
+# ============================================================
 # Analytics
 # ============================================================
 
@@ -256,5 +317,8 @@ __all__ = [
     "NavItem",
     "OAuthProviderSpec",
     "RedirectTarget",
+    "SearchBackendSpec",
+    "SearchHit",
+    "SearchResults",
     "StorageBackendSpec",
 ]

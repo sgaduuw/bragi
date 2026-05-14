@@ -108,6 +108,8 @@ def create_admin_app() -> Flask:
         registry.add_storage_backend(spec)
     for spec in pm.hook.register_image_processor():
         registry.add_image_processor(spec)
+    for spec in pm.hook.register_search_backend():
+        registry.add_search_backend(spec)
 
     # Mount plugin-contributed Blueprints on the admin app.
     for bp in pm.hook.register_admin_blueprint():

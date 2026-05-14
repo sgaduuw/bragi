@@ -19,6 +19,7 @@ from bragi.api import (
     ImporterSpec,
     NavItem,
     OAuthProviderSpec,
+    SearchBackendSpec,
     StorageBackendSpec,
 )
 
@@ -34,6 +35,7 @@ class Registry:
     admin_nav: list[NavItem] = field(default_factory=list)
     storage_backends: list[StorageBackendSpec] = field(default_factory=list)
     image_processors: list[ImageProcessorSpec] = field(default_factory=list)
+    search_backends: list[SearchBackendSpec] = field(default_factory=list)
 
     def add_content_type(self, spec: ContentTypeSpec) -> None:
         self.content_types.append(spec)
@@ -55,6 +57,9 @@ class Registry:
 
     def add_image_processor(self, spec: ImageProcessorSpec) -> None:
         self.image_processors.append(spec)
+
+    def add_search_backend(self, spec: SearchBackendSpec) -> None:
+        self.search_backends.append(spec)
 
     def content_type(self, name: str) -> ContentTypeSpec | None:
         """Return the ContentTypeSpec named `name`, or None."""
@@ -84,3 +89,17 @@ class Registry:
             if spec.can_process(content_type):
                 return spec
         return None
+
+    def search_backend(self) -> SearchBackendSpec | None:
+        """Return the active search backend.
+
+        Priority: first non-`sqlite-fts5` backend (installing a
+        third-party search plugin signals operator intent to use
+        it), else the FTS5 fallback. None if no backend registered.
+        """
+        if not self.search_backends:
+            return None
+        for spec in self.search_backends:
+            if spec.name != "sqlite-fts5":
+                return spec
+        return self.search_backends[0]
