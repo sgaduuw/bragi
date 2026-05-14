@@ -33,6 +33,7 @@ PASSWORD = "correct-horse-battery-staple"
 
 @pytest.fixture
 def delivery_app(
+    patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
@@ -160,6 +161,7 @@ def test_404_response_has_no_cache_header(delivery_app: Flask) -> None:
 
 @pytest.fixture
 def admin_app(
+    patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
