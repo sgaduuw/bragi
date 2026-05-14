@@ -1,0 +1,71 @@
+# Example docker compose for bragi.
+#
+# Pulls the published images from GHCR rather than building from
+# source. The tag is parameterised via `BRAGI_TAG` (default
+# `latest`); pin to a specific release in production:
+#
+#   BRAGI_TAG=v1.1.0 docker compose up -d
+#
+# Companion file `docker/compose.dev.yml` builds the images
+# locally instead, for testing the container shape without a
+# GHCR pull.
+#
+# A reverse proxy in front (Caddy / nginx / Traefik) terminates
+# TLS and maps your real hostnames onto the admin (8001) and
+# delivery (8002) ports. The publish addresses bind to 127.0.0.1
+# so nothing reaches the public interface unless the proxy
+# routes it there.
+
+services:
+  # One-shot: run pending alembic migrations and exit. Both apps
+  # wait on this to complete successfully before starting, so a
+  # fresh deploy + a schema-bump deploy work the same way.
+  migrate:
+    image: ghcr.io/sgaduuw/bragi-admin:${BRAGI_TAG:-latest}
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      BRAGI_DATABASE_URL: sqlite:////data/bragi.db
+    volumes:
+      - bragi-data:/data
+    restart: "no"
+
+  admin:
+    image: ghcr.io/sgaduuw/bragi-admin:${BRAGI_TAG:-latest}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      # Required.
+      BRAGI_DATABASE_URL: sqlite:////data/bragi.db
+      BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
+      BRAGI_ATTACHMENTS_ROOT: /data/uploads
+      # Optional — uncomment + populate to enable.
+      # BRAGI_GITHUB_CLIENT_ID: ...
+      # BRAGI_GITHUB_CLIENT_SECRET: ...
+      # BRAGI_SECURITY_CONTACT: mailto:security@example.com
+    volumes:
+      - bragi-data:/data
+    restart: unless-stopped
+
+  delivery:
+    image: ghcr.io/sgaduuw/bragi-delivery:${BRAGI_TAG:-latest}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8002:8002"
+    environment:
+      BRAGI_DATABASE_URL: sqlite:////data/bragi.db
+      BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
+      BRAGI_ATTACHMENTS_ROOT: /data/uploads
+      # BRAGI_SECURITY_CONTACT: mailto:security@example.com
+    volumes:
+      - bragi-data:/data
+    restart: unless-stopped
+
+volumes:
+  # Shared between all three services: SQLite DB at /data/bragi.db
+  # plus uploaded attachments under /data/uploads/. Back this up.
+  bragi-data:
