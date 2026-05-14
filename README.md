@@ -6,14 +6,20 @@ citizen.
 
 ## Status
 
-Pre-1.0.0, under active development. The scaffolding is in place;
-the v1 built-in plugin set (Post, Page, Tags, GitHub auth, local
-bootstrap, Hugo / Ghost importers, redirects, analytics, Pygments
-code highlighting, sitemap / robots / security.txt, TipTap editor)
-is being built out as separate packages under `bragi.contrib.*`.
+1.1.0 shipped 2026-05-14. All day-one built-in plugins are in
+place: Post, Page, Tag, GitHub OAuth + local-credential auth
+(with `must_change` rotation), Hugo / Ghost importers, redirects
+with prefix / regex matching and slug-change auto-301,
+analytics (with UA classification), attachments, server-side
+sessions, audit log, Pygments highlighting, heading anchors,
+per-site `sitemap.xml` / `robots.txt` / `security.txt` / Atom
+`feed.xml`, BlogPosting JSON-LD, TipTap editor, per-site roles,
+post / page revision history, and HTTP cache management with an
+`on_cache_purge` plugin hookspec.
 
 Releases follow git-flow with `develop` as the default branch.
-v1.0.0 will tag the first feature-complete cut.
+Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
+`bragi-delivery:vX.Y.Z` on every tag push.
 
 ## What bragi is
 
@@ -44,6 +50,18 @@ v1.0.0 will tag the first feature-complete cut.
   importers preserve source URLs as redirect rows; resolution
   middleware runs on every public 404. `410 Gone` for tombstoned
   content.
+- **Revision history.** Every post / page save captures a
+  pre-edit snapshot in `post_revisions` / `page_revisions`.
+  Admin views list revisions, show a side-by-side with the live
+  row, and restore (with the restore itself recorded as a fresh
+  revision so it stays reversible).
+- **HTTP caching baked in.** Delivery 2xx HTML carries
+  `Cache-Control` (short browser cache, longer shared cache),
+  weak `ETag`, and `Last-Modified`; `If-None-Match` /
+  `If-Modified-Since` short-circuit to 304. Admin forces
+  `private, no-store`. The `on_cache_purge` plugin hookspec
+  fires on every content commit so a CDN invalidator has
+  something to subscribe to.
 
 ## What bragi is not
 
@@ -69,18 +87,31 @@ v1.0.0 will tag the first feature-complete cut.
 
 ## Importers
 
-v1 ships importers for:
+Both shipped in 1.0; both are idempotent via `Post.source_id`,
+so re-running the importer over an updated source tree updates
+rows in place rather than duplicating them.
 
-- **Hugo**: walks `content/`, parses TOML / YAML / JSON
-  frontmatter, translates common shortcodes
-  (`{{< figure >}}`, `{{< highlight >}}`, `{{< youtube >}}`) to
-  directive syntax, registers aliases as redirect rows.
-- **Ghost**: JSON export. Older posts (`markdown` field) import
-  directly; Mobiledoc / Lexical bodies pass through Ghost's HTML
-  renderer and convert to markdown via `markdownify`.
+- **Hugo**: walks `content/**/*.md` (skipping `_index.md`),
+  parses TOML or YAML frontmatter, and copies the markdown body
+  through verbatim. The same bragi markdown pipeline that runs
+  on native authoring then renders it, so no shortcode
+  translation step is needed. Every `aliases:` entry becomes a
+  301 Redirect from the legacy URL to the post's bragi
+  canonical (`/posts/<slug>/`). `tags:` lists upsert by slug.
+  CLI: `cms import hugo --site <slug> [--author <email>]
+  [--dry-run] <path>`.
+- **Ghost**: parses the single-file JSON export
+  (`db[0].data.posts`). Bodies arrive as HTML and convert to
+  markdown via `markdownify(heading_style="ATX")`; tags come
+  from `data.tags` + `data.posts_tags`; authors match existing
+  Users by email (else fall back to the first user). For every
+  published post a 301 from Ghost's permalink (`/<slug>/`) to
+  bragi's (`/posts/<slug>/`) lands so legacy bookmarks survive.
+  CLI: `cms import ghost --site <slug> [--author <email>]
+  [--dry-run] <path>`.
 
-WordPress (WXR XML) is the v1.1 priority. Notion / Substack /
-Medium are opportunistic.
+WordPress (WXR XML), Notion, Substack, and Medium are deferred
+to follow-up packages; no v1.x commitment.
 
 ## Quick start (development)
 
@@ -113,36 +144,50 @@ bragi/
 │   ├── hookspecs.py            # internal hookspec definitions
 │   ├── plugins.py              # PluginManager + entry-point discovery
 │   ├── settings.py             # Pydantic Settings
+│   ├── cli.py                  # `cms` top-level click group
 │   ├── apps/
 │   │   ├── admin.py            # create_admin_app
 │   │   └── delivery.py         # create_delivery_app
 │   ├── core/                   # shared, non-plugin code
 │   │   ├── models/             # SQLAlchemy models (single source of truth)
-│   │   ├── middleware/         # site resolver, auth, redirects, analytics
+│   │   ├── middleware/         # site_resolver, csrf, sessions, redirects
 │   │   ├── render/             # markdown + transform registries
-│   │   ├── auth/               # service, passwords, permissions
-│   │   ├── content/            # registry, publishing, slug
+│   │   ├── auth/               # internal auth helpers
+│   │   ├── content/            # content-type runtime helpers
+│   │   ├── audit.py            # AuditLog writer
+│   │   ├── cache.py            # Cache-Control / ETag / 304 helpers
+│   │   ├── db.py               # SessionLocal
 │   │   ├── htmx.py             # HX-Request dispatch helpers
-│   │   └── seo.py              # title/meta/canonical/og + JSON-LD
+│   │   ├── permissions.py      # per-site role enforcement
+│   │   ├── registry.py         # in-process Registry (content types, importers, nav, ...)
+│   │   ├── security.py         # current_user / is_superuser
+│   │   ├── seo.py              # title/meta/canonical/og helpers
+│   │   ├── storage.py          # attachment storage backend
+│   │   ├── text.py             # slugify
+│   │   └── useragent.py        # bot / browser / feed-reader classifier
 │   └── contrib/                # built-ins as plugins
-│       ├── post/
-│       ├── page/
-│       ├── tags/
-│       ├── auth_github/
-│       ├── auth_local/
-│       ├── redirects/
-│       ├── import_hugo/
-│       ├── import_ghost/
-│       ├── analytics/
-│       ├── code_highlight/
-│       ├── seo/                # sitemap, robots.txt, security.txt
-│       └── editor_tiptap/      # admin editor frontend
+│       ├── analytics/          # pageview sink + admin dashboard
+│       ├── anchors/            # heading id injection
+│       ├── attachments/        # upload + serve
+│       ├── audit/              # audit-log admin
+│       ├── auth_github/        # OAuth via Authlib
+│       ├── auth_local/         # email + password + must-change rotation
+│       ├── highlight/          # Pygments html transform
+│       ├── import_ghost/       # Ghost JSON importer
+│       ├── import_hugo/        # Hugo content-tree importer
+│       ├── page/               # nested page content type
+│       ├── post/               # post content type + tags + tiptap editor
+│       ├── redirects/          # resolve_redirect + admin + slug-change auto-301
+│       ├── seo/                # sitemap, robots.txt, security.txt, feed.xml
+│       ├── sessions/           # session admin (list / revoke)
+│       └── sites/              # Site CRUD admin + alias subcommands
 ├── alembic/                    # migrations
 ├── docker/                     # admin.Dockerfile, delivery.Dockerfile
 ├── .github/workflows/          # ci.yml, docker.yml
 └── tests/
     ├── unit/                   # pure logic, no DB
     ├── contrib/                # one file per built-in plugin
+    ├── core/                   # core middleware / cache / permissions tests
     └── integration/            # full stack lifecycle scenarios
 ```
 
