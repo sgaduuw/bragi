@@ -18,6 +18,20 @@ PUBLIC_ENDPOINTS: frozenset[str] = frozenset(
     {
         "auth_local.login",
         "auth_local.logout",
+        "auth_github.login",
+        "auth_github.callback",
+        "static",
+    }
+)
+
+# Endpoints reachable while `session["must_change_password"]` is
+# set. Anything else funnels back to the change-password form so a
+# user with a generated bootstrap password can't snoop around
+# before rotating.
+MUST_CHANGE_ALLOWED_ENDPOINTS: frozenset[str] = frozenset(
+    {
+        "auth_local.change_password",
+        "auth_local.logout",
         "static",
     }
 )
@@ -29,13 +43,19 @@ def _require_authentication() -> ResponseReturnValue | None:
     Redirects anonymous users to /auth/login, preserving the
     originally-requested path via ?next= so login can bounce them
     back. Logged-in users pass through; the route or its 404
-    handler then runs.
+    handler then runs. Users with a must-change flag are funnelled
+    to /auth/change-password and only let off that page once
+    they've rotated.
     """
     if request.endpoint in PUBLIC_ENDPOINTS:
         return None
-    if "user_id" in session:
-        return None
-    return redirect(url_for("auth_local.login", next=request.path))
+    if "user_id" not in session:
+        return redirect(url_for("auth_local.login", next=request.path))
+    if session.get("must_change_password"):
+        if request.endpoint in MUST_CHANGE_ALLOWED_ENDPOINTS:
+            return None
+        return redirect(url_for("auth_local.change_password"))
+    return None
 
 
 @hookimpl

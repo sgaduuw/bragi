@@ -46,5 +46,12 @@ class Settings(BaseSettings):
     security_contact: str | None = None
     security_expires_days: int = 365
 
+    # GitHub OAuth. Both must be set for the `Sign in with GitHub`
+    # button to appear; if either is unset the plugin still loads
+    # (the Blueprint is registered) but the login endpoint refuses
+    # to start a flow.
+    github_client_id: str | None = None
+    github_client_secret: str | None = None
+
 
 settings = Settings()

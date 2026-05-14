@@ -24,6 +24,7 @@ markdown-it-py = "^3.0"
 pygments = "^2.18"
 markdownify = "^0.13"
 click = "^8.1"
+requests = "^2.34.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
@@ -43,6 +44,7 @@ post = "bragi.contrib.post.plugin"
 page = "bragi.contrib.page.plugin"
 redirects = "bragi.contrib.redirects.plugin"
 auth_local = "bragi.contrib.auth_local.plugin"
+auth_github = "bragi.contrib.auth_github.plugin"
 sites = "bragi.contrib.sites.plugin"
 sessions = "bragi.contrib.sessions.plugin"
 audit = "bragi.contrib.audit.plugin"
@@ -89,7 +91,7 @@ disable_error_code = ["empty-body"]
 
 # Libraries without type stubs.
 [[tool.mypy.overrides]]
-module = ["pygments.*"]
+module = ["pygments.*", "authlib.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

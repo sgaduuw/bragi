@@ -396,3 +396,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to `bragi.core.text.slugify` so post / tag / anchor code can
   reuse it without crossing the plugin boundary. Migration
   `add_tags` (revision `46fe76487384`).
+- `LocalCredential.must_change` is now enforced. After
+  successful login, a credential row with `must_change=True`
+  redirects to `/auth/change-password` instead of the original
+  `next`; the admin guard only releases the user from that page
+  once the password has been rotated. `cms user create` gained
+  a `--must-change/--no-must-change` flag that defaults to ON
+  when the password was generated (typical bootstrap path) and
+  OFF when the operator supplied one explicitly.
+- Per-site authorisation via `UserSiteRole` + the
+  `bragi.core.permissions` helper. Three ranks
+  (`admin > editor > author`); `is_superuser=True` short-circuits
+  every check. The post admin guards now read:
+  list / new / edit-own require `author+`; edit-any and delete
+  require `editor+`. New CLI subcommand `cms user grant` upserts
+  the `(user_id, site_id)` row. Migration `add_user_site_roles`
+  (revision `2ecc724d6dfb`).
+- GitHub OAuth via Authlib + `UserIdentity` table.
+  `bragi.contrib.auth_github` plugin registers an OAuth provider
+  spec and a Blueprint with `/auth/github/login` and
+  `/auth/github/callback`. Callback fetches the GitHub profile,
+  reuses an existing identity by `(provider, provider_user_id)`
+  or falls back to email-match for operator-seeded users, then
+  creates a new User if neither matched. Fires
+  `pm.hook.on_user_login(user=, method='github', request=)`.
+  Two new settings: `BRAGI_GITHUB_CLIENT_ID` /
+  `BRAGI_GITHUB_CLIENT_SECRET`; both must be set for the flow
+  to start (the login endpoint returns 503 when either is
+  unset). New runtime dependency: `requests` (Authlib's Flask
+  integration imports it lazily). Migration
+  `add_user_identities` (revision `48e608e60109`).

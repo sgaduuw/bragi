@@ -31,6 +31,7 @@ from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from bragi.core.models.user_site_role import UserSiteRole
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -46,14 +47,17 @@ def admin_app(
     db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
-    db_session.add(
-        Site(
-            slug="blog",
-            hostname="blog.example.com",
-            title="Blog",
-            canonical_url="https://blog.example.com",
-        )
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
     )
+    db_session.add(site)
+    db_session.flush()
+    # Editor on the seeded site so post admin role-checks pass; the
+    # superuser-only audit admin still 403s as the tests expect.
+    db_session.add(UserSiteRole(user_id=user.id, site_id=site.id, role="editor"))
     db_session.commit()
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
@@ -64,6 +68,7 @@ def admin_app(
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.permissions.SessionLocal", db_session_factory)
 
     yield create_admin_app()
 

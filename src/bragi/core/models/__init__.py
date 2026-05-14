@@ -24,6 +24,8 @@ from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.models.tag import Tag, post_tags
 from bragi.core.models.user import User
+from bragi.core.models.user_identity import UserIdentity
+from bragi.core.models.user_site_role import Role, UserSiteRole
 
 __all__ = [
     "AnalyticsEvent",
@@ -38,10 +40,13 @@ __all__ = [
     "PostStatus",
     "Redirect",
     "RedirectSource",
+    "Role",
     "Session",
     "Site",
     "SiteAlias",
     "Tag",
     "User",
+    "UserIdentity",
+    "UserSiteRole",
     "post_tags",
 ]

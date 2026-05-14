@@ -43,7 +43,7 @@ def admin_app(
     db_session.add(site)
     db_session.flush()
 
-    user = User(email=EMAIL, display_name="Ada Lovelace", is_active=True)
+    user = User(email=EMAIL, display_name="Ada Lovelace", is_active=True, is_superuser=True)
     db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))

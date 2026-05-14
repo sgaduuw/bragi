@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from flask import (
     Blueprint,
+    abort,
     current_app,
     flash,
     redirect,
@@ -29,7 +30,10 @@ from bragi.core.htmx import is_htmx
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
+from bragi.core.models.user_site_role import UserSiteRole
+from bragi.core.permissions import has_role, require_role
 from bragi.core.render.markdown import make_excerpt, render_markdown
+from bragi.core.security import current_user
 from bragi.core.text import slugify
 
 bp = Blueprint(
@@ -95,8 +99,27 @@ def _sync_post_tags(
     post.tags = tags
 
 
+def _user_can_act_anywhere(min_role: str) -> bool:
+    """True when the active user has at least `min_role` on at least
+    one site (or is superuser). Used by list / new gates."""
+    user = current_user()
+    if user is None:
+        return False
+    if user.is_superuser:
+        return True
+    with SessionLocal() as db:
+        rows = (
+            db.execute(select(UserSiteRole).where(UserSiteRole.user_id == user.id))
+            .scalars()
+            .all()
+        )
+    return any(has_role(min_role, row.site_id) for row in rows)
+
+
 @bp.route("/", methods=["GET"])
 def list_posts() -> ResponseReturnValue:
+    if not _user_can_act_anywhere("author"):
+        abort(403)
     with SessionLocal() as db:
         posts = db.execute(select(Post).order_by(Post.created_at.desc())).scalars().all()
     # htmx dispatch: return just the table partial for hx-get
@@ -108,6 +131,8 @@ def list_posts() -> ResponseReturnValue:
 
 @bp.route("/new", methods=["GET", "POST"])
 def new_post() -> ResponseReturnValue:
+    if not _user_can_act_anywhere("author"):
+        abort(403)
     if request.method == "GET":
         return render_template("admin/edit.html", post=None, form={})
 
@@ -127,6 +152,8 @@ def new_post() -> ResponseReturnValue:
         body_markdown = form["body_markdown"]
         new_status = form["status"]
         site_id = site.id
+        if not has_role("author", site_id):
+            abort(403)
         new_post_row = Post(
             site_id=site_id,
             slug=form["slug"],
@@ -170,6 +197,17 @@ def edit_post(post_id: int) -> ResponseReturnValue:
         if post is None:
             flash("Post not found.", "error")
             return redirect(url_for("post_admin.list_posts"))
+
+        # Authors can edit their own posts; editors+ can edit any
+        # post on their sites. Anything else is 403. Superusers
+        # short-circuit both checks via `has_role`.
+        active = current_user()
+        is_own = bool(active and active.id == post.author_id)
+        if not (
+            (is_own and has_role("author", post.site_id))
+            or has_role("editor", post.site_id)
+        ):
+            abort(403)
 
         if request.method == "GET":
             form = {
@@ -242,6 +280,7 @@ def delete_post(post_id: int) -> ResponseReturnValue:
         if post is None:
             flash("Post not found.", "error")
             return redirect(url_for("post_admin.list_posts"))
+        require_role("editor", post.site_id)
         title = post.title
         deleted_site_id = post.site_id
         deleted_slug = post.slug
