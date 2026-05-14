@@ -62,6 +62,13 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   `private, no-store`. The `on_cache_purge` plugin hookspec
   fires on every content commit so a CDN invalidator has
   something to subscribe to.
+- **Push-crawl via IndexNow.** Post / page publish, update, and
+  delete fire a fire-and-forget POST to the configured IndexNow
+  endpoint so participating search engines (Bing, Yandex, Seznam,
+  Naver, ...) hear about the change immediately. Per-site key
+  bootstrapped with `cms indexnow setup --site <slug>`; the
+  verification key file lives at `/<key>.txt` on the delivery
+  app.
 
 ## What bragi is not
 
@@ -194,6 +201,7 @@ bragi/
 │       ├── highlight/          # Pygments html transform
 │       ├── import_ghost/       # Ghost JSON importer
 │       ├── import_hugo/        # Hugo content-tree importer
+│       ├── indexnow/           # IndexNow push-crawl on publish/update/delete
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301
