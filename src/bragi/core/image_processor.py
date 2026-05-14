@@ -53,8 +53,47 @@ def _probe(data: bytes) -> ImageMetadata | None:
         return None
 
 
+def _resize(data: bytes, target_width: int) -> bytes | None:
+    """Rescale `data` to fit `target_width`, preserving aspect ratio.
+
+    Returns None if the source can't be decoded or is already at
+    or below `target_width` (no point storing a duplicate). The
+    output format mirrors the input so a PNG stays a PNG, a JPEG
+    stays a JPEG: re-encoding to a different format here would
+    leak through `Attachment.content_type` and break the
+    `<picture>` srcset contract.
+    """
+    if target_width <= 0:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            if img.width <= target_width:
+                # Don't upscale; the source already covers this slot.
+                return None
+            # Preserve aspect ratio. thumbnail() rescales in place
+            # and is high-quality (LANCZOS by default in Pillow 10+).
+            target_height = round(img.height * target_width / img.width)
+            resized = img.copy()
+            resized.thumbnail((target_width, target_height))
+            out = io.BytesIO()
+            save_format = img.format or "PNG"
+            # JPEGs default to quality=75; bump to 85 for sharper
+            # renditions at the cost of a few KB. Other formats
+            # use Pillow defaults.
+            save_kwargs: dict[str, int | bool] = {}
+            if save_format == "JPEG":
+                save_kwargs["quality"] = 85
+                save_kwargs["optimize"] = True
+            resized.save(out, format=save_format, **save_kwargs)
+            return out.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        LOG.info("Pillow resize to %dw failed: %s", target_width, exc)
+        return None
+
+
 PillowImageProcessor = ImageProcessorSpec(
     name="pillow",
     can_process=_can_process,
     probe=_probe,
+    resize=_resize,
 )

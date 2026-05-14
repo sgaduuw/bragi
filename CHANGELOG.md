@@ -7,6 +7,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Image rendition ladder (#41 Phase 2). Uploads now generate one
+  `AttachmentRendition` per configured target width (default
+  `[320, 800, 1600]`, override via
+  `BRAGI_ATTACHMENT_RENDITION_WIDTHS`). Widths at or above the
+  source skip (no upscale); the ladder runs synchronously on
+  upload because the day-one workload is small and a job queue
+  would be premature. `ImageProcessorSpec` gains an optional
+  `resize(data, target_width) -> bytes | None`; the default
+  Pillow processor implements it with aspect-preserving thumbnail
+  scaling (LANCZOS, quality 85 for JPEGs). New Jinja global
+  `srcset_for(attachment)` emits a `<picture srcset>`-compatible
+  value spanning each rendition plus the original. The delivery
+  route at `/attachments/<key>` now also serves rendition bytes
+  (matched against `AttachmentRendition.storage_key`, joined to
+  the parent attachment for per-site isolation). Delete cascades
+  the rendition rows and unlinks orphan storage keys across both
+  tables. Migration `add_attachment_renditions`
+  (rev `25c6f95918c4`).
 - Media library foundation (#41 Phase 1). The `Attachment` model
   gains `width`, `height`, `alt_text`, `title`, `focal_x`,
   `focal_y` columns; image uploads now populate width / height

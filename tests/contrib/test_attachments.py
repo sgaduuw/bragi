@@ -27,6 +27,7 @@ from bragi.apps.admin import create_admin_app
 from bragi.apps.delivery import create_delivery_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.attachment import Attachment
+from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
@@ -85,6 +86,7 @@ def admin_app(
 
 @pytest.fixture
 def delivery_app(
+    patched_session_locals: sessionmaker[Session],
     tmp_attachments_root: Path,
     db_session: Session,
     db_session_factory: sessionmaker[Session],
@@ -688,3 +690,310 @@ def test_registry_image_processor_handles_image_types(admin_app: Flask) -> None:
     assert registry.image_processor_for("image/png") is not None
     assert registry.image_processor_for("image/jpeg") is not None
     assert registry.image_processor_for("application/pdf") is None
+
+
+# --------------------------- renditions (phase 2) ---------------------------
+
+
+def test_upload_image_generates_rendition_ladder(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """Source wider than every ladder width: every slot fills."""
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=2000, height=1500)
+    resp = client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "large.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        attachment = db.execute(select(Attachment)).scalar_one()
+        renditions = (
+            db.execute(
+                select(AttachmentRendition)
+                .where(AttachmentRendition.attachment_id == attachment.id)
+                .order_by(AttachmentRendition.width)
+            )
+            .scalars()
+            .all()
+        )
+    # Default ladder is [320, 800, 1600]; all below source's 2000.
+    assert [r.size_label for r in renditions] == ["320w", "800w", "1600w"]
+    assert [r.width for r in renditions] == [320, 800, 1600]
+    # Heights are aspect-preserving rescales of 1500.
+    assert renditions[0].height == round(1500 * 320 / 2000)
+    # Each rendition's bytes are on disk under <slug>/<key[:2]>/<key>.
+    for r in renditions:
+        on_disk = tmp_attachments_root / "blog" / r.storage_key[:2] / r.storage_key
+        assert on_disk.exists()
+        assert on_disk.stat().st_size == r.bytes_size
+
+
+def test_upload_skips_widths_at_or_above_source(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """A 600w source produces only the 320w rendition (800 and 1600 skip)."""
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=600, height=400)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "small.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+    assert [r.size_label for r in rows] == ["320w"]
+
+
+def test_upload_non_image_creates_no_renditions(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(b"hello text"), "note.txt"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+    assert rows == []
+
+
+def test_upload_with_custom_ladder(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ladder is configurable; override at runtime and observe."""
+    monkeypatch.setattr(
+        "bragi.settings.settings.attachment_rendition_widths",
+        [100, 200],
+    )
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=500, height=400)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "img.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    with db_session_factory() as db:
+        rows = (
+            db.execute(select(AttachmentRendition).order_by(AttachmentRendition.width))
+            .scalars()
+            .all()
+        )
+    assert [r.size_label for r in rows] == ["100w", "200w"]
+
+
+def test_delete_cascades_renditions_and_unlinks_storage(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=2000, height=1500)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "delete-me.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    with db_session_factory() as db:
+        attachment = db.execute(select(Attachment)).scalar_one()
+        aid = attachment.id
+        parent_key = attachment.storage_key
+        rendition_keys = [
+            r.storage_key
+            for r in db.execute(
+                select(AttachmentRendition).where(AttachmentRendition.attachment_id == aid)
+            ).scalars()
+        ]
+
+    assert len(rendition_keys) == 3
+    # All files exist before delete.
+    for key in {parent_key, *rendition_keys}:
+        on_disk = tmp_attachments_root / "blog" / key[:2] / key
+        assert on_disk.exists(), f"expected {key} on disk before delete"
+
+    token = csrf_token(client, path="/admin/attachments/")
+    client.post(
+        f"/admin/attachments/{aid}/delete",
+        data={"_csrf_token": token},
+    )
+
+    with db_session_factory() as db:
+        assert db.execute(select(Attachment)).scalars().first() is None
+        assert db.execute(select(AttachmentRendition)).scalars().first() is None
+    for key in {parent_key, *rendition_keys}:
+        on_disk = tmp_attachments_root / "blog" / key[:2] / key
+        assert not on_disk.exists(), f"{key} should have been unlinked"
+
+
+def test_delivery_serves_rendition_by_storage_key(
+    admin_app: Flask,
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """A rendition's key works against the same /attachments route."""
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=1200, height=800)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "pic.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    with db_session_factory() as db:
+        rendition = db.execute(
+            select(AttachmentRendition).where(AttachmentRendition.size_label == "320w")
+        ).scalar_one()
+
+    delivery_client = delivery_app.test_client()
+    resp = delivery_client.get(
+        f"/attachments/{rendition.storage_key}",
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"].startswith("image/png")
+    assert len(resp.data) == rendition.bytes_size
+
+
+def test_delivery_rendition_cross_site_isolation(
+    admin_app: Flask,
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """A rendition under site A is not reachable on site B."""
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=1200, height=800)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "pic.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    with db_session_factory() as db:
+        rendition = db.execute(select(AttachmentRendition).limit(1)).scalar_one()
+
+    delivery_client = delivery_app.test_client()
+    resp = delivery_client.get(
+        f"/attachments/{rendition.storage_key}",
+        headers={"Host": "other.example.com"},
+    )
+    assert resp.status_code == 404
+
+
+def test_srcset_helper_emits_ordered_parts(
+    admin_app: Flask,
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/attachments/new")
+    data = _make_png(width=1200, height=900)
+    client.post(
+        "/admin/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "pic.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    with db_session_factory() as db:
+        attachment = db.execute(select(Attachment)).scalar_one()
+
+    from bragi.contrib.attachments.plugin import srcset_for
+
+    # Run inside a request context so url_for resolves.
+    with delivery_app.test_request_context("/"):
+        value = srcset_for(attachment)
+    parts = [p.strip() for p in value.split(",")]
+    # Widths: 320, 800 (1600 skipped because source is 1200), then
+    # the original at 1200w.
+    descriptors = [p.split()[-1] for p in parts]
+    assert descriptors == ["320w", "800w", "1200w"]
+
+
+def test_srcset_helper_returns_empty_for_non_image(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    # Plant a non-image Attachment by hand.
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="doc.pdf",
+            content_type="application/pdf",
+            size_bytes=42,
+            storage_key="b" * 64,
+        )
+        db.add(att)
+        db.commit()
+        attachment_id = att.id
+
+    from bragi.contrib.attachments.plugin import srcset_for
+
+    with delivery_app.test_request_context("/"), db_session_factory() as db:
+        attachment = db.get(Attachment, attachment_id)
+        value = srcset_for(attachment)
+    assert value == ""
