@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-14
+
 ### Added
 - WordPress (WXR) importer (#39). New
   `bragi.contrib.import_wordpress` reads a WP export, lands posts
