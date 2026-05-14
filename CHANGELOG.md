@@ -7,6 +7,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Bulk alt-text editing + reindex CLI (#41 Phase 3). The
+  attachments admin list view gains a `?missing_alt=1` filter
+  that lists image rows lacking alt text, with an inline
+  htmx-driven save form per row so an operator can fill in
+  many at once without leaving the page. The header surfaces a
+  count badge linking to the filtered view. A new endpoint
+  `POST /admin/attachments/<id>/alt-text` saves a single row
+  (htmx returns the row partial; non-htmx redirects). New CLI:
+  `flask cms media reindex [--site SLUG] [--dry-run]` walks
+  image attachments and fills in any rendition slots missing
+  from the current ladder (purely additive; existing slots
+  untouched). The list view partial is now extracted to
+  `admin/_attachment_row.html` so htmx and full-page renders
+  share markup.
 - Image rendition ladder (#41 Phase 2). Uploads now generate one
   `AttachmentRendition` per configured target width (default
   `[320, 800, 1600]`, override via

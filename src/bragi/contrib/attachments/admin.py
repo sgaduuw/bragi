@@ -27,11 +27,12 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
-from sqlalchemy import select
+from sqlalchemy import func, select
 from werkzeug.utils import secure_filename
 
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
+from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.site import Site
@@ -54,25 +55,33 @@ def list_attachments() -> ResponseReturnValue:
         page = max(1, int(request.args.get("page", "1")))
     except ValueError:
         page = 1
+    missing_alt = request.args.get("missing_alt") == "1"
 
     with SessionLocal() as db:
         sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
         sites_by_id = {s.id: s for s in sites}
         offset = (page - 1) * PAGE_SIZE
-        rows = (
-            db.execute(
-                select(Attachment)
-                .order_by(Attachment.created_at.desc(), Attachment.id.desc())
-                .limit(PAGE_SIZE)
-                .offset(offset)
-            )
-            .scalars()
-            .all()
-        )
-        peek = db.execute(
-            select(Attachment).limit(1).offset(offset + PAGE_SIZE)
-        ).scalar_one_or_none()
+
+        rows_query = select(Attachment).order_by(Attachment.created_at.desc(), Attachment.id.desc())
+        peek_query = select(Attachment)
+        if missing_alt:
+            # Only image rows (width is populated on images per the
+            # phase 1 probe contract) that lack alt text. Decorative
+            # uploads can still ship with empty alt text by design;
+            # this filter is the operator's punch list of authoring
+            # work, not a validation gate.
+            missing_filter = (Attachment.width.is_not(None)) & (Attachment.alt_text.is_(None))
+            rows_query = rows_query.where(missing_filter)
+            peek_query = peek_query.where(missing_filter)
+
+        rows = db.execute(rows_query.limit(PAGE_SIZE).offset(offset)).scalars().all()
+        peek = db.execute(peek_query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
         has_more = peek is not None
+        missing_alt_count = db.execute(
+            select(func.count())
+            .select_from(Attachment)
+            .where(Attachment.width.is_not(None), Attachment.alt_text.is_(None))
+        ).scalar_one()
 
     return render_template(
         "admin/attachments_list.html",
@@ -81,6 +90,8 @@ def list_attachments() -> ResponseReturnValue:
         sites_by_id=sites_by_id,
         page=page,
         has_more=has_more,
+        missing_alt=missing_alt,
+        missing_alt_count=missing_alt_count,
     )
 
 
@@ -254,6 +265,52 @@ def upload_attachment() -> ResponseReturnValue:
         "success",
     )
     return redirect(url_for("attachment_admin.list_attachments"))
+
+
+@bp.route("/<int:attachment_id>/alt-text", methods=["POST"])
+def save_alt_text(attachment_id: int) -> ResponseReturnValue:
+    """Save just the alt text for one attachment (htmx-friendly).
+
+    The bulk missing-alt view posts here inline so an operator can
+    fill in alt text on many rows without leaving the list page.
+    On htmx requests the row partial is returned so the
+    `hx-swap="outerHTML"` target replaces in place; on a non-htmx
+    submit the response redirects back to the list view.
+    """
+    alt_text = (request.form.get("alt_text") or "").strip() or None
+    with SessionLocal() as db:
+        row = db.get(Attachment, attachment_id)
+        if row is None:
+            flash("Attachment not found.", "error")
+            return redirect(url_for("attachment_admin.list_attachments"))
+        row.alt_text = alt_text
+        db.commit()
+        site_id = row.site_id
+        filename = row.filename
+        # Re-read needed values while the row is still attached.
+        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
+        sites_by_id = {s.id: s for s in sites}
+
+    audit(
+        "attachment.metadata_updated",
+        target_type="attachment",
+        target_id=attachment_id,
+        site_id=site_id,
+        extra={"filename": filename, "field": "alt_text"},
+    )
+
+    if is_htmx():
+        with SessionLocal() as db:
+            row = db.get(Attachment, attachment_id)
+            return render_template(
+                "admin/_attachment_row.html",
+                r=row,
+                sites_by_id=sites_by_id,
+                missing_alt=True,
+                just_saved=True,
+            )
+    flash(f"Saved alt text for {filename}.", "success")
+    return redirect(url_for("attachment_admin.list_attachments", missing_alt="1"))
 
 
 @bp.route("/<int:attachment_id>/edit", methods=["GET", "POST"])
