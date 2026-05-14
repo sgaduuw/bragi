@@ -6,6 +6,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-05-14
+
+### Added
+- IndexNow push-crawl plugin (#36). New `bragi.contrib.indexnow`
+  fires on `on_post_published`, `on_post_updated`, and
+  `on_post_deleted` (which covers pages too — the page admin
+  reuses the post lifecycle hooks). For each event, the plugin
+  resolves the item's site, reads `extra_settings['indexnow_key']`,
+  builds the public URL via the content-type registry's
+  `url_for`, and POSTs to the configured endpoint
+  (`BRAGI_INDEXNOW_ENDPOINT`, defaulting to
+  `https://api.indexnow.org/indexnow`). HTTP errors are logged
+  and swallowed so a missed ping never breaks a publish. The
+  delivery app serves the verification key file at
+  `GET /<key>.txt` (24h cache, scoped per Site). New CLI:
+  `cms indexnow setup --site <slug> [--key <key>]` generates a
+  32-hex-char key (or accepts an explicit one), validates it,
+  writes it into the site's `extra_settings`, and prints the
+  verification URL.
+
 ## [1.1.0] - 2026-05-14
 
 ### Added

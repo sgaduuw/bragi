@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bragi"
-version = "1.1.0"
+version = "1.2.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = ["Eelco Wesemann <6771014+sgaduuw@users.noreply.github.com>"]
 license = "MIT"
@@ -56,6 +56,7 @@ seo = "bragi.contrib.seo.plugin"
 analytics = "bragi.contrib.analytics.plugin"
 import_hugo = "bragi.contrib.import_hugo.plugin"
 import_ghost = "bragi.contrib.import_ghost.plugin"
+indexnow = "bragi.contrib.indexnow.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]
