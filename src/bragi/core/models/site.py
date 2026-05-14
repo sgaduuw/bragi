@@ -28,6 +28,13 @@ class Site(IdMixin, TimestampsMixin, Base):
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     canonical_url: Mapped[str] = mapped_column(String(255), default="")
     active: Mapped[bool] = mapped_column(default=True)
+    # NULL means "no theme override, render with the plugin /
+    # default templates as today." A non-null slug must match a
+    # registered ThemeSpec.slug at request time; an orphaned value
+    # (slug no longer installed) falls back to the default chain
+    # rather than 500'ing, so an operator can uninstall a theme
+    # without breaking sites that still reference it.
+    theme: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     # Plugin-contributed flat key/value bag. Deliberately
     # schemaless: reads are always "all settings for this site",
     # never "sites where setting X == Y", so a flat JSON column is

@@ -33,6 +33,7 @@ from bragi.api import (
     RedirectTarget,
     SearchBackendSpec,
     StorageBackendSpec,
+    ThemeSpec,
 )
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
@@ -329,6 +330,32 @@ def register_search_backend() -> SearchBackendSpec:
     from this hook. Resolution: the first non-`sqlite-fts5`
     backend if any (installing a third-party one signals operator
     intent), else the FTS5 fallback.
+    """
+    ...
+
+
+# ============================================================
+# Themes
+# ============================================================
+
+
+@hookspec
+def register_theme() -> ThemeSpec:
+    """Register a file-based theme.
+
+    Themes are filesystem packages (Python or in-tree subpackages)
+    that ship Jinja templates and optionally a `static/` directory;
+    a `pip install bragi-theme-foo` is enough to make the theme
+    selectable from the admin's per-Site dropdown.
+
+    Resolution at request time: if the active site has a non-null
+    `theme` matching a registered ThemeSpec.slug, the theme's
+    `template_loader` is consulted before the bragi default
+    chain. Sites with `theme=NULL` render with the plugin /
+    default templates exactly as before (back-compat preserved).
+
+    Database-stored templates remain rejected (CONTEXT.md "Deferred
+    surfaces"); themes are filesystem packages, no exceptions.
     """
     ...
 

@@ -16,7 +16,9 @@ goes through the CLI.
 
 from __future__ import annotations
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from typing import Any
+
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
@@ -34,6 +36,10 @@ bp = Blueprint(
 
 def _form_from_request() -> dict[str, str]:
     """Pull the site-edit form fields off the current request."""
+    # Theme: empty string means "no theme", stored as NULL on the
+    # row. Any non-empty value is taken verbatim; we validate it
+    # against `Registry.themes` at save time so an unknown slug
+    # gets a friendly error instead of silently sticking around.
     return {
         "slug": (request.form.get("slug") or "").strip().lower(),
         "hostname": (request.form.get("hostname") or "").strip().lower(),
@@ -41,7 +47,30 @@ def _form_from_request() -> dict[str, str]:
         "locale": (request.form.get("locale") or "en").strip(),
         "timezone": (request.form.get("timezone") or "UTC").strip(),
         "canonical_url": (request.form.get("canonical_url") or "").strip(),
+        "theme": (request.form.get("theme") or "").strip(),
     }
+
+
+def _available_themes() -> list[Any]:
+    """Themes discovered through `register_theme`; empty if none."""
+    registry = current_app.extensions.get("registry")
+    return list(registry.themes) if registry is not None else []
+
+
+def _theme_or_error(slug: str) -> tuple[str | None, str | None]:
+    """Resolve the form's theme value.
+
+    Returns `(theme_value, error_message)`: theme_value is the
+    string to persist (None means clear), error_message is a
+    user-facing string if the slug is non-empty but not
+    registered. Both None on a clean clear.
+    """
+    if not slug:
+        return None, None
+    registry = current_app.extensions.get("registry")
+    if registry is None or registry.theme(slug) is None:
+        return None, f"Unknown theme {slug!r}; install the theme package or pick another."
+    return slug, None
 
 
 def _validate(form: dict[str, str]) -> list[str]:
@@ -65,15 +94,19 @@ def list_sites() -> ResponseReturnValue:
 
 @bp.route("/new", methods=["GET", "POST"])
 def new_site() -> ResponseReturnValue:
+    themes = _available_themes()
     if request.method == "GET":
-        return render_template("admin/sites_edit.html", site=None, form={})
+        return render_template("admin/sites_edit.html", site=None, form={}, themes=themes)
 
     form = _form_from_request()
     errors = _validate(form)
+    theme_value, theme_err = _theme_or_error(form["theme"])
+    if theme_err is not None:
+        errors.append(theme_err)
     if errors:
         for err in errors:
             flash(err, "error")
-        return render_template("admin/sites_edit.html", site=None, form=form)
+        return render_template("admin/sites_edit.html", site=None, form=form, themes=themes)
 
     # Default the canonical URL when the form leaves it blank.
     canonical = form["canonical_url"] or f"https://{form['hostname']}"
@@ -87,7 +120,7 @@ def new_site() -> ResponseReturnValue:
             ).scalar_one_or_none()
             if existing is not None:
                 flash(f"A site with {column} {value!r} already exists.", "error")
-                return render_template("admin/sites_edit.html", site=None, form=form)
+                return render_template("admin/sites_edit.html", site=None, form=form, themes=themes)
 
         db.add(
             Site(
@@ -98,6 +131,7 @@ def new_site() -> ResponseReturnValue:
                 timezone=form["timezone"],
                 canonical_url=canonical,
                 active=True,
+                theme=theme_value,
             )
         )
         db.commit()
@@ -108,6 +142,7 @@ def new_site() -> ResponseReturnValue:
 
 @bp.route("/<int:site_id>/edit", methods=["GET", "POST"])
 def edit_site(site_id: int) -> ResponseReturnValue:
+    themes = _available_themes()
     with SessionLocal() as db:
         site = db.get(Site, site_id)
         if site is None:
@@ -122,6 +157,7 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 "locale": site.locale,
                 "timezone": site.timezone,
                 "canonical_url": site.canonical_url,
+                "theme": site.theme or "",
             }
             aliases = (
                 db.execute(
@@ -132,14 +168,23 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 .scalars()
                 .all()
             )
-            return render_template("admin/sites_edit.html", site=site, form=form, aliases=aliases)
+            return render_template(
+                "admin/sites_edit.html",
+                site=site,
+                form=form,
+                aliases=aliases,
+                themes=themes,
+            )
 
         form = _form_from_request()
         errors = _validate(form)
+        theme_value, theme_err = _theme_or_error(form["theme"])
+        if theme_err is not None:
+            errors.append(theme_err)
         if errors:
             for err in errors:
                 flash(err, "error")
-            return render_template("admin/sites_edit.html", site=site, form=form)
+            return render_template("admin/sites_edit.html", site=site, form=form, themes=themes)
 
         # Uniqueness checks excluding the row being edited.
         for column, value in (("slug", form["slug"]), ("hostname", form["hostname"])):
@@ -148,7 +193,7 @@ def edit_site(site_id: int) -> ResponseReturnValue:
             ).scalar_one_or_none()
             if existing is not None:
                 flash(f"Another site already uses {column} {value!r}.", "error")
-                return render_template("admin/sites_edit.html", site=site, form=form)
+                return render_template("admin/sites_edit.html", site=site, form=form, themes=themes)
 
         site.slug = form["slug"]
         site.hostname = form["hostname"]
@@ -156,6 +201,7 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         site.locale = form["locale"]
         site.timezone = form["timezone"]
         site.canonical_url = form["canonical_url"] or f"https://{form['hostname']}"
+        site.theme = theme_value
         db.commit()
         flash(f"Site '{form['slug']}' updated.", "success")
 
