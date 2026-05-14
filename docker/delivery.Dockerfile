@@ -8,7 +8,10 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     POETRY_VIRTUALENVS_CREATE=false
 
-RUN pip install --no-cache-dir poetry
+# Poetry 2.x split `poetry export` out into the poetry-plugin-export
+# package; pin both so the build stays deterministic across upstream
+# version bumps.
+RUN pip install --no-cache-dir "poetry>=2.0,<3.0" "poetry-plugin-export>=1.8"
 
 WORKDIR /app
 COPY pyproject.toml poetry.lock* ./

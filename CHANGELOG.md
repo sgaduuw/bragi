@@ -6,6 +6,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-05-14
+
+### Fixed
+- Docker image build: the `bragi-admin` / `bragi-delivery`
+  Dockerfiles used `poetry export`, which Poetry 2.x dropped from
+  the core CLI in favour of the `poetry-plugin-export` package.
+  Both Dockerfiles now install Poetry pinned to `>=2.0,<3.0`
+  alongside `poetry-plugin-export>=1.8` so the export step works
+  again. v1.0.0 shipped the tag but the GHCR workflow failed to
+  publish images; v1.0.1 is the first release with actual
+  containers on GHCR.
+
 ## [1.0.0] - 2026-05-14
 
 ### Added
