@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-1.5.0 shipped 2026-05-15. All day-one built-in plugins are in
+1.5.1 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
@@ -177,7 +177,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.5.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.5.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A one-shot `migrate` service runs `alembic upgrade head` before
