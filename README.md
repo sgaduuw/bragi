@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-1.6.0 shipped 2026-05-16. All day-one built-in plugins are in
+1.6.1 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
@@ -33,6 +33,13 @@ stdout) instead of Werkzeug's dev server. Worker counts default
 to 2 / 4 (admin / delivery), tunable via `ADMIN_WORKERS` /
 `DELIVERY_WORKERS`. No code, schema, or interface changes; the
 old image silently ran the dev server, the new image doesn't.
+
+1.6.1 fixes a Ghost-importer detection regression on Ghost 6.x
+exports (#95): the earlier head-scan heuristic looked for
+`"posts"` in the first 4 KB, but modern exports lead `db[0].data`
+with `benefits` / `custom_theme_settings`, pushing `posts` past
+the cutoff and causing valid exports to be rejected. Detection
+now does a full parse; no schema or interface change.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
@@ -185,7 +192,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.6.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.6.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A one-shot `migrate` service runs `alembic upgrade head` before
