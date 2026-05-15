@@ -38,16 +38,17 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    user = User(email=EMAIL, display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email=EMAIL, display_name="Ada", is_active=True)
-    db_session.add(user)
     db_session.flush()
     db_session.add(
         Post(
@@ -176,6 +177,7 @@ def admin_app(
             hostname="blog.example.com",
             title="Blog",
             canonical_url="https://blog.example.com",
+            owner_user_id=user.id,
         )
     )
     db_session.commit()

@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from bragi.contrib.sites.cli import site_group
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
+from bragi.core.models.user import User
+from tests.conftest import make_test_user
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +19,24 @@ def _patch_session_local(
     monkeypatch: pytest.MonkeyPatch, db_session_factory: sessionmaker[Session]
 ) -> None:
     monkeypatch.setattr("bragi.contrib.sites.cli.SessionLocal", db_session_factory)
+    # The transfer subcommand emits an audit row via core.audit, which
+    # opens its own SessionLocal. Patch it too so the row lands in the
+    # test DB (failing this only logs and is swallowed, but routing it
+    # correctly lets the row show up if a future test asserts on it).
+    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
+
+
+@pytest.fixture(autouse=True)
+def _seed_superuser(db_session_factory: sessionmaker[Session]) -> User:
+    """Pre-seed a superuser so `cms site create` (which defaults the
+    owner to the first superuser) succeeds without an explicit
+    --owner flag. Tests that directly construct `Site(...)` also use
+    this user's id as `owner_user_id`."""
+    with db_session_factory() as db:
+        sup = make_test_user(db, email="_super@example.com", is_superuser=True)
+        db.commit()
+        # Re-fetch so the attribute access after session-close is fine.
+        return db.get(User, sup.id)  # type: ignore[return-value]
 
 
 def test_site_create_persists_row(db_session_factory: sessionmaker[Session]) -> None:
@@ -100,7 +120,9 @@ def test_site_create_honours_overrides(db_session_factory: sessionmaker[Session]
     assert site.canonical_url == "https://example.nl/blog"
 
 
-def test_site_create_rejects_duplicate_slug(db_session_factory: sessionmaker[Session]) -> None:
+def test_site_create_rejects_duplicate_slug(
+    db_session_factory: sessionmaker[Session], _seed_superuser: User
+) -> None:
     with db_session_factory() as db:
         db.add(
             Site(
@@ -108,6 +130,7 @@ def test_site_create_rejects_duplicate_slug(db_session_factory: sessionmaker[Ses
                 hostname="one.example.com",
                 title="One",
                 canonical_url="https://one.example.com",
+                owner_user_id=_seed_superuser.id,
             )
         )
         db.commit()
@@ -130,7 +153,9 @@ def test_site_create_rejects_duplicate_slug(db_session_factory: sessionmaker[Ses
     assert "already exists" in result.output
 
 
-def test_site_create_rejects_duplicate_hostname(db_session_factory: sessionmaker[Session]) -> None:
+def test_site_create_rejects_duplicate_hostname(
+    db_session_factory: sessionmaker[Session], _seed_superuser: User
+) -> None:
     with db_session_factory() as db:
         db.add(
             Site(
@@ -138,6 +163,7 @@ def test_site_create_rejects_duplicate_hostname(db_session_factory: sessionmaker
                 hostname="blog.example.com",
                 title="One",
                 canonical_url="https://blog.example.com",
+                owner_user_id=_seed_superuser.id,
             )
         )
         db.commit()
@@ -167,7 +193,9 @@ def test_site_list_empty(db_session_factory: sessionmaker[Session]) -> None:
     assert "(no sites)" in result.output
 
 
-def test_site_list_shows_rows(db_session_factory: sessionmaker[Session]) -> None:
+def test_site_list_shows_rows(
+    db_session_factory: sessionmaker[Session], _seed_superuser: User
+) -> None:
     with db_session_factory() as db:
         db.add(
             Site(
@@ -176,6 +204,7 @@ def test_site_list_shows_rows(db_session_factory: sessionmaker[Session]) -> None
                 title="First",
                 canonical_url="https://aaa.example.com",
                 active=True,
+                owner_user_id=_seed_superuser.id,
             )
         )
         db.add(
@@ -185,6 +214,7 @@ def test_site_list_shows_rows(db_session_factory: sessionmaker[Session]) -> None
                 title="Second",
                 canonical_url="https://bbb.example.com",
                 active=False,
+                owner_user_id=_seed_superuser.id,
             )
         )
         db.commit()
@@ -207,7 +237,7 @@ def test_sites_plugin_registers_cli(db_session_factory: sessionmaker[Session]) -
 
 
 def test_site_extra_settings_defaults_to_empty_dict(
-    db_session_factory: sessionmaker[Session],
+    db_session_factory: sessionmaker[Session], _seed_superuser: User
 ) -> None:
     with db_session_factory() as db:
         db.add(
@@ -216,6 +246,7 @@ def test_site_extra_settings_defaults_to_empty_dict(
                 hostname="blog.example.com",
                 title="Blog",
                 canonical_url="https://blog.example.com",
+                owner_user_id=_seed_superuser.id,
             )
         )
         db.commit()
@@ -225,7 +256,7 @@ def test_site_extra_settings_defaults_to_empty_dict(
 
 
 def test_site_extra_settings_in_place_mutation_persists(
-    db_session_factory: sessionmaker[Session],
+    db_session_factory: sessionmaker[Session], _seed_superuser: User
 ) -> None:
     """`MutableDict.as_mutable` tracks in-place sets without reassignment."""
     with db_session_factory() as db:
@@ -235,6 +266,7 @@ def test_site_extra_settings_in_place_mutation_persists(
                 hostname="blog.example.com",
                 title="Blog",
                 canonical_url="https://blog.example.com",
+                owner_user_id=_seed_superuser.id,
             )
         )
         db.commit()
@@ -256,11 +288,13 @@ def test_site_extra_settings_in_place_mutation_persists(
 
 def _seed_blog(db_session_factory: sessionmaker[Session]) -> int:
     with db_session_factory() as db:
+        owner = make_test_user(db)
         site = Site(
             slug="blog",
             hostname="blog.example.com",
             title="Blog",
             canonical_url="https://blog.example.com",
+            owner_user_id=owner.id,
         )
         db.add(site)
         db.commit()
@@ -345,3 +379,82 @@ def test_alias_remove(db_session_factory: sessionmaker[Session]) -> None:
             select(SiteAlias).where(SiteAlias.hostname == "www.blog.example.com")
         ).scalar_one_or_none()
     assert remaining is None
+
+
+# ============================================================
+# `cms site transfer` (P1 / #77)
+# ============================================================
+
+
+def test_site_transfer_flips_owner(db_session_factory: sessionmaker[Session]) -> None:
+    """Happy path: the named user becomes the site's new owner_user_id."""
+    site_id = _seed_blog(db_session_factory)
+    # Seed the destination user.
+    with db_session_factory() as db:
+        new_owner = make_test_user(db, email="new-owner@example.com")
+        db.commit()
+        new_owner_id = new_owner.id
+
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group,
+        ["transfer", "--site", "blog", "--to", "new-owner@example.com"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Transferred ownership" in result.output
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.id == site_id)).scalar_one()
+    assert site.owner_user_id == new_owner_id
+
+
+def test_site_transfer_unknown_site_errors(db_session_factory: sessionmaker[Session]) -> None:
+    """Targeting a non-existent slug exits 1 with a friendly message."""
+    # Need a real user to exist so the slug-lookup is the failing step.
+    with db_session_factory() as db:
+        make_test_user(db, email="someone@example.com")
+        db.commit()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group,
+        ["transfer", "--site", "ghost", "--to", "someone@example.com"],
+    )
+    assert result.exit_code == 1
+    assert "No site with slug" in result.output
+
+
+def test_site_transfer_unknown_email_errors(db_session_factory: sessionmaker[Session]) -> None:
+    """Targeting a non-existent user email exits 1 with a friendly message."""
+    _seed_blog(db_session_factory)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group,
+        ["transfer", "--site", "blog", "--to", "nobody@example.com"],
+    )
+    assert result.exit_code == 1
+    assert "No user with email" in result.output
+
+
+def test_site_transfer_same_owner_is_noop(db_session_factory: sessionmaker[Session]) -> None:
+    """Transferring to the existing owner emits a 'no change' message
+    and leaves the row untouched (no audit row emitted either)."""
+    site_id = _seed_blog(db_session_factory)
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.id == site_id)).scalar_one()
+        current_owner = db.execute(select(User).where(User.id == site.owner_user_id)).scalar_one()
+        owner_email = current_owner.email
+        owner_id_before = site.owner_user_id
+
+    runner = CliRunner()
+    result = runner.invoke(
+        site_group,
+        ["transfer", "--site", "blog", "--to", owner_email],
+    )
+    assert result.exit_code == 0, result.output
+    assert "no change" in result.output
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.id == site_id)).scalar_one()
+    assert site.owner_user_id == owner_id_before

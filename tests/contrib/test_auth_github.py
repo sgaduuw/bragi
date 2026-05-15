@@ -24,6 +24,7 @@ from bragi.contrib.auth_github import client as gh_client
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.models.user_identity import UserIdentity
+from tests.conftest import make_test_user
 
 # Sample GitHub /user response (trimmed to the fields the plugin reads).
 GH_PROFILE = {
@@ -143,12 +144,18 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    # Pre-seed the owner using the OAuth profile email so the
+    # callback tests that assert exactly one User after login still
+    # hold: the OAuth flow links its identity to the existing owner
+    # row rather than creating a duplicate.
+    owner = make_test_user(db_session, email="ada@example.com")
     db_session.add(
         Site(
             slug="blog",
             hostname="blog.example.com",
             title="Blog",
             canonical_url="https://blog.example.com",
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()
@@ -220,10 +227,13 @@ def test_callback_links_to_user_by_email_when_no_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`cms user create` seeded a User; first OAuth login attaches an
-    identity rather than creating a duplicate."""
-    with db_session_factory() as db:
-        db.add(User(email="ada@example.com", display_name="Ada (seeded)", is_active=True))
-        db.commit()
+    identity rather than creating a duplicate.
+
+    The `admin_app` fixture already seeds `ada@example.com` as the
+    site owner (P1 / #77), which matches the OAuth profile email; no
+    extra User insert is needed (and would clash on the unique
+    email index).
+    """
     _mock_authlib_client(monkeypatch)
 
     client = admin_app.test_client()

@@ -3,7 +3,9 @@
 {% block content %}
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
   <h1 style="margin: 0;">Sites</h1>
-  <a href="{{ url_for('site_admin.new_site') }}" class="btn">New site</a>
+  {% if is_superuser %}
+    <a href="{{ url_for('site_admin.new_site') }}" class="btn">New site</a>
+  {% endif %}
 </div>
 
 {% if sites %}
@@ -15,17 +17,24 @@
       <th>Title</th>
       <th>Locale</th>
       <th>Status</th>
-      <th></th>
+      {% if is_superuser %}<th></th>{% endif %}
     </tr>
   </thead>
   <tbody>
     {% for site in sites %}
     <tr>
-      <td><a href="{{ url_for('site_admin.edit_site', site_id=site.id) }}"><code>{{ site.slug }}</code></a></td>
+      <td>
+        {% if is_superuser %}
+          <a href="{{ url_for('site_admin.edit_site', site_id=site.id) }}"><code>{{ site.slug }}</code></a>
+        {% else %}
+          <code>{{ site.slug }}</code>
+        {% endif %}
+      </td>
       <td>{{ site.hostname }}</td>
       <td>{{ site.title }}</td>
       <td>{{ site.locale }}</td>
       <td>{{ 'active' if site.active else 'inactive' }}</td>
+      {% if is_superuser %}
       <td>
         {% if site.active %}
         <form method="post"
@@ -44,11 +53,18 @@
         </form>
         {% endif %}
       </td>
+      {% endif %}
     </tr>
     {% endfor %}
   </tbody>
 </table>
 {% else %}
-<p>No sites yet. <a href="{{ url_for('site_admin.new_site') }}">Create the first one.</a></p>
+<p>
+  {% if is_superuser %}
+    No sites yet. <a href="{{ url_for('site_admin.new_site') }}">Create the first one.</a>
+  {% else %}
+    You don't have access to any sites yet. Ask an admin to grant you a role.
+  {% endif %}
+</p>
 {% endif %}
 {% endblock %}

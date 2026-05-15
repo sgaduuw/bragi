@@ -21,16 +21,17 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    user = User(email="ada@example.com", display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email="ada@example.com", display_name="Ada", is_active=True)
-    db_session.add(user)
     db_session.flush()
 
     # Top-level page
@@ -118,16 +119,17 @@ def test_same_slug_under_different_parents_allowed(
 ) -> None:
     """Two pages with slug 'overview' under different parents must coexist."""
     with db_session_factory() as db:
+        user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
         site = Site(
             slug="blog",
             hostname="blog.example.com",
             title="Blog",
             canonical_url="https://blog.example.com",
+            owner_user_id=user.id,
         )
         db.add(site)
-        db.flush()
-        user = User(email="ada@example.com", display_name="Ada", is_active=True)
-        db.add(user)
         db.flush()
 
         parent_a = Page(
@@ -188,16 +190,17 @@ def test_same_parent_same_slug_rejected(
 ) -> None:
     """Two pages with the same slug under the same parent must fail."""
     with db_session_factory() as db:
+        user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
         site = Site(
             slug="blog",
             hostname="blog.example.com",
             title="Blog",
             canonical_url="https://blog.example.com",
+            owner_user_id=user.id,
         )
         db.add(site)
-        db.flush()
-        user = User(email="ada@example.com", display_name="Ada", is_active=True)
-        db.add(user)
         db.flush()
         parent = Page(
             site_id=site.id,

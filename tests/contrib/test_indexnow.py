@@ -22,7 +22,7 @@ from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, make_test_user
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -40,12 +40,14 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    owner = make_test_user(db_session)
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
         extra_settings={"indexnow_key": KEY},
+        owner_user_id=owner.id,
     )
     db_session.add(site)
     db_session.commit()
@@ -76,12 +78,14 @@ def test_key_file_404s_when_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No key in extra_settings: even the right URL pattern 404s."""
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="blog",
             hostname="blog.example.com",
             title="Blog",
             canonical_url="https://blog.example.com",
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()
@@ -107,17 +111,18 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
         extra_settings={"indexnow_key": KEY},
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
-    db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
@@ -327,16 +332,17 @@ def test_no_key_means_no_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A site without an IndexNow key configured does NOT fire."""
+    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
-    db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
@@ -429,12 +435,14 @@ def test_cli_setup_writes_key_into_extra_settings(
 ) -> None:
     monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
+        owner = make_test_user(db)
         db.add(
             Site(
                 slug="blog",
                 hostname="blog.example.com",
                 title="Blog",
                 canonical_url="https://blog.example.com",
+                owner_user_id=owner.id,
             )
         )
         db.commit()
@@ -456,12 +464,14 @@ def test_cli_setup_accepts_explicit_key(
 ) -> None:
     monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
+        owner = make_test_user(db)
         db.add(
             Site(
                 slug="blog",
                 hostname="blog.example.com",
                 title="Blog",
                 canonical_url="https://blog.example.com",
+                owner_user_id=owner.id,
             )
         )
         db.commit()
@@ -482,12 +492,14 @@ def test_cli_setup_rejects_invalid_key(
 ) -> None:
     monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
+        owner = make_test_user(db)
         db.add(
             Site(
                 slug="blog",
                 hostname="blog.example.com",
                 title="Blog",
                 canonical_url="https://blog.example.com",
+                owner_user_id=owner.id,
             )
         )
         db.commit()

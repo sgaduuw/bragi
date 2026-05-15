@@ -31,7 +31,7 @@ from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, make_test_user
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -63,12 +63,14 @@ def admin_app(
                 hostname="blog.example.com",
                 title="Blog",
                 canonical_url="https://blog.example.com",
+                owner_user_id=user.id,
             ),
             Site(
                 slug="other",
                 hostname="other.example.com",
                 title="Other",
                 canonical_url="https://other.example.com",
+                owner_user_id=user.id,
             ),
         ]
     )
@@ -97,6 +99,7 @@ def delivery_app(
     # app fixture share `db_session` and the admin fixture seeds the
     # same hostnames first.
     if db_session.execute(select(Site).limit(1)).scalar_one_or_none() is None:
+        owner = make_test_user(db_session)
         db_session.add_all(
             [
                 Site(
@@ -104,12 +107,14 @@ def delivery_app(
                     hostname="blog.example.com",
                     title="Blog",
                     canonical_url="https://blog.example.com",
+                    owner_user_id=owner.id,
                 ),
                 Site(
                     slug="other",
                     hostname="other.example.com",
                     title="Other",
                     canonical_url="https://other.example.com",
+                    owner_user_id=owner.id,
                 ),
             ]
         )

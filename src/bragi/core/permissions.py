@@ -20,6 +20,8 @@ from flask import abort
 from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
+from bragi.core.models.site import Site
+from bragi.core.models.user import User
 from bragi.core.models.user_site_role import UserSiteRole
 from bragi.core.security import current_user
 
@@ -50,11 +52,67 @@ def _user_rank_for_site(user_id: int, site_id: int) -> int:
     return ROLE_RANKS.get(row.role, 0)
 
 
+def is_site_member(user: User | None, site: Site) -> bool:
+    """True when `user` may access `site` for any purpose.
+
+    Membership covers three paths, in priority order:
+
+    1. Superuser (`user.is_superuser=True`). Cross-site by definition.
+    2. Owner (`site.owner_user_id == user.id`). Implicit admin on
+       their own site; no `UserSiteRole` row required.
+    3. Any `UserSiteRole` row for `(user.id, site.id)` (regardless
+       of which role).
+
+    Anonymous (`user is None`) always fails. Used by the new
+    `/admin/sites/...` blueprints to gate access; finer-grained
+    role checks (e.g. "author can publish, editor can delete")
+    still go through `require_role` / `has_role`.
+    """
+    if user is None:
+        return False
+    if user.is_superuser:
+        return True
+    if site.owner_user_id == user.id:
+        return True
+    with SessionLocal() as db:
+        row = db.execute(
+            select(UserSiteRole).where(
+                UserSiteRole.user_id == user.id,
+                UserSiteRole.site_id == site.id,
+            )
+        ).scalar_one_or_none()
+    return row is not None
+
+
+def accessible_sites_for(user: User | None) -> list[Site]:
+    """Return every Site `user` can act on, ordered by slug.
+
+    Superusers see every active site. Other users see sites they
+    own plus sites where they hold any `UserSiteRole`. The two
+    sources are unioned; deactivated sites are excluded (resolves
+    correctly with B2's `active=False` semantics).
+    """
+    if user is None:
+        return []
+    with SessionLocal() as db:
+        base = select(Site).where(Site.active.is_(True)).order_by(Site.slug)
+        if user.is_superuser:
+            return list(db.execute(base).scalars())
+        owned_or_member = base.where(
+            (Site.owner_user_id == user.id)
+            | (Site.id.in_(select(UserSiteRole.site_id).where(UserSiteRole.user_id == user.id)))
+        )
+        return list(db.execute(owned_or_member).scalars())
+
+
 def has_role(min_role: str, site_id: int) -> bool:
     """True when the active session can act at `min_role` on `site_id`.
 
     Superusers always pass. Unauthenticated requests always fail.
     Unknown role strings fail closed.
+
+    Site owners are implicit admins on their own site, so they
+    satisfy every role rank without an explicit `UserSiteRole`.
     """
     user = current_user()
     if user is None:
@@ -64,6 +122,13 @@ def has_role(min_role: str, site_id: int) -> bool:
     needed = ROLE_RANKS.get(min_role)
     if needed is None:
         return False
+    # Owner short-circuit: skip the UserSiteRole lookup entirely.
+    with SessionLocal() as db:
+        owner_id = db.execute(
+            select(Site.owner_user_id).where(Site.id == site_id)
+        ).scalar_one_or_none()
+    if owner_id == user.id:
+        return True
     return _user_rank_for_site(user.id, site_id) >= needed
 
 

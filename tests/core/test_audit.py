@@ -52,6 +52,7 @@ def admin_app(
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
     db_session.flush()

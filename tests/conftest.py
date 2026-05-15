@@ -7,14 +7,63 @@ fixtures) land here as the corresponding plugins ship.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from flask.testing import FlaskClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.core.models import Base
+from bragi.core.models.site import Site
+from bragi.core.models.user import User
+
+
+def make_test_user(
+    db_session: Session,
+    *,
+    email: str = "_owner@example.com",
+    is_superuser: bool = False,
+) -> User:
+    """Get-or-create a User by email. Idempotent.
+
+    Convenience for tests that need an owner for a Site row but
+    don't care about the User's identity. Defaults to a sentinel
+    email so repeated calls in one test return the same row.
+    """
+    existing = db_session.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    user = User(
+        email=email,
+        display_name=email.split("@", 1)[0],
+        is_active=True,
+        is_superuser=is_superuser,
+    )
+    db_session.add(user)
+    db_session.flush()
+    return user
+
+
+def make_test_site(db_session: Session, **kwargs: Any) -> Site:
+    """Build and persist a Site row, auto-creating an owner if missing.
+
+    Mirrors P1 / #77: every Site has a NOT NULL `owner_user_id`,
+    so tests need an owner. Pass `owner_user_id=` explicitly when
+    the test cares; otherwise the helper creates a default User.
+    Pass `commit=False` to skip the commit (for tests that batch).
+    """
+    commit = kwargs.pop("commit", True)
+    if "owner_user_id" not in kwargs:
+        kwargs["owner_user_id"] = make_test_user(db_session).id
+    site = Site(**kwargs)
+    db_session.add(site)
+    if commit:
+        db_session.commit()
+    else:
+        db_session.flush()
+    return site
 
 
 def csrf_token(client: FlaskClient, *, path: str = "/auth/login") -> str:

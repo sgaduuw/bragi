@@ -6,6 +6,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`Site.owner_user_id` (#77).** Each site now has a single
+  designated owner, stored as a NOT NULL FK to `users.id`. Owners
+  are implicit admins of their site: `has_role(user, site, "admin")`
+  returns true for the owner regardless of whether they hold an
+  explicit `UserSiteRole`. Permissions exposed two new helpers,
+  `is_site_member(user, site)` and `accessible_sites_for(user)`,
+  used to scope the admin sites list. A new `cms site transfer`
+  CLI command reassigns ownership and writes a
+  `site.owner.transferred` audit row; `cms site create` gained an
+  `--owner` flag and defaults to the first superuser when omitted.
+- **`/admin/sites` is now member-readable (#77).** The Sites list
+  no longer requires superuser. Any logged-in user sees the sites
+  they own, hold an explicit role on, or (for superusers) every
+  site. Write actions on the page (Deactivate, Activate, New
+  site, edit links) remain superuser-only and now self-gate via
+  the blueprint hook plus a template conditional, replacing the
+  blanket `_superuser_only` gate. The empty-state copy adjusts
+  for the two audiences.
+
+### Migration
+- **`add_site_owner`** (`7fd0ed6fe2df`). Three-pass schema change:
+  add `owner_user_id` as nullable, backfill (existing site admin
+  → first superuser → fail loudly if no candidate exists), then
+  promote to NOT NULL via `batch_alter_table` so SQLite is happy.
+  Downgrade drops the column.
+
 ## [1.4.1] - 2026-05-15
 
 A pure-bugfix release sweeping eight defects surfaced by a full

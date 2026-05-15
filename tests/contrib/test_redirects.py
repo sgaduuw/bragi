@@ -15,14 +15,17 @@ from bragi.api import RedirectTarget
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.plugins import create_plugin_manager
+from tests.conftest import make_test_user
 
 
 def _make_site(session: Session, *, slug: str = "blog") -> Site:
+    owner = make_test_user(session)
     site = Site(
         slug=slug,
         hostname=f"{slug}.example.com",
         title=f"{slug} test site",
         canonical_url=f"https://{slug}.example.com",
+        owner_user_id=owner.id,
     )
     session.add(site)
     session.flush()
