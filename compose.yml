@@ -4,7 +4,7 @@
 # source. The tag is parameterised via `BRAGI_TAG` (default
 # `latest`); pin to a specific release in production:
 #
-#   BRAGI_TAG=v1.5.1 docker compose up -d
+#   BRAGI_TAG=v1.6.0 docker compose up -d
 #
 # Companion file `docker/compose.dev.yml` builds the images
 # locally instead, for testing the container shape without a
