@@ -6,17 +6,40 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-05-16
+
+Admin post-list reordering. After the 1.6.1 Ghost-importer fix
+landed, the next thing the operator hit was that the admin post
+list looked like it was sorted alphabetically: every imported
+row got `created_at = now()` clustered in microseconds, in the
+order Ghost iterated its export, so a 60-post import surfaced
+in Ghost's internal id order rather than anything meaningful
+to the operator. The same effect would hit Hugo and WordPress
+imports for the same reason.
+
+Switch the admin list's `order_by` to `COALESCE(published_at,
+updated_at) DESC` with `id DESC` as the tie-break. Published
+posts now sort by publication date; drafts fall back to their
+last edit; imported posts surface by the publish date the
+importer preserved. Native authoring is also better off:
+editing an old draft bubbles it back up the list.
+
+No schema, hookspec, or URL change; the order_by clause on one
+admin query is the entire diff. Pages have the same pattern at
+`bragi/contrib/page/admin.py:135` but were left untouched on
+the read that pages are structural, not chronological;
+revisitable if operator feedback says otherwise.
+
 ### Changed
-- **Admin post list sorts by recency, not creation time.** The
-  list at `/admin/sites/<slug>/posts/` now orders by
-  `COALESCE(published_at, updated_at) DESC` with `id DESC` as the
-  tie-break: published posts surface by publication date, drafts
-  by last edit. The previous `created_at DESC` order leaked
-  import iteration into the admin list (every imported row gets
-  `created_at = now()` clustered in the export's natural order,
-  so a Ghost import appeared alphabetical-ish), and didn't bubble
-  a freshly edited old draft to the top either. No schema or
-  hookspec change; pure ordering tweak on one query.
+- **Admin post list sorts by recency, not creation time
+  (#99).** `/admin/sites/<slug>/posts/` orders by
+  `COALESCE(published_at, updated_at) DESC` with `Post.id DESC`
+  as the tie-break. Replaces the previous `created_at DESC`
+  order, which leaked import iteration into the admin list and
+  didn't bubble a freshly edited old draft to the top either.
+  Regression test seeds four posts whose `created_at` order is
+  in direct conflict with publish-recency and asserts the
+  COALESCE key wins.
 
 ## [1.6.1] - 2026-05-16
 

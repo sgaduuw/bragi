@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-1.6.1 shipped 2026-05-16. All day-one built-in plugins are in
+1.7.0 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
@@ -40,6 +40,14 @@ exports (#95): the earlier head-scan heuristic looked for
 with `benefits` / `custom_theme_settings`, pushing `posts` past
 the cutoff and causing valid exports to be rejected. Detection
 now does a full parse; no schema or interface change.
+
+1.7.0 reorders the admin post list by `COALESCE(published_at,
+updated_at) DESC` instead of `created_at DESC`. Published posts
+sort by publication date, drafts by last edit, and imported posts
+land in their original Ghost / WordPress / Hugo publish order
+rather than reflecting the importer's iteration order. Editing
+an old draft also bubbles it back up. No schema or hookspec
+change; admin URLs and delivery output are unchanged.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
@@ -192,7 +200,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.6.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.7.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A one-shot `migrate` service runs `alembic upgrade head` before
