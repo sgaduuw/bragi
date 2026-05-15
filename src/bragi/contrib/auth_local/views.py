@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from flask import (
     Blueprint,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -74,6 +75,11 @@ def login() -> ResponseReturnValue:
             login_user_id = user.id
             must_change = cred.must_change
             flash(f"Welcome, {user.display_name}.", "success")
+            # Detach so we can hand the user instance to the
+            # `on_user_login` subscribers below without keeping the
+            # SessionLocal context manager open for the duration of
+            # whatever plugins want to do.
+            db.expunge(user)
 
         audit(
             AuditAction.AUTH_LOGIN_SUCCESS,
@@ -81,6 +87,15 @@ def login() -> ResponseReturnValue:
             target_id=login_user_id,
             extra={"method": "local"},
         )
+        # Mirror the auth_github callback: subscribers (analytics,
+        # webhook fans, audit-enrichment plugins) should see local
+        # logins on the same hook surface they get for GitHub.
+        # Before this fix, password logins were silent on the hook
+        # while GitHub logins fired, which left observability blind
+        # to half the auth flow.
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_user_login(user=user, method="local", request=request)
+
         if must_change:
             # Stash the original `next` so the post-rotation
             # redirect lands where the user was going. The
