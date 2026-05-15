@@ -34,17 +34,17 @@ def admin_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
     """Admin app with one Site, one User, one Post pre-seeded."""
+    user = User(email=EMAIL, display_name="Ada Lovelace", is_active=True, is_superuser=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-
-    user = User(email=EMAIL, display_name="Ada Lovelace", is_active=True, is_superuser=True)
-    db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
 
@@ -82,7 +82,7 @@ def _login(client: FlaskClient) -> None:
 
 
 def test_list_requires_auth(admin_app: Flask) -> None:
-    resp = admin_app.test_client().get("/admin/posts/", follow_redirects=False)
+    resp = admin_app.test_client().get("/admin/sites/blog/posts/", follow_redirects=False)
     assert resp.status_code == 302
     assert "/auth/login" in resp.headers["Location"]
 
@@ -90,7 +90,7 @@ def test_list_requires_auth(admin_app: Flask) -> None:
 def test_list_shows_seeded_post(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 200
     assert b"Hello World" in resp.data
     assert b"hello" in resp.data  # slug
@@ -99,7 +99,7 @@ def test_list_shows_seeded_post(admin_app: Flask) -> None:
 def test_new_get_serves_form(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/posts/new")
+    resp = client.get("/admin/sites/blog/posts/new")
     assert resp.status_code == 200
     assert b'name="title"' in resp.data
     assert b'name="slug"' in resp.data
@@ -109,9 +109,9 @@ def test_new_get_serves_form(admin_app: Flask) -> None:
 def test_new_post_creates_row(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/new")
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
     resp = client.post(
-        "/admin/posts/new",
+        "/admin/sites/blog/posts/new",
         data={
             "title": "Brand New",
             "slug": "brand-new",
@@ -133,9 +133,9 @@ def test_new_post_creates_row(admin_app: Flask, db_session_factory: sessionmaker
 def test_new_requires_title_and_slug(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/new")
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
     resp = client.post(
-        "/admin/posts/new",
+        "/admin/sites/blog/posts/new",
         data={"title": "", "slug": "", "_csrf_token": token},
     )
     assert resp.status_code == 200
@@ -150,7 +150,7 @@ def test_edit_get_prefills_fields(
 
     client = admin_app.test_client()
     _login(client)
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     assert resp.status_code == 200
     assert b'value="Hello World"' in resp.data
     assert b'value="hello"' in resp.data
@@ -162,9 +162,9 @@ def test_edit_post_updates(admin_app: Flask, db_session_factory: sessionmaker[Se
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     resp = client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Updated Title",
             "slug": "hello",
@@ -193,9 +193,9 @@ def test_delete_post_removes_row(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/")
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
     resp = client.post(
-        f"/admin/posts/{post_id}/delete",
+        f"/admin/sites/blog/posts/{post_id}/delete",
         data={"_csrf_token": token},
         follow_redirects=False,
     )
@@ -217,7 +217,7 @@ def test_authenticated_index_has_logout_form(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
     # The post list uses admin/base.html which renders the logout form
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 200
     assert b"/auth/logout" in resp.data
     assert b"Log out" in resp.data
@@ -277,9 +277,9 @@ def test_on_post_published_fires_on_first_publish_via_edit(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello World",
             "slug": "hello",
@@ -306,9 +306,9 @@ def test_on_post_published_skips_when_already_published(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello World (edited)",
             "slug": "hello",
@@ -329,9 +329,9 @@ def test_on_post_published_fires_on_new_post_created_published(
 ) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/new")
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
     client.post(
-        "/admin/posts/new",
+        "/admin/sites/blog/posts/new",
         data={
             "title": "Born Public",
             "slug": "born-public",
@@ -354,9 +354,9 @@ def test_on_post_deleted_fires_with_row_still_in_session(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/")
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
     client.post(
-        f"/admin/posts/{post_id}/delete",
+        f"/admin/sites/blog/posts/{post_id}/delete",
         data={"_csrf_token": token},
     )
     assert len(lifecycle_recorder.deleted) == 1

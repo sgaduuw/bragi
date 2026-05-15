@@ -113,16 +113,19 @@ def test_plan_warns_on_missing_slug(tmp_path: Path) -> None:
 
 @pytest.fixture
 def site_id(db_session: Session) -> Iterator[int]:
+    # Importer needs at least one user for the author fallback; the
+    # same user doubles as the site owner.
+    user = User(email="ada@example.com", display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    # Importer needs at least one user for the author fallback.
-    db_session.add(User(email="ada@example.com", display_name="Ada", is_active=True))
     db_session.commit()
     yield site.id
 

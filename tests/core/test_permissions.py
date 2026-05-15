@@ -18,23 +18,25 @@ def app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Flask:
+    plain = User(email="plain@example.com", display_name="Plain", is_active=True)
+    sup = User(email="sup@example.com", display_name="Sup", is_active=True, is_superuser=True)
+    db_session.add_all([plain, sup])
+    db_session.flush()
     blog = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=sup.id,
     )
     other = Site(
         slug="other",
         hostname="other.example.com",
         title="Other",
         canonical_url="https://other.example.com",
+        owner_user_id=sup.id,
     )
     db_session.add_all([blog, other])
-    db_session.flush()
-    plain = User(email="plain@example.com", display_name="Plain", is_active=True)
-    sup = User(email="sup@example.com", display_name="Sup", is_active=True, is_superuser=True)
-    db_session.add_all([plain, sup])
     db_session.flush()
     db_session.add(UserSiteRole(user_id=plain.id, site_id=blog.id, role="editor"))
     db_session.add(UserSiteRole(user_id=plain.id, site_id=other.id, role="author"))

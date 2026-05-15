@@ -36,16 +36,17 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
-    db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
@@ -90,7 +91,7 @@ def test_edit_page_renders_editor_mount(
     with db_session_factory() as db:
         post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
 
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     body = resp.data.decode()
     assert resp.status_code == 200
     # Editor mount + toolbar present.
@@ -111,7 +112,7 @@ def test_edit_page_loads_tiptap_modules_from_esm_cdn(
     with db_session_factory() as db:
         post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
 
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     body = resp.data.decode()
     assert "esm.sh/@tiptap/core" in body
     assert "esm.sh/@tiptap/starter-kit" in body
@@ -124,7 +125,7 @@ def test_toolbar_includes_required_actions(admin_app: Flask) -> None:
     code block, ordered list, unordered list."""
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/posts/new")
+    resp = client.get("/admin/sites/blog/posts/new")
     body = resp.data.decode()
     for action in (
         "bold",
@@ -146,7 +147,7 @@ def test_new_post_page_has_empty_editor_content(admin_app: Flask) -> None:
     """New-post form has an empty body so the editor mounts empty."""
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/posts/new")
+    resp = client.get("/admin/sites/blog/posts/new")
     body = resp.data.decode()
     # Find the textarea and check it's empty.
     # Naive but sufficient: the value is between the open and close tags.
@@ -163,7 +164,7 @@ def test_existing_post_pre_populates_textarea(
     with db_session_factory() as db:
         post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
 
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     body = resp.data.decode()
     assert '<textarea name="body_markdown" id="body_markdown">**hi**</textarea>' in body
 
@@ -175,9 +176,9 @@ def test_post_create_still_works_via_textarea_submission(
     (as if JS hadn't loaded) still saves the markdown verbatim."""
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/new")
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
     resp = client.post(
-        "/admin/posts/new",
+        "/admin/sites/blog/posts/new",
         data={
             "title": "TipTap roundtrip",
             "slug": "tiptap-roundtrip",

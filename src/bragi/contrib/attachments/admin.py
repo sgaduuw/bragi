@@ -1,9 +1,14 @@
 """Admin Blueprint for managing Attachments.
 
-Upload form at /admin/attachments. The form expects a single file
-per submission and writes it to the local-disk storage backend.
-The Attachment row records metadata; the bytes themselves are
-content-addressed under `Settings.attachments_root`.
+Mounted under /admin/sites/<site_slug>/attachments on the admin
+app (P2 / #78). Every view resolves <site_slug> via
+`resolve_site_or_abort`, then scopes its queries to that site.
+Cross-site attachment-id probes return 404, not 403.
+
+The form expects a single file per submission and writes it to
+the local-disk storage backend. The Attachment row records
+metadata; the bytes themselves are content-addressed under
+`Settings.attachments_root`.
 
 Deletion removes the Attachment row and the on-disk file. The
 storage layer is naive about refcount (a second Attachment row
@@ -18,6 +23,7 @@ import mimetypes
 
 from flask import (
     Blueprint,
+    abort,
     current_app,
     flash,
     redirect,
@@ -35,7 +41,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
-from bragi.core.models.site import Site
+from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
 from bragi.settings import settings
 
@@ -43,14 +49,14 @@ bp = Blueprint(
     "attachment_admin",
     __name__,
     template_folder="templates",
-    url_prefix="/admin/attachments",
+    url_prefix="/admin/sites/<site_slug>/attachments",
 )
 
 PAGE_SIZE = 50
 
 
 @bp.route("/", methods=["GET"])
-def list_attachments() -> ResponseReturnValue:
+def list_attachments(site_slug: str) -> ResponseReturnValue:
     try:
         page = max(1, int(request.args.get("page", "1")))
     except ValueError:
@@ -58,12 +64,15 @@ def list_attachments() -> ResponseReturnValue:
     missing_alt = request.args.get("missing_alt") == "1"
 
     with SessionLocal() as db:
-        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
-        sites_by_id = {s.id: s for s in sites}
+        site = resolve_site_or_abort(db, site_slug)
         offset = (page - 1) * PAGE_SIZE
 
-        rows_query = select(Attachment).order_by(Attachment.created_at.desc(), Attachment.id.desc())
-        peek_query = select(Attachment)
+        rows_query = (
+            select(Attachment)
+            .where(Attachment.site_id == site.id)
+            .order_by(Attachment.created_at.desc(), Attachment.id.desc())
+        )
+        peek_query = select(Attachment).where(Attachment.site_id == site.id)
         if missing_alt:
             # Only image rows (width is populated on images per the
             # phase 1 probe contract) that lack alt text. Decorative
@@ -80,14 +89,16 @@ def list_attachments() -> ResponseReturnValue:
         missing_alt_count = db.execute(
             select(func.count())
             .select_from(Attachment)
-            .where(Attachment.width.is_not(None), Attachment.alt_text.is_(None))
+            .where(
+                Attachment.site_id == site.id,
+                Attachment.width.is_not(None),
+                Attachment.alt_text.is_(None),
+            )
         ).scalar_one()
 
     return render_template(
         "admin/attachments_list.html",
         rows=rows,
-        sites=sites,
-        sites_by_id=sites_by_id,
         page=page,
         has_more=has_more,
         missing_alt=missing_alt,
@@ -96,14 +107,14 @@ def list_attachments() -> ResponseReturnValue:
 
 
 @bp.route("/picker", methods=["GET"])
-def picker() -> ResponseReturnValue:
+def picker(site_slug: str) -> ResponseReturnValue:
     """Image picker grid for the post / page TipTap editor.
 
-    Returns an HTML grid (htmx-friendly) of image attachments,
-    optionally filtered by site slug via `?site=<slug>`. Each
-    card carries `data-storage-key` / `data-alt-text` /
-    `data-filename` so the editor's client-side script can pull
-    the values needed to insert the markdown snippet.
+    Returns an HTML grid (htmx-friendly) of image attachments for
+    the current site. Each card carries `data-storage-key` /
+    `data-alt-text` / `data-filename` so the editor's client-side
+    script can pull the values needed to insert the markdown
+    snippet.
 
     Auth piggybacks on the admin login_required guard installed
     on this Blueprint at app boot.
@@ -112,92 +123,57 @@ def picker() -> ResponseReturnValue:
         page = max(1, int(request.args.get("page", "1")))
     except ValueError:
         page = 1
-    site_slug = (request.args.get("site") or "").strip().lower() or None
 
     with SessionLocal() as db:
-        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
+        site = resolve_site_or_abort(db, site_slug)
         offset = (page - 1) * PAGE_SIZE
         query = (
             select(Attachment)
-            .where(Attachment.width.is_not(None))
+            .where(Attachment.site_id == site.id, Attachment.width.is_not(None))
             .order_by(Attachment.created_at.desc(), Attachment.id.desc())
         )
-        peek_query = select(Attachment).where(Attachment.width.is_not(None))
-        if site_slug is not None:
-            site_row = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
-            if site_row is not None:
-                query = query.where(Attachment.site_id == site_row.id)
-                peek_query = peek_query.where(Attachment.site_id == site_row.id)
+        peek_query = select(Attachment).where(
+            Attachment.site_id == site.id, Attachment.width.is_not(None)
+        )
         rows = db.execute(query.limit(PAGE_SIZE).offset(offset)).scalars().all()
         peek = db.execute(peek_query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
         has_more = peek is not None
-        sites_by_id = {s.id: s for s in sites}
 
     return render_template(
         "admin/attachments_picker.html",
         rows=rows,
-        sites=sites,
-        sites_by_id=sites_by_id,
         page=page,
         has_more=has_more,
-        site_slug=site_slug,
     )
 
 
 @bp.route("/new", methods=["GET", "POST"])
-def upload_attachment() -> ResponseReturnValue:
+def upload_attachment(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
-        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
-    if not sites:
-        flash("Create a site before uploading attachments.", "error")
-        return redirect(url_for("attachment_admin.list_attachments"))
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("author", site.id)
+        site_id = site.id
+        site_slug_for_storage = site.slug
 
     if request.method == "GET":
-        return render_template(
-            "admin/attachments_new.html",
-            sites=sites,
-            default_site_id=sites[0].id,
-        )
+        return render_template("admin/attachments_new.html")
 
     # POST
     upload = request.files.get("file")
-    site_id_raw = (request.form.get("site_id") or "").strip()
-
     if upload is None or not upload.filename:
         flash("Choose a file to upload.", "error")
-        return render_template(
-            "admin/attachments_new.html",
-            sites=sites,
-            default_site_id=sites[0].id,
-        )
-    try:
-        site_id = int(site_id_raw)
-    except ValueError:
-        flash("Pick a site.", "error")
-        return render_template(
-            "admin/attachments_new.html",
-            sites=sites,
-            default_site_id=sites[0].id,
-        )
+        return render_template("admin/attachments_new.html")
 
     data = upload.read()
     if not data:
         flash("That file is empty.", "error")
-        return render_template(
-            "admin/attachments_new.html",
-            sites=sites,
-            default_site_id=sites[0].id,
-        )
+        return render_template("admin/attachments_new.html")
     if len(data) > settings.attachments_max_bytes:
         flash(
             f"File too large ({len(data)} bytes; max {settings.attachments_max_bytes}).",
             "error",
         )
-        return render_template(
-            "admin/attachments_new.html",
-            sites=sites,
-            default_site_id=sites[0].id,
-        )
+        return render_template("admin/attachments_new.html")
 
     filename = secure_filename(upload.filename) or "upload"
     content_type = (
@@ -205,18 +181,10 @@ def upload_attachment() -> ResponseReturnValue:
     )
 
     with SessionLocal() as db:
-        site = db.get(Site, site_id)
-        if site is None:
-            flash("Pick a valid site.", "error")
-            return render_template(
-                "admin/attachments_new.html",
-                sites=sites,
-                default_site_id=sites[0].id,
-            )
         # Store first so the row's storage_key matches the backend
         # location. Idempotent: a duplicate upload reuses the file.
         backend = resolve_storage(current_app)
-        storage_key, size = backend.store(site.slug, data)
+        storage_key, size = backend.store(site_slug_for_storage, data)
         existing = db.execute(
             select(Attachment).where(
                 Attachment.site_id == site_id,
@@ -280,7 +248,7 @@ def upload_attachment() -> ResponseReturnValue:
                 resized_meta = processor.probe(resized)
                 if resized_meta is None:
                     continue
-                resized_key, resized_size = backend.store(site.slug, resized)
+                resized_key, resized_size = backend.store(site_slug_for_storage, resized)
                 db.add(
                     AttachmentRendition(
                         attachment_id=new_id,
@@ -317,7 +285,7 @@ def upload_attachment() -> ResponseReturnValue:
 
 
 @bp.route("/<int:attachment_id>/alt-text", methods=["POST"])
-def save_alt_text(attachment_id: int) -> ResponseReturnValue:
+def save_alt_text(site_slug: str, attachment_id: int) -> ResponseReturnValue:
     """Save just the alt text for one attachment (htmx-friendly).
 
     The bulk missing-alt view posts here inline so an operator can
@@ -328,17 +296,15 @@ def save_alt_text(attachment_id: int) -> ResponseReturnValue:
     """
     alt_text = (request.form.get("alt_text") or "").strip() or None
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("author", site.id)
         row = db.get(Attachment, attachment_id)
-        if row is None:
-            flash("Attachment not found.", "error")
-            return redirect(url_for("attachment_admin.list_attachments"))
+        if row is None or row.site_id != site.id:
+            abort(404)
         row.alt_text = alt_text
         db.commit()
         site_id = row.site_id
         filename = row.filename
-        # Re-read needed values while the row is still attached.
-        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
-        sites_by_id = {s.id: s for s in sites}
 
     audit(
         "attachment.metadata_updated",
@@ -354,7 +320,6 @@ def save_alt_text(attachment_id: int) -> ResponseReturnValue:
             return render_template(
                 "admin/_attachment_row.html",
                 r=row,
-                sites_by_id=sites_by_id,
                 missing_alt=True,
                 just_saved=True,
             )
@@ -363,7 +328,7 @@ def save_alt_text(attachment_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:attachment_id>/edit", methods=["GET", "POST"])
-def edit_attachment(attachment_id: int) -> ResponseReturnValue:
+def edit_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue:
     """Edit alt text / title / focal point on an Attachment.
 
     Width / height / size / content-type / storage_key are
@@ -372,10 +337,11 @@ def edit_attachment(attachment_id: int) -> ResponseReturnValue:
     re-uploads (which produces a fresh row with its own metadata).
     """
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("author", site.id)
         row = db.get(Attachment, attachment_id)
-        if row is None:
-            flash("Attachment not found.", "error")
-            return redirect(url_for("attachment_admin.list_attachments"))
+        if row is None or row.site_id != site.id:
+            abort(404)
 
         if request.method == "GET":
             return render_template("admin/attachment_edit.html", row=row)
@@ -425,14 +391,14 @@ def _parse_focal(raw: str | None) -> float | None:
 
 
 @bp.route("/<int:attachment_id>/delete", methods=["POST"])
-def delete_attachment(attachment_id: int) -> ResponseReturnValue:
+def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
         row = db.get(Attachment, attachment_id)
-        if row is None:
-            flash("Attachment not found.", "error")
-            return redirect(url_for("attachment_admin.list_attachments"))
-        site = db.get(Site, row.site_id)
-        site_slug = site.slug if site is not None else "_orphan"
+        if row is None or row.site_id != site.id:
+            abort(404)
+        site_slug_for_storage = site.slug
         storage_key = row.storage_key
         filename = row.filename
         site_id = row.site_id
@@ -464,7 +430,7 @@ def delete_attachment(attachment_id: int) -> ResponseReturnValue:
                 ).scalar_one_or_none()
             )
             if still_used is None:
-                backend.remove(site_slug, key)
+                backend.remove(site_slug_for_storage, key)
 
     audit(
         "attachment.deleted",

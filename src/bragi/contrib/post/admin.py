@@ -1,8 +1,16 @@
 """Admin Blueprint for managing Posts.
 
-Mounted under /admin/posts on the admin app. The auth_local
-before_request guard protects all admin URLs, so these views
-assume an authenticated user (session["user_id"] is set).
+Mounted under /admin/sites/<site_slug>/posts on the admin app
+(P2 / #78). Every view resolves <site_slug> via
+`resolve_site_or_abort`, which 404s on an unknown slug and 403s
+on an authenticated non-member, then uses the resolved Site as
+the scope for queries and role checks. Cross-site post-id probes
+(e.g. POST `/admin/sites/blog/posts/42/edit` where post 42 lives
+on site `other`) return 404, not 403, so an owner on site A can
+not enumerate site B's id space.
+
+The auth_local before_request guard still protects every /admin
+URL, so these views assume an authenticated user.
 """
 
 from __future__ import annotations
@@ -29,10 +37,12 @@ from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
-from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
-from bragi.core.models.user_site_role import UserSiteRole
-from bragi.core.permissions import has_role, require_role
+from bragi.core.permissions import (
+    has_role,
+    require_role,
+    resolve_site_or_abort,
+)
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.security import current_user
 from bragi.core.text import slugify
@@ -41,7 +51,7 @@ bp = Blueprint(
     "post_admin",
     __name__,
     template_folder="templates",
-    url_prefix="/admin/posts",
+    url_prefix="/admin/sites/<site_slug>/posts",
 )
 
 
@@ -127,27 +137,15 @@ def _sync_post_tags(
     post.tags = tags
 
 
-def _user_can_act_anywhere(min_role: str) -> bool:
-    """True when the active user has at least `min_role` on at least
-    one site (or is superuser). Used by list / new gates."""
-    user = current_user()
-    if user is None:
-        return False
-    if user.is_superuser:
-        return True
-    with SessionLocal() as db:
-        rows = (
-            db.execute(select(UserSiteRole).where(UserSiteRole.user_id == user.id)).scalars().all()
-        )
-    return any(has_role(min_role, row.site_id) for row in rows)
-
-
 @bp.route("/", methods=["GET"])
-def list_posts() -> ResponseReturnValue:
-    if not _user_can_act_anywhere("author"):
-        abort(403)
+def list_posts(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
-        posts = db.execute(select(Post).order_by(Post.created_at.desc())).scalars().all()
+        site = resolve_site_or_abort(db, site_slug)
+        posts = (
+            db.execute(select(Post).where(Post.site_id == site.id).order_by(Post.created_at.desc()))
+            .scalars()
+            .all()
+        )
     # htmx dispatch: return just the table partial for hx-get
     # refreshes; full page for cold loads (and crawlers).
     if is_htmx():
@@ -156,30 +154,26 @@ def list_posts() -> ResponseReturnValue:
 
 
 @bp.route("/new", methods=["GET", "POST"])
-def new_post() -> ResponseReturnValue:
-    if not _user_can_act_anywhere("author"):
-        abort(403)
-    if request.method == "GET":
-        return render_template("admin/edit.html", post=None, form={})
-
-    form = _form_from_request()
-    if not form["title"] or not form["slug"]:
-        flash("Title and slug are required.", "error")
-        return render_template("admin/edit.html", post=None, form=form)
-
+def new_post(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
-        # First-Site-wins for now; a real site picker lands when
-        # multi-site UI is built.
-        site = db.execute(select(Site).limit(1)).scalar_one_or_none()
-        if site is None:
-            flash("No site exists yet. Create one via the CLI.", "error")
+        site = resolve_site_or_abort(db, site_slug)
+        # Membership covered by resolve_site_or_abort; require_role
+        # adds the "at least author" check (members with zero
+        # explicit role would be locked out here even though they
+        # can read the list).
+        require_role("author", site.id)
+        site_id = site.id
+
+        if request.method == "GET":
+            return render_template("admin/edit.html", post=None, form={})
+
+        form = _form_from_request()
+        if not form["title"] or not form["slug"]:
+            flash("Title and slug are required.", "error")
             return render_template("admin/edit.html", post=None, form=form)
 
         body_markdown = form["body_markdown"]
         new_status = form["status"]
-        site_id = site.id
-        if not has_role("author", site_id):
-            abort(403)
         new_post_row = Post(
             site_id=site_id,
             slug=form["slug"],
@@ -218,12 +212,14 @@ def new_post() -> ResponseReturnValue:
 
 
 @bp.route("/<int:post_id>/edit", methods=["GET", "POST"])
-def edit_post(post_id: int) -> ResponseReturnValue:
+def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
         post = db.get(Post, post_id)
-        if post is None:
-            flash("Post not found.", "error")
-            return redirect(url_for("post_admin.list_posts"))
+        # Cross-site post-id probe -> 404 (not 403), so an owner on
+        # site A cannot enumerate site B's id space.
+        if post is None or post.site_id != site.id:
+            abort(404)
 
         # Authors can edit their own posts; editors+ can edit any
         # post on their sites. Anything else is 403. Superusers
@@ -308,12 +304,12 @@ def edit_post(post_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:post_id>/delete", methods=["POST"])
-def delete_post(post_id: int) -> ResponseReturnValue:
+def delete_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
         post = db.get(Post, post_id)
-        if post is None:
-            flash("Post not found.", "error")
-            return redirect(url_for("post_admin.list_posts"))
+        if post is None or post.site_id != site.id:
+            abort(404)
         require_role("editor", post.site_id)
         title = post.title
         deleted_site_id = post.site_id
@@ -352,12 +348,12 @@ def _can_view_post(post: Post) -> bool:
 
 
 @bp.route("/<int:post_id>/revisions", methods=["GET"])
-def list_revisions(post_id: int) -> ResponseReturnValue:
+def list_revisions(site_slug: str, post_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
         post = db.get(Post, post_id)
-        if post is None:
-            flash("Post not found.", "error")
-            return redirect(url_for("post_admin.list_posts"))
+        if post is None or post.site_id != site.id:
+            abort(404)
         if not _can_view_post(post):
             abort(403)
         revisions = (
@@ -373,12 +369,12 @@ def list_revisions(post_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:post_id>/revisions/<int:rev_id>", methods=["GET"])
-def show_revision(post_id: int, rev_id: int) -> ResponseReturnValue:
+def show_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
         post = db.get(Post, post_id)
-        if post is None:
-            flash("Post not found.", "error")
-            return redirect(url_for("post_admin.list_posts"))
+        if post is None or post.site_id != site.id:
+            abort(404)
         if not _can_view_post(post):
             abort(403)
         revision = db.get(PostRevision, rev_id)
@@ -393,15 +389,15 @@ def show_revision(post_id: int, rev_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:post_id>/revisions/<int:rev_id>/restore", methods=["POST"])
-def restore_revision(post_id: int, rev_id: int) -> ResponseReturnValue:
+def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseReturnValue:
     """Swap the live post's mutable fields with the revision's,
     after capturing the now-current state as a fresh revision so
     the restore is itself undoable."""
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
         post = db.get(Post, post_id)
-        if post is None:
-            flash("Post not found.", "error")
-            return redirect(url_for("post_admin.list_posts"))
+        if post is None or post.site_id != site.id:
+            abort(404)
         if not _can_view_post(post):
             abort(403)
         revision = db.get(PostRevision, rev_id)

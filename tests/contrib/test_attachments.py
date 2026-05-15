@@ -31,7 +31,7 @@ from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, make_test_user
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -63,12 +63,14 @@ def admin_app(
                 hostname="blog.example.com",
                 title="Blog",
                 canonical_url="https://blog.example.com",
+                owner_user_id=user.id,
             ),
             Site(
                 slug="other",
                 hostname="other.example.com",
                 title="Other",
                 canonical_url="https://other.example.com",
+                owner_user_id=user.id,
             ),
         ]
     )
@@ -97,6 +99,7 @@ def delivery_app(
     # app fixture share `db_session` and the admin fixture seeds the
     # same hostnames first.
     if db_session.execute(select(Site).limit(1)).scalar_one_or_none() is None:
+        owner = make_test_user(db_session)
         db_session.add_all(
             [
                 Site(
@@ -104,12 +107,14 @@ def delivery_app(
                     hostname="blog.example.com",
                     title="Blog",
                     canonical_url="https://blog.example.com",
+                    owner_user_id=owner.id,
                 ),
                 Site(
                     slug="other",
                     hostname="other.example.com",
                     title="Other",
                     canonical_url="https://other.example.com",
+                    owner_user_id=owner.id,
                 ),
             ]
         )
@@ -140,7 +145,7 @@ def _blog_id(db_session_factory: sessionmaker[Session]) -> int:
 
 
 def test_list_requires_auth(admin_app: Flask) -> None:
-    resp = admin_app.test_client().get("/admin/attachments/", follow_redirects=False)
+    resp = admin_app.test_client().get("/admin/sites/blog/attachments/", follow_redirects=False)
     assert resp.status_code == 302
     assert "/auth/login" in resp.headers["Location"]
 
@@ -153,13 +158,13 @@ def test_upload_writes_row_and_file(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
 
     data = b"\x89PNG\r\n\x1a\nfake-png-bytes"
     expected_key = hashlib.sha256(data).hexdigest()
 
     resp = client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "logo.png"),
@@ -192,9 +197,9 @@ def test_reupload_same_bytes_is_idempotent(
     data = b"hello world"
 
     for _ in range(2):
-        token = csrf_token(client, path="/admin/attachments/new")
+        token = csrf_token(client, path="/admin/sites/blog/attachments/new")
         client.post(
-            "/admin/attachments/new",
+            "/admin/sites/blog/attachments/new",
             data={
                 "site_id": str(site_id),
                 "file": (io.BytesIO(data), "greeting.txt"),
@@ -211,9 +216,9 @@ def test_reupload_same_bytes_is_idempotent(
 def test_upload_rejects_empty_file(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     resp = client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": "1",
             "file": (io.BytesIO(b""), "empty.txt"),
@@ -228,9 +233,9 @@ def test_upload_rejects_empty_file(admin_app: Flask) -> None:
 def test_upload_rejects_missing_file(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     resp = client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={"site_id": "1", "_csrf_token": token},
         content_type="multipart/form-data",
     )
@@ -243,10 +248,10 @@ def test_upload_rejects_oversized_file(admin_app: Flask, monkeypatch: pytest.Mon
     monkeypatch.setattr("bragi.settings.settings.attachments_max_bytes", 16)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     big = b"x" * 100
     resp = client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": "1",
             "file": (io.BytesIO(big), "big.bin"),
@@ -266,11 +271,11 @@ def test_delete_removes_row_and_file(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = b"some bytes"
     expected_key = hashlib.sha256(data).hexdigest()
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "f.txt"),
@@ -281,9 +286,9 @@ def test_delete_removes_row_and_file(
     with db_session_factory() as db:
         aid = db.execute(select(Attachment)).scalar_one().id
 
-    token = csrf_token(client, path="/admin/attachments/")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/")
     resp = client.post(
-        f"/admin/attachments/{aid}/delete",
+        f"/admin/sites/blog/attachments/{aid}/delete",
         data={"_csrf_token": token},
         follow_redirects=False,
     )
@@ -311,9 +316,9 @@ def test_delete_preserves_file_when_other_rows_reference_it(
     data = b"shared bytes"
     expected_key = hashlib.sha256(data).hexdigest()
     # Upload to "blog" via admin.
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(blog.id),
             "file": (io.BytesIO(data), "shared.bin"),
@@ -345,9 +350,9 @@ def test_delete_preserves_file_when_other_rows_reference_it(
             db.execute(select(Attachment).where(Attachment.site_id == blog.id)).scalar_one().id
         )
 
-    token = csrf_token(client, path="/admin/attachments/")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/")
     client.post(
-        f"/admin/attachments/{blog_aid}/delete",
+        f"/admin/sites/blog/attachments/{blog_aid}/delete",
         data={"_csrf_token": token},
     )
 
@@ -482,10 +487,10 @@ def test_upload_populates_image_dimensions(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=42, height=17)
     resp = client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "shot.png"),
@@ -507,9 +512,9 @@ def test_upload_non_image_leaves_dimensions_null(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     resp = client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(b"plain text body"), "note.txt"),
@@ -532,9 +537,9 @@ def test_upload_malformed_image_bytes_does_not_break_upload(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     resp = client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(b"\x89PNG\r\n\x1a\nnot really a png"), "bad.png"),
@@ -579,7 +584,7 @@ def test_edit_get_renders_form(
     aid = _seed_image(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    resp = client.get(f"/admin/attachments/{aid}/edit")
+    resp = client.get(f"/admin/sites/blog/attachments/{aid}/edit")
     assert resp.status_code == 200
     assert b"Alt text" in resp.data
     assert b"hero.png" in resp.data
@@ -593,9 +598,9 @@ def test_edit_post_persists_metadata(
     aid = _seed_image(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/attachments/{aid}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/attachments/{aid}/edit")
     resp = client.post(
-        f"/admin/attachments/{aid}/edit",
+        f"/admin/sites/blog/attachments/{aid}/edit",
         data={
             "alt_text": "Hero shot of the lake",
             "title": "Lake at dawn",
@@ -621,9 +626,9 @@ def test_edit_clamps_focal_to_unit_range(
     aid = _seed_image(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/attachments/{aid}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/attachments/{aid}/edit")
     client.post(
-        f"/admin/attachments/{aid}/edit",
+        f"/admin/sites/blog/attachments/{aid}/edit",
         data={
             "alt_text": "",
             "title": "",
@@ -656,9 +661,9 @@ def test_edit_empty_values_clear_fields(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/attachments/{aid}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/attachments/{aid}/edit")
     client.post(
-        f"/admin/attachments/{aid}/edit",
+        f"/admin/sites/blog/attachments/{aid}/edit",
         data={
             "alt_text": "",
             "title": "",
@@ -705,10 +710,10 @@ def test_upload_image_generates_rendition_ladder(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=2000, height=1500)
     resp = client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "large.png"),
@@ -749,10 +754,10 @@ def test_upload_skips_widths_at_or_above_source(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=600, height=400)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "small.png"),
@@ -773,9 +778,9 @@ def test_upload_non_image_creates_no_renditions(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(b"hello text"), "note.txt"),
@@ -802,10 +807,10 @@ def test_upload_with_custom_ladder(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=500, height=400)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "img.png"),
@@ -831,10 +836,10 @@ def test_delete_cascades_renditions_and_unlinks_storage(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=2000, height=1500)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "delete-me.png"),
@@ -860,9 +865,9 @@ def test_delete_cascades_renditions_and_unlinks_storage(
         on_disk = tmp_attachments_root / "blog" / key[:2] / key
         assert on_disk.exists(), f"expected {key} on disk before delete"
 
-    token = csrf_token(client, path="/admin/attachments/")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/")
     client.post(
-        f"/admin/attachments/{aid}/delete",
+        f"/admin/sites/blog/attachments/{aid}/delete",
         data={"_csrf_token": token},
     )
 
@@ -883,10 +888,10 @@ def test_delivery_serves_rendition_by_storage_key(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=1200, height=800)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "pic.png"),
@@ -918,10 +923,10 @@ def test_delivery_rendition_cross_site_isolation(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=1200, height=800)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "pic.png"),
@@ -948,10 +953,10 @@ def test_srcset_helper_emits_ordered_parts(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=1200, height=900)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "pic.png"),
@@ -1014,14 +1019,14 @@ def test_missing_alt_filter_lists_only_images_without_alt(
     without_alt_id, with_alt_id = _seed_two_images_one_missing_alt(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/attachments/?missing_alt=1")
+    resp = client.get("/admin/sites/blog/attachments/?missing_alt=1")
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "needs-alt.png" in body
     assert "has-alt.png" not in body
     # The form action points at the save endpoint for the missing row.
-    assert f"/admin/attachments/{without_alt_id}/alt-text" in body
-    assert f"/admin/attachments/{with_alt_id}/alt-text" not in body
+    assert f"/admin/sites/blog/attachments/{without_alt_id}/alt-text" in body
+    assert f"/admin/sites/blog/attachments/{with_alt_id}/alt-text" not in body
 
 
 def test_missing_alt_count_surfaced_in_header(
@@ -1031,7 +1036,7 @@ def test_missing_alt_count_surfaced_in_header(
     _seed_two_images_one_missing_alt(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/attachments/")
+    resp = client.get("/admin/sites/blog/attachments/")
     assert resp.status_code == 200
     # Count of 1 (only the row missing alt text) surfaced as a link.
     assert b"missing alt text (1)" in resp.data.lower()
@@ -1044,9 +1049,9 @@ def test_save_alt_text_non_htmx_redirects(
     without_alt_id, _ = _seed_two_images_one_missing_alt(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/?missing_alt=1")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
     resp = client.post(
-        f"/admin/attachments/{without_alt_id}/alt-text",
+        f"/admin/sites/blog/attachments/{without_alt_id}/alt-text",
         data={"alt_text": "A clarifying caption.", "_csrf_token": token},
         follow_redirects=False,
     )
@@ -1064,9 +1069,9 @@ def test_save_alt_text_htmx_returns_row_partial(
     without_alt_id, _ = _seed_two_images_one_missing_alt(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/?missing_alt=1")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
     resp = client.post(
-        f"/admin/attachments/{without_alt_id}/alt-text",
+        f"/admin/sites/blog/attachments/{without_alt_id}/alt-text",
         data={"alt_text": "Hero shot of the lake.", "_csrf_token": token},
         headers={"HX-Request": "true"},
     )
@@ -1085,9 +1090,9 @@ def test_save_alt_text_empty_string_clears(
     _, with_alt_id = _seed_two_images_one_missing_alt(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/?missing_alt=1")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
     client.post(
-        f"/admin/attachments/{with_alt_id}/alt-text",
+        f"/admin/sites/blog/attachments/{with_alt_id}/alt-text",
         data={"alt_text": "", "_csrf_token": token},
     )
     with db_session_factory() as db:
@@ -1108,10 +1113,10 @@ def test_reindex_cli_adds_missing_slots(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=2000, height=1500)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "hero.png"),
@@ -1143,10 +1148,10 @@ def test_reindex_cli_dry_run_writes_nothing(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=2000, height=1500)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "hero.png"),
@@ -1206,10 +1211,10 @@ def test_reindex_cli_skips_existing_slots(
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/attachments/new")
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
     data = _make_png(width=2000, height=1500)
     client.post(
-        "/admin/attachments/new",
+        "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(site_id),
             "file": (io.BytesIO(data), "hero.png"),
@@ -1241,7 +1246,9 @@ def test_reindex_cli_unknown_site_errors(admin_app: Flask) -> None:
 
 
 def test_picker_requires_auth(admin_app: Flask) -> None:
-    resp = admin_app.test_client().get("/admin/attachments/picker", follow_redirects=False)
+    resp = admin_app.test_client().get(
+        "/admin/sites/blog/attachments/picker", follow_redirects=False
+    )
     assert resp.status_code == 302
     assert "/auth/login" in resp.headers["Location"]
 
@@ -1287,7 +1294,7 @@ def test_picker_lists_image_attachments(
 
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/attachments/picker")
+    resp = client.get("/admin/sites/blog/attachments/picker")
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "hero.png" in body
@@ -1331,7 +1338,7 @@ def test_picker_site_filter(
 
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/attachments/picker?site=blog")
+    resp = client.get("/admin/sites/blog/attachments/picker")
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "blog-img.png" in body

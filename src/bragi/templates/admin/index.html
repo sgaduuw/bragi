@@ -1,0 +1,33 @@
+{% extends "admin/base.html" %}
+{% block title %}bragi admin{% endblock %}
+{% block content %}
+<h1>Welcome{% if current_user_display_name %}, {{ current_user_display_name }}{% endif %}.</h1>
+<p style="color: #666; margin-top: -0.5rem;">
+  bragi admin, v{{ version }}.
+</p>
+
+{% if global_nav_items %}
+<section style="margin-top: 2rem;">
+  <h2 style="font-size: 1rem; text-transform: uppercase; letter-spacing: 0.08em; color: #666;">
+    Sections
+  </h2>
+  {# Site-scoped items (Posts, Pages, Redirects, Attachments) live
+     under /admin/sites/<slug>/...; the picker at /admin/sites/ is
+     the way into those. At the root, only global sections show. #}
+  <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin-top: 0.75rem;">
+    {% for item in global_nav_items %}
+    <li>
+      <a href="{{ url_for(item.endpoint) }}"
+         style="display: block; padding: 1rem; border: 1px solid #ddd; border-radius: 6px; text-decoration: none; color: #222; background: #fafafa;">
+        <strong style="display: block;">{{ item.label }}</strong>
+        <small style="color: #888;">{{ item.section }}</small>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% else %}
+<p>No admin sections are registered. (No plugins contributed any
+   <code>NavItem</code>s, or your role hides all of them.)</p>
+{% endif %}
+{% endblock %}

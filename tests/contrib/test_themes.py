@@ -27,7 +27,7 @@ from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.registry import Registry
 from bragi.core.themes import ThemeAwareLoader
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, make_test_user
 
 # ============================================================
 # ThemeSpec + Registry
@@ -64,6 +64,7 @@ def seeded_themed_site(
     patched_session_locals: sessionmaker[Session],
 ) -> Iterator[None]:
     """One Site with theme='stub-theme' on the in-memory DB."""
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="blog",
@@ -72,6 +73,7 @@ def seeded_themed_site(
             canonical_url="https://blog.example.com",
             active=True,
             theme="stub-theme",
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()
@@ -119,6 +121,7 @@ def test_theme_loader_falls_back_when_site_has_no_theme(
 ) -> None:
     """A site with theme=NULL renders with the default chain; the theme's
     override never fires."""
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="blog",
@@ -127,6 +130,7 @@ def test_theme_loader_falls_back_when_site_has_no_theme(
             canonical_url="https://blog.example.com",
             active=True,
             theme=None,
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()
@@ -155,6 +159,7 @@ def test_theme_loader_falls_back_on_unknown_slug(
     """A site referencing an uninstalled theme slug must not 500; it
     falls back to the default chain so an operator can `pip uninstall`
     a theme without breaking existing sites."""
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="blog",
@@ -163,6 +168,7 @@ def test_theme_loader_falls_back_on_unknown_slug(
             canonical_url="https://blog.example.com",
             active=True,
             theme="never-installed",
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()
@@ -208,6 +214,7 @@ def themed_delivery_app_with_static(
     static_dir.mkdir()
     (static_dir / "site.css").write_text("body { color: rebeccapurple; }")
 
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="blog",
@@ -215,6 +222,7 @@ def themed_delivery_app_with_static(
             title="Blog",
             canonical_url="https://blog.example.com",
             active=True,
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()
@@ -257,6 +265,7 @@ def test_theme_static_404_theme_without_static_dir(
     db_session: Session,
     patched_session_locals: sessionmaker[Session],
 ) -> None:
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="blog",
@@ -264,6 +273,7 @@ def test_theme_static_404_theme_without_static_dir(
             title="Blog",
             canonical_url="https://blog.example.com",
             active=True,
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()
@@ -303,6 +313,7 @@ def admin_app_with_user(
             title="Blog",
             canonical_url="https://blog.example.com",
             active=True,
+            owner_user_id=user.id,
         )
     )
     db_session.commit()

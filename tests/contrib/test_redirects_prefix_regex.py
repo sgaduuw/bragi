@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from bragi.apps.delivery import create_delivery_app
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
+from tests.conftest import make_test_user
 
 
 @pytest.fixture
@@ -28,12 +29,14 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="blog",
             hostname="blog.example.com",
             title="Blog",
             canonical_url="https://blog.example.com",
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()

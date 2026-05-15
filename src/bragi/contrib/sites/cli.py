@@ -12,9 +12,11 @@ import sys
 import click
 from sqlalchemy import select
 
+from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
+from bragi.core.models.user import User
 
 
 @click.group("site", help="Site management commands.")
@@ -33,6 +35,12 @@ def site_group() -> None:
     default=None,
     help="Canonical absolute URL; defaults to 'https://<hostname>'.",
 )
+@click.option(
+    "--owner",
+    "owner_email",
+    default=None,
+    help="Email of the owning user. Defaults to the first superuser.",
+)
 def create_site(
     slug: str,
     hostname: str,
@@ -40,6 +48,7 @@ def create_site(
     locale: str,
     timezone: str,
     canonical_url: str | None,
+    owner_email: str | None,
 ) -> None:
     """Create a Site row.
 
@@ -63,6 +72,29 @@ def create_site(
                 )
                 sys.exit(1)
 
+        # Resolve the owner. Explicit --owner wins; otherwise pick
+        # the first superuser. If neither exists, fail loudly so the
+        # operator seeds the right user first.
+        if owner_email:
+            owner = db.execute(
+                select(User).where(User.email == owner_email.strip().lower())
+            ).scalar_one_or_none()
+            if owner is None:
+                click.echo(f"No user with email {owner_email!r}.", err=True)
+                sys.exit(1)
+        else:
+            owner = db.execute(
+                select(User).where(User.is_superuser.is_(True)).order_by(User.id)
+            ).scalar()
+            if owner is None:
+                click.echo(
+                    "No superuser exists to default ownership to. "
+                    "Create one with `cms user create --superuser` first, "
+                    "or pass --owner explicitly.",
+                    err=True,
+                )
+                sys.exit(1)
+
         site = Site(
             slug=slug_normalized,
             hostname=hostname_normalized,
@@ -71,10 +103,55 @@ def create_site(
             timezone=timezone,
             canonical_url=canonical,
             active=True,
+            owner_user_id=owner.id,
         )
         db.add(site)
         db.commit()
-        click.echo(f"Created site {site.slug} ({site.hostname}, id={site.id}).")
+        click.echo(
+            f"Created site {site.slug} ({site.hostname}, id={site.id}, " f"owner={owner.email})."
+        )
+
+
+@site_group.command("transfer")
+@click.option("--site", "site_slug", required=True, help="Slug of the site to transfer.")
+@click.option("--to", "to_email", required=True, help="Email of the new owner.")
+def transfer_site(site_slug: str, to_email: str) -> None:
+    """Reassign the owner of a Site.
+
+    The new owner becomes the site's `owner_user_id` and is
+    implicit admin going forward. The previous owner keeps any
+    `UserSiteRole` they had separately (if none, they lose all
+    access to the site). Emits an audit row.
+    """
+    site_slug = site_slug.strip().lower()
+    to_email = to_email.strip().lower()
+    with SessionLocal() as db:
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+        if site is None:
+            click.echo(f"No site with slug {site_slug!r}.", err=True)
+            sys.exit(1)
+        new_owner = db.execute(select(User).where(User.email == to_email)).scalar_one_or_none()
+        if new_owner is None:
+            click.echo(f"No user with email {to_email!r}.", err=True)
+            sys.exit(1)
+        if site.owner_user_id == new_owner.id:
+            click.echo(f"{to_email} is already the owner of {site_slug!r}; no change.")
+            return
+        old_owner_id = site.owner_user_id
+        site.owner_user_id = new_owner.id
+        db.commit()
+
+        audit(
+            AuditAction.SITE_OWNER_TRANSFERRED,
+            target_type="site",
+            target_id=site.id,
+            site_id=site.id,
+            extra={"from_user_id": old_owner_id, "to_user_id": new_owner.id},
+        )
+        click.echo(
+            f"Transferred ownership of {site_slug!r} to {to_email} "
+            f"(was user_id={old_owner_id})."
+        )
 
 
 @site_group.command("list")

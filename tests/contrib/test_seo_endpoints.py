@@ -30,22 +30,24 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    user = User(email="ada@example.com", display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
     blog = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     other = Site(
         slug="other",
         hostname="other.example.com",
         title="Other",
         canonical_url="https://other.example.com",
+        owner_user_id=user.id,
     )
     db_session.add_all([blog, other])
-    db_session.flush()
-    user = User(email="ada@example.com", display_name="Ada", is_active=True)
-    db_session.add(user)
     db_session.flush()
 
     db_session.add_all(

@@ -101,6 +101,7 @@ def register_admin_nav() -> list[NavItem]:
             endpoint="attachment_admin.list_attachments",
             section="content",
             weight=20,
+            scope="site",
         ),
     ]
 

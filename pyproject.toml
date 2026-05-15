@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bragi"
-version = "1.4.1"
+version = "1.5.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = ["Eelco Wesemann <6771014+sgaduuw@users.noreply.github.com>"]
 license = "MIT"
@@ -48,6 +48,7 @@ redirects = "bragi.contrib.redirects.plugin"
 auth_local = "bragi.contrib.auth_local.plugin"
 auth_github = "bragi.contrib.auth_github.plugin"
 sites = "bragi.contrib.sites.plugin"
+team = "bragi.contrib.team.plugin"
 sessions = "bragi.contrib.sessions.plugin"
 audit = "bragi.contrib.audit.plugin"
 attachments = "bragi.contrib.attachments.plugin"

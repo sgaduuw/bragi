@@ -39,16 +39,17 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
-    db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
@@ -103,9 +104,9 @@ def _post_id(db_session_factory: sessionmaker[Session]) -> int:
 def test_purge_fires_on_post_create(admin_app: Flask, purge_recorder: _PurgeRecorder) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/new")
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
     client.post(
-        "/admin/posts/new",
+        "/admin/sites/blog/posts/new",
         data={
             "title": "New",
             "slug": "new",
@@ -124,9 +125,9 @@ def test_purge_does_not_fire_for_draft_create(
     """A draft has no cached public page; purging would be wasted."""
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/new")
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
     client.post(
-        "/admin/posts/new",
+        "/admin/sites/blog/posts/new",
         data={
             "title": "Draft",
             "slug": "draft",
@@ -146,9 +147,9 @@ def test_purge_fires_on_post_edit(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello (edited)",
             "slug": "hello",
@@ -168,8 +169,8 @@ def test_purge_fires_on_post_delete(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/")
-    client.post(f"/admin/posts/{post_id}/delete", data={"_csrf_token": token})
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    client.post(f"/admin/sites/blog/posts/{post_id}/delete", data={"_csrf_token": token})
     assert ("post", str(post_id)) in purge_recorder.calls
 
 
@@ -180,9 +181,9 @@ def test_purge_fires_on_page_create_published(
 ) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/pages/new")
+    token = csrf_token(client, path="/admin/sites/blog/pages/new")
     client.post(
-        "/admin/pages/new",
+        "/admin/sites/blog/pages/new",
         data={
             "title": "About",
             "slug": "about",
@@ -220,6 +221,6 @@ def test_purge_fires_on_page_delete(
         page_id = page.id
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/pages/")
-    client.post(f"/admin/pages/{page_id}/delete", data={"_csrf_token": token})
+    token = csrf_token(client, path="/admin/sites/blog/pages/")
+    client.post(f"/admin/sites/blog/pages/{page_id}/delete", data={"_csrf_token": token})
     assert ("page", str(page_id)) in purge_recorder.calls

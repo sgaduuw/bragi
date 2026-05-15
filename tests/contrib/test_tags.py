@@ -58,16 +58,17 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
-    db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
@@ -109,9 +110,9 @@ def test_edit_post_creates_new_tags(
         post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello",
             "slug": "hello",
@@ -139,9 +140,9 @@ def test_edit_post_reuses_existing_tag_by_slug(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello",
             "slug": "hello",
@@ -171,9 +172,9 @@ def test_edit_post_removing_tag_detaches_it(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello",
             "slug": "hello",
@@ -201,16 +202,17 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    user = User(email="ada@example.com", display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email="ada@example.com", display_name="Ada", is_active=True)
-    db_session.add(user)
     db_session.flush()
     tag = Tag(site_id=site.id, slug="python", label="Python")
     other_tag = Tag(site_id=site.id, slug="rust", label="Rust")

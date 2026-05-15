@@ -52,6 +52,7 @@ def admin_app(
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
     db_session.flush()
@@ -186,9 +187,9 @@ def test_post_create_emits_audit_row(
 ) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/new")
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
     client.post(
-        "/admin/posts/new",
+        "/admin/sites/blog/posts/new",
         data={
             "title": "Hello",
             "slug": "hello",
@@ -232,9 +233,9 @@ def test_post_update_emits_audit_row_with_diff(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Existing Renamed",
             "slug": "existing",
@@ -278,9 +279,9 @@ def test_post_delete_emits_audit_row(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/")
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
     client.post(
-        f"/admin/posts/{post_id}/delete",
+        f"/admin/sites/blog/posts/{post_id}/delete",
         data={"_csrf_token": token},
     )
     with db_session_factory() as db:

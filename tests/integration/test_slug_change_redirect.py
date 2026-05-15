@@ -44,16 +44,17 @@ def admin_and_delivery(
     used to drive renames; the delivery app exercises the redirect
     chain on the public URL.
     """
+    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
-    db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     post = Post(
@@ -94,7 +95,7 @@ def _login(client: FlaskClient) -> None:
 
 
 def _rename(admin_client: FlaskClient, post_id: int, new_slug: str, *, skip: bool = False) -> None:
-    token = csrf_token(admin_client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(admin_client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     data: dict[str, str] = {
         "title": "Original",
         "slug": new_slug,
@@ -104,7 +105,7 @@ def _rename(admin_client: FlaskClient, post_id: int, new_slug: str, *, skip: boo
     }
     if skip:
         data["skip_redirect"] = "1"
-    admin_client.post(f"/admin/posts/{post_id}/edit", data=data)
+    admin_client.post(f"/admin/sites/blog/posts/{post_id}/edit", data=data)
 
 
 def test_rename_inserts_301_from_old_to_new(
@@ -155,9 +156,9 @@ def test_title_only_change_does_not_insert_redirect(
     admin_app, _, post_id = admin_and_delivery
     admin = admin_app.test_client()
     _login(admin)
-    token = csrf_token(admin, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(admin, path=f"/admin/sites/blog/posts/{post_id}/edit")
     admin.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Renamed Title",
             "slug": "original",  # unchanged

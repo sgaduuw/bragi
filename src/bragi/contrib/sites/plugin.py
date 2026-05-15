@@ -26,10 +26,11 @@ def register_admin_blueprint() -> Blueprint:
 def register_admin_nav() -> list[NavItem]:
     """Add a Sites entry to the admin sidebar (site section).
 
-    Gated behind `permission="superuser"`: the sites admin
-    endpoints themselves enforce the same check via a
-    before_request hook, so this is purely for UI tidiness (don't
-    show a link to a 403).
+    No `permission` gate: the list view is now "sites you can
+    access" and works for any logged-in user. Write actions on
+    the page (Deactivate, New site, etc.) self-gate via the
+    blueprint's before_request hook and the template's
+    `is_superuser` conditional.
     """
     return [
         NavItem(
@@ -37,6 +38,5 @@ def register_admin_nav() -> list[NavItem]:
             endpoint="site_admin.list_sites",
             section="site",
             weight=10,
-            permission="superuser",
         ),
     ]

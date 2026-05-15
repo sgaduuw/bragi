@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import click
 import jinja2
-from flask import Flask, session
+from flask import Flask, g, render_template, session
 
 from bragi import __version__
 from bragi.cli import cms
@@ -20,7 +20,7 @@ from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
-from bragi.core.security import is_superuser
+from bragi.core.security import current_user, is_superuser
 from bragi.plugins import create_plugin_manager
 from bragi.settings import settings
 
@@ -79,6 +79,31 @@ def create_admin_app() -> Flask:
     register_site_resolver(app)
     register_csrf(app)
 
+    # Site-prefixed admin routes (`/admin/sites/<site_slug>/...`)
+    # capture the slug as a URL converter. Stash it on `g` so the
+    # chrome / context processor / cross-endpoint `url_for` calls
+    # all see the active site without each view having to pass it
+    # explicitly. The matching `url_defaults` hook injects
+    # `site_slug` into any outgoing `url_for(...)` call whose
+    # endpoint expects it, so templates can keep saying
+    # `url_for('post_admin.list_posts')` and stay in-site.
+    @app.url_value_preprocessor
+    def _capture_site_slug(_endpoint: str | None, values: dict[str, object] | None) -> None:
+        if values is not None and "site_slug" in values:
+            slug = values["site_slug"]
+            if isinstance(slug, str):
+                g.site_slug = slug
+
+    @app.url_defaults
+    def _inject_site_slug(endpoint: str, values: dict[str, object]) -> None:
+        if "site_slug" in values:
+            return
+        if not app.url_map.is_endpoint_expecting(endpoint, "site_slug"):
+            return
+        slug = getattr(g, "site_slug", None)
+        if isinstance(slug, str):
+            values["site_slug"] = slug
+
     # Every admin response is auth-bearing; force `no-store` on
     # every status code so no intermediary or browser caches a
     # page that includes session state.
@@ -130,27 +155,54 @@ def create_admin_app() -> Flask:
     def _inject_admin_context() -> dict[str, object]:
         # NavItem.permission gates visibility. None = always show;
         # 'superuser' = current user must have is_superuser=True;
-        # other values (per-site roles) land alongside #9.
+        # 'site_owner' = current user owns the site in scope (P4
+        # / #80; superusers also pass). Unknown permission
+        # strings hide by default.
         def _visible(item: object) -> bool:
             perm = getattr(item, "permission", None)
             if perm is None:
                 return True
             if perm == "superuser":
                 return is_superuser()
-            return False  # unknown permission strings hide by default
+            if perm == "site_owner":
+                if is_superuser():
+                    return True
+                cur_site = getattr(g, "current_site", None)
+                cur_user = current_user()
+                if cur_site is None or cur_user is None:
+                    return False
+                return getattr(cur_site, "owner_user_id", None) == cur_user.id
+            return False
 
         visible_nav = [i for i in registry.admin_nav if _visible(i)]
+        sorted_nav = sorted(visible_nav, key=lambda i: (i.section, i.weight))
+        # P2: nav items split by scope. `global_nav_items` always
+        # show in the chrome (Sites, Sessions, Audit, Account, ...).
+        # `site_nav_items` only show when the request is in a site
+        # context (URL carries <site_slug>); their endpoints expect
+        # site_slug, which the app's url_defaults hook fills from g.
+        global_nav_items = [i for i in sorted_nav if getattr(i, "scope", "global") == "global"]
+        site_nav_items = [i for i in sorted_nav if getattr(i, "scope", "global") == "site"]
         return {
-            "nav_items": sorted(visible_nav, key=lambda i: (i.section, i.weight)),
+            # Back-compat alias: a couple of older templates still
+            # iterate `nav_items` as the full ordered list. New
+            # chrome iterates the split lists.
+            "nav_items": sorted_nav,
+            "global_nav_items": global_nav_items,
+            "site_nav_items": site_nav_items,
+            "current_site": getattr(g, "current_site", None),
+            "current_site_slug": getattr(g, "site_slug", None),
             "current_user_email": session.get("user_email"),
             "current_user_display_name": session.get("user_display_name"),
         }
 
-    # Index lands at the first nav entry when authenticated;
-    # otherwise the auth guard redirects to /auth/login.
+    # Index renders through the admin base template so the nav,
+    # logout button, and flash slot show up. The page itself is a
+    # sections grid derived from `nav_items`, so it self-updates
+    # when plugins add new admin surfaces.
     @app.route("/")
     def index() -> str:
-        return f"<h1>bragi admin</h1><p>v{__version__}. Pick a section from the top nav.</p>"
+        return render_template("admin/index.html", version=__version__)
 
     return app
 

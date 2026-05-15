@@ -323,6 +323,29 @@ def test_authenticated_admin_hit_passes_through(admin_app: Flask) -> None:
     assert b"bragi admin" in resp.data
 
 
+def test_admin_index_renders_chrome_with_nav(admin_app: Flask) -> None:
+    """The `/` route must render the admin base template, not bare
+    inline HTML. Otherwise the only page the auth bounce lands the
+    operator on has no nav, no logout button, no flash slot — and
+    no way to navigate without already knowing the URL space.
+    Regression net for #75 / B9."""
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": token},
+    )
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    # The base template's topbar must be present.
+    assert '<nav class="topbar"' in body
+    # The logout form (which only renders for an authenticated
+    # session) confirms the chrome is fully wired, not just an
+    # empty nav stub.
+    assert "Log out" in body
+
+
 def test_login_endpoint_is_public(admin_app: Flask) -> None:
     """The login view must be reachable without a session, or login is impossible."""
     client = admin_app.test_client()
@@ -388,14 +411,14 @@ def test_login_with_must_change_redirects_to_change_password(
 def test_must_change_guard_blocks_other_admin_pages(
     must_change_admin_app: Flask,
 ) -> None:
-    """A logged-in but must-change user can't reach /admin/posts/."""
+    """A logged-in but must-change user can't reach an admin page."""
     client = must_change_admin_app.test_client()
     token = csrf_token(client)
     client.post(
         "/auth/login",
         data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": token},
     )
-    resp = client.get("/admin/posts/", follow_redirects=False)
+    resp = client.get("/admin/sites/", follow_redirects=False)
     assert resp.status_code == 302
     assert "/auth/change-password" in resp.headers["Location"]
 
@@ -499,8 +522,8 @@ def test_after_rotation_admin_pages_pass_through(
             "_csrf_token": new_token,
         },
     )
-    # Now /admin/posts/ should be reachable.
-    resp = client.get("/admin/posts/", follow_redirects=False)
+    # Now /admin/sites/ should be reachable (must-change guard cleared).
+    resp = client.get("/admin/sites/", follow_redirects=False)
     assert resp.status_code == 200
 
 
@@ -623,10 +646,16 @@ def test_user_grant_creates_role_row(
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
         site = Site(
-            slug="blog", hostname="b.example.com", title="B", canonical_url="https://b.example.com"
+            slug="blog",
+            hostname="b.example.com",
+            title="B",
+            canonical_url="https://b.example.com",
+            owner_user_id=user.id,
         )
-        db.add_all([user, site])
+        db.add(site)
         db.commit()
 
     runner = CliRunner()
@@ -656,10 +685,16 @@ def test_user_grant_updates_existing_row(
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
         site = Site(
-            slug="blog", hostname="b.example.com", title="B", canonical_url="https://b.example.com"
+            slug="blog",
+            hostname="b.example.com",
+            title="B",
+            canonical_url="https://b.example.com",
+            owner_user_id=user.id,
         )
-        db.add_all([user, site])
+        db.add(site)
         db.flush()
         db.add(UserSiteRole(user_id=user.id, site_id=site.id, role="author"))
         db.commit()
@@ -686,12 +721,16 @@ def test_user_grant_unknown_user_errors(
 
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
+        owner = User(email="owner@example.com", display_name="Owner", is_active=True)
+        db.add(owner)
+        db.flush()
         db.add(
             Site(
                 slug="blog",
                 hostname="b.example.com",
                 title="B",
                 canonical_url="https://b.example.com",
+                owner_user_id=owner.id,
             )
         )
         db.commit()

@@ -28,20 +28,24 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    # Four users: ada (post author + author role), bob (editor),
+    # charlie (no role), and a dedicated site owner kept out of the
+    # role matrix so the owner-is-implicit-admin behaviour doesn't
+    # leak into role tests (P1 / #77).
+    site_owner = User(email="owner@example.com", display_name="Owner", is_active=True)
+    ada = User(email="ada@example.com", display_name="Ada", is_active=True)
+    bob = User(email="bob@example.com", display_name="Bob", is_active=True)
+    charlie = User(email="charlie@example.com", display_name="Charlie", is_active=True)
+    db_session.add_all([site_owner, ada, bob, charlie])
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=site_owner.id,
     )
     db_session.add(site)
-    db_session.flush()
-    # Three users: ada (author of the post + author role),
-    # bob (editor role), charlie (no role).
-    ada = User(email="ada@example.com", display_name="Ada", is_active=True)
-    bob = User(email="bob@example.com", display_name="Bob", is_active=True)
-    charlie = User(email="charlie@example.com", display_name="Charlie", is_active=True)
-    db_session.add_all([ada, bob, charlie])
     db_session.flush()
     for user in (ada, bob, charlie):
         db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
@@ -88,14 +92,14 @@ def _post_id(db_session_factory: sessionmaker[Session]) -> int:
 def test_no_role_user_cannot_list(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login_as(client, "charlie@example.com")
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 403
 
 
 def test_author_can_list(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login_as(client, "ada@example.com")
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 200
 
 
@@ -105,7 +109,7 @@ def test_author_can_edit_own_post(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "ada@example.com")
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     assert resp.status_code == 200
 
 
@@ -113,8 +117,8 @@ def test_author_cannot_delete(admin_app: Flask, db_session_factory: sessionmaker
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "ada@example.com")
-    token = csrf_token(client, path="/admin/posts/")
-    resp = client.post(f"/admin/posts/{post_id}/delete", data={"_csrf_token": token})
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    resp = client.post(f"/admin/sites/blog/posts/{post_id}/delete", data={"_csrf_token": token})
     assert resp.status_code == 403
 
 
@@ -125,7 +129,7 @@ def test_editor_can_edit_any_post(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "bob@example.com")
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     assert resp.status_code == 200
 
 
@@ -133,9 +137,9 @@ def test_editor_can_delete(admin_app: Flask, db_session_factory: sessionmaker[Se
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "bob@example.com")
-    token = csrf_token(client, path="/admin/posts/")
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
     resp = client.post(
-        f"/admin/posts/{post_id}/delete",
+        f"/admin/sites/blog/posts/{post_id}/delete",
         data={"_csrf_token": token},
         follow_redirects=False,
     )
@@ -150,5 +154,5 @@ def test_author_cannot_edit_someone_elses_post(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "charlie@example.com")
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     assert resp.status_code == 403

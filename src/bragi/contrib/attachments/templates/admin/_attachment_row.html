@@ -9,7 +9,6 @@
       <br><small>{{ r.width }}&times;{{ r.height }}</small>
     {% endif %}
   </td>
-  <td><small>{{ sites_by_id.get(r.site_id).slug if sites_by_id.get(r.site_id) else r.site_id }}</small></td>
   <td><small>{{ r.content_type }}</small></td>
   {% if missing_alt %}
     <td colspan="2">

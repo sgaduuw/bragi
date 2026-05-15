@@ -1,5 +1,11 @@
 """Admin dashboard for analytics.
 
+Mounted under /admin/sites/<site_slug>/analytics on the admin app
+(P3 / #79). Scopes the count-by-day query to the resolved Site;
+cross-site aggregation is no longer surfaced anywhere (the
+writer keeps writing `site_id` on every row, but the read path
+hard-filters to one site at a time).
+
 v1 view: a count-by-day table for the last 30 days, broken down
 by `user_agent_class`. The query is a simple GROUP BY; once the
 table grows past the table-per-month migration point this can
@@ -11,31 +17,29 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
-from flask import Blueprint, abort, render_template
+from flask import Blueprint, render_template
 from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.analytics_event import AnalyticsEvent as AnalyticsEventRow
-from bragi.core.security import is_superuser
+from bragi.core.permissions import resolve_site_or_abort
 
 bp = Blueprint(
     "analytics_admin",
     __name__,
     template_folder="templates",
-    url_prefix="/admin/analytics",
+    url_prefix="/admin/sites/<site_slug>/analytics",
 )
 
 WINDOW_DAYS = 30
 
 
 @bp.route("/", methods=["GET"])
-def list_analytics() -> ResponseReturnValue:
-    if not is_superuser():
-        abort(403)
-
+def list_analytics(site_slug: str) -> ResponseReturnValue:
     since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=WINDOW_DAYS)
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
         rows = db.execute(
             select(
                 func.date(AnalyticsEventRow.occurred_at).label("day"),
@@ -43,6 +47,7 @@ def list_analytics() -> ResponseReturnValue:
                 func.count().label("count"),
             )
             .where(
+                AnalyticsEventRow.site_id == site.id,
                 AnalyticsEventRow.event_type == "pageview",
                 AnalyticsEventRow.occurred_at >= since,
             )
@@ -52,6 +57,7 @@ def list_analytics() -> ResponseReturnValue:
 
         total_30d = db.execute(
             select(func.count()).where(
+                AnalyticsEventRow.site_id == site.id,
                 AnalyticsEventRow.event_type == "pageview",
                 AnalyticsEventRow.occurred_at >= since,
             )
