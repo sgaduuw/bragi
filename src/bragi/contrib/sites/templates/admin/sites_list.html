@@ -24,11 +24,7 @@
     {% for site in sites %}
     <tr>
       <td>
-        {% if is_superuser %}
-          <a href="{{ url_for('site_admin.edit_site', site_id=site.id) }}"><code>{{ site.slug }}</code></a>
-        {% else %}
-          <code>{{ site.slug }}</code>
-        {% endif %}
+        <a href="{{ url_for('site_admin.site_dashboard', site_slug=site.slug) }}"><code>{{ site.slug }}</code></a>
       </td>
       <td>{{ site.hostname }}</td>
       <td>{{ site.title }}</td>

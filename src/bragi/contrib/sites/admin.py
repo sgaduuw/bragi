@@ -133,17 +133,23 @@ def site_dashboard(site_slug: str) -> ResponseReturnValue:
     """Per-site landing page (P2 / #78).
 
     The chrome's site_nav_items already provides the working
-    sections (Posts, Pages, Redirects, Attachments); this view
-    surfaces them as a sections grid so the dashboard self-updates
-    when new site-scoped plugins register. Deferred sections
-    (Analytics in P3, Team in P4) appear as inert placeholder
-    cards so the IA is visible end-to-end while the work lands.
+    sections (Posts, Pages, Redirects, Attachments, ...); this
+    view surfaces them as a sections grid so the dashboard
+    self-updates when new site-scoped plugins register.
+
+    The picker (`list_sites`) now treats every row as an Enter
+    link, so site settings (hostname, title, theme, aliases)
+    are reached from here via the superuser-only Settings
+    affordance rather than from the picker. This keeps the
+    cross-site view a pure "pick where to work" surface and
+    pushes the rare write surface one level deeper into the
+    site context where you'd actually want it.
     """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
     # `resolve_site_or_abort` already expunged the row so the
     # chrome can read it post-render; no further detach needed.
-    return render_template("admin/site_dashboard.html", site=site)
+    return render_template("admin/site_dashboard.html", site=site, is_superuser=is_superuser())
 
 
 @bp.route("/new", methods=["GET", "POST"])
