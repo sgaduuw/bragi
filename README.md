@@ -188,6 +188,12 @@ that up. Ports bind to `127.0.0.1` only; front the apps with a
 reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
 routing.
 
+Both apps run under gunicorn inside the container (sync worker
+class; `--access-logfile -` to stdout). Worker counts default to
+2 for admin and 4 for delivery; tune via `ADMIN_WORKERS` /
+`DELIVERY_WORKERS` env vars on each service if your traffic
+shape needs it.
+
 ## Project layout
 
 ```
