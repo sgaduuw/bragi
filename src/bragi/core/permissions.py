@@ -128,6 +128,15 @@ def resolve_site_or_abort(db: Session, site_slug: str) -> Site:
         abort(404)
     if not is_site_member(current_user(), site):
         abort(403)
+    # Detach before any commit can expire the row's columns:
+    # `g.current_site` is read again by the chrome's context
+    # processor when the template renders, which happens AFTER
+    # the view's `with SessionLocal() as db:` block exits. A
+    # subsequent commit elsewhere in the view would otherwise
+    # invalidate the cached column values and the template's
+    # access to `current_site.owner_user_id` (P4 / #80) would
+    # raise DetachedInstanceError.
+    db.expunge(site)
     g.current_site = site
     g.site_slug = site.slug
     return site

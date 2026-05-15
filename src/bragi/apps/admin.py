@@ -20,7 +20,7 @@ from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
 from bragi.core.render.transforms import TransformRegistry
-from bragi.core.security import is_superuser
+from bragi.core.security import current_user, is_superuser
 from bragi.plugins import create_plugin_manager
 from bragi.settings import settings
 
@@ -155,14 +155,24 @@ def create_admin_app() -> Flask:
     def _inject_admin_context() -> dict[str, object]:
         # NavItem.permission gates visibility. None = always show;
         # 'superuser' = current user must have is_superuser=True;
-        # other values (per-site roles) land alongside #9.
+        # 'site_owner' = current user owns the site in scope (P4
+        # / #80; superusers also pass). Unknown permission
+        # strings hide by default.
         def _visible(item: object) -> bool:
             perm = getattr(item, "permission", None)
             if perm is None:
                 return True
             if perm == "superuser":
                 return is_superuser()
-            return False  # unknown permission strings hide by default
+            if perm == "site_owner":
+                if is_superuser():
+                    return True
+                cur_site = getattr(g, "current_site", None)
+                cur_user = current_user()
+                if cur_site is None or cur_user is None:
+                    return False
+                return getattr(cur_site, "owner_user_id", None) == cur_user.id
+            return False
 
         visible_nav = [i for i in registry.admin_nav if _visible(i)]
         sorted_nav = sorted(visible_nav, key=lambda i: (i.section, i.weight))
