@@ -476,16 +476,19 @@ def _login_editor(client: FlaskClient) -> None:
 
 
 def test_non_superuser_can_view_list(admin_app_non_superuser: Flask) -> None:
-    """P1 / #77: the list view became member-readable (it's now the
-    "sites you can act on" picker), so a non-superuser gets 200 and
-    sees only sites they own or hold a role on. The write actions on
-    the page stay superuser-gated via the template's `is_superuser`
-    conditional."""
+    """P1 / #77 + P2 / #78: the list view is member-readable; a
+    non-superuser with exactly one accessible site is redirected
+    straight to that site's dashboard, so the picker only shows
+    when there's a genuine choice. Bob has exactly one site (blog),
+    so `/admin/sites/` 302s to `/admin/sites/blog/`."""
     client = admin_app_non_superuser.test_client()
     _login_editor(client)
-    resp = client.get("/admin/sites/")
+    resp = client.get("/admin/sites/", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/admin/sites/blog/")
+    # Following the redirect lands on the dashboard for Bob's site.
+    resp = client.get("/admin/sites/", follow_redirects=True)
     assert resp.status_code == 200
-    # Bob has an editor role on `blog`, so the row should render.
     assert b"blog" in resp.data
 
 
@@ -528,13 +531,13 @@ def test_sites_nav_entry_visible_for_non_superusers(
     now see the link too; the view itself scopes what they see to
     sites they own or hold a role on.
 
-    Hit /admin/posts/ to land on a page that renders the base
-    template chrome; the bare `/` endpoint returns inline HTML and
-    skips the nav, so it doesn't probe what we want here.
+    Hit /admin/sites/blog/posts/ to land on a page that renders the
+    base template chrome; the bare `/` endpoint returns inline HTML
+    and skips the nav, so it doesn't probe what we want here.
     """
     client = admin_app_non_superuser.test_client()
     _login_editor(client)
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 200
     body = resp.data.decode()
     assert 'href="/admin/sites/"' in body

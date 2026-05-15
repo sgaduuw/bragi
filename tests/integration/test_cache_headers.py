@@ -201,6 +201,6 @@ def test_admin_redirect_is_no_store(admin_app: Flask) -> None:
     """Even 302s from the auth guard must carry no-store; an
     intermediary caching the redirect would pin the user on the
     login page forever."""
-    resp = admin_app.test_client().get("/admin/posts/", follow_redirects=False)
+    resp = admin_app.test_client().get("/admin/sites/blog/posts/", follow_redirects=False)
     assert resp.status_code == 302
     assert resp.headers["Cache-Control"] == "private, no-store"

@@ -70,6 +70,7 @@ def admin_app(
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.permissions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.admin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
@@ -121,7 +122,7 @@ def _blog_id(db_session_factory: sessionmaker[Session]) -> int:
 
 
 def test_list_requires_auth(admin_app: Flask) -> None:
-    resp = admin_app.test_client().get("/admin/redirects/", follow_redirects=False)
+    resp = admin_app.test_client().get("/admin/sites/blog/redirects/", follow_redirects=False)
     assert resp.status_code == 302
     assert "/auth/login" in resp.headers["Location"]
 
@@ -129,7 +130,7 @@ def test_list_requires_auth(admin_app: Flask) -> None:
 def test_list_empty(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/redirects/")
+    resp = client.get("/admin/sites/blog/redirects/")
     assert resp.status_code == 200
     assert b"No redirects" in resp.data
 
@@ -137,14 +138,12 @@ def test_list_empty(admin_app: Flask) -> None:
 def test_new_redirect_round_trip(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/redirects/new")
+    token = csrf_token(client, path="/admin/sites/blog/redirects/new")
     resp = client.post(
-        "/admin/redirects/new",
+        "/admin/sites/blog/redirects/new",
         data={
-            "site_id": str(site_id),
             "source_path": "/old/",
             "target": "/new/",
             "status_code": "301",
@@ -169,11 +168,10 @@ def test_new_redirect_round_trip(
 def test_new_requires_source_to_start_with_slash(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/redirects/new")
+    token = csrf_token(client, path="/admin/sites/blog/redirects/new")
     resp = client.post(
-        "/admin/redirects/new",
+        "/admin/sites/blog/redirects/new",
         data={
-            "site_id": "1",
             "source_path": "no-slash",
             "target": "/somewhere/",
             "status_code": "301",
@@ -188,11 +186,10 @@ def test_new_requires_source_to_start_with_slash(admin_app: Flask) -> None:
 def test_new_rejects_invalid_status_code(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/redirects/new")
+    token = csrf_token(client, path="/admin/sites/blog/redirects/new")
     resp = client.post(
-        "/admin/redirects/new",
+        "/admin/sites/blog/redirects/new",
         data={
-            "site_id": "1",
             "source_path": "/x/",
             "target": "/y/",
             "status_code": "999",
@@ -221,11 +218,10 @@ def test_new_uniqueness_check(admin_app: Flask, db_session_factory: sessionmaker
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/redirects/new")
+    token = csrf_token(client, path="/admin/sites/blog/redirects/new")
     resp = client.post(
-        "/admin/redirects/new",
+        "/admin/sites/blog/redirects/new",
         data={
-            "site_id": str(site_id),
             "source_path": "/seen/",
             "target": "/whatever/",
             "status_code": "302",
@@ -257,11 +253,10 @@ def test_edit_redirect_round_trip(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/redirects/{rid}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/redirects/{rid}/edit")
     resp = client.post(
-        f"/admin/redirects/{rid}/edit",
+        f"/admin/sites/blog/redirects/{rid}/edit",
         data={
-            "site_id": str(site_id),
             "source_path": "/before/",
             "target": "/after/",
             "status_code": "301",
@@ -297,9 +292,9 @@ def test_delete_redirect(admin_app: Flask, db_session_factory: sessionmaker[Sess
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/redirects/")
+    token = csrf_token(client, path="/admin/sites/blog/redirects/")
     resp = client.post(
-        f"/admin/redirects/{rid}/delete",
+        f"/admin/sites/blog/redirects/{rid}/delete",
         data={"_csrf_token": token},
         follow_redirects=False,
     )
@@ -309,6 +304,8 @@ def test_delete_redirect(admin_app: Flask, db_session_factory: sessionmaker[Sess
 
 
 def test_list_filters_by_site(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
+    """Each site's URL scope is its own list; the old ?site= filter is gone
+    because the site is now part of the URL path (P2 / #78)."""
     with db_session_factory() as db:
         blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
         other = db.execute(select(Site).where(Site.slug == "other")).scalar_one()
@@ -336,10 +333,15 @@ def test_list_filters_by_site(admin_app: Flask, db_session_factory: sessionmaker
 
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/redirects/?site=blog")
+    resp = client.get("/admin/sites/blog/redirects/")
     body = resp.data.decode()
     assert "/blog-rule/" in body
     assert "/other-rule/" not in body
+
+    resp2 = client.get("/admin/sites/other/redirects/")
+    body2 = resp2.data.decode()
+    assert "/other-rule/" in body2
+    assert "/blog-rule/" not in body2
 
 
 def test_pagination_caps_at_page_size(
@@ -362,14 +364,14 @@ def test_pagination_caps_at_page_size(
 
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/redirects/")
+    resp = client.get("/admin/sites/blog/redirects/")
     body = resp.data.decode()
     # Page 1: PAGE_SIZE rows, "Next" link visible.
     # Count the per-row delete buttons as a proxy for row count.
     assert body.count("/delete") == PAGE_SIZE
     assert "Next" in body
 
-    resp2 = client.get("/admin/redirects/?page=2")
+    resp2 = client.get("/admin/sites/blog/redirects/?page=2")
     body2 = resp2.data.decode()
     # Page 2: remaining 5 rows, no "Next".
     assert body2.count("/delete") == 5

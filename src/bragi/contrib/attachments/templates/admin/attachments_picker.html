@@ -10,24 +10,9 @@
 
 <div id="attachment-picker"
      style="max-height: 70vh; overflow-y: auto;">
-  <form method="get"
-        hx-get="{{ url_for('attachment_admin.picker') }}"
-        hx-target="#attachment-picker"
-        hx-swap="outerHTML"
-        style="display: flex; gap: 0.5rem; align-items: center;
-               padding: 0.5rem; border-bottom: 1px solid #eee;
-               position: sticky; top: 0; background: white; z-index: 1;">
-    <label for="picker-site" style="margin: 0;">Site</label>
-    <select id="picker-site" name="site">
-      <option value="">All sites</option>
-      {% for s in sites %}
-        <option value="{{ s.slug }}" {% if site_slug == s.slug %}selected{% endif %}>{{ s.slug }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit">Filter</button>
-    <span style="flex: 1;"></span>
-    {% if rows %}<small>Page {{ page }}</small>{% endif %}
-  </form>
+  {# Picker is scoped to the current site by URL (P2 #78); the
+     post / page editor that opens this dialog is itself
+     site-scoped, so the picker always loads the right corpus. #}
 
   {% if not rows %}
     <p style="padding: 1rem;">
@@ -74,7 +59,7 @@
                 display: flex; gap: 0.5rem; justify-content: center;">
       {% if page > 1 %}
         <button type="button"
-                hx-get="{{ url_for('attachment_admin.picker', page=page-1, site=site_slug) }}"
+                hx-get="{{ url_for('attachment_admin.picker', page=page-1) }}"
                 hx-target="#attachment-picker"
                 hx-swap="outerHTML">
           &laquo; Prev
@@ -83,7 +68,7 @@
       <span>Page {{ page }}</span>
       {% if has_more %}
         <button type="button"
-                hx-get="{{ url_for('attachment_admin.picker', page=page+1, site=site_slug) }}"
+                hx-get="{{ url_for('attachment_admin.picker', page=page+1) }}"
                 hx-target="#attachment-picker"
                 hx-swap="outerHTML">
           Next &raquo;

@@ -6,19 +6,6 @@
   <a href="{{ url_for('redirect_admin.new_redirect') }}" class="btn">New redirect</a>
 </div>
 
-{% if sites|length > 1 %}
-<form method="get" action="{{ url_for('redirect_admin.list_redirects') }}"
-      style="margin-bottom: 1rem;">
-  <label for="site" style="margin-right: 0.5rem;">Site:</label>
-  <select name="site" id="site" onchange="this.form.submit()">
-    <option value="">All sites</option>
-    {% for s in sites %}
-    <option value="{{ s.slug }}" {% if site_filter == s.slug %}selected{% endif %}>{{ s.slug }} ({{ s.hostname }})</option>
-    {% endfor %}
-  </select>
-</form>
-{% endif %}
-
 {% if rows %}
 <table>
   <thead>
@@ -31,7 +18,6 @@
       <th>Last hit</th>
       <th>Active</th>
       <th>Origin</th>
-      <th>Site</th>
       <th></th>
     </tr>
   </thead>
@@ -46,7 +32,6 @@
       <td>{{ r.last_hit_at.strftime('%Y-%m-%d') if r.last_hit_at else '(none)' }}</td>
       <td>{{ 'yes' if r.active else 'no' }}</td>
       <td><small>{{ r.source }}</small></td>
-      <td><small>{{ sites_by_id.get(r.site_id).slug if sites_by_id.get(r.site_id) else r.site_id }}</small></td>
       <td>
         <form method="post"
               action="{{ url_for('redirect_admin.delete_redirect', redirect_id=r.id) }}"
@@ -62,17 +47,16 @@
 </table>
 
 <nav style="margin-top: 1rem;">
-  {% set base_args = {'site': site_filter} if site_filter else {} %}
   {% if page > 1 %}
-    <a class="btn secondary" href="{{ url_for('redirect_admin.list_redirects', page=page-1, **base_args) }}">&laquo; Prev</a>
+    <a class="btn secondary" href="{{ url_for('redirect_admin.list_redirects', page=page-1) }}">&laquo; Prev</a>
   {% endif %}
   <span style="margin: 0 1rem;">Page {{ page }}</span>
   {% if has_more %}
-    <a class="btn secondary" href="{{ url_for('redirect_admin.list_redirects', page=page+1, **base_args) }}">Next &raquo;</a>
+    <a class="btn secondary" href="{{ url_for('redirect_admin.list_redirects', page=page+1) }}">Next &raquo;</a>
   {% endif %}
 </nav>
 {% else %}
-<p>No redirects {% if site_filter %}for site <code>{{ site_filter }}</code>{% endif %}.
+<p>No redirects for this site.
    <a href="{{ url_for('redirect_admin.new_redirect') }}">Create one.</a></p>
 {% endif %}
 {% endblock %}
