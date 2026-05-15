@@ -24,12 +24,19 @@ def register_admin_blueprint() -> Blueprint:
 
 @hookimpl
 def register_admin_nav() -> list[NavItem]:
-    """Add a Sites entry to the admin sidebar (site section)."""
+    """Add a Sites entry to the admin sidebar (site section).
+
+    Gated behind `permission="superuser"`: the sites admin
+    endpoints themselves enforce the same check via a
+    before_request hook, so this is purely for UI tidiness (don't
+    show a link to a 403).
+    """
     return [
         NavItem(
             label="Sites",
             endpoint="site_admin.list_sites",
             section="site",
             weight=10,
+            permission="superuser",
         ),
     ]

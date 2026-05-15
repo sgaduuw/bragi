@@ -18,13 +18,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
+from bragi.core.security import is_superuser
 
 bp = Blueprint(
     "site_admin",
@@ -32,6 +33,25 @@ bp = Blueprint(
     template_folder="templates",
     url_prefix="/admin/sites",
 )
+
+
+@bp.before_request
+def _superuser_only() -> None:
+    """Gate every site-admin endpoint behind the superuser flag.
+
+    Sites are the multisite primitive (Host header -> Site row); a
+    misconfigured or maliciously-edited Site row affects every
+    public visitor of the deployment. Edit / deactivate / alias-
+    swap therefore stays behind the strongest role we have.
+
+    For solo-operator bragi (one superuser, multiple sites) this
+    is the natural shape: nobody else has admin pages-list access
+    anyway. A future multi-admin / per-site-role rollout would
+    replace this with a `has_role(site_id, "admin")` check; until
+    then the conservative gate matches the intended threat model.
+    """
+    if not is_superuser():
+        abort(403)
 
 
 def _form_from_request() -> dict[str, str]:

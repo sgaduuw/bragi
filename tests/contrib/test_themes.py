@@ -290,7 +290,9 @@ def admin_app_with_user(
     db_session: Session,
     patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
-    user = User(email=EMAIL, display_name="Ada", is_active=True)
+    # Superuser so the sites admin (where the theme dropdown
+    # lives) is reachable; B8 added a superuser-only gate.
+    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
     db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
