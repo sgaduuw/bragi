@@ -24,21 +24,27 @@ def _candidate_file(path: Path) -> Path | None:
 
 
 def looks_like_ghost(path: Any) -> bool:
-    """Soft detection: a single JSON file whose top-level matches
-    the Ghost export envelope. Reads only the first few KiB to
-    keep `detect()` cheap on misuse."""
-    src = _candidate_file(Path(path))
-    if src is None:
-        return False
+    """Structural detection: try to parse the file as a Ghost
+    export envelope. Returns True if the structure validates,
+    False on missing-file / non-JSON / wrong-shape.
+
+    An earlier version of this function read only the first
+    4 KB and looked for `"db"` plus `"posts"` / `"users"`
+    substrings. Modern Ghost exports (6.x+) lead `db[0].data`
+    with a sizable `custom_theme_settings` array (#95), so
+    `"posts"` lands past the 4 KB cutoff and the head-scan
+    returned False on genuinely valid files. Files are at
+    most low-MB; a full parse is fast enough that the cheap-
+    detection optimization wasn't worth the false negatives.
+    """
     try:
-        with src.open("r", encoding="utf-8") as f:
-            head = f.read(4096)
-    except OSError:
+        load_export(path)
+    except (OSError, ValueError):
+        # `json.JSONDecodeError` subclasses ValueError, so this
+        # one except line covers malformed JSON, missing
+        # db[]/data envelope, and unreadable files.
         return False
-    # Loose: a real check would parse and inspect db[0].data.posts.
-    # The cheap heuristic is enough to avoid false positives in
-    # `detect()`; the full parse happens in `load_export`.
-    return '"db"' in head and ('"posts"' in head or '"users"' in head)
+    return True
 
 
 def load_export(path: Any) -> dict[str, Any]:
