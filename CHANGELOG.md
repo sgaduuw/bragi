@@ -105,6 +105,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   P4 owner nav gate) ran, those reads would raise
   DetachedInstanceError. The expunge happens unconditionally so
   every site-prefixed blueprint inherits the fix.
+- **Picker rows now Enter, not Edit.** Clicking a slug in
+  `/admin/sites/` takes you to the per-site dashboard
+  (`/admin/sites/<slug>/`), the action everyone (including
+  superusers) actually wants from the picker most of the time.
+  Site settings (hostname, title, theme, aliases) moved to a
+  superuser-only "Settings" affordance next to the title on
+  the dashboard itself; the underlying
+  `/admin/sites/<int:site_id>/edit` URL is unchanged. The
+  Deactivate / Activate column stays on the picker since
+  deactivation is a cross-site operator decision rather than
+  an in-site one.
 
 ## [1.4.1] - 2026-05-15
 

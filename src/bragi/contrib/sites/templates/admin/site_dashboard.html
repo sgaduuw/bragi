@@ -1,8 +1,14 @@
 {% extends "admin/base.html" %}
 {% block title %}{{ site.title }} &middot; bragi admin{% endblock %}
 {% block content %}
-<h1>{{ site.title }}</h1>
-<p style="color: #666; margin-top: -0.5rem;">
+<div style="display: flex; align-items: baseline; gap: 1rem; margin-bottom: 0.5rem;">
+  <h1 style="margin: 0;">{{ site.title }}</h1>
+  {% if is_superuser %}
+    <a href="{{ url_for('site_admin.edit_site', site_id=site.id) }}"
+       style="font-size: 0.9em;">Settings</a>
+  {% endif %}
+</div>
+<p style="color: #666; margin-top: 0;">
   <code>{{ site.hostname }}</code>
   {% if not site.active %}<span class="flash error" style="margin-left: 0.5rem; padding: 0.1rem 0.5rem;">inactive</span>{% endif %}
 </p>
