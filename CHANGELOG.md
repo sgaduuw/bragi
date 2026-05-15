@@ -6,6 +6,73 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-05-15
+
+A pure-bugfix release sweeping eight defects surfaced by a full
+audit of the test suite. No schema changes, no contract changes;
+all fixes target correctness, observability, and security gaps
+that were silent on the happy path but real under their failure
+modes.
+
+### Fixed
+- **Page admin fires `on_post_published` / `on_post_updated`
+  (#57).** Page admin was firing only `on_post_deleted`. Search
+  indexing, slug-change auto-301, IndexNow ping, and cache-purge
+  subscribers all saw page create/edit as no-op events. Pages
+  were surfacing in search only because `cms search reindex`
+  walked them after the fact. Page admin now mirrors the post
+  admin's lifecycle wiring; the page-edit form gains a
+  `skip_redirect` checkbox so typo-fixes in drafts don't insert
+  stale 301s.
+- **`site_resolver` honours `active=False` (#58).** The admin
+  "Deactivate" toggle updated the flag but the resolver ignored
+  it; deactivated sites kept serving. The canonical-hostname and
+  alias-fallback queries now filter on `Site.active`, so the
+  toggle actually takes a site off the air.
+- **`on_user_login` fires for local password auth (#59).** GitHub
+  OAuth fired the hook; the local password flow didn't.
+  Observability subscribers (analytics, audit enrichment, future
+  plugins) were blind to half the auth surface. Failed logins
+  still do not fire the hook (the contract is "successful auth").
+- **Redirect chain follow + loop detection (#60).** The middleware
+  resolved a single redirect and stopped, leaving multi-hop
+  chains as browser-visible double-hops and turning data-layer
+  cycles into infinite browser-side chains. Now follows up to 3
+  hops, collapses the chain into a single user-visible redirect
+  (status code from the first hop, target from the last), detects
+  loops (direct and indirect) and serves 500 with a log line, and
+  short-circuits on 410 anywhere in the chain.
+- **IndexNow no longer pings on draft saves (#61).** The
+  `on_post_updated` hookimpl fired unconditionally on every
+  save, including draft-to-draft edits. The plugin POSTed to the
+  IndexNow endpoint with URLs that 404 publicly, wasting per-host
+  quota and training search engines to downweight the site. Now
+  filters: draft→draft is silent, draft→published / published
+  edits / published→draft / delete all ping (the unpublish case
+  is intentional so the engine learns the URL is now 404).
+- **Sitemap walks all registered content types (#62).** The
+  sitemap was Post-only; published Pages were silently excluded.
+  Now iterates `registry.content_types` filtered by
+  `sitemap_eligible` and emits a `<url>` per published row of
+  each spec. Future-proof for any third-party content-type plugin
+  that registers with the same shape.
+- **Session id rotated on login (#63).** Both auth paths set
+  `user_id` on the session without rotating the underlying sid.
+  Any pre-auth sid an attacker may have planted on the victim's
+  browser was inherited intact through authentication: textbook
+  session fixation. `BragiServerSession.regenerate()` rotates
+  the sid while preserving dict contents; `rotate_sid()` helper
+  is called by both `auth_local` and `auth_github`. Failed
+  logins do not rotate.
+- **Sites admin gated behind superuser flag (#64).** The
+  /admin/sites endpoints had only the global "logged in" guard;
+  any author or editor on one site could edit, deactivate, or
+  alias-swap any other site. Now refuses non-superuser hits with
+  403, and the Sites nav entry is hidden from non-superusers to
+  match. Conservative default for solo-operator bragi; a future
+  multi-admin scenario can replace the gate with per-site role
+  checks.
+
 ## [1.4.0] - 2026-05-15
 
 ### Added
