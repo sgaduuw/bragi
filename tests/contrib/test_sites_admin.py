@@ -21,6 +21,7 @@ from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.models.user import User
+from bragi.core.models.user_site_role import UserSiteRole
 from tests.conftest import csrf_token
 
 EMAIL = "ada@example.com"
@@ -33,8 +34,13 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
-    """Admin app with one seeded user and one seeded site."""
-    user = User(email=EMAIL, display_name="Ada", is_active=True)
+    """Admin app with one seeded user and one seeded site.
+
+    The user is `is_superuser=True` because the sites admin
+    blueprint gates every endpoint behind the superuser flag.
+    Non-superuser coverage lives in dedicated 403 tests below.
+    """
+    user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
     db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
@@ -402,3 +408,124 @@ def test_remove_alias_deletes_row(
     assert resp.status_code == 302
     with db_session_factory() as db:
         assert db.get(SiteAlias, alias_id) is None
+
+
+# ============================================================
+# Superuser gate (non-superusers must hit 403, not the view)
+# ============================================================
+
+
+EDITOR_EMAIL = "bob@example.com"
+EDITOR_PASSWORD = "another-correct-horse-battery-staple"
+
+
+@pytest.fixture
+def admin_app_non_superuser(
+    db_session: Session,
+    patched_session_locals: sessionmaker[Session],
+) -> Iterator[Flask]:
+    """An admin app whose seeded user is NOT a superuser.
+
+    Used to exercise the 403 path on `/admin/sites/...`: any
+    authenticated but non-superuser hit must be refused, not just
+    on GET-list but on the full mutation surface (edit / activate
+    / aliases). Uses `patched_session_locals` so every module that
+    imports SessionLocal at module level (including
+    `bragi.core.permissions`, which the post admin's role check
+    reaches into) sees the test engine.
+    """
+    user = User(email=EDITOR_EMAIL, display_name="Bob", is_active=True, is_superuser=False)
+    db_session.add(user)
+    db_session.flush()
+    db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(EDITOR_PASSWORD)))
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        active=True,
+    )
+    db_session.add(site)
+    db_session.flush()
+    # Editor role lets Bob reach /admin/posts/ (which is what the
+    # nav-visibility test renders for chrome); the sites admin
+    # gate is independent of any per-site role and is what we're
+    # actually testing.
+    db_session.add(UserSiteRole(user_id=user.id, site_id=site.id, role="editor"))
+    db_session.commit()
+    yield create_admin_app()
+
+
+def _login_editor(client: FlaskClient) -> None:
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": EDITOR_EMAIL, "password": EDITOR_PASSWORD, "_csrf_token": token},
+    )
+
+
+def test_non_superuser_gets_403_on_list(admin_app_non_superuser: Flask) -> None:
+    client = admin_app_non_superuser.test_client()
+    _login_editor(client)
+    resp = client.get("/admin/sites/")
+    assert resp.status_code == 403
+
+
+def test_non_superuser_gets_403_on_new(admin_app_non_superuser: Flask) -> None:
+    client = admin_app_non_superuser.test_client()
+    _login_editor(client)
+    resp = client.get("/admin/sites/new")
+    assert resp.status_code == 403
+
+
+def test_non_superuser_post_deactivate_blocked(
+    admin_app_non_superuser: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """A non-superuser POST to /deactivate must return 403, AND the
+    Site row must remain active (no side effect happened)."""
+    client = admin_app_non_superuser.test_client()
+    _login_editor(client)
+    with db_session_factory() as db:
+        site = db.execute(select(Site)).scalar_one()
+        site_id = site.id
+        assert site.active is True
+
+    token = csrf_token(client, path="/")
+    resp = client.post(
+        f"/admin/sites/{site_id}/deactivate",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 403
+    with db_session_factory() as db:
+        assert db.execute(select(Site)).scalar_one().active is True
+
+
+def test_sites_nav_entry_hidden_for_non_superusers(
+    admin_app_non_superuser: Flask,
+) -> None:
+    """The admin chrome's nav permission filter (apps/admin.py
+    `_visible`) must hide the Sites link for users without the
+    superuser flag, so they don't see a tempting link to a 403.
+
+    Hit /admin/posts/ to land on a page that renders the base
+    template chrome; the bare `/` endpoint returns inline HTML and
+    skips the nav, so it doesn't probe what we want here.
+    """
+    client = admin_app_non_superuser.test_client()
+    _login_editor(client)
+    resp = client.get("/admin/posts/")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert 'href="/admin/sites/"' not in body
+
+
+def test_sites_nav_entry_visible_for_superuser(admin_app: Flask) -> None:
+    """Mirror: a superuser sees the Sites link in the nav."""
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert 'href="/admin/sites/"' in body
