@@ -193,15 +193,113 @@ def test_publish_fires_indexnow_post(
             "_csrf_token": token,
         },
     )
-    # Two events fire: on_post_updated (every save) and
-    # on_post_published (first publish). Both should ping. We just
-    # assert that at least one call carried the right shape.
-    assert len(calls) >= 1
-    payload = calls[0]["json"]
-    assert payload["host"] == "blog.example.com"
-    assert payload["key"] == KEY
-    assert payload["keyLocation"] == f"https://blog.example.com/{KEY}.txt"
-    assert payload["urlList"] == ["https://blog.example.com/posts/hello/"]
+    # Two events fire on a draft→published transition:
+    # `on_post_updated` (every save, only pings when after.status is
+    # published) and `on_post_published` (always pings). Both
+    # qualify here, so the expected count is exactly 2.
+    assert len(calls) == 2
+    for call in calls:
+        payload = call["json"]
+        assert payload["host"] == "blog.example.com"
+        assert payload["key"] == KEY
+        assert payload["keyLocation"] == f"https://blog.example.com/{KEY}.txt"
+        assert payload["urlList"] == ["https://blog.example.com/posts/hello/"]
+
+
+def test_draft_edit_does_not_fire_indexnow(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A draft→draft edit (typo fix on a never-published post) must
+    not ping IndexNow: the URL 404s in delivery, so the search
+    engine would learn nothing useful and waste host quota."""
+    calls = _captured_post(monkeypatch)
+    with db_session_factory() as db:
+        post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    client.post(
+        f"/admin/posts/{post_id}/edit",
+        data={
+            "title": "Hello (typo fix)",
+            "slug": "hello",
+            "body_markdown": "h",
+            "status": "draft",
+            "_csrf_token": token,
+        },
+    )
+    assert calls == []
+
+
+def test_unpublish_fires_indexnow(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """published→draft (unpublish) should ping so the search engine
+    re-crawls and replaces its stale snapshot with the new 404."""
+    # Flip the seeded draft to published first, then capture and
+    # unpublish so the test only inspects the unpublish ping.
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        db.commit()
+        post_id = post.id
+
+    calls = _captured_post(monkeypatch)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    client.post(
+        f"/admin/posts/{post_id}/edit",
+        data={
+            "title": "Hello",
+            "slug": "hello",
+            "body_markdown": "h",
+            "status": "draft",
+            "_csrf_token": token,
+        },
+    )
+    # Only `on_post_updated` fires (no `on_post_published` here);
+    # `on_post_updated`'s "was published" branch kicks in.
+    assert len(calls) == 1
+    assert calls[0]["json"]["urlList"] == ["https://blog.example.com/posts/hello/"]
+
+
+def test_published_to_published_edit_fires_indexnow(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A normal edit on an already-published post should ping; the
+    content changed and we want crawlers to re-fetch."""
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        db.commit()
+        post_id = post.id
+
+    calls = _captured_post(monkeypatch)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    client.post(
+        f"/admin/posts/{post_id}/edit",
+        data={
+            "title": "Hello (edited)",
+            "slug": "hello",
+            "body_markdown": "h v2",
+            "status": "published",
+            "_csrf_token": token,
+        },
+    )
+    # `on_post_updated` fires; `on_post_published` does NOT (no
+    # transition into published since it was already there).
+    assert len(calls) == 1
+    assert calls[0]["json"]["urlList"] == ["https://blog.example.com/posts/hello/"]
 
 
 def test_delete_fires_indexnow_post_with_pre_delete_url(
