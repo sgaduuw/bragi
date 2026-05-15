@@ -78,6 +78,44 @@ def test_looks_like_ghost_short_circuits_for_missing_file(tmp_path: Path) -> Non
     assert looks_like_ghost(tmp_path / "nope.json") is False
 
 
+def test_detect_handles_fat_custom_theme_settings_before_posts(tmp_path: Path) -> None:
+    """Regression for #95: modern Ghost exports (6.x+) lead
+    `db[0].data` with `benefits` / `custom_theme_settings` arrays,
+    pushing the `posts` key well past 4 KB. The earlier head-scan
+    heuristic returned False on these otherwise valid files."""
+    fat_settings = [
+        {
+            "id": f"id{i}",
+            "theme": "source",
+            "key": f"key{i}",
+            "type": "select",
+            "value": "x" * 200,
+        }
+        for i in range(40)
+    ]
+    payload = {
+        "db": [
+            {
+                "meta": {"exported_on": 0, "version": "6.27.0"},
+                "data": {
+                    "benefits": [],
+                    "custom_theme_settings": fat_settings,
+                    "posts": [],
+                    "users": [],
+                    "tags": [],
+                    "posts_tags": [],
+                },
+            }
+        ]
+    }
+    p = tmp_path / "export.json"
+    p.write_text(json.dumps(payload))
+    # Sanity: confirm the test actually exercises the past-4 KB case.
+    assert p.read_bytes().index(b'"posts"') > 4096
+    assert detect(p) is True
+    assert looks_like_ghost(p) is True
+
+
 # ============================================================
 # plan
 # ============================================================
