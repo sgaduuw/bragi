@@ -6,116 +6,115 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
-- **`Site.owner_user_id` (#77).** Each site now has a single
-  designated owner, stored as a NOT NULL FK to `users.id`. Owners
-  are implicit admins of their site: `has_role(user, site, "admin")`
-  returns true for the owner regardless of whether they hold an
-  explicit `UserSiteRole`. Permissions exposed two new helpers,
-  `is_site_member(user, site)` and `accessible_sites_for(user)`,
-  used to scope the admin sites list. A new `cms site transfer`
-  CLI command reassigns ownership and writes a
-  `site.owner.transferred` audit row; `cms site create` gained an
-  `--owner` flag and defaults to the first superuser when omitted.
-- **`/admin/sites` is now member-readable (#77).** The Sites list
-  no longer requires superuser. Any logged-in user sees the sites
-  they own, hold an explicit role on, or (for superusers) every
-  site. Write actions on the page (Deactivate, Activate, New
-  site, edit links) remain superuser-only and now self-gate via
-  the blueprint hook plus a template conditional, replacing the
-  blanket `_superuser_only` gate. The empty-state copy adjusts
-  for the two audiences.
+## [1.5.0] - 2026-05-15
 
-### Changed
-- **Admin content routes are now site-prefixed (#78).** Posts,
-  pages, redirects, and attachments moved from global `/admin/X/`
-  URLs to `/admin/sites/<site_slug>/X/`. Every site-scoped view
-  resolves the slug to a Site, gates on `is_site_member`, and
-  refuses cross-site id probes with a 404 (not 403) so an owner
-  on site A cannot enumerate site B's id space by watching the
-  response code. The old global URLs hard-404; admin URLs are not
-  a public contract so no redirect bridge ships.
-- **`/admin/sites/` auto-redirects when there is one obvious
-  pick (#78).** A non-superuser with exactly one accessible site
-  is sent straight to that site's dashboard so the picker does
-  not get in the way. Superusers always see the picker because
-  their access set is "everything" and a one-of-many redirect
-  would be misleading.
-- **Admin chrome splits global and site nav (#78).** `NavItem`
-  gained a `scope: "global" | "site"` field (default "global").
-  Global items (Sites, Sessions, Audit, Account) show at the
-  root chrome; site items (Posts, Pages, Redirects, Attachments)
-  show only when the request is in a site context, and their
-  endpoints inherit `site_slug` from `g` via a new app-level
-  `url_defaults` hook so call sites stay free of plumbing. The
-  redirects new/edit form lost its now-redundant site picker;
-  the attachments list / picker lost theirs too.
+A four-phase information-architecture refactor that makes sites
+first-class workspaces: every admin content URL now lives under
+`/admin/sites/<slug>/...`, the picker turns into a "pick where
+to work" surface, analytics scope to the site you've entered,
+and owners get a UI to invite collaborators. Public delivery
+URLs are unchanged; plugin hookspecs are unchanged. The admin
+URL shape changed, which is the only operator-visible break.
+
+Shipped as four sequential PRs (#77, #78, #79, #80) plus a
+post-rollout UX polish (#85) discovered while using the new
+shape live.
 
 ### Added
-- **Per-site dashboard at `/admin/sites/<slug>/` (#78).** Lands
-  on a short welcome plus a sections grid pulled from the active
-  user's `site_nav_items`, so it self-updates when new
-  site-scoped plugins register. Team (P4 / #80) still shows as
-  a disabled placeholder card so the information architecture
-  is visible end-to-end while that phase is in flight.
+- **Site ownership as a first-class fact (P1 / #77).** Each
+  site has a NOT NULL `owner_user_id` FK on `sites`. Owners are
+  implicit admins on their own site:
+  `has_role(user, site, "admin")` returns true for them whether
+  or not an explicit `UserSiteRole` exists. New permission
+  helpers `is_site_member(user, site)` and
+  `accessible_sites_for(user)` underpin the rest of the
+  refactor. `cms site create` gained `--owner` (defaults to the
+  first superuser); new `cms site transfer --site --to`
+  command reassigns ownership and writes a
+  `site.owner.transferred` audit row.
+- **Per-site admin dashboard at `/admin/sites/<slug>/` (P2 /
+  #78).** Lands on a short welcome plus a sections grid pulled
+  from the active user's site-scoped NavItems, so the dashboard
+  self-updates when new site-scoped plugins register. The
+  picker at `/admin/sites/` becomes the "pick where to work"
+  page; non-superusers with exactly one accessible site are
+  redirected straight into it, superusers always see the
+  picker.
 - **`resolve_site_or_abort(db, site_slug) -> Site`.** Shared
   helper in `bragi.core.permissions` used by every site-scoped
-  blueprint to perform the slug-to-Site lookup, the member gate,
-  and the `g.current_site` / `g.site_slug` stash in one call.
-
-### Changed (P3)
-- **Analytics is now per-site (#79).** The dashboard moved from
-  the cross-site `/admin/analytics/` to
-  `/admin/sites/<slug>/analytics/` and queries are scoped to
-  `AnalyticsEvent.site_id == site.id`; cross-site aggregation
-  is no longer surfaced anywhere. Permission shifted from
-  superuser-only to any site member, so owners and collaborators
-  can read their own site's rollups without elevation. The
-  writer in `bragi.contrib.analytics.plugin` is untouched
-  (`site_id` was already populated on every event); this is
-  purely a read-path change. The Analytics nav item gained
-  `scope="site"` and dropped its `permission="superuser"` gate.
-  The old `/admin/analytics/` URL hard-404s.
-
-### Added (P4)
-- **Team management UI for site owners (#80).** New blueprint
-  `bragi.contrib.team` mounts at
-  `/admin/sites/<slug>/team/` and exposes list / grant / revoke
-  views as the polished counterpart to the existing
-  `cms user grant` CLI. Permission model honors P1's "owner is
-  special" semantic: only the site owner (or a superuser) can
-  view or mutate the team. Collaborators with the `admin` role
-  do NOT get to manage the team. Granting writes a
-  `team.granted` audit row (or `team.role_changed` when the
-  user already had a role on the site); revoking writes
-  `team.revoked`. The owner row is unrevocable from this UI;
-  the ownership-transfer path stays on `cms site transfer` per
-  P1's deferral.
-- **`NavItem.permission="site_owner"`.** The chrome's nav
-  visibility predicate gained owner-of-current-site recognition;
-  superusers continue to pass every gate. The Team nav entry
-  uses this so it appears in-site only for owners.
+  blueprint to do the slug-to-Site lookup, the member gate
+  (404 on unknown slug, 403 on non-member), and the
+  `g.current_site` / `g.site_slug` stash in one call. The
+  resolved row is expunged from the session so the chrome can
+  safely read it post-render.
+- **Team management UI (P4 / #80).** New
+  `bragi.contrib.team` plugin mounts at
+  `/admin/sites/<slug>/team/` with list / grant / revoke. Only
+  the site owner (or a superuser) sees the page or can mutate
+  the team; collaborators with the `admin` role get 403. Grant
+  writes `team.granted` (or `team.role_changed` when the user
+  already had a role on the site); revoke writes
+  `team.revoked`. The owner row is unrevokable from the UI; the
+  ownership-transfer path stays on `cms site transfer`.
+- **`NavItem.scope` and `NavItem.permission="site_owner"`.**
+  `scope: "global" | "site"` (default "global") splits the
+  chrome's nav into global items (Sites, Sessions, Audit,
+  Account) and site items (Posts, Pages, Redirects,
+  Attachments, Analytics, Team). The new `site_owner`
+  permission value is recognised by the chrome's visibility
+  predicate; superusers continue to pass every gate.
 
 ### Changed
-- **`resolve_site_or_abort` detaches the resolved Site.** The
-  helper now calls `db.expunge(site)` before stashing the row
-  on `g.current_site`. Without this, a commit later in the view
-  could expire the row's columns; by the time the chrome (which
-  reads `current_site.title` and now `owner_user_id` for the
-  P4 owner nav gate) ran, those reads would raise
-  DetachedInstanceError. The expunge happens unconditionally so
-  every site-prefixed blueprint inherits the fix.
-- **Picker rows now Enter, not Edit.** Clicking a slug in
-  `/admin/sites/` takes you to the per-site dashboard
-  (`/admin/sites/<slug>/`), the action everyone (including
-  superusers) actually wants from the picker most of the time.
-  Site settings (hostname, title, theme, aliases) moved to a
-  superuser-only "Settings" affordance next to the title on
-  the dashboard itself; the underlying
-  `/admin/sites/<int:site_id>/edit` URL is unchanged. The
-  Deactivate / Activate column stays on the picker since
-  deactivation is a cross-site operator decision rather than
-  an in-site one.
+- **Admin content routes are now site-prefixed (P2 / #78).**
+  Posts, pages, redirects, and attachments moved from global
+  `/admin/X/` URLs to `/admin/sites/<site_slug>/X/`. Every
+  site-scoped view resolves the slug to a Site, gates on
+  `is_site_member`, and refuses cross-site id probes with a 404
+  (not 403) so an owner on site A cannot enumerate site B's id
+  space by watching the response code. The old global URLs
+  hard-404; admin URLs are not a public contract so no redirect
+  bridge ships. An app-level `url_defaults` hook injects
+  `site_slug` from `g` into outgoing `url_for(...)` calls, so
+  templates and view-side links stay free of plumbing. The
+  redirects new/edit form lost its now-redundant site picker;
+  the attachments list / picker lost theirs too.
+- **`/admin/sites` is now member-readable (P1 / #77).** The
+  picker no longer requires superuser. Any signed-in user sees
+  the sites they own or hold a role on; superusers see all.
+  Write actions on the picker (Deactivate, Activate, New site)
+  remain superuser-only and self-gate via a blueprint hook plus
+  template conditional, replacing the blanket `_superuser_only`
+  guard.
+- **Picker rows Enter the site (#85).** Clicking a slug in
+  `/admin/sites/` takes you to the per-site dashboard,
+  matching the action both collaborators and superusers
+  actually want from the picker. Site settings (hostname,
+  title, theme, aliases) moved to a superuser-only "Settings"
+  link next to the title on the dashboard; the underlying
+  `/admin/sites/<int:site_id>/edit` URL and endpoint are
+  unchanged. Deactivate / Activate stays on the picker since
+  deactivation is a cross-site operator decision.
+- **Analytics is now per-site (P3 / #79).** The dashboard moved
+  from the cross-site `/admin/analytics/` to
+  `/admin/sites/<slug>/analytics/`; queries hard-filter on
+  `AnalyticsEvent.site_id == site.id`. Cross-site aggregation
+  is no longer surfaced anywhere. Permission shifted from
+  superuser-only to any site member, so owners and
+  collaborators read their own rollups without elevation. The
+  Analytics NavItem gained `scope="site"` and dropped its
+  `permission="superuser"` gate. The writer is untouched;
+  this is a read-path change only. The old `/admin/analytics/`
+  hard-404s.
+
+### Migration
+- **`add_site_owner`** (`7fd0ed6fe2df`). Three-pass schema
+  change: add `owner_user_id` as nullable, backfill (existing
+  site admin then first superuser then fail loudly if no
+  candidate exists), then promote to NOT NULL via
+  `batch_alter_table` so SQLite is happy. Downgrade drops the
+  column. Operators with no superuser and no admin-role rows
+  must seed at least one superuser before `alembic upgrade
+  head` will complete.
 
 ## [1.4.1] - 2026-05-15
 
