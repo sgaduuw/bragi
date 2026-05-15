@@ -110,9 +110,9 @@ def test_post_edit_captures_a_revision(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello (v2)",
             "slug": "hello",
@@ -141,9 +141,9 @@ def test_post_revisions_stack_across_multiple_edits(
     client = admin_app.test_client()
     _login(client)
     for title in ("Hello v2", "Hello v3"):
-        token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+        token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
         client.post(
-            f"/admin/posts/{post_id}/edit",
+            f"/admin/sites/blog/posts/{post_id}/edit",
             data={
                 "title": title,
                 "slug": "hello",
@@ -173,9 +173,9 @@ def test_page_edit_captures_a_revision(
     page_id = _page_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
     client.post(
-        f"/admin/pages/{page_id}/edit",
+        f"/admin/sites/blog/pages/{page_id}/edit",
         data={
             "title": "About (v2)",
             "slug": "about",
@@ -207,9 +207,9 @@ def test_revisions_list_shows_captured_entries(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello (v2)",
             "slug": "hello",
@@ -218,7 +218,7 @@ def test_revisions_list_shows_captured_entries(
             "_csrf_token": token,
         },
     )
-    resp = client.get(f"/admin/posts/{post_id}/revisions")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/revisions")
     assert resp.status_code == 200
     # The captured "Hello" pre-edit title is shown in the list.
     body = resp.data.decode()
@@ -231,9 +231,9 @@ def test_revision_detail_shows_snapshot_and_live(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello (v2)",
             "slug": "hello",
@@ -245,7 +245,7 @@ def test_revision_detail_shows_snapshot_and_live(
     with db_session_factory() as db:
         rev_id = db.execute(select(PostRevision)).scalar_one().id
 
-    resp = client.get(f"/admin/posts/{post_id}/revisions/{rev_id}")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/revisions/{rev_id}")
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "v1 body" in body  # snapshot
@@ -264,9 +264,9 @@ def test_restore_swaps_live_state_and_writes_new_revision(
     client = admin_app.test_client()
     _login(client)
     # Edit once to create a "v1" revision.
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello (v2)",
             "slug": "hello",
@@ -280,9 +280,9 @@ def test_restore_swaps_live_state_and_writes_new_revision(
         rev_id = rev.id
 
     # Restore the v1 snapshot.
-    restore_token = csrf_token(client, path=f"/admin/posts/{post_id}/revisions/{rev_id}")
+    restore_token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/revisions/{rev_id}")
     resp = client.post(
-        f"/admin/posts/{post_id}/revisions/{rev_id}/restore",
+        f"/admin/sites/blog/posts/{post_id}/revisions/{rev_id}/restore",
         data={"_csrf_token": restore_token},
         follow_redirects=False,
     )
@@ -336,9 +336,9 @@ def test_restore_page_swaps_parent_too(
     client = admin_app.test_client()
     _login(client)
     # Move the page under docs (this captures the pre-move parent=None state).
-    token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
     client.post(
-        f"/admin/pages/{page_id}/edit",
+        f"/admin/sites/blog/pages/{page_id}/edit",
         data={
             "title": "About",
             "slug": "about",
@@ -351,9 +351,9 @@ def test_restore_page_swaps_parent_too(
     with db_session_factory() as db:
         rev_id = db.execute(select(PageRevision)).scalar_one().id
 
-    restore_token = csrf_token(client, path=f"/admin/pages/{page_id}/revisions/{rev_id}")
+    restore_token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/revisions/{rev_id}")
     client.post(
-        f"/admin/pages/{page_id}/revisions/{rev_id}/restore",
+        f"/admin/sites/blog/pages/{page_id}/revisions/{rev_id}/restore",
         data={"_csrf_token": restore_token},
     )
     with db_session_factory() as db:

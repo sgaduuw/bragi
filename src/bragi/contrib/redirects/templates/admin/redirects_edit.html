@@ -9,15 +9,6 @@
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 
   <fieldset>
-    <label for="site_id">Site</label>
-    <select name="site_id" id="site_id" required>
-      {% for s in sites %}
-      <option value="{{ s.id }}" {% if form.get('site_id') == (s.id | string) %}selected{% endif %}>{{ s.slug }} ({{ s.hostname }})</option>
-      {% endfor %}
-    </select>
-  </fieldset>
-
-  <fieldset>
     <label for="source_path">Source path</label>
     <input type="text" name="source_path" id="source_path" required
            pattern="/.*" placeholder="/old-url/"

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import click
 import jinja2
-from flask import Flask, render_template, session
+from flask import Flask, g, render_template, session
 
 from bragi import __version__
 from bragi.cli import cms
@@ -79,6 +79,31 @@ def create_admin_app() -> Flask:
     register_site_resolver(app)
     register_csrf(app)
 
+    # Site-prefixed admin routes (`/admin/sites/<site_slug>/...`)
+    # capture the slug as a URL converter. Stash it on `g` so the
+    # chrome / context processor / cross-endpoint `url_for` calls
+    # all see the active site without each view having to pass it
+    # explicitly. The matching `url_defaults` hook injects
+    # `site_slug` into any outgoing `url_for(...)` call whose
+    # endpoint expects it, so templates can keep saying
+    # `url_for('post_admin.list_posts')` and stay in-site.
+    @app.url_value_preprocessor
+    def _capture_site_slug(_endpoint: str | None, values: dict[str, object] | None) -> None:
+        if values is not None and "site_slug" in values:
+            slug = values["site_slug"]
+            if isinstance(slug, str):
+                g.site_slug = slug
+
+    @app.url_defaults
+    def _inject_site_slug(endpoint: str, values: dict[str, object]) -> None:
+        if "site_slug" in values:
+            return
+        if not app.url_map.is_endpoint_expecting(endpoint, "site_slug"):
+            return
+        slug = getattr(g, "site_slug", None)
+        if isinstance(slug, str):
+            values["site_slug"] = slug
+
     # Every admin response is auth-bearing; force `no-store` on
     # every status code so no intermediary or browser caches a
     # page that includes session state.
@@ -140,8 +165,23 @@ def create_admin_app() -> Flask:
             return False  # unknown permission strings hide by default
 
         visible_nav = [i for i in registry.admin_nav if _visible(i)]
+        sorted_nav = sorted(visible_nav, key=lambda i: (i.section, i.weight))
+        # P2: nav items split by scope. `global_nav_items` always
+        # show in the chrome (Sites, Sessions, Audit, Account, ...).
+        # `site_nav_items` only show when the request is in a site
+        # context (URL carries <site_slug>); their endpoints expect
+        # site_slug, which the app's url_defaults hook fills from g.
+        global_nav_items = [i for i in sorted_nav if getattr(i, "scope", "global") == "global"]
+        site_nav_items = [i for i in sorted_nav if getattr(i, "scope", "global") == "site"]
         return {
-            "nav_items": sorted(visible_nav, key=lambda i: (i.section, i.weight)),
+            # Back-compat alias: a couple of older templates still
+            # iterate `nav_items` as the full ordered list. New
+            # chrome iterates the split lists.
+            "nav_items": sorted_nav,
+            "global_nav_items": global_nav_items,
+            "site_nav_items": site_nav_items,
+            "current_site": getattr(g, "current_site", None),
+            "current_site_slug": getattr(g, "site_slug", None),
             "current_user_email": session.get("user_email"),
             "current_user_display_name": session.get("user_display_name"),
         }

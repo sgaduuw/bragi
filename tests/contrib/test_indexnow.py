@@ -187,9 +187,9 @@ def test_publish_fires_indexnow_post(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello",
             "slug": "hello",
@@ -225,9 +225,9 @@ def test_draft_edit_does_not_fire_indexnow(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello (typo fix)",
             "slug": "hello",
@@ -257,9 +257,9 @@ def test_unpublish_fires_indexnow(
     calls = _captured_post(monkeypatch)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello",
             "slug": "hello",
@@ -290,9 +290,9 @@ def test_published_to_published_edit_fires_indexnow(
     calls = _captured_post(monkeypatch)
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello (edited)",
             "slug": "hello",
@@ -320,8 +320,8 @@ def test_delete_fires_indexnow_post_with_pre_delete_url(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/posts/")
-    client.post(f"/admin/posts/{post_id}/delete", data={"_csrf_token": token})
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    client.post(f"/admin/sites/blog/posts/{post_id}/delete", data={"_csrf_token": token})
     assert len(calls) == 1
     assert calls[0]["json"]["urlList"] == ["https://blog.example.com/posts/hello/"]
 
@@ -375,9 +375,9 @@ def test_no_key_means_no_post(
 
     client = app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello",
             "slug": "hello",
@@ -408,9 +408,9 @@ def test_http_failure_swallowed(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/posts/{post_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
     resp = client.post(
-        f"/admin/posts/{post_id}/edit",
+        f"/admin/sites/blog/posts/{post_id}/edit",
         data={
             "title": "Hello",
             "slug": "hello",

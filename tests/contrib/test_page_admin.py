@@ -47,6 +47,7 @@ def admin_app(
     monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.permissions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.page.admin.SessionLocal", db_session_factory)
@@ -63,16 +64,16 @@ def _login(client: FlaskClient) -> None:
 
 
 def test_list_requires_auth(admin_app: Flask) -> None:
-    resp = admin_app.test_client().get("/admin/pages/", follow_redirects=False)
+    resp = admin_app.test_client().get("/admin/sites/blog/pages/", follow_redirects=False)
     assert resp.status_code == 302
 
 
 def test_new_creates_root_page(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/pages/new")
+    token = csrf_token(client, path="/admin/sites/blog/pages/new")
     resp = client.post(
-        "/admin/pages/new",
+        "/admin/sites/blog/pages/new",
         data={
             "title": "About",
             "slug": "about",
@@ -112,9 +113,9 @@ def test_new_rejects_duplicate_slug_under_same_parent(
         db.commit()
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/pages/new")
+    token = csrf_token(client, path="/admin/sites/blog/pages/new")
     resp = client.post(
-        "/admin/pages/new",
+        "/admin/sites/blog/pages/new",
         data={
             "title": "Another about",
             "slug": "about",
@@ -163,9 +164,9 @@ def test_edit_changes_parent(admin_app: Flask, db_session_factory: sessionmaker[
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/pages/{child_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{child_id}/edit")
     resp = client.post(
-        f"/admin/pages/{child_id}/edit",
+        f"/admin/sites/blog/pages/{child_id}/edit",
         data={
             "title": "Team",
             "slug": "team",
@@ -203,9 +204,9 @@ def test_edit_rejects_self_as_parent(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
     resp = client.post(
-        f"/admin/pages/{page_id}/edit",
+        f"/admin/sites/blog/pages/{page_id}/edit",
         data={
             "title": "About",
             "slug": "about",
@@ -257,9 +258,9 @@ def test_delete_blocked_when_children_exist(
 
     client = admin_app.test_client()
     _login(client)
-    token = csrf_token(client, path="/admin/pages/")
+    token = csrf_token(client, path="/admin/sites/blog/pages/")
     client.post(
-        f"/admin/pages/{about_id}/delete",
+        f"/admin/sites/blog/pages/{about_id}/delete",
         data={"_csrf_token": token},
     )
     with db_session_factory() as db:
@@ -331,9 +332,9 @@ def test_new_published_page_fires_on_post_published(admin_app: Flask) -> None:
     try:
         client = admin_app.test_client()
         _login(client)
-        token = csrf_token(client, path="/admin/pages/new")
+        token = csrf_token(client, path="/admin/sites/blog/pages/new")
         client.post(
-            "/admin/pages/new",
+            "/admin/sites/blog/pages/new",
             data={
                 "title": "About",
                 "slug": "about",
@@ -360,9 +361,9 @@ def test_new_draft_page_does_not_fire_on_post_published(admin_app: Flask) -> Non
     try:
         client = admin_app.test_client()
         _login(client)
-        token = csrf_token(client, path="/admin/pages/new")
+        token = csrf_token(client, path="/admin/sites/blog/pages/new")
         client.post(
-            "/admin/pages/new",
+            "/admin/sites/blog/pages/new",
             data={
                 "title": "Draft",
                 "slug": "draft",
@@ -408,9 +409,9 @@ def test_edit_published_page_fires_on_post_updated(
     try:
         client = admin_app.test_client()
         _login(client)
-        token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+        token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
         client.post(
-            f"/admin/pages/{page_id}/edit",
+            f"/admin/sites/blog/pages/{page_id}/edit",
             data={
                 "title": "New Title",
                 "slug": "new-slug",
@@ -459,9 +460,9 @@ def test_edit_draft_to_published_fires_both_hooks(
     try:
         client = admin_app.test_client()
         _login(client)
-        token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+        token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
         client.post(
-            f"/admin/pages/{page_id}/edit",
+            f"/admin/sites/blog/pages/{page_id}/edit",
             data={
                 "title": "D",
                 "slug": "d",
@@ -508,9 +509,9 @@ def test_skip_redirect_suppresses_on_post_updated(
     try:
         client = admin_app.test_client()
         _login(client)
-        token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+        token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
         client.post(
-            f"/admin/pages/{page_id}/edit",
+            f"/admin/sites/blog/pages/{page_id}/edit",
             data={
                 "title": "Typo",
                 "slug": "fixed-typo",

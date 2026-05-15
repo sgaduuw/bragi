@@ -1,13 +1,16 @@
 """Admin Blueprint for managing Redirect rows.
 
-Mounted under /admin/redirects on the admin app. Covers the
-manual-entry path; importer-generated rows show up here too (with
-their `source` populated to track provenance). Hit counts are
-maintained by the resolver in `bragi.contrib.redirects.plugin`.
+Mounted under /admin/sites/<site_slug>/redirects on the admin app
+(P2 / #78). Every view resolves <site_slug> via
+`resolve_site_or_abort`; the site is implicit in the URL, so the
+old "site picker" select on the new/edit form is gone. Pre-P2
+imported / manual rows survive the route change unchanged (the
+rows carry `site_id`, the URL just made the selection explicit).
 
-Match type `exact` is the only resolver-enforced value today.
-`prefix` and `regex` can be stored but won't fire until #13
-lands; the form labels them as "stored only".
+Hit counts are maintained by the resolver in
+`bragi.contrib.redirects.plugin`. Match type `exact` is the only
+resolver-enforced value today; `prefix` and `regex` can be stored
+but won't fire until #13 lands.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from typing import cast
 
 from flask import (
     Blueprint,
+    abort,
     flash,
     redirect,
     render_template,
@@ -27,13 +31,13 @@ from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
-from bragi.core.models.site import Site
+from bragi.core.permissions import require_role, resolve_site_or_abort
 
 bp = Blueprint(
     "redirect_admin",
     __name__,
     template_folder="templates",
-    url_prefix="/admin/redirects",
+    url_prefix="/admin/sites/<site_slug>/redirects",
 )
 
 VALID_STATUS_CODES: frozenset[int] = frozenset({301, 302, 307, 308, 410})
@@ -42,14 +46,17 @@ PAGE_SIZE = 50
 
 
 def _form_from_request() -> dict[str, object]:
-    """Pull the redirect-edit form fields off the current request."""
+    """Pull the redirect-edit form fields off the current request.
+
+    `site_id` is no longer a form field (P2 #78): the site comes
+    from the URL. Callers inject `site.id` after `_validate`.
+    """
     raw_status = (request.form.get("status_code") or "301").strip()
     try:
         status_code = int(raw_status)
     except ValueError:
         status_code = -1  # forces validation failure below
     return {
-        "site_id": (request.form.get("site_id") or "").strip(),
         "source_path": (request.form.get("source_path") or "").strip(),
         "target": (request.form.get("target") or "").strip(),
         "status_code": status_code,
@@ -62,8 +69,6 @@ def _form_from_request() -> dict[str, object]:
 def _validate(form: dict[str, object]) -> list[str]:
     """Return a list of human-readable validation errors."""
     errors: list[str] = []
-    if not form["site_id"]:
-        errors.append("Site is required.")
     source_path = form["source_path"]
     if not isinstance(source_path, str) or not source_path:
         errors.append("Source path is required.")
@@ -79,25 +84,19 @@ def _validate(form: dict[str, object]) -> list[str]:
 
 
 @bp.route("/", methods=["GET"])
-def list_redirects() -> ResponseReturnValue:
+def list_redirects(site_slug: str) -> ResponseReturnValue:
     try:
         page = max(1, int(request.args.get("page", "1")))
     except ValueError:
         page = 1
-    site_filter = (request.args.get("site") or "").strip()
 
     with SessionLocal() as db:
-        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
-        sites_by_id = {s.id: s for s in sites}
-        site_by_slug = {s.slug: s for s in sites}
-
-        query = select(Redirect).order_by(
-            Redirect.hit_count.desc(),
-            Redirect.id.desc(),
+        site = resolve_site_or_abort(db, site_slug)
+        query = (
+            select(Redirect)
+            .where(Redirect.site_id == site.id)
+            .order_by(Redirect.hit_count.desc(), Redirect.id.desc())
         )
-        if site_filter and site_filter in site_by_slug:
-            query = query.where(Redirect.site_id == site_by_slug[site_filter].id)
-
         offset = (page - 1) * PAGE_SIZE
         rows = db.execute(query.limit(PAGE_SIZE).offset(offset)).scalars().all()
         # has_more is one cheap COUNT-shaped check: try to read one
@@ -108,30 +107,21 @@ def list_redirects() -> ResponseReturnValue:
     return render_template(
         "admin/redirects_list.html",
         rows=rows,
-        sites=sites,
-        sites_by_id=sites_by_id,
         page=page,
         has_more=has_more,
-        site_filter=site_filter,
     )
 
 
 @bp.route("/new", methods=["GET", "POST"])
-def new_redirect() -> ResponseReturnValue:
+def new_redirect(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
-        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
-
-    if not sites:
-        flash(
-            "Create a site before adding redirects (cms site create, or /admin/sites/new).",
-            "error",
-        )
-        return redirect(url_for("redirect_admin.list_redirects"))
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        site_id = site.id
 
     if request.method == "GET":
-        # Default the form: first site, exact match, 301, active.
+        # Default the form: exact match, 301, active.
         form: dict[str, object] = {
-            "site_id": str(sites[0].id),
             "source_path": "",
             "target": "",
             "status_code": 301,
@@ -139,21 +129,16 @@ def new_redirect() -> ResponseReturnValue:
             "active": True,
             "note": None,
         }
-        return render_template(
-            "admin/redirects_edit.html", redirect_row=None, form=form, sites=sites
-        )
+        return render_template("admin/redirects_edit.html", redirect_row=None, form=form)
 
     form = _form_from_request()
     errors = _validate(form)
     if errors:
         for err in errors:
             flash(err, "error")
-        return render_template(
-            "admin/redirects_edit.html", redirect_row=None, form=form, sites=sites
-        )
+        return render_template("admin/redirects_edit.html", redirect_row=None, form=form)
 
     with SessionLocal() as db:
-        site_id = int(cast(str, form["site_id"]))
         source_path = cast(str, form["source_path"])
         target = cast(str, form["target"])
         status_code = cast(int, form["status_code"])
@@ -172,9 +157,7 @@ def new_redirect() -> ResponseReturnValue:
                 f"A redirect for {source_path!r} on this site already exists.",
                 "error",
             )
-            return render_template(
-                "admin/redirects_edit.html", redirect_row=None, form=form, sites=sites
-            )
+            return render_template("admin/redirects_edit.html", redirect_row=None, form=form)
         db.add(
             Redirect(
                 site_id=site_id,
@@ -193,17 +176,17 @@ def new_redirect() -> ResponseReturnValue:
 
 
 @bp.route("/<int:redirect_id>/edit", methods=["GET", "POST"])
-def edit_redirect(redirect_id: int) -> ResponseReturnValue:
+def edit_redirect(site_slug: str, redirect_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
-        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
         row = db.get(Redirect, redirect_id)
-        if row is None:
-            flash("Redirect not found.", "error")
-            return redirect(url_for("redirect_admin.list_redirects"))
+        # Cross-site row probe -> 404 (not 403).
+        if row is None or row.site_id != site.id:
+            abort(404)
 
         if request.method == "GET":
             form = {
-                "site_id": str(row.site_id),
                 "source_path": row.source_path,
                 "target": row.target,
                 "status_code": row.status_code,
@@ -211,26 +194,21 @@ def edit_redirect(redirect_id: int) -> ResponseReturnValue:
                 "active": row.active,
                 "note": row.note,
             }
-            return render_template(
-                "admin/redirects_edit.html", redirect_row=row, form=form, sites=sites
-            )
+            return render_template("admin/redirects_edit.html", redirect_row=row, form=form)
 
         form = _form_from_request()
         errors = _validate(form)
         if errors:
             for err in errors:
                 flash(err, "error")
-            return render_template(
-                "admin/redirects_edit.html", redirect_row=row, form=form, sites=sites
-            )
+            return render_template("admin/redirects_edit.html", redirect_row=row, form=form)
 
-        site_id = int(cast(str, form["site_id"]))
         source_path = cast(str, form["source_path"])
         match_type = cast(str, form["match_type"])
 
         conflict = db.execute(
             select(Redirect).where(
-                Redirect.site_id == site_id,
+                Redirect.site_id == site.id,
                 Redirect.source_path == source_path,
                 Redirect.match_type == match_type,
                 Redirect.id != row.id,
@@ -241,11 +219,8 @@ def edit_redirect(redirect_id: int) -> ResponseReturnValue:
                 "Another redirect already covers that (site, source, match_type).",
                 "error",
             )
-            return render_template(
-                "admin/redirects_edit.html", redirect_row=row, form=form, sites=sites
-            )
+            return render_template("admin/redirects_edit.html", redirect_row=row, form=form)
 
-        row.site_id = site_id
         row.source_path = source_path
         row.target = cast(str, form["target"])
         row.status_code = cast(int, form["status_code"])
@@ -259,12 +234,13 @@ def edit_redirect(redirect_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:redirect_id>/delete", methods=["POST"])
-def delete_redirect(redirect_id: int) -> ResponseReturnValue:
+def delete_redirect(site_slug: str, redirect_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
         row = db.get(Redirect, redirect_id)
-        if row is None:
-            flash("Redirect not found.", "error")
-            return redirect(url_for("redirect_admin.list_redirects"))
+        if row is None or row.site_id != site.id:
+            abort(404)
         source_path = row.source_path
         db.delete(row)
         db.commit()

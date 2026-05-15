@@ -25,7 +25,7 @@ from sqlalchemy import select
 from bragi.core.db import SessionLocal
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
-from bragi.core.permissions import accessible_sites_for
+from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
 from bragi.core.security import current_user, is_superuser
 
 bp = Blueprint(
@@ -38,10 +38,12 @@ bp = Blueprint(
 
 # Endpoints (sans the `site_admin.` blueprint prefix) that any
 # logged-in user may reach. The list view is now the "sites you can
-# work with" picker; everything else (create, edit hostname,
+# work with" picker and `site_dashboard` is the per-site landing
+# (P2 / #78); both self-gate further (the dashboard via
+# `resolve_site_or_abort`). Everything else (create, edit hostname,
 # deactivate, alias-swap) stays superuser-only because those are
 # platform-level changes that touch DNS and shared infra.
-_MEMBER_READABLE_ENDPOINTS = frozenset({"list_sites"})
+_MEMBER_READABLE_ENDPOINTS = frozenset({"list_sites", "site_dashboard"})
 
 
 @bp.before_request
@@ -111,11 +113,38 @@ def list_sites() -> ResponseReturnValue:
     Superusers see every active site; everyone else sees sites
     they own plus sites they hold a role on. The write actions
     on this page (Deactivate, Add alias, etc.) are still gated
-    behind the superuser flag and the template should hide them
-    for non-superusers.
+    behind the superuser flag and the template hides them for
+    non-superusers.
+
+    P2 / #78 UX: non-superusers with exactly one accessible site
+    are redirected straight to that site's dashboard, so the
+    picker only shows when there's a genuine choice to make.
+    Superusers always see the full list (their access set is
+    "everything").
     """
     sites = accessible_sites_for(current_user())
+    if not is_superuser() and len(sites) == 1:
+        return redirect(url_for("site_admin.site_dashboard", site_slug=sites[0].slug))
     return render_template("admin/sites_list.html", sites=sites, is_superuser=is_superuser())
+
+
+@bp.route("/<site_slug>/", methods=["GET"])
+def site_dashboard(site_slug: str) -> ResponseReturnValue:
+    """Per-site landing page (P2 / #78).
+
+    The chrome's site_nav_items already provides the working
+    sections (Posts, Pages, Redirects, Attachments); this view
+    surfaces them as a sections grid so the dashboard self-updates
+    when new site-scoped plugins register. Deferred sections
+    (Analytics in P3, Team in P4) appear as inert placeholder
+    cards so the IA is visible end-to-end while the work lands.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        # Detach the in-memory copy from the session: the template
+        # reads slug / title / etc. but db is about to close.
+        db.expunge(site)
+    return render_template("admin/site_dashboard.html", site=site)
 
 
 @bp.route("/new", methods=["GET", "POST"])

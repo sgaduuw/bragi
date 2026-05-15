@@ -85,7 +85,7 @@ def test_full_page_includes_chrome_and_partial(admin_app: Flask) -> None:
     """A cold GET (no HX-Request) returns the whole page."""
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     body = resp.data.decode()
     assert resp.status_code == 200
     # Chrome from the base template.
@@ -101,7 +101,7 @@ def test_htmx_get_returns_partial_only(admin_app: Flask) -> None:
     """`HX-Request: true` returns just the partial."""
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/posts/", headers={"HX-Request": "true"})
+    resp = client.get("/admin/sites/blog/posts/", headers={"HX-Request": "true"})
     body = resp.data.decode()
     assert resp.status_code == 200
     # No full-document chrome.
@@ -119,7 +119,7 @@ def test_htmx_partial_carries_csrf_token_for_delete_form(admin_app: Flask) -> No
     that subsequent deletes need."""
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/posts/", headers={"HX-Request": "true"})
+    resp = client.get("/admin/sites/blog/posts/", headers={"HX-Request": "true"})
     body = resp.data.decode()
     assert 'name="_csrf_token"' in body
 
@@ -128,5 +128,5 @@ def test_full_page_includes_htmx_script(admin_app: Flask) -> None:
     """The admin base template loads htmx so partial swaps work."""
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     assert b"htmx.org" in resp.data

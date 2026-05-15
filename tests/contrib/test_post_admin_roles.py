@@ -92,14 +92,14 @@ def _post_id(db_session_factory: sessionmaker[Session]) -> int:
 def test_no_role_user_cannot_list(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login_as(client, "charlie@example.com")
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 403
 
 
 def test_author_can_list(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login_as(client, "ada@example.com")
-    resp = client.get("/admin/posts/")
+    resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 200
 
 
@@ -109,7 +109,7 @@ def test_author_can_edit_own_post(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "ada@example.com")
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     assert resp.status_code == 200
 
 
@@ -117,8 +117,8 @@ def test_author_cannot_delete(admin_app: Flask, db_session_factory: sessionmaker
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "ada@example.com")
-    token = csrf_token(client, path="/admin/posts/")
-    resp = client.post(f"/admin/posts/{post_id}/delete", data={"_csrf_token": token})
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    resp = client.post(f"/admin/sites/blog/posts/{post_id}/delete", data={"_csrf_token": token})
     assert resp.status_code == 403
 
 
@@ -129,7 +129,7 @@ def test_editor_can_edit_any_post(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "bob@example.com")
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     assert resp.status_code == 200
 
 
@@ -137,9 +137,9 @@ def test_editor_can_delete(admin_app: Flask, db_session_factory: sessionmaker[Se
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "bob@example.com")
-    token = csrf_token(client, path="/admin/posts/")
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
     resp = client.post(
-        f"/admin/posts/{post_id}/delete",
+        f"/admin/sites/blog/posts/{post_id}/delete",
         data={"_csrf_token": token},
         follow_redirects=False,
     )
@@ -154,5 +154,5 @@ def test_author_cannot_edit_someone_elses_post(
     post_id = _post_id(db_session_factory)
     client = admin_app.test_client()
     _login_as(client, "charlie@example.com")
-    resp = client.get(f"/admin/posts/{post_id}/edit")
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
     assert resp.status_code == 403

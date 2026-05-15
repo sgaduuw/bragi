@@ -1,7 +1,12 @@
 """Admin Blueprint for managing Pages.
 
-Mounted under /admin/pages on the admin app. Mirrors the post
-admin layout but adds a `parent_id` selector for nesting and an
+Mounted under /admin/sites/<site_slug>/pages on the admin app
+(P2 / #78). Mirrors the post admin shape: every view resolves
+<site_slug> via `resolve_site_or_abort`, then scopes its queries
+and role checks to the resolved Site. Cross-site page-id probes
+return 404, not 403.
+
+Pages also add a `parent_id` selector for nesting and an
 app-level uniqueness pre-flight on `(site_id, parent_id, slug)`:
 the DB UNIQUE catches non-NULL-parent collisions, while SQLite
 treats two NULL `parent_id`s as distinct, so root-level checks
@@ -12,6 +17,7 @@ from __future__ import annotations
 
 from flask import (
     Blueprint,
+    abort,
     current_app,
     flash,
     redirect,
@@ -29,14 +35,14 @@ from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.page_revision import PageRevision
-from bragi.core.models.site import Site
+from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.render.markdown import make_excerpt, render_markdown
 
 bp = Blueprint(
     "page_admin",
     __name__,
     template_folder="templates",
-    url_prefix="/admin/pages",
+    url_prefix="/admin/sites/<site_slug>/pages",
 )
 
 
@@ -122,21 +128,24 @@ def _all_pages_for_picker(db: object, site_id: int) -> list[Page]:
 
 
 @bp.route("/", methods=["GET"])
-def list_pages() -> ResponseReturnValue:
+def list_pages(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
-        pages = db.execute(select(Page).order_by(Page.created_at.desc())).scalars().all()
+        site = resolve_site_or_abort(db, site_slug)
+        pages = (
+            db.execute(select(Page).where(Page.site_id == site.id).order_by(Page.created_at.desc()))
+            .scalars()
+            .all()
+        )
     if is_htmx():
         return render_template("admin/_page_list_table.html", pages=pages)
     return render_template("admin/page_list.html", pages=pages)
 
 
 @bp.route("/new", methods=["GET", "POST"])
-def new_page() -> ResponseReturnValue:
+def new_page(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
-        site = db.execute(select(Site).limit(1)).scalar_one_or_none()
-        if site is None:
-            flash("No site exists yet. Create one via the CLI.", "error")
-            return redirect(url_for("page_admin.list_pages"))
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("author", site.id)
         site_id = site.id
 
         if request.method == "GET":
@@ -195,12 +204,13 @@ def new_page() -> ResponseReturnValue:
 
 
 @bp.route("/<int:page_id>/edit", methods=["GET", "POST"])
-def edit_page(page_id: int) -> ResponseReturnValue:
+def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
         page = db.get(Page, page_id)
-        if page is None:
-            flash("Page not found.", "error")
-            return redirect(url_for("page_admin.list_pages"))
+        if page is None or page.site_id != site.id:
+            abort(404)
 
         # Exclude self from the parent picker to avoid loops.
         all_parents = _all_pages_for_picker(db, page.site_id)
@@ -280,12 +290,13 @@ def edit_page(page_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:page_id>/delete", methods=["POST"])
-def delete_page(page_id: int) -> ResponseReturnValue:
+def delete_page(site_slug: str, page_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
         page = db.get(Page, page_id)
-        if page is None:
-            flash("Page not found.", "error")
-            return redirect(url_for("page_admin.list_pages"))
+        if page is None or page.site_id != site.id:
+            abort(404)
         # A page with children blocks deletion; archive the children
         # or re-parent them first. Keeps tree consistency without a
         # cascade rule on the FK.
@@ -323,12 +334,12 @@ def delete_page(page_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:page_id>/revisions", methods=["GET"])
-def list_page_revisions(page_id: int) -> ResponseReturnValue:
+def list_page_revisions(site_slug: str, page_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
         page = db.get(Page, page_id)
-        if page is None:
-            flash("Page not found.", "error")
-            return redirect(url_for("page_admin.list_pages"))
+        if page is None or page.site_id != site.id:
+            abort(404)
         revisions = (
             db.execute(
                 select(PageRevision)
@@ -342,12 +353,12 @@ def list_page_revisions(page_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:page_id>/revisions/<int:rev_id>", methods=["GET"])
-def show_page_revision(page_id: int, rev_id: int) -> ResponseReturnValue:
+def show_page_revision(site_slug: str, page_id: int, rev_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
         page = db.get(Page, page_id)
-        if page is None:
-            flash("Page not found.", "error")
-            return redirect(url_for("page_admin.list_pages"))
+        if page is None or page.site_id != site.id:
+            abort(404)
         revision = db.get(PageRevision, rev_id)
         if revision is None or revision.page_id != page.id:
             flash("Revision not found.", "error")
@@ -356,12 +367,13 @@ def show_page_revision(page_id: int, rev_id: int) -> ResponseReturnValue:
 
 
 @bp.route("/<int:page_id>/revisions/<int:rev_id>/restore", methods=["POST"])
-def restore_page_revision(page_id: int, rev_id: int) -> ResponseReturnValue:
+def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
         page = db.get(Page, page_id)
-        if page is None:
-            flash("Page not found.", "error")
-            return redirect(url_for("page_admin.list_pages"))
+        if page is None or page.site_id != site.id:
+            abort(404)
         revision = db.get(PageRevision, rev_id)
         if revision is None or revision.page_id != page.id:
             flash("Revision not found.", "error")

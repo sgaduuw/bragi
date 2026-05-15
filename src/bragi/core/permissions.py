@@ -18,6 +18,7 @@ from typing import Any, ParamSpec, TypeVar
 
 from flask import abort
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.site import Site
@@ -103,6 +104,33 @@ def accessible_sites_for(user: User | None) -> list[Site]:
             | (Site.id.in_(select(UserSiteRole.site_id).where(UserSiteRole.user_id == user.id)))
         )
         return list(db.execute(owned_or_member).scalars())
+
+
+def resolve_site_or_abort(db: Session, site_slug: str) -> Site:
+    """Resolve `<site_slug>` from a site-prefixed admin URL.
+
+    Returns the Site row when the slug names an existing, active
+    site AND the current user is a member. Otherwise aborts:
+
+    - 404 when no Site matches the slug. The spec wants 404 (not
+      403) here so an unauthorised user can't enumerate slugs by
+      probing for 403 vs 404 responses.
+    - 403 when the slug resolves but the user isn't a member.
+
+    The resolved Site is also stashed on `g.current_site` (and its
+    slug on `g.site_slug`) so the admin chrome / context processor
+    can show "Site: <title>" breadcrumbs without re-querying.
+    """
+    from flask import g
+
+    site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+    if site is None:
+        abort(404)
+    if not is_site_member(current_user(), site):
+        abort(403)
+    g.current_site = site
+    g.site_slug = site.slug
+    return site
 
 
 def has_role(min_role: str, site_id: int) -> bool:

@@ -8,15 +8,6 @@
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 
   <fieldset>
-    <label for="site_id">Site</label>
-    <select name="site_id" id="site_id" required>
-      {% for s in sites %}
-      <option value="{{ s.id }}" {% if s.id == default_site_id %}selected{% endif %}>{{ s.slug }} ({{ s.hostname }})</option>
-      {% endfor %}
-    </select>
-  </fieldset>
-
-  <fieldset>
     <label for="file">File</label>
     <input type="file" name="file" id="file" required>
     <small>The bytes are content-addressed by SHA-256. Re-uploading

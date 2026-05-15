@@ -411,14 +411,14 @@ def test_login_with_must_change_redirects_to_change_password(
 def test_must_change_guard_blocks_other_admin_pages(
     must_change_admin_app: Flask,
 ) -> None:
-    """A logged-in but must-change user can't reach /admin/posts/."""
+    """A logged-in but must-change user can't reach an admin page."""
     client = must_change_admin_app.test_client()
     token = csrf_token(client)
     client.post(
         "/auth/login",
         data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": token},
     )
-    resp = client.get("/admin/posts/", follow_redirects=False)
+    resp = client.get("/admin/sites/", follow_redirects=False)
     assert resp.status_code == 302
     assert "/auth/change-password" in resp.headers["Location"]
 
@@ -522,8 +522,8 @@ def test_after_rotation_admin_pages_pass_through(
             "_csrf_token": new_token,
         },
     )
-    # Now /admin/posts/ should be reachable.
-    resp = client.get("/admin/posts/", follow_redirects=False)
+    # Now /admin/sites/ should be reachable (must-change guard cleared).
+    resp = client.get("/admin/sites/", follow_redirects=False)
     assert resp.status_code == 200
 
 

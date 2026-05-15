@@ -47,9 +47,18 @@
 <body>
   <nav class="topbar">
     <span class="brand">bragi</span>
-    {% for item in nav_items %}
+    {% for item in global_nav_items %}
       <a href="{{ url_for(item.endpoint) }}">{{ item.label }}</a>
     {% endfor %}
+    {% if current_site %}
+      <span style="opacity: 0.5; margin-left: 1.5rem;">|</span>
+      <span style="margin-left: 1rem; opacity: 0.85;">{{ current_site.title }}</span>
+      {% for item in site_nav_items %}
+        <a href="{{ url_for(item.endpoint) }}">{{ item.label }}</a>
+      {% endfor %}
+      <a href="{{ url_for('site_admin.list_sites') }}"
+         style="margin-left: 1rem; opacity: 0.7; font-size: 0.9em;">switch site</a>
+    {% endif %}
     <span class="spacer"></span>
     {% if current_user_email %}
       <span class="user">{{ current_user_display_name or current_user_email }}</span>

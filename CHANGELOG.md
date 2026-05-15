@@ -26,12 +26,43 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   blanket `_superuser_only` gate. The empty-state copy adjusts
   for the two audiences.
 
-### Migration
-- **`add_site_owner`** (`7fd0ed6fe2df`). Three-pass schema change:
-  add `owner_user_id` as nullable, backfill (existing site admin
-  → first superuser → fail loudly if no candidate exists), then
-  promote to NOT NULL via `batch_alter_table` so SQLite is happy.
-  Downgrade drops the column.
+### Changed
+- **Admin content routes are now site-prefixed (#78).** Posts,
+  pages, redirects, and attachments moved from global `/admin/X/`
+  URLs to `/admin/sites/<site_slug>/X/`. Every site-scoped view
+  resolves the slug to a Site, gates on `is_site_member`, and
+  refuses cross-site id probes with a 404 (not 403) so an owner
+  on site A cannot enumerate site B's id space by watching the
+  response code. The old global URLs hard-404; admin URLs are not
+  a public contract so no redirect bridge ships.
+- **`/admin/sites/` auto-redirects when there is one obvious
+  pick (#78).** A non-superuser with exactly one accessible site
+  is sent straight to that site's dashboard so the picker does
+  not get in the way. Superusers always see the picker because
+  their access set is "everything" and a one-of-many redirect
+  would be misleading.
+- **Admin chrome splits global and site nav (#78).** `NavItem`
+  gained a `scope: "global" | "site"` field (default "global").
+  Global items (Sites, Sessions, Audit, Account) show at the
+  root chrome; site items (Posts, Pages, Redirects, Attachments)
+  show only when the request is in a site context, and their
+  endpoints inherit `site_slug` from `g` via a new app-level
+  `url_defaults` hook so call sites stay free of plumbing. The
+  redirects new/edit form lost its now-redundant site picker;
+  the attachments list / picker lost theirs too.
+
+### Added
+- **Per-site dashboard at `/admin/sites/<slug>/` (#78).** Lands
+  on a short welcome plus a sections grid pulled from the active
+  user's `site_nav_items`, so it self-updates when new
+  site-scoped plugins register. Analytics (P3 / #79) and Team
+  (P4 / #80) show as disabled placeholder cards so the
+  information architecture is visible end-to-end while the
+  remaining phases are in flight.
+- **`resolve_site_or_abort(db, site_slug) -> Site`.** Shared
+  helper in `bragi.core.permissions` used by every site-scoped
+  blueprint to perform the slug-to-Site lookup, the member gate,
+  and the `g.current_site` / `g.site_slug` stash in one call.
 
 ## [1.4.1] - 2026-05-15
 

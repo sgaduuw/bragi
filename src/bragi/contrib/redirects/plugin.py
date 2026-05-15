@@ -179,6 +179,7 @@ def register_admin_nav() -> list[NavItem]:
             endpoint="redirect_admin.list_redirects",
             section="site",
             weight=20,
+            scope="site",
         ),
     ]
 

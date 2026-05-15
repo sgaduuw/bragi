@@ -147,6 +147,11 @@ class NavItem:
     section: str = "content"  # 'content'|'site'|'system'
     weight: int = 100  # sort order within section (lower = earlier)
     permission: str | None = None  # required permission, if any
+    # 'global' items show at the root admin chrome (/admin/sites/,
+    # /admin/sessions/, /admin/account/...). 'site' items show only
+    # when the user is in a site context (URL contains <site_slug>),
+    # and their endpoint resolves with site_slug from the request.
+    scope: str = "global"
 
 
 # ============================================================

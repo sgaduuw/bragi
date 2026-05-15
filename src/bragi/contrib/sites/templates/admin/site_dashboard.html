@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ site.title }} &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>{{ site.title }}</h1>
+<p style="color: #666; margin-top: -0.5rem;">
+  <code>{{ site.hostname }}</code>
+  {% if not site.active %}<span class="flash error" style="margin-left: 0.5rem; padding: 0.1rem 0.5rem;">inactive</span>{% endif %}
+</p>
+
+{% if site_nav_items %}
+<section style="margin-top: 1.5rem;">
+  <h2 style="font-size: 1rem; text-transform: uppercase; letter-spacing: 0.08em; color: #666;">
+    Sections
+  </h2>
+  <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin-top: 0.75rem;">
+    {% for item in site_nav_items %}
+    <li>
+      <a href="{{ url_for(item.endpoint) }}"
+         style="display: block; padding: 1rem; border: 1px solid #ddd; border-radius: 6px; text-decoration: none; color: #222; background: #fafafa;">
+        <strong style="display: block;">{{ item.label }}</strong>
+        <small style="color: #888;">{{ item.section }}</small>
+      </a>
+    </li>
+    {% endfor %}
+
+    {# Stubs for sections that land in later phases. Listed here so
+       the IA is visible end-to-end while #79 / #80 are in flight.
+       Drop these once the real NavItems are registered. #}
+    <li>
+      <span style="display: block; padding: 1rem; border: 1px dashed #ccc; border-radius: 6px; color: #999; background: #fafafa; cursor: not-allowed;">
+        <strong style="display: block;">Analytics</strong>
+        <small>per-site, lands in P3 (#79)</small>
+      </span>
+    </li>
+    <li>
+      <span style="display: block; padding: 1rem; border: 1px dashed #ccc; border-radius: 6px; color: #999; background: #fafafa; cursor: not-allowed;">
+        <strong style="display: block;">Team</strong>
+        <small>member management, lands in P4 (#80)</small>
+      </span>
+    </li>
+  </ul>
+</section>
+{% endif %}
+{% endblock %}
