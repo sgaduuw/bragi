@@ -18,6 +18,7 @@ from sqlalchemy import select
 from bragi.contrib.auth_local.passwords import hash_password, verify_password
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
+from bragi.core.middleware.sessions import rotate_sid
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user import User
 
@@ -69,6 +70,12 @@ def login() -> ResponseReturnValue:
                 flash("Invalid email or password.", "error")
                 return render_template("login.html", email=email, next=next_url)
 
+            # Rotate the session id at the privilege transition so
+            # any pre-auth sid an attacker may have planted on the
+            # browser is invalidated. Must happen before we write
+            # `user_id`; regenerate() preserves dict contents so any
+            # already-present flash messages survive.
+            rotate_sid()
             session["user_id"] = user.id
             session["user_email"] = user.email
             session["user_display_name"] = user.display_name

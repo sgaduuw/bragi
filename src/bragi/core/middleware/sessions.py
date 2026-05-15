@@ -81,6 +81,24 @@ class BragiServerSession(dict[str, Any], SessionMixin):
         super().clear()
         self.modified = True
 
+    def regenerate(self) -> None:
+        """Rotate the session ID, preserving dict contents.
+
+        Mark the current sid for destruction so `save_session`
+        deletes the old DB row; clear `self.sid` so a fresh UUID is
+        generated on the next save. Used at privilege transitions
+        (login) to defend against session-fixation: an attacker who
+        planted a known anonymous sid on the victim's browser sees
+        their cookie become useless the moment the victim
+        authenticates.
+
+        Distinct from `clear()`, which also empties the dict.
+        """
+        if self.sid is not None:
+            self.destroyed_sid = self.sid
+            self.sid = None
+        self.modified = True
+
     def pop(self, key: str, default: Any = None) -> Any:  # noqa: ANN401
         self.modified = True
         return super().pop(key, default)
@@ -201,6 +219,22 @@ class BragiSessionInterface(SessionInterface):
 def register_server_sessions(app: Flask) -> None:
     """Replace `app.session_interface` with the DB-backed store."""
     app.session_interface = BragiSessionInterface()
+
+
+def rotate_sid() -> None:
+    """Regenerate the active session's id, preserving its contents.
+
+    Call right after a privilege transition (login, OAuth callback
+    success) so any pre-auth sid is invalidated. The Flask `session`
+    proxy resolves to a `BragiServerSession` in this app, so the
+    `regenerate()` method is available; `hasattr` guards against
+    third-party plugins that might have swapped the session
+    interface and don't carry the method.
+    """
+    from flask import session
+
+    if hasattr(session, "regenerate"):
+        session.regenerate()
 
 
 def purge_expired_sessions() -> int:
