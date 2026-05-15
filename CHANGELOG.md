@@ -6,6 +6,32 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-05-16
+
+A pure docs release: brings `README.md` up to date for 1.5.0.
+No code, schema, behaviour, or configuration changes. The
+v1.5.0 git tag had the pre-refresh 1.3.0-era README attached;
+this release replaces it with the current snapshot. Pinning to
+`v1.5.0` versus `v1.5.1` makes no operational difference;
+images are identical except for the README baked into the
+build context.
+
+Also adds a "verify README is a current snapshot" step to the
+project's release checklist (in the gitignored CLAUDE.md) so
+the same drift doesn't recur silently.
+
+### Changed
+- **README refreshed for 1.5.0 (#88).** Status header bumped
+  from 1.3.0 / 2026-05-14 to 1.5.0 / 2026-05-15; feature list
+  picks up themes (1.4.0, #40), SQLite FTS5 search (1.4.0, #43),
+  and the IA refactor cluster (1.5.0, #77 / #78 / #79 / #80).
+  "What bragi is" gains a "Sites are first-class workspaces"
+  bullet. Importers section promotes WordPress (#39) out of
+  "deferred". Compose example bumped to `BRAGI_TAG=v1.5.0`.
+  Project layout adds `search/`, `themes/`, `team/`, and
+  `import_wordpress/` to the contrib tree. Status header
+  re-bumped to 1.5.1 / 2026-05-16 as part of this release.
+
 ## [1.5.0] - 2026-05-15
 
 A four-phase information-architecture refactor that makes sites
