@@ -175,8 +175,12 @@ def new_page() -> ResponseReturnValue:
         db.commit()
         new_id = page_row.id
         new_slug = page_row.slug
+        pm = current_app.extensions["plugin_manager"]
         if new_status == PageStatus.PUBLISHED:
-            pm = current_app.extensions["plugin_manager"]
+            # Mirror the post admin's first-publish path: subscribers
+            # (search index, sitemap rebuild, indexnow ping, webhook
+            # fans) get the same hook surface for pages as for posts.
+            pm.hook.on_post_published(item=page_row, session=db)
             pm.hook.on_cache_purge(scope="page", key=str(new_id))
         flash(f"Page '{form['title']}' created.", "success")
 
@@ -233,6 +237,12 @@ def edit_page(page_id: int) -> ResponseReturnValue:
         # the page to its prior shape (including parent).
         _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
 
+        # `before` snapshot for the on_post_updated hook (slug
+        # changes drive auto-301 redirects via the redirects
+        # plugin's subscriber). Capture BEFORE mutating.
+        before = {"slug": page.slug, "title": page.title, "status": page.status}
+        was_published = page.status == PageStatus.PUBLISHED
+
         page.title = str(form["title"])
         page.slug = slug
         page.parent_id = parent_id
@@ -244,7 +254,18 @@ def edit_page(page_id: int) -> ResponseReturnValue:
         db.commit()
         updated_id = page.id
         updated_site_id = page.site_id
+        after = {"slug": page.slug, "title": page.title, "status": page.status}
+        skip_redirect = request.form.get("skip_redirect") == "1"
+
         pm = current_app.extensions["plugin_manager"]
+        # Fire on_post_updated unless the editor opted out (typo-
+        # fix-in-draft renames don't need a stale-URL 301).
+        if not skip_redirect:
+            pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # First-publish transition fires on_post_published so
+        # subscribers see the same lifecycle as posts.
+        if page.status == PageStatus.PUBLISHED and not was_published:
+            pm.hook.on_post_published(item=page, session=db)
         pm.hook.on_cache_purge(scope="page", key=str(updated_id))
         flash(f"Page '{form['title']}' updated.", "success")
 

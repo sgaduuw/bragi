@@ -49,6 +49,15 @@
     </select>
   </fieldset>
 
+  {% if is_edit %}
+  <fieldset style="flex-direction: row; align-items: center; gap: 0.5rem;">
+    <input type="checkbox" name="skip_redirect" id="skip_redirect" value="1">
+    <label for="skip_redirect" style="margin: 0;">
+      Skip redirect when slug changes (use for typo fixes in drafts)
+    </label>
+  </fieldset>
+  {% endif %}
+
   <div class="actions">
     <button type="submit">{{ 'Save' if is_edit else 'Create' }}</button>
     <a href="{{ url_for('page_admin.list_pages') }}" class="btn secondary">Cancel</a>
