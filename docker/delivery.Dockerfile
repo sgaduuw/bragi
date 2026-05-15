@@ -35,4 +35,10 @@ COPY pyproject.toml README.md ./
 RUN pip install --no-deps -e .
 
 EXPOSE 8002
-CMD ["bragi-delivery", "--host", "0.0.0.0", "--port", "8002"]
+# `bragi-delivery` (the click script) calls `app.run(...)` and is
+# the local-dev entrypoint. In the container, run gunicorn against
+# the WSGI factory. Delivery is read-heavy; 4 workers default fine
+# under SQLite WAL. `DELIVERY_WORKERS` env var lets ops dial it up
+# or down. See the admin Dockerfile for the rationale on
+# `sync` worker class and `--access-logfile -`.
+CMD ["sh", "-c", "exec gunicorn -w ${DELIVERY_WORKERS:-4} -b 0.0.0.0:8002 --timeout 30 --access-logfile - 'bragi.apps.delivery:create_delivery_app()'"]

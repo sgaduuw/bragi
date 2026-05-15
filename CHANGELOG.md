@@ -6,6 +6,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Production containers run gunicorn, not Werkzeug's dev
+  server (#91).** Both Dockerfile CMDs now invoke
+  `gunicorn ... 'bragi.apps.X:create_X_app()'` with the `sync`
+  worker class, `--timeout 30`, and `--access-logfile -` for
+  stdout-friendly combined-log access lines. The
+  `bragi-admin` / `bragi-delivery` click scripts stay the
+  local-dev entrypoints (`make dev`); they call `app.run(...)`
+  for Werkzeug's auto-reload. Workers default to 2 on admin
+  (low concurrency) and 4 on delivery (read-heavy, parallel
+  reads under SQLite WAL); both env-tunable via
+  `ADMIN_WORKERS` / `DELIVERY_WORKERS`. Removes Werkzeug's
+  "do not use in production" startup warning that previously
+  shipped in every running image.
+
 ## [1.5.1] - 2026-05-16
 
 A pure docs release: brings `README.md` up to date for 1.5.0.
