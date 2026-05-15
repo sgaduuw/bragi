@@ -55,14 +55,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Per-site dashboard at `/admin/sites/<slug>/` (#78).** Lands
   on a short welcome plus a sections grid pulled from the active
   user's `site_nav_items`, so it self-updates when new
-  site-scoped plugins register. Analytics (P3 / #79) and Team
-  (P4 / #80) show as disabled placeholder cards so the
-  information architecture is visible end-to-end while the
-  remaining phases are in flight.
+  site-scoped plugins register. Team (P4 / #80) still shows as
+  a disabled placeholder card so the information architecture
+  is visible end-to-end while that phase is in flight.
 - **`resolve_site_or_abort(db, site_slug) -> Site`.** Shared
   helper in `bragi.core.permissions` used by every site-scoped
   blueprint to perform the slug-to-Site lookup, the member gate,
   and the `g.current_site` / `g.site_slug` stash in one call.
+
+### Changed (P3)
+- **Analytics is now per-site (#79).** The dashboard moved from
+  the cross-site `/admin/analytics/` to
+  `/admin/sites/<slug>/analytics/` and queries are scoped to
+  `AnalyticsEvent.site_id == site.id`; cross-site aggregation
+  is no longer surfaced anywhere. Permission shifted from
+  superuser-only to any site member, so owners and collaborators
+  can read their own site's rollups without elevation. The
+  writer in `bragi.contrib.analytics.plugin` is untouched
+  (`site_id` was already populated on every event); this is
+  purely a read-path change. The Analytics nav item gained
+  `scope="site"` and dropped its `permission="superuser"` gate.
+  The old `/admin/analytics/` URL hard-404s.
 
 ## [1.4.1] - 2026-05-15
 

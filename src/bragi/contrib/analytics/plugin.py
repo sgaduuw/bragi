@@ -100,24 +100,26 @@ def on_app_init(app: Flask, registry: object) -> None:
 
 @hookimpl
 def register_admin_blueprint() -> Blueprint:
-    """Mount the analytics admin Blueprint at /admin/analytics."""
+    """Mount the analytics admin Blueprint under /admin/sites/<slug>/."""
     return analytics_admin_bp
 
 
 @hookimpl
 def register_admin_nav() -> list[NavItem]:
-    """Add an Analytics entry under section 'system'.
+    """Add an Analytics entry under the site-scoped nav.
 
-    Superuser-gated because cross-site analytics expose more than
-    a per-site author should see; per-site filtering for editors
-    can land alongside #9 (user_site_roles).
+    P3 / #79: the dashboard moved from a global cross-site
+    aggregation to a per-site view. Any site member can read
+    their own site's pageview rollups, so the old
+    superuser-only gate is gone; the view-level
+    `resolve_site_or_abort` enforces membership instead.
     """
     return [
         NavItem(
             label="Analytics",
             endpoint="analytics_admin.list_analytics",
-            section="system",
+            section="content",
             weight=40,
-            permission="superuser",
+            scope="site",
         ),
     ]
