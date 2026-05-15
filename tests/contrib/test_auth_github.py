@@ -249,6 +249,28 @@ def test_callback_sets_session_user_id(
         assert sess.get("user_email") == "ada@example.com"
 
 
+def test_callback_rotates_session_id(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The OAuth callback rotates the sid at the privilege
+    transition: an attacker who planted a pre-auth sid sees it
+    invalidated. Mirrors the auth_local fix."""
+    _mock_authlib_client(monkeypatch)
+    client = admin_app.test_client()
+    # Bootstrap an anonymous sid by hitting any page (which
+    # populates the CSRF token / session cookie).
+    client.get("/auth/login")
+    pre_sid = client.get_cookie("bragi_sid")
+    pre_sid_value = pre_sid.value if pre_sid else None
+
+    client.get("/auth/github/callback?code=abc")
+    post_sid = client.get_cookie("bragi_sid")
+    assert post_sid is not None
+    assert post_sid.value != pre_sid_value
+
+
 def test_callback_fires_on_user_login_hook(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],

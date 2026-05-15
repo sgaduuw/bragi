@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from flask import (
     Blueprint,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from bragi.contrib.auth_local.passwords import hash_password, verify_password
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
+from bragi.core.middleware.sessions import rotate_sid
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user import User
 
@@ -68,12 +70,23 @@ def login() -> ResponseReturnValue:
                 flash("Invalid email or password.", "error")
                 return render_template("login.html", email=email, next=next_url)
 
+            # Rotate the session id at the privilege transition so
+            # any pre-auth sid an attacker may have planted on the
+            # browser is invalidated. Must happen before we write
+            # `user_id`; regenerate() preserves dict contents so any
+            # already-present flash messages survive.
+            rotate_sid()
             session["user_id"] = user.id
             session["user_email"] = user.email
             session["user_display_name"] = user.display_name
             login_user_id = user.id
             must_change = cred.must_change
             flash(f"Welcome, {user.display_name}.", "success")
+            # Detach so we can hand the user instance to the
+            # `on_user_login` subscribers below without keeping the
+            # SessionLocal context manager open for the duration of
+            # whatever plugins want to do.
+            db.expunge(user)
 
         audit(
             AuditAction.AUTH_LOGIN_SUCCESS,
@@ -81,6 +94,15 @@ def login() -> ResponseReturnValue:
             target_id=login_user_id,
             extra={"method": "local"},
         )
+        # Mirror the auth_github callback: subscribers (analytics,
+        # webhook fans, audit-enrichment plugins) should see local
+        # logins on the same hook surface they get for GitHub.
+        # Before this fix, password logins were silent on the hook
+        # while GitHub logins fired, which left observability blind
+        # to half the auth flow.
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_user_login(user=user, method="local", request=request)
+
         if must_change:
             # Stash the original `next` so the post-rotation
             # redirect lands where the user was going. The

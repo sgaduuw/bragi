@@ -81,20 +81,48 @@ def _push_url_for_item(item: Any, session: Any) -> None:
     )
 
 
+def _is_published(state: Any) -> bool:
+    """True if the post/page (or before/after snapshot) was published.
+
+    Accepts either the live model instance or a `{"status": ...}`
+    dict snapshot. Status is a plain string column on both Post and
+    Page; the literal `"published"` is the canonical value.
+    """
+    status = state.get("status") if isinstance(state, dict) else getattr(state, "status", None)
+    return status == "published"
+
+
 @hookimpl
 def on_post_published(item: Any, session: Any) -> None:
+    # Fires only on transition-to-published, so a ping is always
+    # the right move.
     _push_url_for_item(item, session)
 
 
 @hookimpl
 def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], session: Any) -> None:
-    del before, after
+    # Ping in two cases:
+    # 1) The item is currently published (any edit on a published
+    #    post wants the search engine to re-crawl).
+    # 2) The item *was* published and just got unpublished (so the
+    #    search engine re-crawls and updates its index with the new
+    #    404 / 410, instead of keeping a stale snapshot live).
+    # A draft→draft edit (typo fix on a never-published post) is
+    # silent: pinging IndexNow with a URL that 404s in delivery
+    # wastes quota and trains the engine to downweight the host.
+    if not _is_published(after) and not _is_published(before):
+        return
     _push_url_for_item(item, session)
 
 
 @hookimpl
 def on_post_deleted(item: Any, session: Any) -> None:
     # Fires BEFORE the row is deleted, so url_for still works.
+    # No status filter: a deletion of any status wants the search
+    # engine to recrawl-and-confirm-404. (Draft deletions are
+    # almost no-ops because the URL was never crawled in the first
+    # place, but pinging is harmless and avoids a stale-cache edge
+    # case if a draft was ever briefly published.)
     _push_url_for_item(item, session)
 
 

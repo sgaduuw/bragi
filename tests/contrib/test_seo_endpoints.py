@@ -18,6 +18,7 @@ from flask import Flask
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.delivery import create_delivery_app
+from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
@@ -81,6 +82,38 @@ def delivery_app(
                 status=PostStatus.PUBLISHED,
                 published_at=datetime(2026, 5, 14, tzinfo=UTC),
             ),
+            # Pages: one published top-level, one draft (must not
+            # appear), one on the other site (leak check).
+            Page(
+                site_id=blog.id,
+                slug="about",
+                title="About",
+                body_markdown="a",
+                body_html="<p>a</p>",
+                body_excerpt="a",
+                author_id=user.id,
+                status=PageStatus.PUBLISHED,
+            ),
+            Page(
+                site_id=blog.id,
+                slug="hidden",
+                title="Hidden",
+                body_markdown="h",
+                body_html="<p>h</p>",
+                body_excerpt="h",
+                author_id=user.id,
+                status=PageStatus.DRAFT,
+            ),
+            Page(
+                site_id=other.id,
+                slug="page-leak-check",
+                title="Other site page",
+                body_markdown="o",
+                body_html="<p>o</p>",
+                body_excerpt="o",
+                author_id=user.id,
+                status=PageStatus.PUBLISHED,
+            ),
         ]
     )
     db_session.commit()
@@ -117,6 +150,35 @@ def test_sitemap_isolates_other_site(delivery_app: Flask) -> None:
     assert "https://other.example.com/posts/leak-check/" in body
     # blog.example.com's URLs must not appear here.
     assert "blog.example.com" not in body
+
+
+def test_sitemap_includes_published_pages(delivery_app: Flask) -> None:
+    """The sitemap must include published Pages alongside Posts. v1
+    walked Post only (with a TODO comment); the page plugin has
+    shipped since, so this is now the contract."""
+    resp = delivery_app.test_client().get("/sitemap.xml", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    # The /pages/<slug>/ vs /<slug>/ vs /<parent>/<slug>/ shape
+    # depends on the page plugin's `url_for`; just assert the page
+    # slug is somewhere in a <loc> and the canonical hostname's
+    # path-segment is present.
+    assert "https://blog.example.com" in body
+    assert "about" in body
+
+
+def test_sitemap_excludes_draft_pages(delivery_app: Flask) -> None:
+    """A draft Page must not surface even though its slug ('hidden')
+    exists; same contract as posts."""
+    resp = delivery_app.test_client().get("/sitemap.xml", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert "hidden" not in body
+
+
+def test_sitemap_pages_isolated_per_site(delivery_app: Flask) -> None:
+    """The other site's pages must not leak into blog's sitemap."""
+    resp = delivery_app.test_client().get("/sitemap.xml", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert "page-leak-check" not in body
 
 
 def test_sitemap_unknown_host_404s(delivery_app: Flask) -> None:

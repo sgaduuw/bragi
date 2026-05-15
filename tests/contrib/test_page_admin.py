@@ -270,3 +270,257 @@ def test_pages_nav_entry_registered(admin_app: Flask) -> None:
     registry = admin_app.extensions["registry"]
     labels = {item.label for item in registry.admin_nav}
     assert "Pages" in labels
+
+
+# ============================================================
+# Lifecycle hooks (B1: page admin now mirrors post admin)
+# ============================================================
+
+
+def _make_recorder():
+    """Build a pluggy-compatible recorder for the three post hooks."""
+    from typing import Any
+
+    from bragi.api import hookimpl
+
+    calls: list[dict[str, Any]] = []
+
+    class _Recorder:
+        @hookimpl
+        def on_post_published(self, item: Any, session: Any) -> None:
+            del session
+            calls.append({"hook": "published", "id": item.id, "slug": item.slug})
+
+        @hookimpl
+        def on_post_updated(
+            self,
+            item: Any,
+            before: dict[str, Any],
+            after: dict[str, Any],
+            session: Any,
+        ) -> None:
+            del session
+            calls.append(
+                {
+                    "hook": "updated",
+                    "id": item.id,
+                    "before_slug": before.get("slug"),
+                    "after_slug": after.get("slug"),
+                    "before_status": before.get("status"),
+                    "after_status": after.get("status"),
+                }
+            )
+
+        @hookimpl
+        def on_post_deleted(self, item: Any, session: Any) -> None:
+            del session
+            calls.append({"hook": "deleted", "id": item.id})
+
+    return _Recorder(), calls
+
+
+def test_new_published_page_fires_on_post_published(admin_app: Flask) -> None:
+    """Creating a page as published triggers on_post_published, which
+    is what indexnow / search / cache-purge subscribers all rely on
+    (the brief: page admin should reuse on_post_* like the search
+    plugin's hookimpls expect)."""
+    rec, calls = _make_recorder()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(rec)
+    try:
+        client = admin_app.test_client()
+        _login(client)
+        token = csrf_token(client, path="/admin/pages/new")
+        client.post(
+            "/admin/pages/new",
+            data={
+                "title": "About",
+                "slug": "about",
+                "body_markdown": "About us.",
+                "status": "published",
+                "parent_id": "",
+                "_csrf_token": token,
+            },
+        )
+    finally:
+        pm.unregister(rec)
+
+    published = [c for c in calls if c["hook"] == "published"]
+    assert len(published) == 1
+    assert published[0]["slug"] == "about"
+
+
+def test_new_draft_page_does_not_fire_on_post_published(admin_app: Flask) -> None:
+    """A page created as draft must NOT fire on_post_published; the
+    contract is "transition into published"."""
+    rec, calls = _make_recorder()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(rec)
+    try:
+        client = admin_app.test_client()
+        _login(client)
+        token = csrf_token(client, path="/admin/pages/new")
+        client.post(
+            "/admin/pages/new",
+            data={
+                "title": "Draft",
+                "slug": "draft",
+                "body_markdown": "x",
+                "status": "draft",
+                "parent_id": "",
+                "_csrf_token": token,
+            },
+        )
+    finally:
+        pm.unregister(rec)
+
+    assert [c for c in calls if c["hook"] == "published"] == []
+
+
+def test_edit_published_page_fires_on_post_updated(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Editing a page fires on_post_updated with before/after slug
+    in the dict so subscribers (redirects auto-301, search index)
+    can react."""
+    # Seed a published page directly.
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+        user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
+        page = Page(
+            site_id=site_id,
+            slug="old-slug",
+            title="Old Title",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="x",
+            author_id=user_id,
+            status=PageStatus.PUBLISHED,
+        )
+        db.add(page)
+        db.commit()
+        page_id = page.id
+
+    rec, calls = _make_recorder()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(rec)
+    try:
+        client = admin_app.test_client()
+        _login(client)
+        token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+        client.post(
+            f"/admin/pages/{page_id}/edit",
+            data={
+                "title": "New Title",
+                "slug": "new-slug",
+                "body_markdown": "x",
+                "status": "published",
+                "parent_id": "",
+                "_csrf_token": token,
+            },
+        )
+    finally:
+        pm.unregister(rec)
+
+    updated = [c for c in calls if c["hook"] == "updated"]
+    assert len(updated) == 1
+    assert updated[0]["before_slug"] == "old-slug"
+    assert updated[0]["after_slug"] == "new-slug"
+    # No on_post_published transition here: was already published.
+    assert [c for c in calls if c["hook"] == "published"] == []
+
+
+def test_edit_draft_to_published_fires_both_hooks(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Promoting a draft to published fires BOTH on_post_updated and
+    on_post_published. Mirrors the post admin's behaviour."""
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+        user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
+        page = Page(
+            site_id=site_id,
+            slug="d",
+            title="D",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="x",
+            author_id=user_id,
+            status=PageStatus.DRAFT,
+        )
+        db.add(page)
+        db.commit()
+        page_id = page.id
+
+    rec, calls = _make_recorder()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(rec)
+    try:
+        client = admin_app.test_client()
+        _login(client)
+        token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+        client.post(
+            f"/admin/pages/{page_id}/edit",
+            data={
+                "title": "D",
+                "slug": "d",
+                "body_markdown": "x",
+                "status": "published",
+                "parent_id": "",
+                "_csrf_token": token,
+            },
+        )
+    finally:
+        pm.unregister(rec)
+
+    hooks = [c["hook"] for c in calls]
+    assert "updated" in hooks
+    assert "published" in hooks
+
+
+def test_skip_redirect_suppresses_on_post_updated(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The skip_redirect form checkbox tells the admin not to fire
+    on_post_updated (used for typo-in-draft renames so a stale-URL
+    301 isn't autocreated)."""
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+        user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
+        page = Page(
+            site_id=site_id,
+            slug="typo",
+            title="Typo",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="x",
+            author_id=user_id,
+            status=PageStatus.DRAFT,
+        )
+        db.add(page)
+        db.commit()
+        page_id = page.id
+
+    rec, calls = _make_recorder()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(rec)
+    try:
+        client = admin_app.test_client()
+        _login(client)
+        token = csrf_token(client, path=f"/admin/pages/{page_id}/edit")
+        client.post(
+            f"/admin/pages/{page_id}/edit",
+            data={
+                "title": "Typo",
+                "slug": "fixed-typo",
+                "body_markdown": "x",
+                "status": "draft",
+                "parent_id": "",
+                "skip_redirect": "1",
+                "_csrf_token": token,
+            },
+        )
+    finally:
+        pm.unregister(rec)
+
+    assert [c for c in calls if c["hook"] == "updated"] == []
