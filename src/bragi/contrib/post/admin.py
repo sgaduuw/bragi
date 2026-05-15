@@ -29,7 +29,7 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bragi.core.audit import AuditAction, audit
@@ -141,8 +141,19 @@ def _sync_post_tags(
 def list_posts(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
+        # `COALESCE(published_at, updated_at) DESC` surfaces newest
+        # content first regardless of status: published posts sort by
+        # publication date, drafts by last edit. `created_at` would
+        # be the wrong key after an import, because every imported
+        # row gets `created_at = now()` clustered in the export's
+        # iteration order; `published_at` is preserved by importers,
+        # so the import case sorts correctly too. `Post.id.desc()`
+        # is the tie-break for posts that share a key to the second.
+        recency = func.coalesce(Post.published_at, Post.updated_at).desc()
         posts = (
-            db.execute(select(Post).where(Post.site_id == site.id).order_by(Post.created_at.desc()))
+            db.execute(
+                select(Post).where(Post.site_id == site.id).order_by(recency, Post.id.desc())
+            )
             .scalars()
             .all()
         )
