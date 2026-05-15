@@ -30,6 +30,7 @@ from sqlalchemy import select
 from bragi.contrib.auth_github.client import build_github_client, fetch_user_info
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
+from bragi.core.middleware.sessions import rotate_sid
 from bragi.core.models.user import User
 from bragi.core.models.user_identity import UserIdentity
 from bragi.settings import settings
@@ -116,6 +117,9 @@ def callback() -> ResponseReturnValue:
         user_id = user.id
         display_name = user.display_name
 
+    # Rotate the sid at the privilege transition (defends against
+    # session-fixation: a planted pre-auth sid is invalidated).
+    rotate_sid()
     session["user_id"] = user_id
     session["user_email"] = external.email or ""
     session["user_display_name"] = display_name

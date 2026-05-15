@@ -168,6 +168,45 @@ def test_login_next_redirect_must_be_relative(admin_app: Flask) -> None:
     assert "evil.example" not in resp.headers["Location"]
 
 
+def test_login_rotates_session_id(admin_app: Flask) -> None:
+    """A successful login must rotate the session UUID so any
+    pre-auth sid an attacker may have planted on the browser is
+    invalidated. The pre-login cookie value must not equal the
+    post-login cookie value."""
+    client = admin_app.test_client()
+    # Hit a page to bootstrap an anonymous sid.
+    client.get("/auth/login")
+    pre_sid = client.get_cookie("bragi_sid")
+    pre_sid_value = pre_sid.value if pre_sid else None
+
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": token},
+    )
+    post_sid = client.get_cookie("bragi_sid")
+    assert post_sid is not None
+    assert post_sid.value != pre_sid_value
+
+
+def test_failed_login_does_not_rotate_session_id(admin_app: Flask) -> None:
+    """A failed login must NOT rotate the sid (no privilege
+    transition happened). The same anonymous session continues."""
+    client = admin_app.test_client()
+    client.get("/auth/login")
+    pre_sid = client.get_cookie("bragi_sid")
+    pre_sid_value = pre_sid.value if pre_sid else None
+
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": TEST_EMAIL, "password": "wrong", "_csrf_token": token},
+    )
+    post_sid = client.get_cookie("bragi_sid")
+    assert post_sid is not None
+    assert post_sid.value == pre_sid_value
+
+
 def test_login_fires_on_user_login_hook(
     admin_app: Flask,
 ) -> None:
