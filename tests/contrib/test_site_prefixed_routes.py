@@ -293,8 +293,10 @@ def test_dashboard_404_for_unknown_slug(admin_app: Flask) -> None:
 
 def test_dashboard_shows_site_nav_items(admin_app: Flask) -> None:
     """The dashboard surfaces the site-scoped sections (Posts,
-    Pages, Redirects, Attachments) so users have a one-screen
-    landing into the site's content surface."""
+    Pages, Redirects, Attachments, Analytics) so users have a
+    one-screen landing into the site's content surface. Team
+    (P4 / #80) is owner-only and is asserted separately in
+    `test_team_admin`."""
     client = admin_app.test_client()
     _login_as(client, "ada@example.com")
     resp = client.get("/admin/sites/blog/")
@@ -303,6 +305,4 @@ def test_dashboard_shows_site_nav_items(admin_app: Flask) -> None:
     assert "Pages" in body
     assert "Redirects" in body
     assert "Attachments" in body
-    # Analytics / Team stubs are listed too so the IA is visible.
     assert "Analytics" in body
-    assert "Team" in body

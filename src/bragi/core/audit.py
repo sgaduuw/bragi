@@ -41,6 +41,10 @@ class AuditAction:
 
     SITE_OWNER_TRANSFERRED = "site.owner.transferred"
 
+    TEAM_GRANTED = "team.granted"
+    TEAM_ROLE_CHANGED = "team.role_changed"
+    TEAM_REVOKED = "team.revoked"
+
 
 def audit(
     action: str,

@@ -158,6 +158,7 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.contrib.seo.sitemap.SessionLocal",
     "bragi.contrib.sessions.admin.SessionLocal",
     "bragi.contrib.sites.admin.SessionLocal",
+    "bragi.contrib.team.admin.SessionLocal",
     "bragi.contrib.search.backend.SessionLocal",
     "bragi.contrib.search.cli.SessionLocal",
     "bragi.contrib.sites.cli.SessionLocal",

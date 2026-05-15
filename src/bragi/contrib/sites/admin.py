@@ -141,9 +141,8 @@ def site_dashboard(site_slug: str) -> ResponseReturnValue:
     """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
-        # Detach the in-memory copy from the session: the template
-        # reads slug / title / etc. but db is about to close.
-        db.expunge(site)
+    # `resolve_site_or_abort` already expunged the row so the
+    # chrome can read it post-render; no further detach needed.
     return render_template("admin/site_dashboard.html", site=site)
 
 

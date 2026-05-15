@@ -1,0 +1,76 @@
+{% extends "admin/base.html" %}
+{% block title %}Team &middot; {{ site.title }} &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Team</h1>
+<p style="color: #666; margin-top: -0.5rem;">
+  Manage who else can author for <strong>{{ site.title }}</strong>.
+  Roles ladder up: <code>author</code> &lt; <code>editor</code> &lt; <code>admin</code>.
+  Admin collaborators cannot themselves manage the team; only the owner can.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Email</th>
+      <th>Display name</th>
+      <th>Role</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% if owner %}
+    <tr>
+      <td><code>{{ owner.email }}</code></td>
+      <td>{{ owner.display_name or '' }}</td>
+      <td><strong>Owner</strong></td>
+      <td><small style="color: #888;">Transfer ownership via <code>cms site transfer</code>.</small></td>
+    </tr>
+    {% endif %}
+    {% for role, user in collaborators %}
+    <tr>
+      <td><code>{{ user.email }}</code></td>
+      <td>{{ user.display_name or '' }}</td>
+      <td>{{ role.role }}</td>
+      <td>
+        <form method="post"
+              action="{{ url_for('team_admin.revoke', user_id=user.id) }}"
+              onsubmit="return confirm('Revoke {{ user.email }}\'s role on this site?');"
+              style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">Revoke</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2 style="margin-top: 2rem;">Add a collaborator</h2>
+<p style="color: #666; margin-top: -0.5rem;">
+  The user must already exist (run <code>cms user create</code>
+  on the host first). Inviting un-registered users by email link
+  isn't built yet.
+</p>
+<form method="post" action="{{ url_for('team_admin.grant') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <fieldset>
+    <label for="email">Email</label>
+    <input type="email" name="email" id="email" required
+           placeholder="collaborator@example.com">
+  </fieldset>
+
+  <fieldset>
+    <label for="role">Role</label>
+    <select name="role" id="role" required>
+      {% for r in allowed_roles %}
+      <option value="{{ r }}">{{ r }}</option>
+      {% endfor %}
+    </select>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit">Grant role</button>
+  </div>
+</form>
+{% endblock %}

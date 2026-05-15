@@ -77,6 +77,35 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `scope="site"` and dropped its `permission="superuser"` gate.
   The old `/admin/analytics/` URL hard-404s.
 
+### Added (P4)
+- **Team management UI for site owners (#80).** New blueprint
+  `bragi.contrib.team` mounts at
+  `/admin/sites/<slug>/team/` and exposes list / grant / revoke
+  views as the polished counterpart to the existing
+  `cms user grant` CLI. Permission model honors P1's "owner is
+  special" semantic: only the site owner (or a superuser) can
+  view or mutate the team. Collaborators with the `admin` role
+  do NOT get to manage the team. Granting writes a
+  `team.granted` audit row (or `team.role_changed` when the
+  user already had a role on the site); revoking writes
+  `team.revoked`. The owner row is unrevocable from this UI;
+  the ownership-transfer path stays on `cms site transfer` per
+  P1's deferral.
+- **`NavItem.permission="site_owner"`.** The chrome's nav
+  visibility predicate gained owner-of-current-site recognition;
+  superusers continue to pass every gate. The Team nav entry
+  uses this so it appears in-site only for owners.
+
+### Changed
+- **`resolve_site_or_abort` detaches the resolved Site.** The
+  helper now calls `db.expunge(site)` before stashing the row
+  on `g.current_site`. Without this, a commit later in the view
+  could expire the row's columns; by the time the chrome (which
+  reads `current_site.title` and now `owner_user_id` for the
+  P4 owner nav gate) ran, those reads would raise
+  DetachedInstanceError. The expunge happens unconditionally so
+  every site-prefixed blueprint inherits the fix.
+
 ## [1.4.1] - 2026-05-15
 
 A pure-bugfix release sweeping eight defects surfaced by a full
