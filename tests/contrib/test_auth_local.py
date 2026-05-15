@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from flask import Flask
@@ -165,6 +166,74 @@ def test_login_next_redirect_must_be_relative(admin_app: Flask) -> None:
     # _safe_next forces malformed targets to '/'
     assert resp.headers["Location"].endswith("/")
     assert "evil.example" not in resp.headers["Location"]
+
+
+def test_login_fires_on_user_login_hook(
+    admin_app: Flask,
+) -> None:
+    """A successful local login must fire `on_user_login` with
+    `method="local"`, matching the GitHub callback's behaviour
+    (auth_github/views.py:131). Observability subscribers
+    (analytics, audit-enrichment plugins) need parity across both
+    auth paths."""
+    from bragi.api import hookimpl
+
+    captured: list[dict[str, Any]] = []
+
+    class _Recorder:
+        @hookimpl
+        def on_user_login(self, user: Any, method: str, request: Any) -> None:
+            del request
+            captured.append({"method": method, "email": user.email})
+
+    pm = admin_app.extensions["plugin_manager"]
+    rec = _Recorder()
+    pm.register(rec)
+    try:
+        client = admin_app.test_client()
+        token = csrf_token(client)
+        client.post(
+            "/auth/login",
+            data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": token},
+        )
+    finally:
+        pm.unregister(rec)
+
+    assert len(captured) == 1
+    assert captured[0]["method"] == "local"
+    assert captured[0]["email"] == TEST_EMAIL
+
+
+def test_login_failure_does_not_fire_on_user_login_hook(
+    admin_app: Flask,
+) -> None:
+    """A failed login (bad password, unknown email) must NOT fire
+    `on_user_login`. The hook contract is "successful auth";
+    misfiring on failure would mislead analytics."""
+    from bragi.api import hookimpl
+
+    captured: list[dict[str, Any]] = []
+
+    class _Recorder:
+        @hookimpl
+        def on_user_login(self, user: Any, method: str, request: Any) -> None:
+            del user, method, request
+            captured.append({})
+
+    pm = admin_app.extensions["plugin_manager"]
+    rec = _Recorder()
+    pm.register(rec)
+    try:
+        client = admin_app.test_client()
+        token = csrf_token(client)
+        client.post(
+            "/auth/login",
+            data={"email": TEST_EMAIL, "password": "wrong-password", "_csrf_token": token},
+        )
+    finally:
+        pm.unregister(rec)
+
+    assert captured == []
 
 
 # --------------------------- logout flow -------------------------
