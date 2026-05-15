@@ -7,11 +7,12 @@ test_client with auth_local logged in.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.api import hookimpl
@@ -94,6 +95,93 @@ def test_list_shows_seeded_post(admin_app: Flask) -> None:
     assert resp.status_code == 200
     assert b"Hello World" in resp.data
     assert b"hello" in resp.data  # slug
+
+
+def test_list_sorts_by_recency_not_created_at(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Admin list orders by `COALESCE(published_at, updated_at) DESC`.
+
+    Published posts sort by publish date; drafts fall back to their
+    last edit. `created_at` is intentionally not the sort key: every
+    imported row gets `created_at = now()` clustered in the export's
+    iteration order, so sorting on it leaks Ghost's internal order
+    into the admin list. The scenario below picks dates that put
+    `created_at`-order in direct conflict with publish-recency."""
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        author_id = db.execute(select(User.id).where(User.email == EMAIL)).scalar_one()
+        # Own every row in the list: wipe the fixture's seeded
+        # draft so order assertions are unambiguous.
+        db.execute(delete(Post).where(Post.site_id == site_id))
+        common = {
+            "site_id": site_id,
+            "body_markdown": "x",
+            "body_html": "<p>x</p>",
+            "body_excerpt": "x",
+            "author_id": author_id,
+        }
+        # newest `created_at`, but OLDEST `published_at`: belongs LAST
+        db.add(
+            Post(
+                slug="post-oldpub",
+                title="Old publish",
+                status=PostStatus.PUBLISHED,
+                created_at=datetime(2026, 12, 1, tzinfo=UTC),
+                updated_at=datetime(2026, 12, 1, tzinfo=UTC),
+                published_at=datetime(2026, 1, 1, tzinfo=UTC),
+                **common,
+            )
+        )
+        # middle: published mid-year
+        db.add(
+            Post(
+                slug="post-midpub",
+                title="Mid publish",
+                status=PostStatus.PUBLISHED,
+                created_at=datetime(2026, 6, 1, tzinfo=UTC),
+                updated_at=datetime(2026, 6, 1, tzinfo=UTC),
+                published_at=datetime(2026, 6, 1, tzinfo=UTC),
+                **common,
+            )
+        )
+        # oldest `created_at`, but NEWEST `published_at`: belongs FIRST
+        db.add(
+            Post(
+                slug="post-newpub",
+                title="New publish",
+                status=PostStatus.PUBLISHED,
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+                published_at=datetime(2026, 12, 1, tzinfo=UTC),
+                **common,
+            )
+        )
+        # draft with no `published_at`, recent `updated_at`: COALESCE
+        # falls back to updated_at, which sits between mid and old.
+        db.add(
+            Post(
+                slug="post-draft",
+                title="Recent draft",
+                status=PostStatus.DRAFT,
+                created_at=datetime(2026, 3, 1, tzinfo=UTC),
+                updated_at=datetime(2026, 9, 1, tzinfo=UTC),
+                published_at=None,
+                **common,
+            )
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/posts/").data
+    pos = {
+        slug: body.index(slug.encode())
+        for slug in ("post-newpub", "post-draft", "post-midpub", "post-oldpub")
+    }
+    # Expected sort key DESC: Dec (newpub) > Sep (draft.updated_at)
+    # > Jun (midpub) > Jan (oldpub).
+    assert pos["post-newpub"] < pos["post-draft"] < pos["post-midpub"] < pos["post-oldpub"]
 
 
 def test_new_get_serves_form(admin_app: Flask) -> None:

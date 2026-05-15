@@ -6,6 +6,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Admin post list sorts by recency, not creation time.** The
+  list at `/admin/sites/<slug>/posts/` now orders by
+  `COALESCE(published_at, updated_at) DESC` with `id DESC` as the
+  tie-break: published posts surface by publication date, drafts
+  by last edit. The previous `created_at DESC` order leaked
+  import iteration into the admin list (every imported row gets
+  `created_at = now()` clustered in the export's natural order,
+  so a Ghost import appeared alphabetical-ish), and didn't bubble
+  a freshly edited old draft to the top either. No schema or
+  hookspec change; pure ordering tweak on one query.
+
 ## [1.6.1] - 2026-05-16
 
 Bug-fix release for the Ghost importer's export-detection step.
