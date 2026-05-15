@@ -6,6 +6,35 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-05-16
+
+Bug-fix release for the Ghost importer's export-detection step.
+On Ghost 6.x exports the importer was rejecting otherwise valid
+files: a user's 6.27.0 export reproduced this on the first try.
+The cause was a 4 KB head-scan heuristic in `looks_like_ghost`
+that grepped the file's first 4 KB for `"posts"`. Modern Ghost
+exports lead `db[0].data` with sizable `benefits` and
+`custom_theme_settings` arrays, so `"posts"` lands past the
+cutoff and the heuristic returned False.
+
+Detection now parses the file in full via `load_export` and
+returns False only on `OSError` / `ValueError` (which covers
+malformed JSON, unreadable files, and the missing-envelope shape
+checks already enforced in `load_export`). Files are at most
+low-MB; the optimisation wasn't worth the false negatives.
+
+No schema, interface, or behaviour changes outside the detection
+path. The `cms import ghost ...` CLI shape is unchanged.
+
+### Fixed
+- **Ghost importer detects modern Ghost exports again (#95).**
+  Replaces the 4 KB head-scan in
+  `bragi.contrib.import_ghost.loader.looks_like_ghost` with a
+  full `load_export` parse. Regression test seeds an export with
+  a fat `custom_theme_settings` block before `posts` and asserts
+  the `"posts"` key lands past 4 KB, so the test fails loud if a
+  byte-window heuristic is ever reintroduced.
+
 ## [1.6.0] - 2026-05-16
 
 Production deploy posture cleanup. Up to and including 1.5.1, the
