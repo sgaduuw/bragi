@@ -54,12 +54,14 @@ def admin_app(
                 hostname="blog.example.com",
                 title="Blog",
                 canonical_url="https://blog.example.com",
+                owner_user_id=user.id,
             ),
             Site(
                 slug="other",
                 hostname="other.example.com",
                 title="Other",
                 canonical_url="https://other.example.com",
+                owner_user_id=user.id,
             ),
         ]
     )
@@ -84,12 +86,16 @@ def delivery_app(
 ) -> Iterator[Flask]:
     """Delivery app with the same site seed as admin_app, so hit-count
     tests can drive resolves without also touching the admin fixture."""
+    from tests.conftest import make_test_user
+
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="blog",
             hostname="blog.example.com",
             title="Blog",
             canonical_url="https://blog.example.com",
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()

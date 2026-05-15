@@ -25,7 +25,8 @@ from sqlalchemy import select
 from bragi.core.db import SessionLocal
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
-from bragi.core.security import is_superuser
+from bragi.core.permissions import accessible_sites_for
+from bragi.core.security import current_user, is_superuser
 
 bp = Blueprint(
     "site_admin",
@@ -35,21 +36,19 @@ bp = Blueprint(
 )
 
 
+# Endpoints (sans the `site_admin.` blueprint prefix) that any
+# logged-in user may reach. The list view is now the "sites you can
+# work with" picker; everything else (create, edit hostname,
+# deactivate, alias-swap) stays superuser-only because those are
+# platform-level changes that touch DNS and shared infra.
+_MEMBER_READABLE_ENDPOINTS = frozenset({"list_sites"})
+
+
 @bp.before_request
-def _superuser_only() -> None:
-    """Gate every site-admin endpoint behind the superuser flag.
-
-    Sites are the multisite primitive (Host header -> Site row); a
-    misconfigured or maliciously-edited Site row affects every
-    public visitor of the deployment. Edit / deactivate / alias-
-    swap therefore stays behind the strongest role we have.
-
-    For solo-operator bragi (one superuser, multiple sites) this
-    is the natural shape: nobody else has admin pages-list access
-    anyway. A future multi-admin / per-site-role rollout would
-    replace this with a `has_role(site_id, "admin")` check; until
-    then the conservative gate matches the intended threat model.
-    """
+def _gate() -> None:
+    endpoint = (request.endpoint or "").split(".", 1)[-1]
+    if endpoint in _MEMBER_READABLE_ENDPOINTS:
+        return
     if not is_superuser():
         abort(403)
 
@@ -107,9 +106,16 @@ def _validate(form: dict[str, str]) -> list[str]:
 
 @bp.route("/", methods=["GET"])
 def list_sites() -> ResponseReturnValue:
-    with SessionLocal() as db:
-        sites = db.execute(select(Site).order_by(Site.slug)).scalars().all()
-    return render_template("admin/sites_list.html", sites=sites)
+    """List sites the active user can act on.
+
+    Superusers see every active site; everyone else sees sites
+    they own plus sites they hold a role on. The write actions
+    on this page (Deactivate, Add alias, etc.) are still gated
+    behind the superuser flag and the template should hide them
+    for non-superusers.
+    """
+    sites = accessible_sites_for(current_user())
+    return render_template("admin/sites_list.html", sites=sites, is_superuser=is_superuser())
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -142,6 +148,11 @@ def new_site() -> ResponseReturnValue:
                 flash(f"A site with {column} {value!r} already exists.", "error")
                 return render_template("admin/sites_edit.html", site=None, form=form, themes=themes)
 
+        # The creator becomes the owner. The before_request gate
+        # already ensured a non-anonymous superuser is on the
+        # request, so `current_user()` is not None here.
+        creator = current_user()
+        assert creator is not None  # gated by _gate / superuser check
         db.add(
             Site(
                 slug=form["slug"],
@@ -152,6 +163,7 @@ def new_site() -> ResponseReturnValue:
                 canonical_url=canonical,
                 active=True,
                 theme=theme_value,
+                owner_user_id=creator.id,
             )
         )
         db.commit()

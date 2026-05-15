@@ -59,20 +59,24 @@ def fts_tables_present(
 @pytest.fixture
 def seeded_site(db_session: Session) -> Iterator[tuple[Site, Site, User]]:
     """Two sites + an author so tests can plant posts on either side."""
+    user = User(email="ada@example.com", display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
     blog = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     other = Site(
         slug="other",
         hostname="other.example.com",
         title="Other",
         canonical_url="https://other.example.com",
+        owner_user_id=user.id,
     )
-    user = User(email="ada@example.com", display_name="Ada", is_active=True)
-    db_session.add_all([blog, other, user])
+    db_session.add_all([blog, other])
     db_session.commit()
     yield blog, other, user
 

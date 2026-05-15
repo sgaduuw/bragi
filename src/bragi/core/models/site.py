@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, String
+from sqlalchemy import JSON, ForeignKey, String
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,13 @@ class Site(IdMixin, TimestampsMixin, Base):
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     canonical_url: Mapped[str] = mapped_column(String(255), default="")
     active: Mapped[bool] = mapped_column(default=True)
+    # The user who owns this site. Distinct from `UserSiteRole`
+    # (which carries collaborator roles): ownership is a uniqueness
+    # invariant and ownership transfer is a deliberate act, both of
+    # which muddy when mixed with team roles. The owner is implicit
+    # admin on permission checks; they don't need a UserSiteRole
+    # row to act on their own site.
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     # NULL means "no theme override, render with the plugin /
     # default templates as today." A non-null slug must match a
     # registered ThemeSpec.slug at request time; an orphaned value

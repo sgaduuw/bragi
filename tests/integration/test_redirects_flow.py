@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from bragi.apps.delivery import create_delivery_app
 from bragi.core.models.redirect import Redirect, RedirectSource
 from bragi.core.models.site import Site
+from tests.conftest import make_test_user
 
 KNOWN_HOST = "blog.example.com"
 UNKNOWN_HOST = "unknown.example.com"
@@ -33,11 +34,13 @@ def app(
     db_session_factory: sessionmaker[Session],
 ) -> Iterator[Flask]:
     """Delivery app with one Site + a 301 + a 410 seeded."""
+    owner = make_test_user(db_session)
     site = Site(
         slug="blog",
         hostname=KNOWN_HOST,
         title="Blog",
         canonical_url=f"https://{KNOWN_HOST}",
+        owner_user_id=owner.id,
     )
     db_session.add(site)
     db_session.flush()
@@ -124,11 +127,13 @@ def chain_app(
     db_session_factory: sessionmaker[Session],
 ) -> Iterator[Flask]:
     """Delivery app with no seeded redirects; tests add chains as needed."""
+    owner = make_test_user(db_session)
     site = Site(
         slug="blog",
         hostname=KNOWN_HOST,
         title="Blog",
         canonical_url=f"https://{KNOWN_HOST}",
+        owner_user_id=owner.id,
     )
     db_session.add(site)
     db_session.commit()

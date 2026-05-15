@@ -39,6 +39,8 @@ class AuditAction:
     AUTH_LOGIN_FAILURE = "auth.login.failure"
     AUTH_LOGOUT = "auth.logout"
 
+    SITE_OWNER_TRANSFERRED = "site.owner.transferred"
+
 
 def audit(
     action: str,

@@ -646,10 +646,16 @@ def test_user_grant_creates_role_row(
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
         site = Site(
-            slug="blog", hostname="b.example.com", title="B", canonical_url="https://b.example.com"
+            slug="blog",
+            hostname="b.example.com",
+            title="B",
+            canonical_url="https://b.example.com",
+            owner_user_id=user.id,
         )
-        db.add_all([user, site])
+        db.add(site)
         db.commit()
 
     runner = CliRunner()
@@ -679,10 +685,16 @@ def test_user_grant_updates_existing_row(
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
         site = Site(
-            slug="blog", hostname="b.example.com", title="B", canonical_url="https://b.example.com"
+            slug="blog",
+            hostname="b.example.com",
+            title="B",
+            canonical_url="https://b.example.com",
+            owner_user_id=user.id,
         )
-        db.add_all([user, site])
+        db.add(site)
         db.flush()
         db.add(UserSiteRole(user_id=user.id, site_id=site.id, role="author"))
         db.commit()
@@ -709,12 +721,16 @@ def test_user_grant_unknown_user_errors(
 
     monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
+        owner = User(email="owner@example.com", display_name="Owner", is_active=True)
+        db.add(owner)
+        db.flush()
         db.add(
             Site(
                 slug="blog",
                 hostname="b.example.com",
                 title="B",
                 canonical_url="https://b.example.com",
+                owner_user_id=owner.id,
             )
         )
         db.commit()

@@ -22,7 +22,7 @@ from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.models.user import User
 from bragi.core.models.user_site_role import UserSiteRole
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, make_test_user
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -52,6 +52,7 @@ def admin_app(
             title="Blog",
             canonical_url="https://blog.example.com",
             active=True,
+            owner_user_id=user.id,
         )
     )
     db_session.commit()
@@ -60,6 +61,10 @@ def admin_app(
     monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
+    # P1 / #77: the sites list / nav-visibility checks went through
+    # `accessible_sites_for` in `bragi.core.permissions`, which has
+    # its own SessionLocal binding.
+    monkeypatch.setattr("bragi.core.permissions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.sites.admin.SessionLocal", db_session_factory)
@@ -242,12 +247,14 @@ def test_edit_rejects_duplicate_hostname_against_other_row(
 ) -> None:
     """Renaming a site's hostname to clash with another site's hostname must fail."""
     with db_session_factory() as db:
+        owner = make_test_user(db, email="_second_owner@example.com")
         db.add(
             Site(
                 slug="second",
                 hostname="second.example.com",
                 title="Second",
                 canonical_url="https://second.example.com",
+                owner_user_id=owner.id,
             )
         )
         db.commit()
@@ -438,12 +445,16 @@ def admin_app_non_superuser(
     db_session.add(user)
     db_session.flush()
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(EDITOR_PASSWORD)))
+    # Distinct owner so Bob's editor-only access stays editor-only,
+    # not implicit-admin (P1 / #77: site owner is implicit admin).
+    owner = make_test_user(db_session, email="_blog_owner@example.com")
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
         active=True,
+        owner_user_id=owner.id,
     )
     db_session.add(site)
     db_session.flush()
@@ -464,11 +475,18 @@ def _login_editor(client: FlaskClient) -> None:
     )
 
 
-def test_non_superuser_gets_403_on_list(admin_app_non_superuser: Flask) -> None:
+def test_non_superuser_can_view_list(admin_app_non_superuser: Flask) -> None:
+    """P1 / #77: the list view became member-readable (it's now the
+    "sites you can act on" picker), so a non-superuser gets 200 and
+    sees only sites they own or hold a role on. The write actions on
+    the page stay superuser-gated via the template's `is_superuser`
+    conditional."""
     client = admin_app_non_superuser.test_client()
     _login_editor(client)
     resp = client.get("/admin/sites/")
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    # Bob has an editor role on `blog`, so the row should render.
+    assert b"blog" in resp.data
 
 
 def test_non_superuser_gets_403_on_new(admin_app_non_superuser: Flask) -> None:
@@ -502,12 +520,13 @@ def test_non_superuser_post_deactivate_blocked(
         assert db.execute(select(Site)).scalar_one().active is True
 
 
-def test_sites_nav_entry_hidden_for_non_superusers(
+def test_sites_nav_entry_visible_for_non_superusers(
     admin_app_non_superuser: Flask,
 ) -> None:
-    """The admin chrome's nav permission filter (apps/admin.py
-    `_visible`) must hide the Sites link for users without the
-    superuser flag, so they don't see a tempting link to a 403.
+    """P1 / #77: the Sites nav item dropped its `permission='superuser'`
+    gate when the list view became member-readable. Non-superusers
+    now see the link too; the view itself scopes what they see to
+    sites they own or hold a role on.
 
     Hit /admin/posts/ to land on a page that renders the base
     template chrome; the bare `/` endpoint returns inline HTML and
@@ -518,7 +537,7 @@ def test_sites_nav_entry_hidden_for_non_superusers(
     resp = client.get("/admin/posts/")
     assert resp.status_code == 200
     body = resp.data.decode()
-    assert 'href="/admin/sites/"' not in body
+    assert 'href="/admin/sites/"' in body
 
 
 def test_sites_nav_entry_visible_for_superuser(admin_app: Flask) -> None:

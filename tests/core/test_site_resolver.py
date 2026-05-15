@@ -7,6 +7,7 @@ from collections.abc import Iterator
 import pytest
 from flask import Flask, g
 from sqlalchemy.orm import Session, sessionmaker
+from tests.conftest import make_test_user
 
 from bragi.apps.delivery import create_delivery_app
 from bragi.core.models.site import Site
@@ -19,11 +20,13 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
+    owner = make_test_user(db_session)
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=owner.id,
     )
     db_session.add(site)
     db_session.flush()
@@ -89,6 +92,7 @@ def test_deactivated_canonical_does_not_resolve(
     """A site flagged `active=False` must NOT resolve. The admin
     "Deactivate" toggle is purely cosmetic if the resolver ignores
     it: deactivating a site has to actually take it off the air."""
+    owner = make_test_user(db_session)
     db_session.add(
         Site(
             slug="parked",
@@ -96,6 +100,7 @@ def test_deactivated_canonical_does_not_resolve(
             title="Parked",
             canonical_url="https://parked.example.com",
             active=False,
+            owner_user_id=owner.id,
         )
     )
     db_session.commit()
@@ -115,12 +120,14 @@ def test_deactivated_site_aliases_also_do_not_resolve(
 ) -> None:
     """Aliases inherit the parent Site's active flag: if the site is
     deactivated, requests via its aliases must also 404."""
+    owner = make_test_user(db_session)
     site = Site(
         slug="parked",
         hostname="parked.example.com",
         title="Parked",
         canonical_url="https://parked.example.com",
         active=False,
+        owner_user_id=owner.id,
     )
     db_session.add(site)
     db_session.flush()
@@ -142,12 +149,14 @@ def test_reactivating_a_site_makes_it_resolve_again(
 ) -> None:
     """Toggle round-trip: a deactivated then reactivated site
     resolves again (no cached stale state)."""
+    owner = make_test_user(db_session)
     site = Site(
         slug="cycle",
         hostname="cycle.example.com",
         title="Cycle",
         canonical_url="https://cycle.example.com",
         active=False,
+        owner_user_id=owner.id,
     )
     db_session.add(site)
     db_session.commit()

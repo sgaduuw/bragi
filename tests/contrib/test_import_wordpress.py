@@ -199,21 +199,20 @@ def test_plan_warns_on_shortcodes_and_comments(tmp_path: Path) -> None:
 
 @pytest.fixture
 def site_id(db_session: Session) -> Iterator[int]:
+    # Importer needs at least one user as the fallback author. The
+    # first user doubles as the site owner.
+    ada = User(email="ada@example.com", display_name="Ada", is_active=True)
+    grace = User(email="grace@example.com", display_name="Grace", is_active=True)
+    db_session.add_all([ada, grace])
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=ada.id,
     )
     db_session.add(site)
-    db_session.flush()
-    # Importer needs at least one user as the fallback author.
-    db_session.add_all(
-        [
-            User(email="ada@example.com", display_name="Ada", is_active=True),
-            User(email="grace@example.com", display_name="Grace", is_active=True),
-        ]
-    )
     db_session.commit()
     yield site.id
 

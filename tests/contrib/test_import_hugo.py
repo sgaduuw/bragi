@@ -166,16 +166,17 @@ def test_plan_skips_section_index(tmp_path: Path) -> None:
 
 @pytest.fixture
 def site_and_author(db_session: Session) -> Iterator[tuple[int, int]]:
+    user = User(email="ada@example.com", display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
     site = Site(
         slug="blog",
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
     )
     db_session.add(site)
-    db_session.flush()
-    user = User(email="ada@example.com", display_name="Ada", is_active=True)
-    db_session.add(user)
     db_session.commit()
     yield site.id, user.id
 
@@ -299,11 +300,31 @@ def test_apply_no_users_returns_friendly_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("bragi.contrib.import_hugo.importer.SessionLocal", db_session_factory)
+    # P1 / #77: every Site needs an owner User. To preserve the
+    # "no users in DB except the owner" scenario, seed an owner that
+    # the importer's fallback-author scan can deliberately skip.
+    # Drop FK enforcement just for the delete so the Site can survive
+    # the dangling owner_user_id; the test exercises a code path
+    # (no available author) that doesn't read `owner_user_id`.
+    from sqlalchemy import text
+
+    from tests.conftest import make_test_user
+
+    owner = make_test_user(db_session)
     site = Site(
-        slug="blog", hostname="b.example.com", title="B", canonical_url="https://b.example.com"
+        slug="blog",
+        hostname="b.example.com",
+        title="B",
+        canonical_url="https://b.example.com",
+        owner_user_id=owner.id,
     )
     db_session.add(site)
+    db_session.flush()
     db_session.commit()
+    db_session.execute(text("PRAGMA foreign_keys = OFF"))
+    db_session.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": owner.id})
+    db_session.commit()
+    db_session.execute(text("PRAGMA foreign_keys = ON"))
     db_session.refresh(site)
     db_session.expunge(site)
 
