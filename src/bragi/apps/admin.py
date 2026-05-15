@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import click
 import jinja2
-from flask import Flask, session
+from flask import Flask, render_template, session
 
 from bragi import __version__
 from bragi.cli import cms
@@ -146,11 +146,13 @@ def create_admin_app() -> Flask:
             "current_user_display_name": session.get("user_display_name"),
         }
 
-    # Index lands at the first nav entry when authenticated;
-    # otherwise the auth guard redirects to /auth/login.
+    # Index renders through the admin base template so the nav,
+    # logout button, and flash slot show up. The page itself is a
+    # sections grid derived from `nav_items`, so it self-updates
+    # when plugins add new admin surfaces.
     @app.route("/")
     def index() -> str:
-        return f"<h1>bragi admin</h1><p>v{__version__}. Pick a section from the top nav.</p>"
+        return render_template("admin/index.html", version=__version__)
 
     return app
 

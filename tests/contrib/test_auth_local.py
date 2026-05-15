@@ -323,6 +323,29 @@ def test_authenticated_admin_hit_passes_through(admin_app: Flask) -> None:
     assert b"bragi admin" in resp.data
 
 
+def test_admin_index_renders_chrome_with_nav(admin_app: Flask) -> None:
+    """The `/` route must render the admin base template, not bare
+    inline HTML. Otherwise the only page the auth bounce lands the
+    operator on has no nav, no logout button, no flash slot — and
+    no way to navigate without already knowing the URL space.
+    Regression net for #75 / B9."""
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": token},
+    )
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    # The base template's topbar must be present.
+    assert '<nav class="topbar"' in body
+    # The logout form (which only renders for an authenticated
+    # session) confirms the chrome is fully wired, not just an
+    # empty nav stub.
+    assert "Log out" in body
+
+
 def test_login_endpoint_is_public(admin_app: Flask) -> None:
     """The login view must be reachable without a session, or login is impossible."""
     client = admin_app.test_client()
