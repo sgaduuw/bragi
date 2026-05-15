@@ -6,19 +6,26 @@ citizen.
 
 ## Status
 
-1.3.0 shipped 2026-05-14. All day-one built-in plugins are in
+1.5.1 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
-auto-301, analytics (with UA classification), attachments with a
-full media library (renditions, bulk alt-text, TipTap embed
+auto-301, per-site analytics (with UA classification), attachments
+with a full media library (renditions, bulk alt-text, TipTap embed
 picker, `<picture srcset>` at delivery), server-side sessions,
 audit log, Pygments highlighting, heading anchors, per-site
 `sitemap.xml` / `robots.txt` / `security.txt` / Atom `feed.xml`,
-BlogPosting JSON-LD, TipTap editor, per-site roles, post / page
-revision history, HTTP cache management with an `on_cache_purge`
-plugin hookspec, and IndexNow push-crawl on publish / update /
-delete.
+BlogPosting JSON-LD, TipTap editor, per-site roles plus first-class
+site ownership, post / page revision history, HTTP cache management
+with an `on_cache_purge` plugin hookspec, IndexNow push-crawl on
+publish / update / delete, file-based themes, SQLite FTS5 search,
+and per-site team management UI.
+
+1.5.0 also wraps the four-phase IA refactor (#77, #78, #79, #80):
+admin content URLs moved under `/admin/sites/<slug>/...`, analytics
+scoped to the site you've entered, owners get a UI to invite
+collaborators. Public delivery URLs are unchanged; plugin hookspecs
+are unchanged.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
@@ -29,6 +36,13 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
 - **Multisite by design.** One database serves many sites; the Host
   header at the WSGI edge resolves to a Site row. Every content
   table has a `site_id` FK.
+- **Sites are first-class workspaces.** Each site has a designated
+  owner (with implicit-admin power) and a collaborator roster.
+  Admin content lives under `/admin/sites/<slug>/...` (posts,
+  pages, redirects, attachments, analytics, team), with a per-site
+  dashboard and a picker that auto-redirects single-site users
+  into their workspace. Cross-site id probes return 404 so the
+  response code can't be used to enumerate other sites' content.
 - **Two-binary architecture.** `bragi-admin` (editor UI, write API)
   and `bragi-delivery` (read-only public renderer) share one DB
   and one plugin manager; only the middleware stacks and registered
@@ -97,9 +111,9 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
 
 ## Importers
 
-Both shipped in 1.0; both are idempotent via `Post.source_id`,
-so re-running the importer over an updated source tree updates
-rows in place rather than duplicating them.
+All three ship in 1.x and are idempotent via `Post.source_id`,
+so re-running the importer over an updated source updates rows
+in place rather than duplicating them.
 
 - **Hugo**: walks `content/**/*.md` (skipping `_index.md`),
   parses TOML or YAML frontmatter, and copies the markdown body
@@ -119,9 +133,19 @@ rows in place rather than duplicating them.
   bragi's (`/posts/<slug>/`) lands so legacy bookmarks survive.
   CLI: `cms import ghost --site <slug> [--author <email>]
   [--dry-run] <path>`.
+- **WordPress**: parses WXR (WordPress eXtended RSS) XML
+  exports. `wp:post_type=post` rows become Posts, `page` rows
+  become Pages; bodies are converted from WordPress HTML to
+  markdown and run through the same pipeline. Categories and
+  tags upsert by slug; authors match by email or fall back to
+  the first user. Permalinks captured at export time become 301
+  redirects so legacy bookmarks survive. Idempotency keys on
+  `(site_id, source_id)` via `wp:post_id`. CLI:
+  `cms import wordpress --site <slug> [--author <email>]
+  [--dry-run] <wxr.xml>`.
 
-WordPress (WXR XML), Notion, Substack, and Medium are deferred
-to follow-up packages; no v1.x commitment.
+Notion, Substack, and Medium importers are deferred to
+follow-up packages; no v1.x commitment.
 
 ## Quick start (development)
 
@@ -153,13 +177,13 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.1.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.5.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A one-shot `migrate` service runs `alembic upgrade head` before
 the two app services start, so a fresh deploy and a schema-bump
 deploy work the same way. The shared `bragi-data` volume backs
-both `/data/bragi.db` and `/data/uploads/` (attachments) — back
+both `/data/bragi.db` and `/data/uploads/` (attachments); back
 that up. Ports bind to `127.0.0.1` only; front the apps with a
 reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
 routing.
@@ -195,22 +219,26 @@ bragi/
 │   │   ├── text.py             # slugify
 │   │   └── useragent.py        # bot / browser / feed-reader classifier
 │   └── contrib/                # built-ins as plugins
-│       ├── analytics/          # pageview sink + admin dashboard
+│       ├── analytics/          # per-site pageview sink + admin dashboard
 │       ├── anchors/            # heading id injection
-│       ├── attachments/        # upload + serve
+│       ├── attachments/        # upload + serve + media library
 │       ├── audit/              # audit-log admin
 │       ├── auth_github/        # OAuth via Authlib
 │       ├── auth_local/         # email + password + must-change rotation
 │       ├── highlight/          # Pygments html transform
 │       ├── import_ghost/       # Ghost JSON importer
 │       ├── import_hugo/        # Hugo content-tree importer
+│       ├── import_wordpress/   # WordPress WXR XML importer
 │       ├── indexnow/           # IndexNow push-crawl on publish/update/delete
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301
+│       ├── search/             # SQLite FTS5 contentless index over post bodies
 │       ├── seo/                # sitemap, robots.txt, security.txt, feed.xml
 │       ├── sessions/           # session admin (list / revoke)
-│       └── sites/              # Site CRUD admin + alias subcommands
+│       ├── sites/              # Site CRUD admin + alias subcommands
+│       ├── team/               # per-site team management (list / grant / revoke)
+│       └── themes/             # file-based theme registry + admin picker
 ├── alembic/                    # migrations
 ├── docker/                     # admin.Dockerfile, delivery.Dockerfile
 ├── .github/workflows/          # ci.yml, docker.yml
