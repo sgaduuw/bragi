@@ -4,7 +4,7 @@
 # source. The tag is parameterised via `BRAGI_TAG` (default
 # `latest`); pin to a specific release in production:
 #
-#   BRAGI_TAG=v1.1.0 docker compose up -d
+#   BRAGI_TAG=v1.6.0 docker compose up -d
 #
 # Companion file `docker/compose.dev.yml` builds the images
 # locally instead, for testing the container shape without a
@@ -41,10 +41,14 @@ services:
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
       BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
-      # Optional — uncomment + populate to enable.
+      # Optional (uncomment + populate to enable).
       # BRAGI_GITHUB_CLIENT_ID: ...
       # BRAGI_GITHUB_CLIENT_SECRET: ...
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
+      # Gunicorn worker count for the admin app. Default 2; admin
+      # is low-concurrency (one operator). Dial up if you have
+      # multiple authors hitting it concurrently.
+      # ADMIN_WORKERS: "2"
     volumes:
       - bragi-data:/data
     restart: unless-stopped
@@ -61,6 +65,10 @@ services:
       BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
+      # Gunicorn worker count for the delivery app. Default 4;
+      # delivery is read-heavy and SQLite WAL keeps reads parallel.
+      # Dial up on high-traffic public sites, down on small VPS.
+      # DELIVERY_WORKERS: "4"
     volumes:
       - bragi-data:/data
     restart: unless-stopped

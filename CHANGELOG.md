@@ -6,6 +6,39 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-05-16
+
+Production deploy posture cleanup. Up to and including 1.5.1, the
+container images shipped Werkzeug's dev server as their `CMD`;
+gunicorn wasn't even in `pyproject.toml`. In production behind
+Caddy that meant single-process, no worker pool, no graceful
+reload, and Werkzeug's own "do not use in production" line in
+every startup log. 1.6.0 swaps the entrypoint to gunicorn against
+the WSGI factory.
+
+No schema, no interface, no public-URL changes. The
+v1.5.1-vs-v1.6.0 image diff is operational only: process model,
+worker count, access-log format, restart semantics. Operators
+parsing container logs will see gunicorn's combined-log lines
+where Werkzeug's request lines used to be.
+
+### Changed
+- **Production containers run gunicorn, not Werkzeug's dev
+  server (#91).** Both Dockerfile CMDs now invoke
+  `gunicorn ... 'bragi.apps.X:create_X_app()'` with the `sync`
+  worker class, `--timeout 30`, and `--access-logfile -` for
+  stdout-friendly combined-log access lines. The
+  `bragi-admin` / `bragi-delivery` click scripts stay the
+  local-dev entrypoints (`make dev`); they call `app.run(...)`
+  for Werkzeug's auto-reload. Workers default to 2 on admin
+  (low concurrency) and 4 on delivery (read-heavy, parallel
+  reads under SQLite WAL); both env-tunable via
+  `ADMIN_WORKERS` / `DELIVERY_WORKERS`. Removes Werkzeug's
+  "do not use in production" startup warning that previously
+  shipped in every running image. README and compose example
+  document the new env vars; the BRAGI_TAG example pins
+  v1.6.0.
+
 ## [1.5.1] - 2026-05-16
 
 A pure docs release: brings `README.md` up to date for 1.5.0.

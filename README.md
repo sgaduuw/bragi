@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-1.5.1 shipped 2026-05-16. All day-one built-in plugins are in
+1.6.0 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
@@ -21,11 +21,18 @@ with an `on_cache_purge` plugin hookspec, IndexNow push-crawl on
 publish / update / delete, file-based themes, SQLite FTS5 search,
 and per-site team management UI.
 
-1.5.0 also wraps the four-phase IA refactor (#77, #78, #79, #80):
+1.5.0 wrapped the four-phase IA refactor (#77, #78, #79, #80):
 admin content URLs moved under `/admin/sites/<slug>/...`, analytics
 scoped to the site you've entered, owners get a UI to invite
 collaborators. Public delivery URLs are unchanged; plugin hookspecs
 are unchanged.
+
+1.6.0 cleans up the production deploy posture: containers run
+gunicorn against the WSGI factory (sync workers, access log on
+stdout) instead of Werkzeug's dev server. Worker counts default
+to 2 / 4 (admin / delivery), tunable via `ADMIN_WORKERS` /
+`DELIVERY_WORKERS`. No code, schema, or interface changes; the
+old image silently ran the dev server, the new image doesn't.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
@@ -108,6 +115,7 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
 - htmx (delivery side) + TipTap (admin editor)
 - SQLite (WAL) primary store; DuckDB reserved for later dataset
   paths
+- gunicorn (production WSGI server, sync worker class)
 
 ## Importers
 
@@ -177,7 +185,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.5.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.6.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A one-shot `migrate` service runs `alembic upgrade head` before
@@ -187,6 +195,12 @@ both `/data/bragi.db` and `/data/uploads/` (attachments); back
 that up. Ports bind to `127.0.0.1` only; front the apps with a
 reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
 routing.
+
+Both apps run under gunicorn inside the container (sync worker
+class; `--access-logfile -` to stdout). Worker counts default to
+2 for admin and 4 for delivery; tune via `ADMIN_WORKERS` /
+`DELIVERY_WORKERS` env vars on each service if your traffic
+shape needs it.
 
 ## Project layout
 
