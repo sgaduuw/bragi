@@ -36,13 +36,23 @@ def register_site_resolver(app: Flask) -> None:
             g.site = None
             return
         with SessionLocal() as session:
-            site = session.execute(select(Site).where(Site.hostname == host)).scalar_one_or_none()
+            # `active=False` short-circuits as if the row didn't
+            # exist. The admin "Deactivate" button has to actually
+            # take a site off the air for delivery; without this
+            # predicate the toggle is purely cosmetic.
+            site = session.execute(
+                select(Site).where(Site.hostname == host, Site.active.is_(True))
+            ).scalar_one_or_none()
             if site is None:
                 # Alias fallback: a row in site_aliases points at
-                # its parent Site via FK.
+                # its parent Site via FK. The aliases table itself
+                # has no `active` flag; the toggle lives on the
+                # parent Site, so we filter at the JOIN.
                 alias = session.execute(
                     select(SiteAlias).where(SiteAlias.hostname == host)
                 ).scalar_one_or_none()
                 if alias is not None:
-                    site = session.get(Site, alias.site_id)
+                    parent = session.get(Site, alias.site_id)
+                    if parent is not None and parent.active:
+                        site = parent
         g.site = site
