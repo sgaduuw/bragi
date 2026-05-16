@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bragi"
-version = "1.8.0"
+version = "1.9.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = ["Eelco Wesemann <6771014+sgaduuw@users.noreply.github.com>"]
 license = "MIT"
@@ -64,6 +64,7 @@ import_wordpress = "bragi.contrib.import_wordpress.plugin"
 indexnow = "bragi.contrib.indexnow.plugin"
 search = "bragi.contrib.search.plugin"
 themes = "bragi.contrib.themes.plugin"
+theme_default = "bragi.contrib.theme_default.plugin"
 embeds = "bragi.contrib.embeds.plugin"
 
 [build-system]

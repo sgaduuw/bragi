@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-1.8.0 shipped 2026-05-16. All day-one built-in plugins are in
+1.9.0 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
@@ -18,12 +18,13 @@ audit log, Pygments highlighting, heading anchors, per-site
 BlogPosting JSON-LD, TipTap editor, per-site roles plus first-class
 site ownership, post / page revision history, HTTP cache management
 with an `on_cache_purge` plugin hookspec, IndexNow push-crawl on
-publish / update / delete, file-based themes, SQLite FTS5 search,
-per-site team management UI, external-content embeds (YouTube
-click-to-load, Bluesky, allowlisted oEmbed), and a task-runner
-sidecar container that owns alembic plus periodic
-scheduled-publish, pending-embed rerender, and SQLite maintenance
-ticks.
+publish / update / delete, file-based themes (with an in-tree
+default theme registered through the same `register_theme` hook a
+third-party theme package would use), SQLite FTS5 search, per-site
+team management UI, external-content embeds (YouTube click-to-load,
+Bluesky, allowlisted oEmbed), and a task-runner sidecar container
+that owns alembic plus periodic scheduled-publish, pending-embed
+rerender, and SQLite maintenance ticks.
 
 1.5.0 wrapped the four-phase IA refactor (#77, #78, #79, #80):
 admin content URLs moved under `/admin/sites/<slug>/...`, analytics
@@ -52,6 +53,19 @@ land in their original Ghost / WordPress / Hugo publish order
 rather than reflecting the importer's iteration order. Editing
 an old draft also bubbles it back up. No schema or hookspec
 change; admin URLs and delivery output are unchanged.
+
+1.9.0 promotes the canonical site shell to a registered theme.
+The `delivery/base.html` template moved out of
+`bragi/templates/delivery/` and into a new
+`bragi.contrib.theme_default` contrib package, registered under
+slug `"default"` via `register_theme`: the same hook surface a
+third-party `bragi-theme-foo` package uses. `ThemeAwareLoader`
+now resolves `Site.theme=NULL` to slug `"default"`, and falls
+back to `"default"` for any uninstalled slug rather than
+rendering an unstyled page. `Site.theme` stays nullable; no
+data migration. The two empty namespace-only packages
+`bragi.core.auth` and `bragi.core.content` (docstring-only,
+zero callers) were also removed.
 
 1.8.0 adds external-content embeds (`bragi.contrib.embeds`) and
 a task-runner sidecar container. The new markdown directive
@@ -220,7 +234,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.8.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.9.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -264,8 +278,6 @@ bragi/
 │   │   ├── models/             # SQLAlchemy models (single source of truth)
 │   │   ├── middleware/         # site_resolver, csrf, sessions, redirects
 │   │   ├── render/             # markdown + transform registries
-│   │   ├── auth/               # internal auth helpers
-│   │   ├── content/            # content-type runtime helpers
 │   │   ├── audit.py            # AuditLog writer
 │   │   ├── cache.py            # Cache-Control / ETag / 304 helpers
 │   │   ├── db.py               # SessionLocal
@@ -298,6 +310,7 @@ bragi/
 │       ├── sessions/           # session admin (list / revoke)
 │       ├── sites/              # Site CRUD admin + alias subcommands
 │       ├── team/               # per-site team management (list / grant / revoke)
+│       ├── theme_default/      # in-tree default theme (registers slug "default")
 │       └── themes/             # file-based theme registry + admin picker
 ├── alembic/                    # migrations
 ├── docker/                     # admin.Dockerfile, delivery.Dockerfile

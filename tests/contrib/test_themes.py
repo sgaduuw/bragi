@@ -348,7 +348,7 @@ def test_admin_edit_lists_themes_in_dropdown(
     body = resp.data.decode()
     assert "Stub Theme" in body
     assert 'name="theme"' in body
-    assert "Default (no theme)" in body
+    assert "Default theme" in body
 
 
 def test_admin_edit_persists_theme_slug(
