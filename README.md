@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-1.9.0 shipped 2026-05-16. All day-one built-in plugins are in
+1.9.1 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
@@ -53,6 +53,15 @@ land in their original Ghost / WordPress / Hugo publish order
 rather than reflecting the importer's iteration order. Editing
 an old draft also bubbles it back up. No schema or hookspec
 change; admin URLs and delivery output are unchanged.
+
+1.9.1 fixes a quietly broken task-runner sidecar: the
+`flask --app bragi.apps.admin cms ...` invocation in
+`docker/scheduler.sh` had been silently exiting rc=2 since
+1.8.0 because Flask's CLI autodiscovery only resolves factories
+named `create_app` / `make_app`, not `create_admin_app`. The
+sidecar kept ticking but nothing scheduled-publish, pending
+embed retries, or SQLite maintenance ever ran. Hotfix uses the
+explicit `module:factory` form everywhere it was misspelled.
 
 1.9.0 promotes the canonical site shell to a registered theme.
 The `delivery/base.html` template moved out of
@@ -234,7 +243,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.9.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.9.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start

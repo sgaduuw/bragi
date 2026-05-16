@@ -32,6 +32,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   populate them in-tree; third-party content types do the same
   without touching `bragi.contrib.internal_links`.
 
+## [1.9.1] - 2026-05-16
+
+### Fixed
+- **Task-runner sidecar's `cms` invocations now actually run.**
+  `docker/scheduler.sh` was dispatching
+  `flask --app bragi.apps.admin cms ...` since 1.8.0, but Flask's
+  CLI autodiscovery only resolves factories named `create_app` or
+  `make_app`, not `create_admin_app`. Every tick silently exited
+  rc=2 with "No such command 'cms'"; scheduled-publish, pending
+  embed rerenders, and the daily / weekly SQLite maintenance
+  (`db analyze`, `db vacuum`) never ran in prod. Hotfix uses the
+  explicit `module:factory` form
+  (`flask --app 'bragi.apps.admin:create_admin_app' cms ...`)
+  everywhere it was misspelled: `docker/scheduler.sh`,
+  `compose.yml` comment, and `CLAUDE.md` operational docs.
+  New `tests/core/test_cli_resolution.py` guards against
+  regression. The `bragi-admin` gunicorn invocation was already
+  correct (uses the explicit factory form).
+
 ## [1.9.0] - 2026-05-16
 
 ### Changed
