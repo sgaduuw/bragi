@@ -10,6 +10,7 @@
 #
 # Cadences (env-overridable, all in seconds):
 #   SCHEDULED_PUBLISH_EVERY  default 60      ; flip due drafts to published
+#   EMBEDS_RERENDER_EVERY    default 600     ; retry pending embed cards
 #   ANALYZE_EVERY            default 86400   ; refresh sqlite_stat1 (daily)
 #   VACUUM_EVERY             default 604800  ; compact DB + collapse WAL (weekly)
 #
@@ -25,6 +26,7 @@
 set -u
 
 SCHEDULED_PUBLISH_EVERY=${SCHEDULED_PUBLISH_EVERY:-60}
+EMBEDS_RERENDER_EVERY=${EMBEDS_RERENDER_EVERY:-600}
 ANALYZE_EVERY=${ANALYZE_EVERY:-86400}
 VACUUM_EVERY=${VACUUM_EVERY:-604800}
 
@@ -54,6 +56,7 @@ fi
 
 now=$(date +%s)
 last_scheduled_publish=$now
+last_embeds_rerender=$now
 last_analyze=$now
 last_vacuum=$now
 
@@ -63,6 +66,11 @@ while true; do
     if [ $((now - last_scheduled_publish)) -ge "$SCHEDULED_PUBLISH_EVERY" ]; then
         run "scheduled-publish" flask --app bragi.apps.admin cms scheduled-publish
         last_scheduled_publish=$(date +%s)
+    fi
+
+    if [ $((now - last_embeds_rerender)) -ge "$EMBEDS_RERENDER_EVERY" ]; then
+        run "embeds-rerender" flask --app bragi.apps.admin cms embeds rerender-pending
+        last_embeds_rerender=$(date +%s)
     fi
 
     if [ $((now - last_analyze)) -ge "$ANALYZE_EVERY" ]; then
