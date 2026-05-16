@@ -95,8 +95,8 @@ def test_edit_page_renders_editor_mount(
     body = resp.data.decode()
     assert resp.status_code == 200
     # Editor mount + toolbar present.
-    assert 'id="post-editor"' in body
-    assert 'id="post-editor-toolbar"' in body
+    assert 'id="tiptap-editor"' in body
+    assert 'id="tiptap-editor-toolbar"' in body
     # Textarea kept as canonical form input + JS-disabled fallback.
     assert 'name="body_markdown"' in body
     # Initial content is the post's markdown.

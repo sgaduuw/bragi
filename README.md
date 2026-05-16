@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-1.7.0 shipped 2026-05-16. All day-one built-in plugins are in
+1.8.0 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
@@ -19,7 +19,11 @@ BlogPosting JSON-LD, TipTap editor, per-site roles plus first-class
 site ownership, post / page revision history, HTTP cache management
 with an `on_cache_purge` plugin hookspec, IndexNow push-crawl on
 publish / update / delete, file-based themes, SQLite FTS5 search,
-and per-site team management UI.
+per-site team management UI, external-content embeds (YouTube
+click-to-load, Bluesky, allowlisted oEmbed), and a task-runner
+sidecar container that owns alembic plus periodic
+scheduled-publish, pending-embed rerender, and SQLite maintenance
+ticks.
 
 1.5.0 wrapped the four-phase IA refactor (#77, #78, #79, #80):
 admin content URLs moved under `/admin/sites/<slug>/...`, analytics
@@ -48,6 +52,22 @@ land in their original Ghost / WordPress / Hugo publish order
 rather than reflecting the importer's iteration order. Editing
 an old draft also bubbles it back up. No schema or hookspec
 change; admin URLs and delivery output are unchanged.
+
+1.8.0 adds external-content embeds (`bragi.contrib.embeds`) and
+a task-runner sidecar container. The new markdown directive
+`::: embed <url> :::` resolves URLs at save time, dispatches to a
+provider (YouTube click-to-load, Bluesky, allowlisted oEmbed),
+and inlines the rendered HTML into `body_html`; readers never hit
+external services. Save-time failures fall back to a styled link
+card that the sidecar's `cms embeds rerender-pending` tick
+retries on a cadence. The sidecar (`bragi-tasks` service in
+`compose.yml`) replaces the one-shot `migrate` container,
+owns `alembic upgrade head` on start, and dispatches periodic
+`cms scheduled-publish`, `cms embeds rerender-pending`,
+`cms db analyze`, and `cms db vacuum` commands at configurable
+intervals. The `register_markdown_extension` plugin hook is now
+wired end-to-end on both admin and delivery factories; no
+schema change.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
@@ -200,15 +220,20 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.7.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.8.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
-A one-shot `migrate` service runs `alembic upgrade head` before
-the two app services start, so a fresh deploy and a schema-bump
-deploy work the same way. The shared `bragi-data` volume backs
-both `/data/bragi.db` and `/data/uploads/` (attachments); back
-that up. Ports bind to `127.0.0.1` only; front the apps with a
-reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
+A `bragi-tasks` sidecar owns `alembic upgrade head` on start
+(touching `/data/.migrated` once the schema is current), then
+enters a sleeper loop that dispatches periodic CMS commands:
+`scheduled-publish` (flips drafts whose `scheduled_for` has
+elapsed), `db analyze` (daily), and `db vacuum` (weekly). The
+admin and delivery services gate their start on the sidecar's
+healthcheck, so a fresh deploy and a schema-bump deploy work
+the same way. The shared `bragi-data` volume backs `/data/bragi.db`,
+`/data/uploads/` (attachments), and the `/data/.migrated` sentinel;
+back it up. Ports bind to `127.0.0.1` only; front the apps with
+a reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
 routing.
 
 Both apps run under gunicorn inside the container (sync worker
@@ -216,6 +241,11 @@ class; `--access-logfile -` to stdout). Worker counts default to
 2 for admin and 4 for delivery; tune via `ADMIN_WORKERS` /
 `DELIVERY_WORKERS` env vars on each service if your traffic
 shape needs it.
+
+Task-runner cadences (all in seconds, set on the `bragi-tasks`
+service) default to `SCHEDULED_PUBLISH_EVERY=60`,
+`ANALYZE_EVERY=86400`, `VACUUM_EVERY=604800`. Override in
+`compose.yml` if a different rhythm suits your workload.
 
 ## Project layout
 
@@ -254,6 +284,7 @@ bragi/
 │       ├── audit/              # audit-log admin
 │       ├── auth_github/        # OAuth via Authlib
 │       ├── auth_local/         # email + password + must-change rotation
+│       ├── embeds/             # external-content embeds (directive + providers + rerender)
 │       ├── highlight/          # Pygments html transform
 │       ├── import_ghost/       # Ghost JSON importer
 │       ├── import_hugo/        # Hugo content-tree importer

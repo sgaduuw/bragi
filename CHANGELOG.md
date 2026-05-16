@@ -6,6 +6,86 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-05-16
+
+### Added
+- **External-content embeds plugin (`bragi.contrib.embeds`).**
+  New markdown directive `::: embed <url> :::` resolves a URL
+  at save time, dispatches to a provider, and inlines the
+  rendered HTML into `body_html`. Readers never hit external
+  services; the resolved HTML is cached in the body. v1 ships
+  three providers: YouTube (click-to-load thumbnail by default,
+  no Google network call on read until the reader clicks Play;
+  iframe mode available via `BRAGI_EMBED_YOUTUBE_MODE=iframe`),
+  Bluesky (official oEmbed), and a generic allowlisted oEmbed
+  fallback for Vimeo, SoundCloud, and a handful of Mastodon
+  instances. Failed save-time renders fall back to a styled
+  `bragi-embed--pending` link card; the new
+  `cms embeds rerender-pending` CLI (invoked every
+  `EMBEDS_RERENDER_EVERY` seconds, default 600s, by the
+  task-runner sidecar from #103) retries each with a more
+  patient timeout and replaces the card in `body_html` on
+  success. Per-call and aggregate save-time timeouts are tunable
+  (`BRAGI_EMBED_OEMBED_TIMEOUT_PER`,
+  `BRAGI_EMBED_OEMBED_TIMEOUT_AGGREGATE`). The
+  `register_markdown_extension` hook is now wired end-to-end on
+  both admin and delivery apps; the renderer reads its
+  app-bound `MarkdownIt` from `app.extensions["markdown_renderer"]`
+  when available and falls back to the bare CommonMark
+  instance outside an app context (CLI scripts, importers).
+  Click-to-load adds ~300 bytes of inline JS per page, injected
+  by an HTML transform only when a CTO embed is rendered.
+  Closes #104.
+- **Task-runner sidecar container (`bragi-tasks`).** Replaces the
+  one-shot `migrate` service in `compose.yml`. Owns
+  `alembic upgrade head` on start, touches a `/data/.migrated`
+  sentinel, then enters a sleeper loop dispatching `flask --app
+  bragi.apps.admin cms ...` commands at configured cadences:
+  `scheduled-publish` (default 60s, flips posts whose
+  `scheduled_for` has elapsed from `scheduled` to `published`,
+  firing the same `on_post_published` lifecycle hook the admin
+  fires), `db analyze` (daily), `db vacuum` (weekly). The admin
+  and delivery services gate their start on the sidecar's
+  healthcheck (`test -f /data/.migrated`) rather than the prior
+  one-shot's `service_completed_successfully`. Same image as
+  `bragi-admin` since the `cms` CLI is registered there; ops
+  surface is one extra service, no broker, no job queue. See
+  `docker/scheduler.sh`. Closes #103.
+- **`cms scheduled-publish` CLI command** (under the post plugin).
+  Picks up posts with `status=scheduled` and `scheduled_for <=
+  now()`, sets `status=published` and `published_at` (preserving
+  any existing `published_at`), and dispatches
+  `on_post_published` plus `on_cache_purge` so the search
+  index, audit log, sitemap rebuilders, and any third-party
+  subscribers stay in step with manual publishes from the
+  admin. `--dry-run` lists what would change without writing.
+  Idempotent.
+- **`cms db analyze` and `cms db vacuum` CLI commands** (core).
+  Thin wrappers around SQLite's `ANALYZE` and `VACUUM` (plus
+  `PRAGMA wal_checkpoint(TRUNCATE)` after vacuum), invoked by
+  the task-runner sidecar on a long cadence. Safe to run ad-hoc.
+- **TipTap rich-text editor on the page admin form.** Pages
+  shipped 1.0.0 with only a plain textarea for the body; only
+  posts got the full TipTap toolbar + image picker. The editor
+  was extracted into a shared partial at
+  `bragi/templates/admin/_tiptap_editor.html` (lives in core,
+  not contrib, so both plugins can include it without crossing
+  the contrib boundary), and the page edit template now
+  `{% include %}`s it next to the same `name="body_markdown"`
+  textarea fallback. Backend save path is unchanged; the
+  textarea remains the canonical form input. Mount and toolbar
+  DOM IDs were renamed `post-editor*` -> `tiptap-editor*` since
+  they're shared now.
+
+### Fixed
+- **Editor toolbar stays visible while scrolling.** The TipTap
+  toolbar above the body editor used to scroll off the top of
+  the viewport on long bodies, so the operator had to scroll
+  back to apply formatting. `position: sticky; top: 0` now pins
+  it to the viewport once the page scrolls past it. Lives in
+  the shared partial, so the fix applies to both the post and
+  page edit forms.
+
 ## [1.7.0] - 2026-05-16
 
 Admin post-list reordering. After the 1.6.1 Ghost-importer fix

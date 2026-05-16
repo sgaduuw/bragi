@@ -17,23 +17,48 @@
 # routes it there.
 
 services:
-  # One-shot: run pending alembic migrations and exit. Both apps
-  # wait on this to complete successfully before starting, so a
-  # fresh deploy + a schema-bump deploy work the same way.
-  migrate:
+  # Task-runner sidecar. Owns `alembic upgrade head` on start
+  # (touches /data/.migrated once the schema is current), then
+  # enters a sleeper loop dispatching `flask --app bragi.apps.admin
+  # cms ...` commands at configured cadences: scheduled-publish
+  # (flips due drafts to published), db analyze (daily), db vacuum
+  # (weekly). See docker/scheduler.sh for the loop body and the
+  # env-overridable cadence knobs (SCHEDULED_PUBLISH_EVERY,
+  # ANALYZE_EVERY, VACUUM_EVERY, all in seconds).
+  #
+  # Reuses the bragi-admin image since the `cms` CLI is registered
+  # on the admin app. Web containers gate their start on this
+  # sidecar's healthcheck so gunicorn doesn't serve requests
+  # against an unmigrated DB on a fresh /data volume.
+  bragi-tasks:
     image: ghcr.io/sgaduuw/bragi-admin:${BRAGI_TAG:-latest}
-    command: ["alembic", "upgrade", "head"]
+    command: ["/app/scheduler.sh"]
     environment:
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
+      BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
+      # Cadence overrides (all in seconds). Leave commented for
+      # the defaults defined in docker/scheduler.sh.
+      # SCHEDULED_PUBLISH_EVERY: "60"
+      # ANALYZE_EVERY: "86400"
+      # VACUUM_EVERY: "604800"
     volumes:
       - bragi-data:/data
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      # Sentinel touched by scheduler.sh after a successful
+      # `alembic upgrade head`. Web containers gate on this via
+      # depends_on.condition: service_healthy.
+      test: ["CMD", "test", "-f", "/data/.migrated"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+      start_period: 0s
 
   admin:
     image: ghcr.io/sgaduuw/bragi-admin:${BRAGI_TAG:-latest}
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      bragi-tasks:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8001:8001"
     environment:
@@ -56,8 +81,8 @@ services:
   delivery:
     image: ghcr.io/sgaduuw/bragi-delivery:${BRAGI_TAG:-latest}
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      bragi-tasks:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8002:8002"
     environment:
@@ -74,6 +99,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  # Shared between all three services: SQLite DB at /data/bragi.db
-  # plus uploaded attachments under /data/uploads/. Back this up.
+  # Shared between all three services: SQLite DB at /data/bragi.db,
+  # the migrate-sentinel /data/.migrated touched by bragi-tasks,
+  # and uploaded attachments under /data/uploads/. Back this up.
   bragi-data:
