@@ -19,6 +19,7 @@ from bragi.core.middleware.csrf import register_csrf
 from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
+from bragi.core.render.markdown import install_app_renderer
 from bragi.core.render.transforms import TransformRegistry
 from bragi.core.security import current_user, is_superuser
 from bragi.plugins import create_plugin_manager
@@ -44,6 +45,7 @@ def create_admin_app() -> Flask:
         9. register_template_globals(env=app.jinja_env)
         10. register_markdown_transform(registry=md_transforms)
         11. register_html_transform(registry=html_transforms)
+        12. register_markdown_extension  -> app.extensions["markdown_renderer"]
     """
     app = Flask("bragi-admin")
     app.config["SECRET_KEY"] = settings.secret_key
@@ -147,6 +149,13 @@ def create_admin_app() -> Flask:
     pm.hook.register_template_globals(env=app.jinja_env)
     pm.hook.register_markdown_transform(registry=md_transforms)
     pm.hook.register_html_transform(registry=html_transforms)
+
+    # Build the app-bound `MarkdownIt` after all plugins have had a
+    # chance to register transforms (some plugin extensions wrap
+    # around behaviour the transforms already established). Stashed
+    # on app.extensions so `render_markdown()` picks it up while in
+    # an app context.
+    install_app_renderer(app, pm.hook.register_markdown_extension())
 
     # Expose registry-derived bits to every template (admin chrome,
     # logged-in user). Plugins that need additional template

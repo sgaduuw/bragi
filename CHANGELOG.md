@@ -7,6 +7,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **External-content embeds plugin (`bragi.contrib.embeds`).**
+  New markdown directive `::: embed <url> :::` resolves a URL
+  at save time, dispatches to a provider, and inlines the
+  rendered HTML into `body_html`. Readers never hit external
+  services; the resolved HTML is cached in the body. v1 ships
+  three providers: YouTube (click-to-load thumbnail by default,
+  no Google network call on read until the reader clicks Play;
+  iframe mode available via `BRAGI_EMBED_YOUTUBE_MODE=iframe`),
+  Bluesky (official oEmbed), and a generic allowlisted oEmbed
+  fallback for Vimeo, SoundCloud, and a handful of Mastodon
+  instances. Failed save-time renders fall back to a styled
+  `bragi-embed--pending` link card; the new
+  `cms embeds rerender-pending` CLI (invoked every
+  `EMBEDS_RERENDER_EVERY` seconds, default 600s, by the
+  task-runner sidecar from #103) retries each with a more
+  patient timeout and replaces the card in `body_html` on
+  success. Per-call and aggregate save-time timeouts are tunable
+  (`BRAGI_EMBED_OEMBED_TIMEOUT_PER`,
+  `BRAGI_EMBED_OEMBED_TIMEOUT_AGGREGATE`). The
+  `register_markdown_extension` hook is now wired end-to-end on
+  both admin and delivery apps; the renderer reads its
+  app-bound `MarkdownIt` from `app.extensions["markdown_renderer"]`
+  when available and falls back to the bare CommonMark
+  instance outside an app context (CLI scripts, importers).
+  Click-to-load adds ~300 bytes of inline JS per page, injected
+  by an HTML transform only when a CTO embed is rendered.
+  Closes #104.
 - **Task-runner sidecar container (`bragi-tasks`).** Replaces the
   one-shot `migrate` service in `compose.yml`. Owns
   `alembic upgrade head` on start, touches a `/data/.migrated`

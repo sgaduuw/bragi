@@ -16,6 +16,7 @@ from bragi.core.cache import apply_cache_policy
 from bragi.core.middleware.redirects import register_redirect_handler
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
+from bragi.core.render.markdown import install_app_renderer
 from bragi.core.render.transforms import TransformRegistry
 from bragi.core.themes import ThemeAwareLoader
 from bragi.plugins import create_plugin_manager
@@ -32,6 +33,7 @@ def create_delivery_app() -> Flask:
         4. register_template_globals(env=app.jinja_env)
         5. register_markdown_transform(registry=md_transforms)
         6. register_html_transform(registry=html_transforms)
+        7. register_markdown_extension -> app.extensions["markdown_renderer"]
 
     Delivery deliberately does NOT call register_admin_blueprint,
     register_admin_nav, register_cli_command, register_importer,
@@ -101,6 +103,11 @@ def create_delivery_app() -> Flask:
     pm.hook.register_template_globals(env=app.jinja_env)
     pm.hook.register_markdown_transform(registry=md_transforms)
     pm.hook.register_html_transform(registry=html_transforms)
+
+    # Build the app-bound `MarkdownIt` from any plugin-contributed
+    # markdown-it extensions (container directives, etc.) and stash
+    # on app.extensions so `render_markdown()` picks it up.
+    install_app_renderer(app, pm.hook.register_markdown_extension())
 
     # Index sanity route. A real per-site landing page (post list,
     # featured content, etc.) lands when a site needs more than a
