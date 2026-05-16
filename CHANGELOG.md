@@ -6,6 +6,32 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Internal links resolved at delivery time
+  (`bragi.contrib.internal_links`).** New built-in plugin lets
+  authors write `[text](post:my-slug)` or `[text](post:42)` in
+  markdown bodies. At save time the link is normalised to its
+  stable id and persisted as
+  `<a href="/posts/<slug>/" data-bragi-link="post:<id>">`. A
+  new Jinja filter `internal_link_rewrite` (piped over
+  `body_html` in the post / page delivery templates) keeps the
+  `href` in sync with the target's current slug at delivery
+  time, so renaming a target updates every inbound link without
+  re-editing or re-rendering the source posts. Targets that no
+  longer resolve (deleted, slug-renamed away from both the
+  author's typed key and the persisted id) render with the
+  `bragi-link--broken` class instead of a stale href. Same-site
+  only; cross-site resolution is a deferred v2 concern. The
+  existing slug-change auto-301 covers CDN-cached stale renders
+  during the `Cache-Control` window, so no fanout or backlinks
+  table is needed for correctness. Closes #117.
+- **`ContentTypeSpec.internal_link_prefix` and
+  `ContentTypeSpec.resolve_internal_link`.** Optional public-API
+  fields a content-type plugin sets to opt into the new
+  `[text](<prefix>:<key>)` resolution path. Post and Page
+  populate them in-tree; third-party content types do the same
+  without touching `bragi.contrib.internal_links`.
+
 ## [1.9.1] - 2026-05-16
 
 ### Fixed

@@ -66,6 +66,7 @@ search = "bragi.contrib.search.plugin"
 themes = "bragi.contrib.themes.plugin"
 theme_default = "bragi.contrib.theme_default.plugin"
 embeds = "bragi.contrib.embeds.plugin"
+internal_links = "bragi.contrib.internal_links.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

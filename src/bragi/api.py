@@ -42,6 +42,23 @@ class FieldSpec:
 
 
 @dataclass
+class InternalLinkResolution:
+    """Resolution of an internal link target.
+
+    `entity_id` is the stable typed ID stored in `data-bragi-link`
+    on the rendered anchor; `href` is the current canonical path
+    (relative to the site root). Resolvers return this both at
+    save time (turning `[text](post:my-slug)` or
+    `[text](post:42)` into the persisted anchor shape) and at
+    delivery time (rewriting an existing anchor's href when the
+    target's slug has since changed).
+    """
+
+    entity_id: int
+    href: str
+
+
+@dataclass
 class ContentTypeSpec:
     """Registration record for a content type (Post, Page, custom)."""
 
@@ -56,6 +73,16 @@ class ContentTypeSpec:
     json_ld_type: str | None = None  # 'BlogPosting', 'WebPage', etc.
     feed_eligible: bool = True  # included in RSS/Atom feeds
     sitemap_eligible: bool = True  # included in sitemap.xml
+    # Internal-link resolution: opt-in by setting both fields. The
+    # prefix is what an author writes before the colon in the
+    # markdown shorthand: `[text](post:my-slug)` => prefix="post".
+    # The resolver accepts (key, site_id) where `key` is a numeric
+    # id-as-string or a current slug (resolver decides), and
+    # returns the canonical (entity_id, href) pair, or None if the
+    # key resolves to nothing within `site_id`. Same-site only by
+    # construction. See `bragi.contrib.internal_links`.
+    internal_link_prefix: str | None = None
+    resolve_internal_link: Callable[[str, int], InternalLinkResolution | None] | None = None
 
 
 # ============================================================
