@@ -6,11 +6,14 @@ citizen.
 
 ## Status
 
-1.9.1 shipped 2026-05-16. All day-one built-in plugins are in
+1.10.0 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
 importers, redirects with prefix / regex matching and slug-change
-auto-301, per-site analytics (with UA classification), attachments
+auto-301, delivery-time internal links (`[text](post:42)` /
+`[text](page:about)`) that follow slug renames without re-rendering
+source bodies, with an admin TipTap picker for inserting them,
+per-site analytics (with UA classification), attachments
 with a full media library (renditions, bulk alt-text, TipTap embed
 picker, `<picture srcset>` at delivery), server-side sessions,
 audit log, Pygments highlighting, heading anchors, per-site
@@ -53,6 +56,23 @@ land in their original Ghost / WordPress / Hugo publish order
 rather than reflecting the importer's iteration order. Editing
 an old draft also bubbles it back up. No schema or hookspec
 change; admin URLs and delivery output are unchanged.
+
+1.10.0 adds slug-rename-safe internal links and an admin picker
+for inserting them. Authors write `[text](post:my-slug)` or
+`[text](post:42)` in markdown; the new
+`bragi.contrib.internal_links` plugin resolves the typed-prefix
+shape at save time, stamps the anchor with a stable
+`data-bragi-link="post:<id>"` attribute, and a Jinja filter on
+the post / page delivery templates rewrites the `href` to the
+target's current slug on every render. Renaming a post no longer
+strands every inbound link in the corpus, and there is no
+backlinks table or fanout because the existing slug-change
+auto-301 catches CDN-cached stale renders during the
+`Cache-Control` window. The TipTap admin editor gains an
+"Internal link" toolbar button that opens a search dialog over
+the active site's posts and pages; selecting a target inserts
+the typed-prefix form so authors don't have to type the
+`post:<id>` syntax by hand. Closes #117, #115.
 
 1.9.1 fixes a quietly broken task-runner sidecar: the
 `flask --app bragi.apps.admin cms ...` invocation in
@@ -243,7 +263,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.9.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.10.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -311,6 +331,7 @@ bragi/
 │       ├── import_hugo/        # Hugo content-tree importer
 │       ├── import_wordpress/   # WordPress WXR XML importer
 │       ├── indexnow/           # IndexNow push-crawl on publish/update/delete
+│       ├── internal_links/     # [text](post:42) save-time + delivery-time resolver + admin picker
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301
