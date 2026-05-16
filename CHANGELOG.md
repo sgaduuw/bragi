@@ -6,13 +6,28 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **TipTap rich-text editor on the page admin form.** Pages
+  shipped 1.0.0 with only a plain textarea for the body; only
+  posts got the full TipTap toolbar + image picker. The editor
+  was extracted into a shared partial at
+  `bragi/templates/admin/_tiptap_editor.html` (lives in core,
+  not contrib, so both plugins can include it without crossing
+  the contrib boundary), and the page edit template now
+  `{% include %}`s it next to the same `name="body_markdown"`
+  textarea fallback. Backend save path is unchanged; the
+  textarea remains the canonical form input. Mount and toolbar
+  DOM IDs were renamed `post-editor*` -> `tiptap-editor*` since
+  they're shared now.
+
 ### Fixed
-- **Post-editor toolbar stays visible while scrolling.** The TipTap
-  toolbar above the body editor used to scroll with the page, so on
-  long posts the operator had to scroll back to the top to apply
-  formatting. Now `position: sticky; top: 0` pins it to the viewport
-  once the page scrolls past it. CSS-only; no template structure or
-  JS change.
+- **Editor toolbar stays visible while scrolling.** The TipTap
+  toolbar above the body editor used to scroll off the top of
+  the viewport on long bodies, so the operator had to scroll
+  back to apply formatting. `position: sticky; top: 0` now pins
+  it to the viewport once the page scrolls past it. Lives in
+  the shared partial, so the fix applies to both the post and
+  page edit forms.
 
 ## [1.7.0] - 2026-05-16
 

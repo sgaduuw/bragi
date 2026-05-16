@@ -36,6 +36,7 @@
 
   <fieldset>
     <label for="body_markdown">Body (markdown)</label>
+    {% include "admin/_tiptap_editor.html" %}
     <textarea name="body_markdown" id="body_markdown" rows="15">{{ form.get('body_markdown', '') }}</textarea>
   </fieldset>
 
