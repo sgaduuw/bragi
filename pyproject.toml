@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bragi"
-version = "1.9.1"
+version = "1.10.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = ["Eelco Wesemann <6771014+sgaduuw@users.noreply.github.com>"]
 license = "MIT"
@@ -66,6 +66,7 @@ search = "bragi.contrib.search.plugin"
 themes = "bragi.contrib.themes.plugin"
 theme_default = "bragi.contrib.theme_default.plugin"
 embeds = "bragi.contrib.embeds.plugin"
+internal_links = "bragi.contrib.internal_links.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]
