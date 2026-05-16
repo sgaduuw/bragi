@@ -150,6 +150,7 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.contrib.page.delivery.SessionLocal",
     "bragi.contrib.page.plugin.SessionLocal",
     "bragi.contrib.post.admin.SessionLocal",
+    "bragi.contrib.post.cli.SessionLocal",
     "bragi.contrib.post.delivery.SessionLocal",
     "bragi.contrib.post.plugin.SessionLocal",
     "bragi.contrib.redirects.admin.SessionLocal",
