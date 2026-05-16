@@ -1,0 +1,233 @@
+{# Shared TipTap-on-textarea editor. Included by post/edit.html and
+   page/page_edit.html. The host template owns the surrounding
+   <fieldset>, the <label>, and the <textarea name="body_markdown"
+   id="body_markdown">; this partial layers toolbar / image picker
+   / mount / styles / wiring on top so non-JS clients keep getting
+   a working plain textarea fallback.
+
+   Lives in `bragi/templates/admin/` (not `contrib/`) because both
+   post and page consume it and the contrib boundary forbids
+   sibling-plugin includes. #}
+<div id="tiptap-editor-toolbar" class="editor-toolbar" role="toolbar" hidden>
+  <button type="button" data-action="bold" title="Bold"><strong>B</strong></button>
+  <button type="button" data-action="italic" title="Italic"><em>I</em></button>
+  <button type="button" data-action="code" title="Inline code"><code>code</code></button>
+  <span class="sep">|</span>
+  <button type="button" data-action="h1" title="Heading 1">H1</button>
+  <button type="button" data-action="h2" title="Heading 2">H2</button>
+  <button type="button" data-action="h3" title="Heading 3">H3</button>
+  <span class="sep">|</span>
+  <button type="button" data-action="bullet-list" title="Bullet list">&bull; List</button>
+  <button type="button" data-action="ordered-list" title="Ordered list">1. List</button>
+  <button type="button" data-action="blockquote" title="Blockquote">&ldquo; &rdquo;</button>
+  <button type="button" data-action="code-block" title="Code block">{ }</button>
+  <span class="sep">|</span>
+  <button type="button" data-action="link" title="Link">Link</button>
+  <button type="button" data-action="unlink" title="Remove link">Unlink</button>
+  <span class="sep">|</span>
+  <button type="button" data-action="image" title="Insert image">&#128247; Image</button>
+</div>
+
+<dialog id="image-picker-dialog"
+        style="max-width: 800px; width: 90vw; padding: 0;
+               border: 1px solid #bbb; border-radius: 4px;">
+  <div style="display: flex; align-items: center; justify-content: space-between;
+              padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee;">
+    <strong>Insert image</strong>
+    <button type="button"
+            data-action="close-picker"
+            style="background: none; border: 0; font-size: 1.2em; cursor: pointer;">
+      &times;
+    </button>
+  </div>
+  <div id="image-picker-target">
+    <p style="padding: 1rem; color: #888;">Loading...</p>
+  </div>
+</dialog>
+<div id="tiptap-editor" class="editor-mount" hidden></div>
+
+<style>
+  .editor-toolbar {
+    display: flex; gap: 0.25rem; flex-wrap: wrap;
+    padding: 0.4rem; border: 1px solid #bbb; border-bottom: 0;
+    border-radius: 4px 4px 0 0; background: #f7f7f7;
+    /* Long bodies scroll the whole page, so the toolbar drifts
+       above the viewport once the operator is more than a screen
+       deep. Sticky pins it to the top once the page scrolls past
+       it; the existing solid background keeps content from showing
+       through. */
+    position: sticky; top: 0; z-index: 5;
+  }
+  .editor-toolbar button {
+    background: white; color: #222; border: 1px solid #ccc;
+    border-radius: 3px; padding: 0.2rem 0.5rem; font-size: 0.9em;
+    cursor: pointer; line-height: 1.2;
+  }
+  .editor-toolbar button:hover { background: #eee; }
+  .editor-toolbar button.is-active {
+    background: #222; color: #fff; border-color: #222;
+  }
+  .editor-toolbar .sep { color: #aaa; align-self: center; padding: 0 0.25rem; }
+  .editor-mount { border: 1px solid #bbb; border-radius: 0 0 4px 4px;
+    min-height: 14rem; padding: 0.75rem; background: white; }
+  .editor-mount .ProseMirror { outline: none; min-height: 12rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .editor-mount .ProseMirror p { margin: 0.5rem 0; }
+  .editor-mount .ProseMirror h1 { font-size: 1.5em; margin: 1rem 0 0.5rem; }
+  .editor-mount .ProseMirror h2 { font-size: 1.3em; margin: 1rem 0 0.5rem; }
+  .editor-mount .ProseMirror h3 { font-size: 1.1em; margin: 1rem 0 0.5rem; }
+  .editor-mount .ProseMirror pre { background: #f0f0f0; padding: 0.5rem;
+    border-radius: 3px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .editor-mount .ProseMirror blockquote { border-left: 3px solid #ccc;
+    margin: 0.5rem 0; padding: 0 0.75rem; color: #555; }
+  /* Hide the textarea once JS has wired the editor; the body
+     attribute is set by the module script. */
+  body.has-tiptap-editor textarea#body_markdown { display: none; }
+</style>
+
+<script type="module">
+  // TipTap + Markdown via CDN ESM. Self-hosted bundle + Subresource
+  // Integrity is a follow-up; admin is behind auth so the surface
+  // is the operator's own browser.
+  import { Editor } from 'https://esm.sh/@tiptap/core@2.6';
+  import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2.6';
+  import Link from 'https://esm.sh/@tiptap/extension-link@2.6';
+  import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
+
+  const textarea = document.getElementById('body_markdown');
+  const mount = document.getElementById('tiptap-editor');
+  const toolbar = document.getElementById('tiptap-editor-toolbar');
+  if (!textarea || !mount || !toolbar) {
+    // Template shape changed; let the textarea stand alone.
+    console.warn('tiptap editor mount missing; falling back to textarea');
+  } else {
+    const editor = new Editor({
+      element: mount,
+      extensions: [
+        StarterKit,
+        Link.configure({ openOnClick: false, autolink: false }),
+        Markdown.configure({
+          html: false,
+          linkify: true,
+          breaks: false,
+          tightLists: true,
+        }),
+      ],
+      content: textarea.value,
+      onUpdate: ({ editor }) => {
+        textarea.value = editor.storage.markdown.getMarkdown();
+      },
+      onSelectionUpdate: ({ editor }) => updateToolbarActive(editor),
+    });
+
+    document.body.classList.add('has-tiptap-editor');
+    mount.hidden = false;
+    toolbar.hidden = false;
+
+    function updateToolbarActive(editor) {
+      const map = {
+        bold: () => editor.isActive('bold'),
+        italic: () => editor.isActive('italic'),
+        code: () => editor.isActive('code'),
+        h1: () => editor.isActive('heading', { level: 1 }),
+        h2: () => editor.isActive('heading', { level: 2 }),
+        h3: () => editor.isActive('heading', { level: 3 }),
+        'bullet-list': () => editor.isActive('bulletList'),
+        'ordered-list': () => editor.isActive('orderedList'),
+        blockquote: () => editor.isActive('blockquote'),
+        'code-block': () => editor.isActive('codeBlock'),
+        link: () => editor.isActive('link'),
+      };
+      toolbar.querySelectorAll('button[data-action]').forEach((btn) => {
+        const fn = map[btn.dataset.action];
+        btn.classList.toggle('is-active', !!(fn && fn()));
+      });
+    }
+
+    toolbar.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      e.preventDefault();
+      const chain = editor.chain().focus();
+      switch (btn.dataset.action) {
+        case 'bold': chain.toggleBold().run(); break;
+        case 'italic': chain.toggleItalic().run(); break;
+        case 'code': chain.toggleCode().run(); break;
+        case 'h1': chain.toggleHeading({ level: 1 }).run(); break;
+        case 'h2': chain.toggleHeading({ level: 2 }).run(); break;
+        case 'h3': chain.toggleHeading({ level: 3 }).run(); break;
+        case 'bullet-list': chain.toggleBulletList().run(); break;
+        case 'ordered-list': chain.toggleOrderedList().run(); break;
+        case 'blockquote': chain.toggleBlockquote().run(); break;
+        case 'code-block': chain.toggleCodeBlock().run(); break;
+        case 'link': {
+          const previous = editor.getAttributes('link').href || '';
+          const url = window.prompt('Link URL', previous);
+          if (url === null) break;
+          if (url === '') { chain.unsetLink().run(); break; }
+          chain.extendMarkRange('link').setLink({ href: url }).run();
+          break;
+        }
+        case 'unlink': chain.unsetLink().run(); break;
+        case 'image': openImagePicker(); break;
+      }
+    });
+
+    // Image picker: open the `<dialog>`, lazy-load the grid via
+    // htmx so the page weight stays light when the operator isn't
+    // embedding images. Selecting a card inserts a markdown image
+    // link at the cursor and closes the dialog.
+    const pickerDialog = document.getElementById('image-picker-dialog');
+    const pickerTarget = document.getElementById('image-picker-target');
+    const pickerUrl = '{{ url_for("attachment_admin.picker") }}';
+
+    function openImagePicker() {
+      if (!pickerDialog || !pickerTarget) return;
+      // Load the grid into the dialog body. htmx.ajax replaces
+      // innerHTML and processes any hx-* attributes in the loaded
+      // markup (pagination, site filter).
+      if (window.htmx) {
+        window.htmx.ajax('GET', pickerUrl, { target: pickerTarget, swap: 'innerHTML' });
+      } else {
+        pickerTarget.innerHTML = '<p style="padding: 1rem;">htmx unavailable; close and try again.</p>';
+      }
+      pickerDialog.showModal();
+    }
+
+    if (pickerDialog) {
+      pickerDialog.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="close-picker"]')) {
+          pickerDialog.close();
+          return;
+        }
+        const card = e.target.closest('.picker-card');
+        if (!card) return;
+        e.preventDefault();
+        const key = card.dataset.storageKey || '';
+        const filename = card.dataset.filename || '';
+        const alt = card.dataset.altText || filename || 'image';
+        if (!key) return;
+        editor
+          .chain()
+          .focus()
+          .insertContent(`![${alt}](/attachments/${key})\n\n`)
+          .run();
+        pickerDialog.close();
+      });
+      // Click on the backdrop closes; <dialog> doesn't do this by default.
+      pickerDialog.addEventListener('click', (e) => {
+        if (e.target === pickerDialog) pickerDialog.close();
+      });
+    }
+
+    // Belt-and-braces: even if onUpdate hasn't fired yet (rare race
+    // when submitting immediately after typing), serialize one more
+    // time on form submit so the textarea is fresh.
+    const form = textarea.closest('form');
+    if (form) {
+      form.addEventListener('submit', () => {
+        textarea.value = editor.storage.markdown.getMarkdown();
+      });
+    }
+  }
+</script>
