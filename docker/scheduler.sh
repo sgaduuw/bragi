@@ -4,9 +4,13 @@
 # (single source of DDL truth), then enters a sleeper loop dispatching
 # Flask CLI commands at configured cadences.
 #
-# Each subcommand is invoked via `flask --app bragi.apps.admin cms ...`,
+# Each subcommand is invoked via `flask --app 'bragi.apps.admin:create_admin_app' cms ...`,
 # opens its own DB session, and exits cleanly so a crash in one task
-# doesn't take the loop down.
+# doesn't take the loop down. The explicit `module:factory` form is
+# required: Flask's autodiscovery only looks for factories named
+# `create_app` / `make_app`, not `create_admin_app`, so the bare
+# `--app bragi.apps.admin` form silently degrades to "no app found"
+# and every `cms` invocation exits rc=2.
 #
 # Cadences (env-overridable, all in seconds):
 #   SCHEDULED_PUBLISH_EVERY  default 60      ; flip due drafts to published
@@ -64,22 +68,22 @@ while true; do
     now=$(date +%s)
 
     if [ $((now - last_scheduled_publish)) -ge "$SCHEDULED_PUBLISH_EVERY" ]; then
-        run "scheduled-publish" flask --app bragi.apps.admin cms scheduled-publish
+        run "scheduled-publish" flask --app 'bragi.apps.admin:create_admin_app' cms scheduled-publish
         last_scheduled_publish=$(date +%s)
     fi
 
     if [ $((now - last_embeds_rerender)) -ge "$EMBEDS_RERENDER_EVERY" ]; then
-        run "embeds-rerender" flask --app bragi.apps.admin cms embeds rerender-pending
+        run "embeds-rerender" flask --app 'bragi.apps.admin:create_admin_app' cms embeds rerender-pending
         last_embeds_rerender=$(date +%s)
     fi
 
     if [ $((now - last_analyze)) -ge "$ANALYZE_EVERY" ]; then
-        run "analyze" flask --app bragi.apps.admin cms db analyze
+        run "analyze" flask --app 'bragi.apps.admin:create_admin_app' cms db analyze
         last_analyze=$(date +%s)
     fi
 
     if [ $((now - last_vacuum)) -ge "$VACUUM_EVERY" ]; then
-        run "vacuum" flask --app bragi.apps.admin cms db vacuum
+        run "vacuum" flask --app 'bragi.apps.admin:create_admin_app' cms db vacuum
         last_vacuum=$(date +%s)
     fi
 
