@@ -29,7 +29,7 @@
     </p>
   </header>
   <div class="body">
-    {{ post.body_html | safe }}
+    {{ post.body_html | internal_link_rewrite | safe }}
   </div>
 </article>
 {% endblock %}

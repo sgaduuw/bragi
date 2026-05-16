@@ -16,8 +16,9 @@ from __future__ import annotations
 from typing import Any
 
 from flask import Blueprint, g, render_template
+from sqlalchemy import or_, select
 
-from bragi.api import ContentTypeSpec, FieldSpec, NavItem, hookimpl
+from bragi.api import ContentTypeSpec, FieldSpec, InternalLinkResolution, NavItem, hookimpl
 from bragi.contrib.page.admin import bp as page_admin_bp
 from bragi.contrib.page.delivery import bp as page_delivery_bp
 from bragi.core.db import SessionLocal
@@ -63,6 +64,32 @@ def _url_for_page(page: Any) -> str:
     return "/" + "/".join(_path_segments(page)) + "/"
 
 
+def _resolve_internal_page_link(key: str, site_id: int) -> InternalLinkResolution | None:
+    """Resolve `[text](page:<key>)` to (page.id, current href).
+
+    Same shape as the post resolver: numeric `key` accepts either
+    id or slug; non-numeric `key` is a slug. Site-scoped. The
+    returned href walks the parent chain via `_url_for_page` so a
+    nested page resolves to its full slash-joined path.
+    """
+    int_id: int | None
+    try:
+        int_id = int(key)
+    except ValueError:
+        int_id = None
+    with SessionLocal() as db:
+        stmt = select(Page).where(Page.site_id == site_id)
+        if int_id is not None:
+            stmt = stmt.where(or_(Page.id == int_id, Page.slug == key))
+        else:
+            stmt = stmt.where(Page.slug == key)
+        page = db.execute(stmt).scalar_one_or_none()
+        if page is None:
+            return None
+        href = _url_for_page(page)
+        return InternalLinkResolution(entity_id=page.id, href=href)
+
+
 def _render_page(page: Any, _request: Any) -> str:
     """Render a Page into a full HTML page via Jinja."""
     site = g.get("site")
@@ -102,6 +129,8 @@ def register_content_type() -> ContentTypeSpec:
         json_ld_type="WebPage",
         feed_eligible=False,
         sitemap_eligible=True,
+        internal_link_prefix="page",
+        resolve_internal_link=_resolve_internal_page_link,
     )
 
 

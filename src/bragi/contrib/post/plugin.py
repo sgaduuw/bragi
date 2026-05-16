@@ -14,8 +14,9 @@ from typing import Any
 
 import click
 from flask import Blueprint, g, render_template
+from sqlalchemy import or_, select
 
-from bragi.api import ContentTypeSpec, FieldSpec, NavItem, hookimpl
+from bragi.api import ContentTypeSpec, FieldSpec, InternalLinkResolution, NavItem, hookimpl
 from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.contrib.post.cli import scheduled_publish
 from bragi.contrib.post.delivery import bp as post_delivery_bp
@@ -41,6 +42,33 @@ def _url_for_post(post: Any) -> str:
     """Canonical public URL for a Post. Site context is implicit in
     the delivery request (request.site)."""
     return f"/posts/{post.slug}/"
+
+
+def _resolve_internal_post_link(key: str, site_id: int) -> InternalLinkResolution | None:
+    """Resolve `[text](post:<key>)` to (post.id, current href).
+
+    `key` is accepted as either a numeric id (the persisted form
+    after a save) or a current slug (what an author types).
+    Same-site only: a key that exists under a different site_id
+    is treated as not found. Drafts and archived posts resolve
+    too; admin previews and forthcoming-post drafts must be
+    able to author internal links to each other.
+    """
+    int_id: int | None
+    try:
+        int_id = int(key)
+    except ValueError:
+        int_id = None
+    with SessionLocal() as db:
+        stmt = select(Post.id, Post.slug).where(Post.site_id == site_id)
+        if int_id is not None:
+            stmt = stmt.where(or_(Post.id == int_id, Post.slug == key))
+        else:
+            stmt = stmt.where(Post.slug == key)
+        row = db.execute(stmt).first()
+    if row is None:
+        return None
+    return InternalLinkResolution(entity_id=row.id, href=f"/posts/{row.slug}/")
 
 
 def _render_post(post: Any, _request: Any) -> str:
@@ -89,6 +117,8 @@ def register_content_type() -> ContentTypeSpec:
         json_ld_type="BlogPosting",
         feed_eligible=True,
         sitemap_eligible=True,
+        internal_link_prefix="post",
+        resolve_internal_link=_resolve_internal_post_link,
     )
 
 

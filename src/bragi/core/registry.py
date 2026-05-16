@@ -73,6 +73,18 @@ class Registry:
                 return spec
         return None
 
+    def content_type_for_link_prefix(self, prefix: str) -> ContentTypeSpec | None:
+        """Return the ContentTypeSpec whose `internal_link_prefix`
+        matches `prefix` (and which carries a resolver), or None.
+
+        Used by the `bragi.contrib.internal_links` plugin to find
+        the resolver for a `[text](<prefix>:<key>)` link target.
+        """
+        for spec in self.content_types:
+            if spec.internal_link_prefix == prefix and spec.resolve_internal_link is not None:
+                return spec
+        return None
+
     def storage_backend(self) -> StorageBackendSpec | None:
         """Return the active storage backend.
 
