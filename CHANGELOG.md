@@ -6,6 +6,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Post-editor toolbar stays visible while scrolling.** The TipTap
+  toolbar above the body editor used to scroll with the page, so on
+  long posts the operator had to scroll back to the top to apply
+  formatting. Now `position: sticky; top: 0` pins it to the viewport
+  once the page scrolls past it. CSS-only; no template structure or
+  JS change.
+
 ## [1.7.0] - 2026-05-16
 
 Admin post-list reordering. After the 1.6.1 Ghost-importer fix

@@ -106,6 +106,12 @@
     display: flex; gap: 0.25rem; flex-wrap: wrap;
     padding: 0.4rem; border: 1px solid #bbb; border-bottom: 0;
     border-radius: 4px 4px 0 0; background: #f7f7f7;
+    /* Long post bodies scroll the whole page, so the toolbar
+       drifts above the viewport once the operator is more than
+       a screen deep. Sticky pins it to the top once the page
+       scrolls past it; the existing solid background keeps
+       content from showing through. */
+    position: sticky; top: 0; z-index: 5;
   }
   .editor-toolbar button {
     background: white; color: #222; border: 1px solid #ccc;
