@@ -2,10 +2,30 @@
 # `make dev` (honcho running both processes in your venv); this
 # file is for testing the prod container shape locally.
 services:
+  bragi-tasks:
+    build:
+      context: ..
+      dockerfile: docker/admin.Dockerfile
+    command: ["/app/scheduler.sh"]
+    environment:
+      BRAGI_DATABASE_URL: sqlite:////data/bragi.db
+      BRAGI_SECRET_KEY: dev-only-change-in-production
+    volumes:
+      - bragi-data:/data
+    healthcheck:
+      test: ["CMD", "test", "-f", "/data/.migrated"]
+      interval: 5s
+      timeout: 2s
+      retries: 60
+      start_period: 0s
+
   admin:
     build:
       context: ..
       dockerfile: docker/admin.Dockerfile
+    depends_on:
+      bragi-tasks:
+        condition: service_healthy
     ports:
       - "8001:8001"
     environment:
@@ -18,6 +38,9 @@ services:
     build:
       context: ..
       dockerfile: docker/delivery.Dockerfile
+    depends_on:
+      bragi-tasks:
+        condition: service_healthy
     ports:
       - "8002:8002"
     environment:

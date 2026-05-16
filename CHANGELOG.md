@@ -7,6 +7,34 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Task-runner sidecar container (`bragi-tasks`).** Replaces the
+  one-shot `migrate` service in `compose.yml`. Owns
+  `alembic upgrade head` on start, touches a `/data/.migrated`
+  sentinel, then enters a sleeper loop dispatching `flask --app
+  bragi.apps.admin cms ...` commands at configured cadences:
+  `scheduled-publish` (default 60s, flips posts whose
+  `scheduled_for` has elapsed from `scheduled` to `published`,
+  firing the same `on_post_published` lifecycle hook the admin
+  fires), `db analyze` (daily), `db vacuum` (weekly). The admin
+  and delivery services gate their start on the sidecar's
+  healthcheck (`test -f /data/.migrated`) rather than the prior
+  one-shot's `service_completed_successfully`. Same image as
+  `bragi-admin` since the `cms` CLI is registered there; ops
+  surface is one extra service, no broker, no job queue. See
+  `docker/scheduler.sh`. Closes #103.
+- **`cms scheduled-publish` CLI command** (under the post plugin).
+  Picks up posts with `status=scheduled` and `scheduled_for <=
+  now()`, sets `status=published` and `published_at` (preserving
+  any existing `published_at`), and dispatches
+  `on_post_published` plus `on_cache_purge` so the search
+  index, audit log, sitemap rebuilders, and any third-party
+  subscribers stay in step with manual publishes from the
+  admin. `--dry-run` lists what would change without writing.
+  Idempotent.
+- **`cms db analyze` and `cms db vacuum` CLI commands** (core).
+  Thin wrappers around SQLite's `ANALYZE` and `VACUUM` (plus
+  `PRAGMA wal_checkpoint(TRUNCATE)` after vacuum), invoked by
+  the task-runner sidecar on a long cadence. Safe to run ad-hoc.
 - **TipTap rich-text editor on the page admin form.** Pages
   shipped 1.0.0 with only a plain textarea for the body; only
   posts got the full TipTap toolbar + image picker. The editor

@@ -203,12 +203,17 @@ production:
 BRAGI_TAG=v1.7.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
-A one-shot `migrate` service runs `alembic upgrade head` before
-the two app services start, so a fresh deploy and a schema-bump
-deploy work the same way. The shared `bragi-data` volume backs
-both `/data/bragi.db` and `/data/uploads/` (attachments); back
-that up. Ports bind to `127.0.0.1` only; front the apps with a
-reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
+A `bragi-tasks` sidecar owns `alembic upgrade head` on start
+(touching `/data/.migrated` once the schema is current), then
+enters a sleeper loop that dispatches periodic CMS commands:
+`scheduled-publish` (flips drafts whose `scheduled_for` has
+elapsed), `db analyze` (daily), and `db vacuum` (weekly). The
+admin and delivery services gate their start on the sidecar's
+healthcheck, so a fresh deploy and a schema-bump deploy work
+the same way. The shared `bragi-data` volume backs `/data/bragi.db`,
+`/data/uploads/` (attachments), and the `/data/.migrated` sentinel;
+back it up. Ports bind to `127.0.0.1` only; front the apps with
+a reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
 routing.
 
 Both apps run under gunicorn inside the container (sync worker
@@ -216,6 +221,11 @@ class; `--access-logfile -` to stdout). Worker counts default to
 2 for admin and 4 for delivery; tune via `ADMIN_WORKERS` /
 `DELIVERY_WORKERS` env vars on each service if your traffic
 shape needs it.
+
+Task-runner cadences (all in seconds, set on the `bragi-tasks`
+service) default to `SCHEDULED_PUBLISH_EVERY=60`,
+`ANALYZE_EVERY=86400`, `VACUUM_EVERY=604800`. Override in
+`compose.yml` if a different rhythm suits your workload.
 
 ## Project layout
 

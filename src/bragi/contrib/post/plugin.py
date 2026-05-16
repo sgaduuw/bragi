@@ -12,10 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
+import click
 from flask import Blueprint, g, render_template
 
 from bragi.api import ContentTypeSpec, FieldSpec, NavItem, hookimpl
 from bragi.contrib.post.admin import bp as post_admin_bp
+from bragi.contrib.post.cli import scheduled_publish
 from bragi.contrib.post.delivery import bp as post_delivery_bp
 from bragi.contrib.post.delivery import tag_bp as post_tag_delivery_bp
 from bragi.core.db import SessionLocal
@@ -106,6 +108,17 @@ def register_delivery_blueprint() -> Blueprint:
 def _register_tag_bp() -> Blueprint:
     """Mount the per-tag listing at /tags/<slug>/."""
     return post_tag_delivery_bp
+
+
+@hookimpl
+def register_cli_command(group: click.Group) -> None:
+    """Add `cms scheduled-publish`.
+
+    Lives on the post plugin because it operates on Post lifecycle
+    state. The task-runner sidecar invokes it on a cadence (see
+    `docker/scheduler.sh`).
+    """
+    group.add_command(scheduled_publish)
 
 
 @hookimpl
