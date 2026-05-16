@@ -21,6 +21,7 @@ pydantic-settings = "^2.2"
 authlib = "^1.3"
 argon2-cffi = "^23.1"
 markdown-it-py = "^3.0"
+mdit-py-plugins = "^0.4"
 pygments = "^2.18"
 markdownify = "^0.13"
 click = "^8.1"
@@ -63,6 +64,7 @@ import_wordpress = "bragi.contrib.import_wordpress.plugin"
 indexnow = "bragi.contrib.indexnow.plugin"
 search = "bragi.contrib.search.plugin"
 themes = "bragi.contrib.themes.plugin"
+embeds = "bragi.contrib.embeds.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

@@ -66,5 +66,26 @@ class Settings(BaseSettings):
     # a specific provider's endpoint when only one matters.
     indexnow_endpoint: str = "https://api.indexnow.org/indexnow"
 
+    # Embeds plugin (bragi.contrib.embeds). Save-time render reaches
+    # out to provider oEmbed endpoints; readers never make external
+    # calls because the resolved HTML is cached in body_html. A
+    # failed lookup falls back to a pending link card that the
+    # scheduled `cms embeds rerender-pending` retries later.
+    #
+    # YouTube mode: `click-to-load` shows a static thumbnail until
+    # the reader clicks (no Google network call on read); `iframe`
+    # uses the youtube-nocookie iframe inline (autoplays on render).
+    embed_youtube_mode: str = "click-to-load"
+    # Per-call timeout (seconds) at save time. Aggregate cap is
+    # enforced across all embeds in one save so a post with N
+    # broken providers can't block the editor for N * per seconds.
+    embed_oembed_timeout_per: float = 2.0
+    embed_oembed_timeout_aggregate: float = 5.0
+    # The pending-rerender CLI is invoked by the task-runner
+    # sidecar on a relaxed cadence and can afford to wait longer
+    # per call than the save path.
+    embed_rerender_timeout_per: float = 15.0
+    embed_user_agent: str = "bragi-embeds (+https://github.com/sgaduuw/bragi)"
+
 
 settings = Settings()
