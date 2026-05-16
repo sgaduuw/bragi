@@ -19,8 +19,9 @@
 services:
   # Task-runner sidecar. Owns `alembic upgrade head` on start
   # (touches /data/.migrated once the schema is current), then
-  # enters a sleeper loop dispatching `flask --app bragi.apps.admin
-  # cms ...` commands at configured cadences: scheduled-publish
+  # enters a sleeper loop dispatching
+  # `flask --app 'bragi.apps.admin:create_admin_app' cms ...` commands
+  # at configured cadences: scheduled-publish
   # (flips due drafts to published), db analyze (daily), db vacuum
   # (weekly). See docker/scheduler.sh for the loop body and the
   # env-overridable cadence knobs (SCHEDULED_PUBLISH_EVERY,
