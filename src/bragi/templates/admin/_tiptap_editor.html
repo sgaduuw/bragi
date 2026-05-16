@@ -22,7 +22,8 @@
   <button type="button" data-action="blockquote" title="Blockquote">&ldquo; &rdquo;</button>
   <button type="button" data-action="code-block" title="Code block">{ }</button>
   <span class="sep">|</span>
-  <button type="button" data-action="link" title="Link">Link</button>
+  <button type="button" data-action="link" title="External link">Link</button>
+  <button type="button" data-action="internal-link" title="Internal link to a post or page">Internal link</button>
   <button type="button" data-action="unlink" title="Remove link">Unlink</button>
   <span class="sep">|</span>
   <button type="button" data-action="image" title="Insert image">&#128247; Image</button>
@@ -41,6 +42,22 @@
     </button>
   </div>
   <div id="image-picker-target">
+    <p style="padding: 1rem; color: #888;">Loading...</p>
+  </div>
+</dialog>
+<dialog id="internal-link-picker-dialog"
+        style="max-width: 640px; width: 90vw; padding: 0;
+               border: 1px solid #bbb; border-radius: 4px;">
+  <div style="display: flex; align-items: center; justify-content: space-between;
+              padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee;">
+    <strong>Internal link</strong>
+    <button type="button"
+            data-action="close-internal-picker"
+            style="background: none; border: 0; font-size: 1.2em; cursor: pointer;">
+      &times;
+    </button>
+  </div>
+  <div id="internal-link-picker-target">
     <p style="padding: 1rem; color: #888;">Loading...</p>
   </div>
 </dialog>
@@ -124,6 +141,24 @@
     mount.hidden = false;
     toolbar.hidden = false;
 
+    // Prefixes that map to bragi internal-link content types. v1
+    // ships post + page in-tree; this list is the JS-side mirror of
+    // the registered `ContentTypeSpec.internal_link_prefix` values.
+    // A third-party content type that adopts the picker will need
+    // one entry added here (small enough to be acceptable v1 cost;
+    // an endpoint emitting the live list is a possible follow-up).
+    const INTERNAL_LINK_PREFIXES = ['post', 'page'];
+
+    function currentInternalLinkMarker(editor) {
+      if (!editor.isActive('link')) return null;
+      const href = editor.getAttributes('link').href || '';
+      const colon = href.indexOf(':');
+      if (colon < 1) return null;
+      const prefix = href.slice(0, colon);
+      if (INTERNAL_LINK_PREFIXES.indexOf(prefix) === -1) return null;
+      return href;
+    }
+
     function updateToolbarActive(editor) {
       const map = {
         bold: () => editor.isActive('bold'),
@@ -136,7 +171,8 @@
         'ordered-list': () => editor.isActive('orderedList'),
         blockquote: () => editor.isActive('blockquote'),
         'code-block': () => editor.isActive('codeBlock'),
-        link: () => editor.isActive('link'),
+        link: () => editor.isActive('link') && !currentInternalLinkMarker(editor),
+        'internal-link': () => !!currentInternalLinkMarker(editor),
       };
       toolbar.querySelectorAll('button[data-action]').forEach((btn) => {
         const fn = map[btn.dataset.action];
@@ -170,6 +206,7 @@
         }
         case 'unlink': chain.unsetLink().run(); break;
         case 'image': openImagePicker(); break;
+        case 'internal-link': openInternalLinkPicker(currentInternalLinkMarker(editor)); break;
       }
     });
 
@@ -217,6 +254,94 @@
       // Click on the backdrop closes; <dialog> doesn't do this by default.
       pickerDialog.addEventListener('click', (e) => {
         if (e.target === pickerDialog) pickerDialog.close();
+      });
+    }
+
+    // Internal-link picker: same htmx-into-<dialog> pattern as the
+    // image picker. Selecting a card either replaces the current
+    // link mark's href (cursor in an existing internal link),
+    // wraps the current selection with a fresh link mark, or
+    // inserts the target's title with the mark applied (no
+    // selection). Persisted form for all three cases is the
+    // typed-prefix marker `post:<id>` / `page:<id>`, which the
+    // tiptap-markdown serializer round-trips to
+    // `[text](post:<id>)`.
+    const internalDialog = document.getElementById('internal-link-picker-dialog');
+    const internalTarget = document.getElementById('internal-link-picker-target');
+    const internalPickerUrl = '{{ url_for("internal_links_admin.picker") }}';
+
+    function openInternalLinkPicker(currentMarker) {
+      if (!internalDialog || !internalTarget) return;
+      if (window.htmx) {
+        window.htmx.ajax('GET', internalPickerUrl, {
+          target: internalTarget,
+          swap: 'innerHTML',
+        }).then(() => {
+          // After-swap: highlight the currently-targeted card if
+          // we're editing an existing internal link. Auto-focus
+          // the search input either way.
+          if (currentMarker) {
+            const card = internalTarget.querySelector(
+              '.picker-card[data-internal-link-marker="' + currentMarker + '"]'
+            );
+            if (card) {
+              card.classList.add('is-selected');
+              card.scrollIntoView({ block: 'nearest' });
+            }
+          }
+          const input = internalTarget.querySelector('#picker-q');
+          if (input) input.focus();
+        });
+      } else {
+        internalTarget.innerHTML =
+          '<p style="padding: 1rem;">htmx unavailable; close and try again.</p>';
+      }
+      internalDialog.showModal();
+    }
+
+    function insertInternalLink(marker, displayTitle) {
+      // Three cases, in priority order:
+      // 1. Cursor is inside an existing internal link -> swap its
+      //    href, leave the text alone.
+      // 2. Text is selected -> wrap with the link mark.
+      // 3. No selection -> insert `displayTitle` as the link text
+      //    and apply the mark.
+      const { from, to } = editor.state.selection;
+      if (currentInternalLinkMarker(editor)) {
+        editor.chain().focus().extendMarkRange('link').setLink({ href: marker }).run();
+      } else if (from !== to) {
+        editor.chain().focus().setLink({ href: marker }).run();
+      } else {
+        editor
+          .chain()
+          .focus()
+          .insertContent({
+            type: 'text',
+            text: displayTitle,
+            marks: [{ type: 'link', attrs: { href: marker } }],
+          })
+          .run();
+      }
+    }
+
+    if (internalDialog) {
+      internalDialog.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="close-internal-picker"]')) {
+          internalDialog.close();
+          return;
+        }
+        const card = e.target.closest('.picker-card');
+        if (!card) return;
+        e.preventDefault();
+        const marker = card.dataset.internalLinkMarker || '';
+        const title = card.dataset.displayTitle || '';
+        if (!marker) return;
+        insertInternalLink(marker, title);
+        internalDialog.close();
+      });
+      // Backdrop click closes the dialog. Same shape as the image picker.
+      internalDialog.addEventListener('click', (e) => {
+        if (e.target === internalDialog) internalDialog.close();
       });
     }
 

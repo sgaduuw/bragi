@@ -147,6 +147,7 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.contrib.import_hugo.cli.SessionLocal",
     "bragi.contrib.import_hugo.importer.SessionLocal",
     "bragi.contrib.indexnow.cli.SessionLocal",
+    "bragi.contrib.internal_links.admin.SessionLocal",
     "bragi.contrib.page.admin.SessionLocal",
     "bragi.contrib.page.delivery.SessionLocal",
     "bragi.contrib.page.plugin.SessionLocal",

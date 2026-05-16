@@ -1,0 +1,85 @@
+{# Internal-link picker fragment, returned by
+   /admin/sites/<slug>/internal-links/picker and swapped into the
+   TipTap editor's dialog via htmx.
+
+   Two halves: a search/filter bar that re-fires the request, and a
+   card list whose `data-internal-link-marker` attribute carries
+   the persisted form (`post:<id>` / `page:<id>`) the editor's
+   client-side script consumes on click. #}
+<div id="internal-link-picker">
+  <form class="picker-controls"
+        hx-get="{{ url_for('internal_links_admin.picker') }}"
+        hx-target="#internal-link-picker"
+        hx-swap="outerHTML"
+        hx-trigger="keyup changed delay:200ms from:#picker-q, change from:[name=type]"
+        style="display: flex; gap: 0.5rem; align-items: center;
+               padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee;
+               background: #fafafa;">
+    <input type="search"
+           name="q"
+           id="picker-q"
+           placeholder="Search title or slug…"
+           autocomplete="off"
+           value="{{ q | e }}"
+           style="flex: 1; padding: 0.3rem 0.5rem; font-size: 1em;
+                  border: 1px solid #ccc; border-radius: 3px;">
+    <select name="type"
+            id="picker-type"
+            style="padding: 0.3rem 0.4rem; border: 1px solid #ccc; border-radius: 3px;">
+      {% for value, label in types %}
+        <option value="{{ value }}"
+                {% if (type_filter or '') == value %}selected{% endif %}>
+          {{ label }}
+        </option>
+      {% endfor %}
+    </select>
+  </form>
+
+  <div class="picker-results"
+       style="max-height: 60vh; overflow-y: auto; padding: 0.5rem 0;">
+    {% if rows %}
+      <ul style="list-style: none; padding: 0; margin: 0;">
+        {% for row in rows %}
+          <li>
+            <button type="button"
+                    class="picker-card"
+                    data-internal-link-marker="{{ row.marker }}"
+                    data-display-title="{{ row.title | e }}"
+                    data-display-url="{{ row.display_url | e }}"
+                    style="display: block; width: 100%; text-align: left;
+                           padding: 0.6rem 0.75rem; background: none;
+                           border: 0; border-bottom: 1px solid #f0f0f0;
+                           cursor: pointer; font: inherit; color: inherit;">
+              <div style="display: flex; gap: 0.5rem; align-items: baseline;
+                          justify-content: space-between;">
+                <strong style="flex: 1;">{{ row.title }}</strong>
+                <span style="color: #777; font-size: 0.85em;">
+                  {{ row.prefix }} &middot; {{ row.status }}
+                </span>
+              </div>
+              <div style="color: #888; font-size: 0.85em; margin-top: 0.15rem;
+                          font-family: ui-monospace, Menlo, Consolas, monospace;">
+                {{ row.display_url }}
+              </div>
+            </button>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p style="padding: 1rem; color: #888; text-align: center;">
+        {% if q %}
+          No matches for &ldquo;{{ q }}&rdquo;.
+        {% else %}
+          No internal-link targets yet on this site.
+        {% endif %}
+      </p>
+    {% endif %}
+  </div>
+
+  <style>
+    .picker-card:hover { background: #f7f7f5; }
+    .picker-card.is-selected { background: #fff8d6; }
+    .picker-card.is-selected strong::after { content: " (current target)";
+      color: #888; font-weight: normal; font-size: 0.9em; }
+  </style>
+</div>

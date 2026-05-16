@@ -1,4 +1,4 @@
-"""Tests for the internal_links plugin (#117).
+"""Tests for the internal_links plugin (#117, #115).
 
 Covers:
 - Markdown extension at save time: `[text](post:42)` and
@@ -12,6 +12,12 @@ Covers:
 - End-to-end: a published post linking to another post resolves
   through the public delivery view after the target's slug
   changes, with no re-render of the source.
+- Admin picker (#115): the TipTap editor's "Internal link" dialog
+  loads its search fragment from
+  `/admin/sites/<slug>/internal-links/picker`, scopes results to
+  the active site, surfaces both Post and Page rows, filters by
+  query and content type, and emits the data attributes the
+  client-side script consumes.
 """
 
 from __future__ import annotations
@@ -21,16 +27,21 @@ from datetime import UTC, datetime
 
 import pytest
 from flask import Flask, g
+from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.admin import create_admin_app
 from bragi.apps.delivery import create_delivery_app
+from bragi.contrib.auth_local.passwords import hash_password
 from bragi.contrib.internal_links.delivery import internal_link_rewrite
+from bragi.core.models.local_credential import LocalCredential
+from bragi.core.models.page import Page
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.render.markdown import render_markdown
+from tests.conftest import csrf_token
 
 # ============================================================
 # Fixtures
@@ -171,8 +182,6 @@ def test_save_time_resolves_page_prefix(
 ) -> None:
     """Demonstrates the contract is content-type agnostic: the page
     plugin opts in the same way Post does."""
-    from bragi.core.models.page import Page
-
     site, user = seeded
     with db_session_factory() as db:
         db.add(
@@ -457,3 +466,201 @@ def test_end_to_end_target_deletion_marks_broken_without_500(
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "bragi-link--broken" in body
+
+
+# ============================================================
+# Admin picker (#115)
+# ============================================================
+
+PICKER_EMAIL = "ada@example.com"
+PICKER_PASSWORD = "correct-horse-battery-staple"
+
+
+@pytest.fixture
+def picker_admin_app(
+    db_session: Session,
+    patched_session_locals: sessionmaker[Session],
+) -> Iterator[Flask]:
+    """Admin app + a logged-in user, a blog site, plus seeded
+    post and page rows that the picker should surface. A second
+    site with its own posts exists to test cross-site isolation.
+    """
+    del patched_session_locals
+    user = User(
+        email=PICKER_EMAIL,
+        display_name="Ada",
+        is_active=True,
+        is_superuser=True,
+    )
+    db_session.add(user)
+    db_session.flush()
+    db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PICKER_PASSWORD)))
+    blog = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        active=True,
+        owner_user_id=user.id,
+    )
+    other = Site(
+        slug="other",
+        hostname="other.example.com",
+        title="Other",
+        canonical_url="https://other.example.com",
+        active=True,
+        owner_user_id=user.id,
+    )
+    db_session.add_all([blog, other])
+    db_session.flush()
+    db_session.add_all(
+        [
+            Post(
+                site_id=blog.id,
+                author_id=user.id,
+                slug="ultimate-linux-guide",
+                title="Ultimate Linux Guide",
+                body_markdown="x",
+                body_html="<p>x</p>",
+                status=PostStatus.PUBLISHED,
+                published_at=datetime.now(UTC).replace(tzinfo=None),
+            ),
+            Post(
+                site_id=blog.id,
+                author_id=user.id,
+                slug="how-i-write",
+                title="How I Write",
+                body_markdown="x",
+                body_html="<p>x</p>",
+                status=PostStatus.DRAFT,
+            ),
+            Page(
+                site_id=blog.id,
+                author_id=user.id,
+                slug="about",
+                title="About",
+                body_markdown="x",
+                body_html="<p>x</p>",
+                status="published",
+            ),
+            Post(
+                site_id=other.id,
+                author_id=user.id,
+                slug="other-site-secret",
+                title="Other Site Secret",
+                body_markdown="x",
+                body_html="<p>x</p>",
+                status=PostStatus.PUBLISHED,
+                published_at=datetime.now(UTC).replace(tzinfo=None),
+            ),
+        ]
+    )
+    db_session.commit()
+    yield create_admin_app()
+
+
+def _login_picker(client: FlaskClient) -> None:
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={
+            "email": PICKER_EMAIL,
+            "password": PICKER_PASSWORD,
+            "_csrf_token": token,
+        },
+    )
+
+
+def test_picker_requires_login(picker_admin_app: Flask) -> None:
+    """Logged-out probe must not return picker rows."""
+    resp = picker_admin_app.test_client().get("/admin/sites/blog/internal-links/picker")
+    assert resp.status_code in (302, 401, 403), resp.status_code
+    # Body must not leak any internal-link markers.
+    assert b"data-internal-link-marker" not in resp.data
+
+
+def test_picker_returns_post_and_page_cards(picker_admin_app: Flask) -> None:
+    """Default (no `type` filter) surfaces both content types
+    with cards carrying the expected data attributes."""
+    client = picker_admin_app.test_client()
+    _login_picker(client)
+    resp = client.get("/admin/sites/blog/internal-links/picker")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert 'data-internal-link-marker="post:' in body
+    assert 'data-internal-link-marker="page:' in body
+    assert "Ultimate Linux Guide" in body
+    assert "How I Write" in body
+    assert "About" in body
+    # display-title / display-url are read by the client-side
+    # script; their absence would break the insertion flow.
+    assert "data-display-title=" in body
+    assert "data-display-url=" in body
+
+
+def test_picker_scopes_to_active_site(picker_admin_app: Flask) -> None:
+    """Cross-site posts must not appear in `blog`'s picker even
+    though the same user owns both sites."""
+    client = picker_admin_app.test_client()
+    _login_picker(client)
+    resp = client.get("/admin/sites/blog/internal-links/picker")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "Other Site Secret" not in body
+
+
+def test_picker_query_filters_title_and_slug(picker_admin_app: Flask) -> None:
+    """The `q` parameter is a case-insensitive substring filter on
+    both title and slug."""
+    client = picker_admin_app.test_client()
+    _login_picker(client)
+
+    resp = client.get("/admin/sites/blog/internal-links/picker?q=linux")
+    body = resp.data.decode()
+    assert "Ultimate Linux Guide" in body
+    assert "How I Write" not in body
+
+    # Slug-only match: "ultimate" isn't in any other title or slug.
+    resp = client.get("/admin/sites/blog/internal-links/picker?q=ULTIMATE")
+    body = resp.data.decode()
+    assert "Ultimate Linux Guide" in body
+
+
+def test_picker_type_filter_narrows_to_one_content_type(
+    picker_admin_app: Flask,
+) -> None:
+    """`?type=post` excludes pages; `?type=page` excludes posts."""
+    client = picker_admin_app.test_client()
+    _login_picker(client)
+
+    resp = client.get("/admin/sites/blog/internal-links/picker?type=post")
+    body = resp.data.decode()
+    assert "Ultimate Linux Guide" in body
+    assert "About" not in body
+
+    resp = client.get("/admin/sites/blog/internal-links/picker?type=page")
+    body = resp.data.decode()
+    assert "About" in body
+    assert "Ultimate Linux Guide" not in body
+
+
+def test_picker_empty_query_lists_recent(picker_admin_app: Flask) -> None:
+    """No query at all = the recent-items landing view, same
+    cards as a full corpus search at this scale."""
+    client = picker_admin_app.test_client()
+    _login_picker(client)
+    resp = client.get("/admin/sites/blog/internal-links/picker")
+    body = resp.data.decode()
+    # All three blog-side targets present.
+    for title in ("Ultimate Linux Guide", "How I Write", "About"):
+        assert title in body
+
+
+def test_picker_404_on_unknown_site_slug(picker_admin_app: Flask) -> None:
+    """A slug that doesn't resolve to a Site yields 404, not 403,
+    so probing for site existence isn't easier than probing for
+    membership."""
+    client = picker_admin_app.test_client()
+    _login_picker(client)
+    resp = client.get("/admin/sites/nonexistent/internal-links/picker")
+    assert resp.status_code == 404

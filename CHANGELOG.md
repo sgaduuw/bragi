@@ -7,6 +7,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **TipTap admin picker for internal links.** New
+  "Internal link" toolbar button in the shared TipTap editor
+  (used by post and page edit) opens an htmx-driven dialog that
+  searches the active site's posts and pages by title or slug.
+  Picking a card emits the `[text](post:<id>)` (or
+  `[text](page:<id>)`) shape into the markdown body via a TipTap
+  link mark, so authors don't have to type the typed-prefix form
+  by hand. Clicking the button while the cursor is inside an
+  existing internal link opens the dialog with the current
+  target pre-highlighted, and picking a different target swaps
+  the link mark's href while leaving the link text untouched.
+  New picker endpoint
+  `GET /admin/sites/<slug>/internal-links/picker` returns the
+  fragment; v1 surfaces Post + Page (the two in-tree opt-in
+  content types). Closes #115. **Needs manual browser smoke**
+  per the CLAUDE.md "test UI changes in a browser" rule before
+  release.
+
 - **Internal links resolved at delivery time
   (`bragi.contrib.internal_links`).** New built-in plugin lets
   authors write `[text](post:my-slug)` or `[text](post:42)` in
