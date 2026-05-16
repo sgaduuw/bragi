@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-05-16
+
 ### Added
 - **External-content embeds plugin (`bragi.contrib.embeds`).**
   New markdown directive `::: embed <url> :::` resolves a URL
