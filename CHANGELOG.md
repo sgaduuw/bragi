@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-05-16
+
 ### Added
 - **TipTap admin picker for internal links.** New
   "Internal link" toolbar button in the shared TipTap editor
@@ -21,9 +23,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   New picker endpoint
   `GET /admin/sites/<slug>/internal-links/picker` returns the
   fragment; v1 surfaces Post + Page (the two in-tree opt-in
-  content types). Closes #115. **Needs manual browser smoke**
-  per the CLAUDE.md "test UI changes in a browser" rule before
-  release.
+  content types). Closes #115.
 
 - **Internal links resolved at delivery time
   (`bragi.contrib.internal_links`).** New built-in plugin lets
