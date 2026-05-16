@@ -52,18 +52,23 @@
   <fieldset>
     <label for="theme">Theme</label>
     <select name="theme" id="theme">
-      <option value=""{% if not form.get('theme') %} selected{% endif %}>Default (no theme)</option>
-      {% for t in themes %}
+      {# Empty value persists as NULL on the row; the loader resolves
+         NULL to the "default" slug, so this option means "use the
+         in-tree default theme" — which is also why we skip the
+         literal "default" slug in the loop below (it'd be a
+         duplicate of this option). #}
+      <option value=""{% if not form.get('theme') %} selected{% endif %}>Default theme</option>
+      {% for t in themes if t.slug != 'default' %}
         <option value="{{ t.slug }}"{% if form.get('theme') == t.slug %} selected{% endif %}>
           {{ t.display_name }} ({{ t.slug }})
         </option>
       {% endfor %}
     </select>
     <small>
-      {% if themes %}
-        Override the default templates with one of the installed themes.
+      {% if themes | rejectattr('slug', 'equalto', 'default') | list %}
+        Override the default theme with one of the installed themes.
       {% else %}
-        No themes installed; install a <code>bragi-theme-*</code> package to populate this list.
+        No alternate themes installed; install a <code>bragi-theme-*</code> package to populate this list.
       {% endif %}
     </small>
   </fieldset>

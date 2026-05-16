@@ -1,13 +1,19 @@
 """Per-request theme-aware Jinja loader.
 
-Themes shadow templates for sites that opted into them. The
-delivery app wraps its existing loader chain with
-`ThemeAwareLoader`, which on every template lookup checks
-`g.site.theme`, finds the matching `ThemeSpec` in the registry,
-and tries the theme's `template_loader` first. Misses fall
-through to the fallback chain (plugin templates, then the
-bragi/templates default), so a theme that overrides only one or
-two templates still picks up everything else.
+The delivery app wraps its existing loader chain with
+`ThemeAwareLoader`, which on every template lookup resolves the
+active site's theme slug (`g.site.theme`, or `"default"` when
+NULL) through the registry and tries the theme's
+`template_loader` first. Misses fall through to the fallback
+chain (plugin templates, then `bragi/templates/`), so a theme
+that overrides only one or two templates still picks up
+everything else.
+
+The in-tree `bragi.contrib.theme_default` package registers the
+`"default"` slug and owns the canonical site shell. A site with
+`theme=NULL` is treated as "use the default" rather than "no
+theme dispatch" — disable `theme_default` via entry-points to
+test the truly-unthemed path.
 
 The admin app does NOT wrap its loader: only delivery is
 themable in v1. The admin's job re: themes is exposing the
@@ -44,7 +50,7 @@ class ThemeAwareLoader(jinja2.BaseLoader):
             site = g.get("site")
         except RuntimeError:
             return None
-        if site is None or not getattr(site, "theme", None):
+        if site is None:
             return None
         try:
             registry = current_app.extensions.get("registry")
@@ -52,10 +58,19 @@ class ThemeAwareLoader(jinja2.BaseLoader):
             return None
         if registry is None:
             return None
-        spec = registry.theme(site.theme)
+        # Resolve to a theme in this order: the site's explicit slug,
+        # then the implicit "default" slug. The fallback covers both
+        # `Site.theme=NULL` (the common case: "use the default") and
+        # `Site.theme="<uninstalled-slug>"` (the operator uninstalled
+        # a theme without first un-picking it on every site). Only
+        # when "default" itself isn't registered do we give up and
+        # fall through to the chain — i.e. theme_default was disabled
+        # via entry-points and no replacement was installed.
+        slug = getattr(site, "theme", None)
+        spec = registry.theme(slug) if slug else None
         if spec is None:
-            # Site references a theme slug that isn't installed;
-            # fall through to the default chain rather than 500.
+            spec = registry.theme("default")
+        if spec is None:
             return None
         return cast(jinja2.BaseLoader, spec.template_loader)
 

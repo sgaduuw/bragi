@@ -6,6 +6,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Default site shell is now a registered theme
+  (`bragi.contrib.theme_default`).** The `delivery/base.html`
+  template moved out of `bragi/templates/delivery/` and into the
+  new `theme_default` contrib package, registered under slug
+  `"default"` via `register_theme` (the same hook a third-party
+  `bragi-theme-foo` package would use). `ThemeAwareLoader` now
+  resolves `Site.theme=NULL` to slug `"default"`, and also falls
+  back to `"default"` when a site references an uninstalled slug
+  rather than rendering an unstyled page. The site-edit theme
+  dropdown's empty option is relabeled "Default theme" (was
+  "Default (no theme)") and skips the redundant explicit
+  `default` entry. No data migration: `Site.theme` stays
+  nullable and NULL keeps its meaning ("use the implicit
+  default"). Closes #111.
+
+### Removed
+- **Empty namespace-only packages `bragi.core.auth` and
+  `bragi.core.content`.** Both contained only a docstring
+  describing future structure with zero callers; reserving
+  namespace for hypothetical future requirements is the pattern
+  the tightened KISS rule warns against. Re-create when the
+  shape is driven by real callers.
+
 ## [1.8.0] - 2026-05-16
 
 ### Added
