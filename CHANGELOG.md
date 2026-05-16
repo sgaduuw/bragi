@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-05-16
+
 ### Changed
 - **Default site shell is now a registered theme
   (`bragi.contrib.theme_default`).** The `delivery/base.html`
