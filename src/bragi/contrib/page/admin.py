@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
+from bragi.core.models.attachment import Attachment
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
 from bragi.core.models.post import Post, PostStatus
@@ -61,7 +62,26 @@ def _form_from_request() -> dict[str, str]:
         "status": request.form.get("status") or PageStatus.DRAFT,
         "kind": (request.form.get("kind") or PageKind.STATIC).strip(),
         "parent_id": (request.form.get("parent_id") or "").strip(),
+        "og_image_id": (request.form.get("og_image_id") or "").strip(),
     }
+
+
+def _resolve_og_image_id(db: Session, raw: str, site_id: int) -> tuple[int | None, str | None]:
+    """Validate a form-supplied attachment id; same shape as the
+    post admin's helper. The same-site check prevents a crafted
+    POST from surfacing another tenant's attachment."""
+    if not raw:
+        return None, None
+    try:
+        candidate_id = int(raw)
+    except ValueError:
+        return None, "OG image id must be an integer."
+    attachment = db.get(Attachment, candidate_id)
+    if attachment is None:
+        return None, "OG image attachment not found."
+    if attachment.site_id != site_id:
+        return None, "OG image must belong to this site."
+    return candidate_id, None
 
 
 def _existing_post_index(
@@ -188,6 +208,10 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 "error",
             )
             return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], site_id)
+        if og_image_err is not None:
+            flash(og_image_err, "error")
+            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
 
         # Promotion to POST_INDEX swaps any existing POST_INDEX page
         # back to STATIC. Require explicit confirmation so the
@@ -225,6 +249,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             author_id=int(session["user_id"]),
             status=new_status,
             kind=new_kind,
+            og_image_id=og_image_id,
         )
         db.add(page_row)
         db.commit()
@@ -292,6 +317,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "status": page.status,
                 "kind": page.kind,
                 "parent_id": str(page.parent_id) if page.parent_id else "",
+                "og_image_id": str(page.og_image_id) if page.og_image_id else "",
             }
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
 
@@ -313,6 +339,10 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 f"A page with slug {slug!r} already exists under that parent.",
                 "error",
             )
+            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], page.site_id)
+        if og_image_err is not None:
+            flash(og_image_err, "error")
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
 
         # Promotion-to-POST_INDEX swap requires explicit confirmation.
@@ -389,6 +419,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page.body_excerpt = make_excerpt(str(form["body_markdown"]))
         page.status = str(form["status"])
         page.kind = new_kind
+        page.og_image_id = og_image_id
 
         db.commit()
         updated_id = page.id

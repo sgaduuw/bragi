@@ -53,6 +53,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Open Graph and Twitter Card meta tags (#137).** Post, page,
+  and post-index templates now emit `og:title` / `og:type` /
+  `og:url` / `og:description` / `og:site_name` / `og:image`
+  plus the matching `twitter:card` / `twitter:title` /
+  `twitter:description` / `twitter:image` so social shares
+  render rich previews instead of bare links. Image source
+  resolves through the chain `post.og_image_id` (or
+  `page.og_image_id`) -> `Site.default_og_image_id` -> omitted;
+  when no image is present the twitter card falls back to
+  `summary` from `summary_large_image`. New `core.seo.og_image_url_for`
+  helper builds the absolute URL from `site.canonical_url` +
+  `attachment.storage_key`. Admin edit forms on Post, Page, and
+  Site grew a numeric `og_image_id` (and `default_og_image_id`)
+  input gated by a same-site attachment check; cross-site ids
+  are rejected with an error message. Alembic migration
+  `22e5570ca7f5` adds `pages.og_image_id` and
+  `sites.default_og_image_id` (both FK to `attachments` with
+  `ON DELETE SET NULL`); `Post.og_image_id` was already on the
+  schema from an earlier migration.
 - **Footnote markdown syntax (#136).** New built-in plugin
   `bragi.contrib.markdown_extras` wires
   `mdit-py-plugins`' `footnote_plugin` into the app-bound

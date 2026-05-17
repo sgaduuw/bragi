@@ -31,6 +31,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from bragi.core.seo import og_image_url_for
 from bragi.core.url import post_url_for
 
 POST_EDIT_FIELDS: list[FieldSpec] = [
@@ -128,6 +129,7 @@ def _render_post(post: Any, _request: Any) -> str:
         meta_description=post.meta_description or post.body_excerpt or None,
         canonical_url=canonical,
         noindex=post.noindex,
+        og_image_url=og_image_url_for(item=post, site=site),
     )
 
 

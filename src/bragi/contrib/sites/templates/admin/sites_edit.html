@@ -85,6 +85,15 @@
 
   {% if is_edit %}
   <fieldset>
+    <label for="default_og_image_id">Default social-share image (attachment id)</label>
+    <input type="number" name="default_og_image_id" id="default_og_image_id" min="1"
+           value="{{ form.get('default_og_image_id', '') }}">
+    <small>Optional. Used as the og:image / twitter:image fallback
+      for posts and pages that don't specify one. Look up the
+      attachment id in the attachments admin.</small>
+  </fieldset>
+
+  <fieldset>
     <label for="home_page_id">Home page</label>
     <select name="home_page_id" id="home_page_id">
       <option value=""{% if not form.get('home_page_id') %} selected{% endif %}>(welcome stub or 404)</option>

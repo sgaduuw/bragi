@@ -207,6 +207,7 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.core.middleware.site_resolver.SessionLocal",
     "bragi.core.permissions.SessionLocal",
     "bragi.core.security.SessionLocal",
+    "bragi.core.seo.SessionLocal",
     "bragi.core.url.SessionLocal",
 )
 

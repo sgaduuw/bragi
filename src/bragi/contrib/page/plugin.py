@@ -24,6 +24,7 @@ from bragi.core.cache import attach_validators, etag_for, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.user import User
+from bragi.core.seo import og_image_url_for
 from bragi.core.url import page_url_for
 
 PAGE_EDIT_FIELDS: list[FieldSpec] = [
@@ -118,6 +119,7 @@ def _render_page(page: Any, _request: Any) -> str:
         meta_description=page.meta_description or page.body_excerpt or None,
         canonical_url=canonical,
         noindex=page.noindex,
+        og_image_url=og_image_url_for(item=page, site=site),
     )
 
 

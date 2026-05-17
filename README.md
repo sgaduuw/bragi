@@ -147,8 +147,11 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties
   use. No internal fast path.
-- **SEO as a first-class citizen.** Per-page title / meta / OG /
-  canonical / JSON-LD editable in admin. Per-site `sitemap.xml`,
+- **SEO as a first-class citizen.** Per-page title / meta /
+  canonical / JSON-LD editable in admin. Open Graph + Twitter
+  Card meta on every post and page (with a per-post / per-page
+  attachment override and a per-site default OG image), so
+  social shares render rich previews. Per-site `sitemap.xml`,
   `robots.txt`, `security.txt`. Server-side Pygments highlighting
   for code blocks (Ansible / Python / Terraform lexers in core).
 - **Redirects as a core subsystem.** Slug renames auto-301;
