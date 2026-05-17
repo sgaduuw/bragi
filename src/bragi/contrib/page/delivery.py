@@ -53,7 +53,7 @@ from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
-from bragi.core.url import page_url_for, post_index_page_for
+from bragi.core.url import page_url_for, post_index_page_for, tag_segment_for
 
 DEFAULT_POSTS_PER_PAGE = 10
 
@@ -317,8 +317,12 @@ def show_page(slug_path: str) -> ResponseReturnValue:
         abort(404)
     remainder = slugs[len(index_segments) :]
 
-    # 4. Tag listing: `<index>/tag/<tag-slug>/`.
-    if len(remainder) == 2 and remainder[0] == "tag":
+    # 4. Tag listing: `<index>/<tag-segment>/<tag-slug>/`. The
+    #    segment is per-site (default `tag`), so a site setting
+    #    `tag_segment` to `category` makes the dispatcher match
+    #    `<index>/category/<slug>/` and 404 the old `tag/...`.
+    tag_segment = tag_segment_for(site)
+    if len(remainder) == 2 and remainder[0] == tag_segment:
         response = render_tag(site, remainder[1])
         if response is None:
             abort(404)

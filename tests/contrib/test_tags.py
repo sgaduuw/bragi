@@ -268,8 +268,10 @@ def delivery_app(
 
 
 # Tag pages now live under the POST_INDEX page's URL using the
-# `tag/<slug>/` segment. The seeded blog index is at `/posts/`,
-# so tag URLs are `/posts/tag/<slug>/`.
+# `tag/<slug>/` segment (default; configurable per-site via
+# `Site.extra_settings["tag_segment"]`, see #132 coverage below).
+# The seeded blog index is at `/posts/`, so default tag URLs are
+# `/posts/tag/<slug>/`.
 
 
 def test_tag_page_lists_published_posts(delivery_app: Flask) -> None:
@@ -305,3 +307,71 @@ def test_tag_page_unknown_host_returns_404(delivery_app: Flask) -> None:
         "/posts/tag/python/", headers={"Host": "nope.example.com"}
     )
     assert resp.status_code == 404
+
+
+# ============================================================
+# Configurable tag segment (#132)
+# ============================================================
+
+
+@pytest.fixture
+def delivery_app_custom_segment(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> Flask:
+    """Same fixture as `delivery_app` but with `tag_segment=category`."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.extra_settings = {**site.extra_settings, "tag_segment": "category"}
+        db.commit()
+    return delivery_app
+
+
+def test_tag_segment_default_is_tag(delivery_app: Flask) -> None:
+    """Sites with no override keep using `/posts/tag/<slug>/`."""
+    client = delivery_app.test_client()
+    assert client.get("/posts/tag/python/", headers={"Host": "blog.example.com"}).status_code == 200
+    assert (
+        client.get("/posts/category/python/", headers={"Host": "blog.example.com"}).status_code
+        == 404
+    )
+
+
+def test_tag_segment_override_makes_new_segment_match(delivery_app_custom_segment: Flask) -> None:
+    """`tag_segment=category` swaps which segment the dispatcher accepts."""
+    client = delivery_app_custom_segment.test_client()
+    assert (
+        client.get("/posts/category/python/", headers={"Host": "blog.example.com"}).status_code
+        == 200
+    )
+    assert client.get("/posts/tag/python/", headers={"Host": "blog.example.com"}).status_code == 404
+
+
+def test_tag_segment_override_builds_new_url(
+    delivery_app_custom_segment: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """`tag_url_for` returns the URL with the configured segment."""
+    from bragi.core.url import tag_url_for
+
+    with (
+        delivery_app_custom_segment.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        site_obj = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        assert tag_url_for(site_obj, "python") == "/posts/category/python/"
+
+
+@pytest.mark.parametrize("bogus", ["", "Has Spaces", "with/slash", 42, None, []])
+def test_tag_segment_malformed_falls_back_to_tag(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    bogus: object,
+) -> None:
+    """Non-string, empty, or non-slug values fall back to `tag`."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.extra_settings = {**site.extra_settings, "tag_segment": bogus}
+        db.commit()
+    client = delivery_app.test_client()
+    assert client.get("/posts/tag/python/", headers={"Host": "blog.example.com"}).status_code == 200
