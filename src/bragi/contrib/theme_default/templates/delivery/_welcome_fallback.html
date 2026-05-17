@@ -1,0 +1,17 @@
+{% extends "delivery/base.html" %}
+{% block title %}Welcome to {{ site.title }}{% endblock %}
+{% block meta %}
+  <meta name="robots" content="noindex">
+{% endblock %}
+{% block content %}
+<article class="welcome-fallback">
+  <h1>Welcome to {{ site.title }}</h1>
+  <p>
+    This site doesn't have a homepage configured yet. An
+    administrator can replace this placeholder by either
+    setting a static page as the homepage, or publishing a
+    page of kind <code>post_index</code> and promoting it
+    via the site settings.
+  </p>
+</article>
+{% endblock %}

@@ -68,6 +68,7 @@ def app(
     # from bragi.core.db; patch both for the duration of this test.
     with (
         patch("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory),
+        patch("bragi.core.url.SessionLocal", db_session_factory),
         patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory),
         patch("bragi.contrib.page.delivery.SessionLocal", db_session_factory),
     ):
@@ -139,6 +140,7 @@ def chain_app(
     db_session.commit()
     with (
         patch("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory),
+        patch("bragi.core.url.SessionLocal", db_session_factory),
         patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory),
         patch("bragi.contrib.page.delivery.SessionLocal", db_session_factory),
     ):

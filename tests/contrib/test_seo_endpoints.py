@@ -22,6 +22,7 @@ from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from tests.conftest import seed_blog_index
 
 
 @pytest.fixture
@@ -49,6 +50,8 @@ def delivery_app(
     )
     db_session.add_all([blog, other])
     db_session.flush()
+    seed_blog_index(db_session, blog, commit=False)
+    seed_blog_index(db_session, other, commit=False)
 
     db_session.add_all(
         [
@@ -121,8 +124,10 @@ def delivery_app(
     db_session.commit()
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.seo.sitemap.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.seo.feed.SessionLocal", db_session_factory)
 
     yield create_delivery_app()
 

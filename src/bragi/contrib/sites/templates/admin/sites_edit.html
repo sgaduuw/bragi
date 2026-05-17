@@ -73,11 +73,21 @@
     </small>
   </fieldset>
 
+  {% if not is_edit %}
+  <fieldset style="flex-direction: row; align-items: center; gap: 0.5rem;">
+    <input type="checkbox" name="create_blog" id="create_blog" value="1" checked>
+    <label for="create_blog" style="margin: 0;">
+      Create a default <code>/blog/</code> post-index page so the
+      site can publish posts immediately.
+    </label>
+  </fieldset>
+  {% endif %}
+
   {% if is_edit %}
   <fieldset>
     <label for="home_page_id">Home page</label>
     <select name="home_page_id" id="home_page_id">
-      <option value=""{% if not form.get('home_page_id') %} selected{% endif %}>Recent posts (default)</option>
+      <option value=""{% if not form.get('home_page_id') %} selected{% endif %}>(welcome stub or 404)</option>
       {% for p in home_pages %}
         <option value="{{ p.id }}"{% if form.get('home_page_id') == p.id|string %} selected{% endif %}>
           {{ p.title }}
@@ -86,9 +96,10 @@
     </select>
     <small>
       {% if home_pages %}
-        Pick a published page to serve as this site's <code>/</code> instead of the recent-posts list.
+        Pick a published page to serve as this site's <code>/</code>.
+        Leaving this blank shows the default welcome stub.
       {% else %}
-        No published pages on this site yet; publish one to enable a static homepage.
+        No published pages on this site yet; publish one to set a homepage.
       {% endif %}
     </small>
   </fieldset>

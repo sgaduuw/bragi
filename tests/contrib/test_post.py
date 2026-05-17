@@ -33,14 +33,20 @@ def test_post_plugin_registers_content_type() -> None:
     assert spec.sitemap_eligible is True
 
 
-def test_post_url_for_returns_canonical_path() -> None:
-    """`url_for` produces the conventional `/posts/<slug>/` path."""
+def test_post_url_for_returns_none_outside_request_context() -> None:
+    """`url_for` returns None when no active site is on `g`.
+
+    Post URLs derive from the active site's POST_INDEX page;
+    outside a request context there's no site and no URL to
+    compute. Sitemap, feed, and internal-link callers handle
+    None as "no public URL exists".
+    """
     spec = _post_spec()
 
     class StubPost:
         slug = "hello-world"
 
-    assert spec.url_for(StubPost()) == "/posts/hello-world/"
+    assert spec.url_for(StubPost()) is None
 
 
 def test_post_edit_fields_cover_authoring_basics() -> None:

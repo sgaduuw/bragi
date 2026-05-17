@@ -16,6 +16,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.core.models import Base
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 
@@ -64,6 +65,42 @@ def make_test_site(db_session: Session, **kwargs: Any) -> Site:
     else:
         db_session.flush()
     return site
+
+
+def seed_blog_index(
+    db_session: Session,
+    site: Site,
+    *,
+    slug: str = "posts",
+    title: str = "Blog",
+    author_id: int | None = None,
+    commit: bool = True,
+) -> Page:
+    """Add a POST_INDEX page to `site` so posts have public URLs.
+
+    Mirrors the alembic migration's per-site scaffold: a fresh
+    test that uses ORM `Site(...)` skips migrations, so post URLs
+    are unreachable until this helper runs. Defaults to `slug="posts"`
+    so `/posts/<post-slug>/` URLs continue to resolve, matching what
+    the migration auto-creates on upgrade.
+    """
+    page = Page(
+        site_id=site.id,
+        slug=slug,
+        title=title,
+        body_markdown="",
+        body_html="",
+        body_excerpt="",
+        author_id=author_id or site.owner_user_id,
+        status=PageStatus.PUBLISHED,
+        kind=PageKind.POST_INDEX,
+    )
+    db_session.add(page)
+    if commit:
+        db_session.commit()
+    else:
+        db_session.flush()
+    return page
 
 
 def csrf_token(client: FlaskClient, *, path: str = "/auth/login") -> str:
@@ -170,6 +207,7 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.core.middleware.site_resolver.SessionLocal",
     "bragi.core.permissions.SessionLocal",
     "bragi.core.security.SessionLocal",
+    "bragi.core.url.SessionLocal",
 )
 
 

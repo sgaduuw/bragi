@@ -63,6 +63,10 @@ def _push_url_for_item(item: Any, session: Any) -> None:
     except Exception as exc:  # noqa: BLE001 -- url_for is plugin-defined
         LOG.warning("IndexNow: url_for failed for %r: %s", item, exc)
         return
+    if path is None:
+        # No public URL on this site (e.g. a post when the site
+        # has no POST_INDEX page). Nothing to submit.
+        return
 
     canonical = site.canonical_url.rstrip("/")
     url = f"{canonical}{path}"

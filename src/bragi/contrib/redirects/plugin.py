@@ -31,7 +31,15 @@ from sqlalchemy import func, select
 from bragi.api import NavItem, RedirectTarget, hookimpl
 from bragi.contrib.redirects.admin import bp as redirect_admin_bp
 from bragi.core.db import SessionLocal
+from bragi.core.models.page import Page, PageKind
+from bragi.core.models.post import Post
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
+from bragi.core.models.site import Site
+from bragi.core.url import (
+    invalidate_post_index_cache,
+    page_url_for,
+    post_url_for,
+)
 
 log = logging.getLogger(__name__)
 
@@ -184,15 +192,97 @@ def register_admin_nav() -> list[NavItem]:
     ]
 
 
+def _upsert_redirect(
+    session: Any,
+    *,
+    site_id: int,
+    source_path: str,
+    target: str,
+    match_type: str,
+) -> None:
+    """Insert or update a SLUG_CHANGE 301 redirect.
+
+    Idempotent on (site_id, source_path, match_type): a churn of
+    foo -> bar -> foo -> qux updates the row in place rather than
+    crashing the UNIQUE constraint or stacking dead rules.
+    """
+    existing = session.execute(
+        select(Redirect).where(
+            Redirect.site_id == site_id,
+            Redirect.source_path == source_path,
+            Redirect.match_type == match_type,
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        if existing.target != target or not existing.active:
+            existing.target = target
+            existing.status_code = 301
+            existing.active = True
+            existing.source = RedirectSource.SLUG_CHANGE
+            session.commit()
+        return
+    session.add(
+        Redirect(
+            site_id=site_id,
+            source_path=source_path,
+            target=target,
+            status_code=301,
+            match_type=match_type,
+            source=RedirectSource.SLUG_CHANGE,
+            active=True,
+        )
+    )
+    session.commit()
+
+
+def _page_url_with_substituted_slug(session: Any, page: Page, leaf_slug: str) -> str:
+    """Recompute a Page's URL using `leaf_slug` instead of the
+    persisted slug on `page`.
+
+    Walks the parent chain from `page.parent_id` upward (so the
+    chain doesn't include the changed slug), then prepends
+    `leaf_slug` at the end. Used to derive the pre-rename URL
+    when only the new state is in hand.
+    """
+    parent_segments: list[str] = []
+    cursor_id = page.parent_id
+    seen: set[int] = set()
+    while cursor_id is not None:
+        if cursor_id in seen:
+            break
+        seen.add(cursor_id)
+        parent = session.get(Page, cursor_id)
+        if parent is None:
+            break
+        parent_segments.append(parent.slug)
+        cursor_id = parent.parent_id
+    parent_segments.reverse()
+    chain = parent_segments + [leaf_slug]
+    return "/" + "/".join(chain) + "/"
+
+
 @hookimpl
 def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) -> None:
-    """When a post's slug changes, insert a 301 from the old URL.
+    """Insert a 301 from the pre-rename URL when content slugs change.
 
-    Idempotent: a renamed-then-renamed-again-to-the-same-old-slug
-    rename updates the existing redirect's target rather than
-    crashing on the UNIQUE constraint. The hookimpl ignores the
-    `session` kwarg from the spec and opens its own SessionLocal
-    so the caller's transaction shape is decoupled from ours.
+    Handles both Post and Page rows (the hookspec fires for either).
+    For posts, the new URL derives from the active site's POST_INDEX
+    page via `post_url_for`. For pages, the URL is the slug-derived
+    chain; a STATIC page gets an EXACT 301 from old chain → new,
+    while a POST_INDEX page gets a PREFIX 301 so its post subtree
+    (`<old>/<post-slug>/`, `<old>/tag/<tag-slug>/`) follows in one
+    rule.
+
+    The hookimpl opens its own SessionLocal so the caller's
+    transaction shape is decoupled from ours.
+
+    Limitations (deferred to follow-ups):
+    - Kind change (STATIC ↔ POST_INDEX) is not redirected here
+      because the on_post_updated `before/after` dicts don't yet
+      carry `kind`. Promote the page first, then rename, to land
+      both effects in two predictable steps.
+    - Home page change (which shadows the POST_INDEX URL to `/`)
+      is handled by the site admin, not by this hook.
     """
     if not item or not getattr(item, "site_id", None):
         return
@@ -202,37 +292,46 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) ->
         return
 
     site_id = int(item.site_id)
-    old_path = f"/posts/{old_slug}/"
-    new_path = f"/posts/{new_slug}/"
+
+    # Anything that touches the post_index page's URL needs the
+    # per-request cache invalidated so the new URL is used for
+    # downstream computations.
+    invalidate_post_index_cache()
 
     with SessionLocal() as session:
-        existing = session.execute(
-            select(Redirect).where(
-                Redirect.site_id == site_id,
-                Redirect.source_path == old_path,
-                Redirect.match_type == MatchType.EXACT,
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            # Point the existing rule at the new slug; keep it
-            # active and re-stamp as a slug-change. This handles
-            # the foo -> bar -> foo -> qux churn cleanly.
-            if existing.target != new_path or not existing.active:
-                existing.target = new_path
-                existing.status_code = 301
-                existing.active = True
-                existing.source = RedirectSource.SLUG_CHANGE
-                session.commit()
+        site = session.get(Site, site_id)
+        if site is None:
             return
-        session.add(
-            Redirect(
+
+        if isinstance(item, Post):
+            old_path = post_url_for(site, old_slug)
+            new_path = post_url_for(site, new_slug)
+            if old_path is None or new_path is None or old_path == new_path:
+                # No post_index page on this site (no public URL
+                # exists), or the URL didn't actually change.
+                return
+            _upsert_redirect(
+                session,
                 site_id=site_id,
                 source_path=old_path,
                 target=new_path,
-                status_code=301,
                 match_type=MatchType.EXACT,
-                source=RedirectSource.SLUG_CHANGE,
-                active=True,
             )
-        )
-        session.commit()
+            return
+
+        if isinstance(item, Page):
+            old_path = _page_url_with_substituted_slug(session, item, str(old_slug))
+            new_path = page_url_for(item, db=session)
+            if old_path == new_path:
+                return
+            # POST_INDEX pages move a subtree (the page itself, all
+            # posts under it, and tag listings). One PREFIX rule
+            # covers them all.
+            match_type = MatchType.PREFIX if item.kind == PageKind.POST_INDEX else MatchType.EXACT
+            _upsert_redirect(
+                session,
+                site_id=site_id,
+                source_path=old_path,
+                target=new_path,
+                match_type=match_type,
+            )

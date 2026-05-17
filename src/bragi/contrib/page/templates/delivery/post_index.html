@@ -1,11 +1,19 @@
 {% extends "delivery/base.html" %}
-{% block title %}{{ site.title }}{% endblock %}
+{% block title %}{{ page.meta_title or page.title }} &middot; {{ site.title }}{% endblock %}
 {% block content %}
+<header>
+  <h1>{{ page.title }}</h1>
+</header>
+{% if page.body_html %}
+<div class="intro">
+  {{ page.body_html | internal_link_rewrite | safe }}
+</div>
+{% endif %}
 {% if posts %}
 <ul class="post-list">
   {% for post in posts %}
   <li>
-    <h2><a href="/posts/{{ post.slug }}/">{{ post.title }}</a></h2>
+    <h2><a href="{{ url_for_post(post) }}">{{ post.title }}</a></h2>
     {% if post.published_at %}
       <time datetime="{{ post.published_at.isoformat() }}" class="meta">
         {{ post.published_at.strftime('%Y-%m-%d') }}
@@ -20,15 +28,15 @@
 {% if total_pages > 1 %}
 <nav class="pagination" aria-label="Pagination">
   {% if has_prev %}
-    {% if page == 2 %}
-      <a rel="prev" href="/">&larr; Newer</a>
+    {% if page_n == 2 %}
+      <a rel="prev" href="{{ url_for_page(page) }}">&larr; Newer</a>
     {% else %}
-      <a rel="prev" href="/?page={{ page - 1 }}">&larr; Newer</a>
+      <a rel="prev" href="{{ url_for_page(page) }}?page={{ page_n - 1 }}">&larr; Newer</a>
     {% endif %}
   {% endif %}
-  <span class="page-of">Page {{ page }} of {{ total_pages }}</span>
+  <span class="page-of">Page {{ page_n }} of {{ total_pages }}</span>
   {% if has_next %}
-    <a rel="next" href="/?page={{ page + 1 }}">Older &rarr;</a>
+    <a rel="next" href="{{ url_for_page(page) }}?page={{ page_n + 1 }}">Older &rarr;</a>
   {% endif %}
 </nav>
 {% endif %}
