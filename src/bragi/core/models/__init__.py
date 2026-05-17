@@ -12,6 +12,12 @@ walks for autogenerate diffs.
 from __future__ import annotations
 
 from bragi.core.models._base import Base
+from bragi.core.models.activitypub import (
+    ActivityPubFollower,
+    ActivityPubOutbox,
+    ActivityPubOutboxStatus,
+    SiteKeypair,
+)
 from bragi.core.models.analytics_event import AnalyticsEvent
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -39,6 +45,9 @@ from bragi.core.models.webmention import (
 )
 
 __all__ = [
+    "ActivityPubFollower",
+    "ActivityPubOutbox",
+    "ActivityPubOutboxStatus",
     "AnalyticsEvent",
     "Attachment",
     "AttachmentRendition",
@@ -59,6 +68,7 @@ __all__ = [
     "Session",
     "Site",
     "SiteAlias",
+    "SiteKeypair",
     "Tag",
     "TokenScope",
     "User",

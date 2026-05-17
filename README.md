@@ -218,6 +218,17 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   Approved rows render in a "Mentioned by" aside under the
   post; discovery `<link rel="webmention">` is injected into
   the delivery `<head>` automatically.
+- **ActivityPub federation (one actor per site).** Each site
+  is a follow-able fediverse actor addressed as
+  `@<site-slug>@<hostname>`. Endpoints (delivery app):
+  `/.well-known/webfinger`, `/actor`, `/actor/inbox`,
+  `/actor/outbox`, `/actor/followers`. Mastodon-compatible
+  HTTP signatures (RSA-SHA256, draft-cavage-12) on outbound
+  POSTs; inbound `Follow` / `Undo Follow` verified against the
+  sender's public key. On post publish, a Create+Note fans out
+  to every follower; `cms activitypub send-pending` ships
+  the queued deliveries. Per-site keypair generated on first
+  `/actor` hit or via `cms activitypub keygen --site <slug>`.
 
 ## What bragi is not
 

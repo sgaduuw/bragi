@@ -29,6 +29,7 @@ requests = "^2.34.1"
 pyyaml = "^6.0.3"
 pillow = "^12.2.0"
 gunicorn = "^23.0"
+cryptography = "^48.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0"
@@ -70,6 +71,7 @@ internal_links = "bragi.contrib.internal_links.plugin"
 markdown_extras = "bragi.contrib.markdown_extras.plugin"
 api_tokens = "bragi.contrib.api_tokens.plugin"
 webmentions = "bragi.contrib.webmentions.plugin"
+activitypub = "bragi.contrib.activitypub.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]
