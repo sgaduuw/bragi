@@ -30,6 +30,13 @@ from bragi.core.models.tag import Tag, post_tags
 from bragi.core.models.user import User
 from bragi.core.models.user_identity import UserIdentity
 from bragi.core.models.user_site_role import Role, UserSiteRole
+from bragi.core.models.webmention import (
+    Webmention,
+    WebmentionOutbox,
+    WebmentionOutboxStatus,
+    WebmentionStatus,
+    WebmentionType,
+)
 
 __all__ = [
     "AnalyticsEvent",
@@ -57,5 +64,10 @@ __all__ = [
     "User",
     "UserIdentity",
     "UserSiteRole",
+    "Webmention",
+    "WebmentionOutbox",
+    "WebmentionOutboxStatus",
+    "WebmentionStatus",
+    "WebmentionType",
     "post_tags",
 ]

@@ -207,6 +207,17 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   POST create, PATCH update, and POST publish, scope-gated by
   `post:write`. Argon2id-hashed at rest; expiry honoured; every
   use recorded in the audit log.
+- **Indieweb webmentions (send + receive).** Outbound: on
+  publish, every external link in a post is queued; the
+  cron-driven `cms webmentions send-pending` performs W3C
+  endpoint discovery (Link header, then
+  `<link rel="webmention">`) and POSTs the mention. Inbound:
+  `POST /webmentions` on the delivery app validates the source
+  actually links to the target, extracts an h-card author
+  shape, and stores the mention pending admin moderation.
+  Approved rows render in a "Mentioned by" aside under the
+  post; discovery `<link rel="webmention">` is injected into
+  the delivery `<head>` automatically.
 
 ## What bragi is not
 

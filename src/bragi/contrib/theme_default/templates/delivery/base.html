@@ -10,6 +10,7 @@
     {% if noindex %}<meta name="robots" content="noindex">{% endif %}
   {% endblock %}
   {% block feed_links %}{% if site %}<link rel="alternate" type="application/atom+xml" title="{{ site.title }}" href="/feed.xml">{% endif %}{% endblock %}
+  {% if webmention_endpoint_url is defined and webmention_endpoint_url() %}<link rel="webmention" href="{{ webmention_endpoint_url() }}">{% endif %}
   {# Plugin-contributed stylesheets. Each plugin that needs one
      exposes a Jinja global (e.g. `pygments_css_url`) via
      `register_template_globals`; this list grows organically. #}
