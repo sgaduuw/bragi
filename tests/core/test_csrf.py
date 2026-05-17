@@ -154,3 +154,32 @@ def test_delivery_app_has_no_csrf_guard() -> None:
     # The Jinja global is the user-visible side of the install; its
     # absence proves register_csrf wasn't called on delivery.
     assert "csrf_token" not in app.jinja_env.globals
+
+
+def test_bogus_bearer_does_not_bypass_csrf(admin_app: Flask) -> None:
+    """A session-cookie POST with `Authorization: bearer junk` is still CSRF'd.
+
+    Before #164 the CSRF guard skipped on header *presence*. An
+    attacker who could lure a logged-in browser into a cross-
+    origin POST that smuggled a custom Authorization header (e.g.
+    via a misconfigured CORS proxy or a future bug in another
+    middleware) could bypass CSRF. The verified-bearer-only
+    exemption closes that gap.
+    """
+    client = admin_app.test_client()
+    # Populate a session + log in so cookie auth is active. Without
+    # cookie auth there's no CSRF risk to begin with; the test
+    # exercises the cookie-auth-plus-junk-bearer combination.
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": EMAIL, "password": PASSWORD, FORM_FIELD: token},
+        follow_redirects=False,
+    )
+    # POST again without a CSRF token, but with a junk bearer
+    # header. CSRF must still fire.
+    resp = client.post(
+        "/auth/logout",
+        headers={"Authorization": "Bearer brg_xx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"},
+    )
+    assert resp.status_code == 400
