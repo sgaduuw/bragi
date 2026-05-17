@@ -53,6 +53,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Demotion-confirmation banner for the only POST_INDEX page
+  (#131).** Demoting a site's only `post_index` page to `static`
+  now re-renders the edit form with a warning that quantifies
+  the impact (number of published posts that will lose their
+  public URL). The form ships an implicit `acknowledge_demotion`
+  field on the retry that lets the demotion through. Parallels
+  the existing promotion-swap confirmation (`acknowledge_swap`).
+  The check is skipped when another `post_index` exists for the
+  site (which can only happen as a defensive corner today) so
+  cleanup saves don't loop on the banner.
 - **Configurable tag-segment word per site (#132).** Sites can
   override the URL segment used for tag listings via
   `Site.extra_settings["tag_segment"]` (same shape as

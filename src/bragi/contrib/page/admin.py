@@ -27,7 +27,7 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bragi.core.audit import AuditAction, audit
@@ -35,6 +35,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
+from bragi.core.models.post import Post, PostStatus
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.render.markdown import make_excerpt, render_markdown
 
@@ -310,6 +311,34 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 swap_pending=True,
                 swap_target=existing_index,
             )
+
+        # Demoting the only POST_INDEX on a site strips the public
+        # post URL space entirely; warn so the operator sees the
+        # consequence (orphaned post URLs) before saving. Skipped
+        # when another POST_INDEX page already exists (impossible
+        # under the partial unique index, but defensive) so a
+        # cleanup save can't loop on the banner.
+        is_demotion = page.kind == PageKind.POST_INDEX and new_kind != PageKind.POST_INDEX
+        acknowledge_demotion = request.form.get("acknowledge_demotion") == "1"
+        if is_demotion and not acknowledge_demotion:
+            other_index = _existing_post_index(db, page.site_id, exclude_page_id=page.id)
+            if other_index is None:
+                published_count = db.execute(
+                    select(func.count())
+                    .select_from(Post)
+                    .where(
+                        Post.site_id == page.site_id,
+                        Post.status == PostStatus.PUBLISHED,
+                    )
+                ).scalar_one()
+                return render_template(
+                    "admin/page_edit.html",
+                    page=page,
+                    form=form,
+                    parents=parents,
+                    demotion_pending=True,
+                    demotion_post_count=published_count,
+                )
 
         # Capture pre-edit state before mutating; mirrors the
         # post admin's snapshot semantics so a rollback returns

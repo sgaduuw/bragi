@@ -210,9 +210,10 @@ def test_editing_existing_post_index_does_not_trigger_swap(
     assert posts.kind == PageKind.POST_INDEX
 
 
-def test_demoting_post_index_to_static_works(
+def test_demoting_only_post_index_without_ack_shows_banner(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
+    """Demoting the only POST_INDEX page first re-renders with a warning."""
     posts_id = _page_id(db_session_factory, "posts")
     client = admin_app.test_client()
     _login(client)
@@ -229,10 +230,91 @@ def test_demoting_post_index_to_static_works(
             "_csrf_token": token,
         },
     )
+    # Banner re-renders (200, not 302); the page is not yet demoted.
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "Confirm post_index demotion" in body
+    # No published posts in the fixture, so the "no posts yet" copy wins.
+    assert "no posts are published yet" in body
+
+    with db_session_factory() as db:
+        posts = db.execute(select(Page).where(Page.slug == "posts")).scalar_one()
+    assert posts.kind == PageKind.POST_INDEX
+
+
+def test_demoting_only_post_index_with_ack_completes(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """`acknowledge_demotion=1` lets the demotion through."""
+    posts_id = _page_id(db_session_factory, "posts")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{posts_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{posts_id}/edit",
+        data={
+            "title": "Blog",
+            "slug": "posts",
+            "parent_id": "",
+            "body_markdown": "",
+            "status": "published",
+            "kind": "static",
+            "acknowledge_demotion": "1",
+            "_csrf_token": token,
+        },
+    )
     assert resp.status_code == 302
     with db_session_factory() as db:
         posts = db.execute(select(Page).where(Page.slug == "posts")).scalar_one()
     assert posts.kind == PageKind.STATIC
+
+
+def test_demotion_banner_includes_published_post_count(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """When posts are published, the banner quantifies the impact."""
+    from bragi.core.models.post import Post, PostStatus
+    from bragi.core.models.site import Site
+    from bragi.core.models.user import User
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        user = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        for i in range(3):
+            db.add(
+                Post(
+                    site_id=site.id,
+                    slug=f"p-{i}",
+                    title=f"Post {i}",
+                    body_markdown="x",
+                    body_html="<p>x</p>",
+                    body_excerpt="x",
+                    author_id=user.id,
+                    status=PostStatus.PUBLISHED,
+                )
+            )
+        db.commit()
+
+    posts_id = _page_id(db_session_factory, "posts")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{posts_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{posts_id}/edit",
+        data={
+            "title": "Blog",
+            "slug": "posts",
+            "parent_id": "",
+            "body_markdown": "",
+            "status": "published",
+            "kind": "static",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "Confirm post_index demotion" in body
+    assert "3 published posts" in body
 
 
 def test_invalid_kind_value_is_rejected(

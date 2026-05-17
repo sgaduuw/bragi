@@ -18,10 +18,34 @@
 </div>
 {% endif %}
 
+{% if demotion_pending %}
+<div class="banner banner--warning">
+  <p><strong>Confirm post_index demotion</strong></p>
+  <p>
+    This is the only post_index page on the site. Demoting it to
+    static removes the public post URLs from this site:
+    {% if demotion_post_count %}
+      {{ demotion_post_count }} published post{% if demotion_post_count != 1 %}s{% endif %}
+      will become unreachable until another page is promoted to
+      post_index.
+    {% else %}
+      no posts are published yet, but any posts created later will
+      have no public URL until another page is promoted to
+      post_index.
+    {% endif %}
+  </p>
+  <p>
+    Cancel by going back, or promote another page to post_index
+    first; confirm by saving again below.
+  </p>
+</div>
+{% endif %}
+
 <form method="post"
       action="{{ url_for('page_admin.edit_page', page_id=page.id) if is_edit else url_for('page_admin.new_page') }}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   {% if swap_pending %}<input type="hidden" name="acknowledge_swap" value="1">{% endif %}
+  {% if demotion_pending %}<input type="hidden" name="acknowledge_demotion" value="1">{% endif %}
 
   <fieldset>
     <label for="title">Title</label>
