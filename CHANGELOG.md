@@ -6,6 +6,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Per-site landing page at `/`.** The delivery app's `/` is no
+  longer a scaffold stub: each site now serves a paginated list
+  of its recent published posts, newest first. Page size is
+  configurable per site via `Site.extra_settings.posts_per_page`
+  (default 10); navigation uses `?page=N`. Drafts, scheduled, and
+  archived posts never appear, and posts are strictly scoped to
+  the resolved site. The route ships from `bragi.contrib.post`
+  (Blueprint `post_index_delivery`), so disabling the post plugin
+  removes the landing page along with the per-post views.
+  Configurable static homepages (Page-as-home), featured / pinned
+  posts, and additional themes remain out of scope; tracked in
+  follow-up issues.
+
 ## [1.10.0] - 2026-05-16
 
 ### Added
