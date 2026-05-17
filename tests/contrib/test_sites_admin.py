@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
-from bragi.core.models.page import Page, PageStatus
+from bragi.core.models.page import Page, PageKind, PageStatus
+from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.models.user import User
@@ -775,3 +776,192 @@ def test_new_form_does_not_show_home_page_select(admin_app: Flask) -> None:
     resp = client.get("/admin/sites/new")
     assert resp.status_code == 200
     assert b'name="home_page_id"' not in resp.data
+
+
+# ============================================================
+# Home-page redirects (#130)
+# ============================================================
+
+
+def _seed_home_candidates(
+    db_factory: sessionmaker[Session],
+    site_slug: str,
+) -> tuple[int, int, int]:
+    """Seed a STATIC page, a POST_INDEX page, and a second STATIC page.
+
+    Returns `(static_id, post_index_id, alt_static_id)`. Used by the
+    home-redirect tests so each case has a real page to flip
+    home_page_id between.
+    """
+    with db_factory() as db:
+        owner = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one()
+        static = Page(
+            site_id=site.id,
+            slug="about",
+            title="About",
+            body_markdown="about",
+            body_html="<p>about</p>",
+            body_excerpt="about",
+            author_id=owner.id,
+            status=PageStatus.PUBLISHED,
+            kind=PageKind.STATIC,
+        )
+        post_index = Page(
+            site_id=site.id,
+            slug="news",
+            title="News",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=owner.id,
+            status=PageStatus.PUBLISHED,
+            kind=PageKind.POST_INDEX,
+        )
+        alt = Page(
+            site_id=site.id,
+            slug="contact",
+            title="Contact",
+            body_markdown="c",
+            body_html="<p>c</p>",
+            body_excerpt="c",
+            author_id=owner.id,
+            status=PageStatus.PUBLISHED,
+            kind=PageKind.STATIC,
+        )
+        db.add_all([static, post_index, alt])
+        db.commit()
+        return static.id, post_index.id, alt.id
+
+
+def _post_site_edit(
+    client: FlaskClient,
+    site_id: int,
+    *,
+    home_page_id: str = "",
+) -> object:
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    return client.post(
+        f"/admin/sites/{site_id}/edit",
+        data={
+            "slug": "blog",
+            "hostname": "blog.example.com",
+            "title": "Blog",
+            "locale": "en",
+            "timezone": "UTC",
+            "canonical_url": "https://blog.example.com",
+            "theme": "",
+            "home_page_id": home_page_id,
+            "_csrf_token": token,
+        },
+    )
+
+
+def test_setting_static_home_inserts_exact_redirect(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """home_page_id -> STATIC page inserts EXACT /<slug>/ → /."""
+    static_id, _, _ = _seed_home_candidates(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    _post_site_edit(client, site_id, home_page_id=str(static_id))
+
+    with db_session_factory() as db:
+        row = db.execute(
+            select(Redirect).where(
+                Redirect.source_path == "/about/",
+                Redirect.match_type == MatchType.EXACT,
+            )
+        ).scalar_one()
+    assert row.target == "/"
+    assert row.status_code == 301
+    assert row.source == RedirectSource.HOME_PAGE_CHANGE
+    assert row.active is True
+
+
+def test_setting_post_index_home_inserts_prefix_redirect(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """home_page_id -> POST_INDEX page inserts PREFIX /<slug>/ → /."""
+    _, post_index_id, _ = _seed_home_candidates(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    _post_site_edit(client, site_id, home_page_id=str(post_index_id))
+
+    with db_session_factory() as db:
+        row = db.execute(
+            select(Redirect).where(
+                Redirect.source_path == "/news/",
+                Redirect.match_type == MatchType.PREFIX,
+            )
+        ).scalar_one()
+    assert row.target == "/"
+    assert row.source == RedirectSource.HOME_PAGE_CHANGE
+    assert row.active is True
+
+
+def test_clearing_home_deactivates_previous_redirect(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """home_page_id A -> None deactivates A's slug → / redirect."""
+    static_id, _, _ = _seed_home_candidates(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    _post_site_edit(client, site_id, home_page_id=str(static_id))
+    _post_site_edit(client, site_id, home_page_id="")
+
+    with db_session_factory() as db:
+        row = db.execute(select(Redirect).where(Redirect.source_path == "/about/")).scalar_one()
+    assert row.active is False
+
+
+def test_changing_home_swaps_redirects(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A → B deactivates A's redirect, inserts B's."""
+    static_id, _, alt_id = _seed_home_candidates(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    _post_site_edit(client, site_id, home_page_id=str(static_id))
+    _post_site_edit(client, site_id, home_page_id=str(alt_id))
+
+    with db_session_factory() as db:
+        old = db.execute(select(Redirect).where(Redirect.source_path == "/about/")).scalar_one()
+        new = db.execute(select(Redirect).where(Redirect.source_path == "/contact/")).scalar_one()
+    assert old.active is False
+    assert new.active is True
+    assert new.target == "/"
+    assert new.source == RedirectSource.HOME_PAGE_CHANGE
+
+
+def test_resaving_same_home_page_id_does_not_churn_redirects(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Saving the form with no home_page_id change leaves redirects alone."""
+    static_id, _, _ = _seed_home_candidates(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    _post_site_edit(client, site_id, home_page_id=str(static_id))
+    # Snapshot updated_at, then re-save without changes.
+    with db_session_factory() as db:
+        first = db.execute(select(Redirect).where(Redirect.source_path == "/about/")).scalar_one()
+        first_updated_at = first.updated_at
+    _post_site_edit(client, site_id, home_page_id=str(static_id))
+    with db_session_factory() as db:
+        second = db.execute(select(Redirect).where(Redirect.source_path == "/about/")).scalar_one()
+    assert second.updated_at == first_updated_at

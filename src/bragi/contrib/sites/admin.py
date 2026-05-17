@@ -24,10 +24,12 @@ from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.page import Page, PageKind, PageStatus
+from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
 from bragi.core.security import current_user, is_superuser
+from bragi.core.url import page_url_for
 
 bp = Blueprint(
     "site_admin",
@@ -151,6 +153,83 @@ def _validate(form: dict[str, str]) -> list[str]:
     if not form["title"]:
         errors.append("Title is required.")
     return errors
+
+
+def _sync_home_page_redirect(
+    db: Any,
+    site_id: int,
+    old_home_page_id: int | None,
+    new_home_page_id: int | None,
+) -> None:
+    """Add / remove the page-slug → / redirect when home_page_id changes.
+
+    A page set as the site home is reachable at `/`; the
+    slug-derived URL should 301 there so a single canonical URL
+    is in play. For a STATIC home page the redirect is EXACT
+    (only the page URL itself); for a POST_INDEX home, PREFIX
+    so all post and tag URLs underneath also fold onto `/`.
+
+    Called before commit so the redirect change lands in the same
+    transaction as the site update. Idempotent on repeat saves
+    that don't actually change home_page_id (no-op early-out).
+
+    Per #130 option (b): the manipulation is inline here rather
+    than going through a hookspec. Promote to `on_site_updated`
+    when a second consumer materialises.
+    """
+    if old_home_page_id == new_home_page_id:
+        return
+    if old_home_page_id is not None:
+        old_page = db.get(Page, old_home_page_id)
+        if old_page is not None:
+            old_url = page_url_for(old_page, db=db)
+            # The previous home redirect could be either EXACT
+            # (STATIC) or PREFIX (POST_INDEX); deactivate any row
+            # we ourselves would have written. Restricting to
+            # target="/" avoids touching unrelated manual rows on
+            # the same source path.
+            for mt in (MatchType.EXACT, MatchType.PREFIX):
+                row = db.execute(
+                    select(Redirect).where(
+                        Redirect.site_id == site_id,
+                        Redirect.source_path == old_url,
+                        Redirect.match_type == mt,
+                        Redirect.target == "/",
+                    )
+                ).scalar_one_or_none()
+                if row is not None:
+                    row.active = False
+    if new_home_page_id is not None:
+        new_page = db.get(Page, new_home_page_id)
+        if new_page is not None:
+            new_url = page_url_for(new_page, db=db)
+            match_type = (
+                MatchType.PREFIX if new_page.kind == PageKind.POST_INDEX else MatchType.EXACT
+            )
+            existing = db.execute(
+                select(Redirect).where(
+                    Redirect.site_id == site_id,
+                    Redirect.source_path == new_url,
+                    Redirect.match_type == match_type,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                existing.target = "/"
+                existing.status_code = 301
+                existing.active = True
+                existing.source = RedirectSource.HOME_PAGE_CHANGE
+            else:
+                db.add(
+                    Redirect(
+                        site_id=site_id,
+                        source_path=new_url,
+                        target="/",
+                        status_code=301,
+                        match_type=match_type,
+                        source=RedirectSource.HOME_PAGE_CHANGE,
+                        active=True,
+                    )
+                )
 
 
 @bp.route("/", methods=["GET"])
@@ -367,6 +446,7 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                     home_pages=home_pages,
                 )
 
+        old_home_page_id = site.home_page_id
         site.slug = form["slug"]
         site.hostname = form["hostname"]
         site.title = form["title"]
@@ -375,6 +455,10 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         site.canonical_url = form["canonical_url"] or f"https://{form['hostname']}"
         site.theme = theme_value
         site.home_page_id = home_page_value
+        # Sync the page-slug → / redirect inside the same
+        # transaction so a half-applied state (site updated but
+        # redirect stale) can never be observed.
+        _sync_home_page_redirect(db, site.id, old_home_page_id, home_page_value)
         db.commit()
         flash(f"Site '{form['slug']}' updated.", "success")
 

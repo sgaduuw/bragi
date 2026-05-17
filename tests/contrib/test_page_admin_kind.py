@@ -21,6 +21,7 @@ from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageKind, PageStatus
+from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from tests.conftest import csrf_token
@@ -338,3 +339,101 @@ def test_invalid_kind_value_is_rejected(
     )
     assert resp.status_code == 200
     assert b"Kind must be" in resp.data
+
+
+# ============================================================
+# Kind-change redirects (#130)
+# ============================================================
+
+
+def test_swap_inserts_prefix_redirect_from_old_to_new_post_index(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Promoting news → POST_INDEX (demoting posts) inserts /posts/ → /news/."""
+    news_id = _page_id(db_session_factory, "news")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{news_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{news_id}/edit",
+        data={
+            "title": "News",
+            "slug": "news",
+            "parent_id": "",
+            "body_markdown": "",
+            "status": "published",
+            "kind": "post_index",
+            "acknowledge_swap": "1",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        row = db.execute(
+            select(Redirect).where(
+                Redirect.source_path == "/posts/",
+                Redirect.match_type == MatchType.PREFIX,
+            )
+        ).scalar_one()
+    assert row.target == "/news/"
+    assert row.status_code == 301
+    assert row.source == RedirectSource.KIND_CHANGE
+    assert row.active is True
+
+
+def test_swap_skip_redirect_flag_suppresses_kind_redirect(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """`skip_redirect=1` covers the kind-change subtree 301 too."""
+    news_id = _page_id(db_session_factory, "news")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{news_id}/edit")
+    client.post(
+        f"/admin/sites/blog/pages/{news_id}/edit",
+        data={
+            "title": "News",
+            "slug": "news",
+            "parent_id": "",
+            "body_markdown": "",
+            "status": "published",
+            "kind": "post_index",
+            "acknowledge_swap": "1",
+            "skip_redirect": "1",
+            "_csrf_token": token,
+        },
+    )
+    with db_session_factory() as db:
+        rows = db.execute(select(Redirect).where(Redirect.source_path == "/posts/")).scalars().all()
+    assert rows == []
+
+
+def test_demotion_alone_does_not_insert_redirect(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """No replacement POST_INDEX → no redirect (410-per-post is deferred)."""
+    posts_id = _page_id(db_session_factory, "posts")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{posts_id}/edit")
+    client.post(
+        f"/admin/sites/blog/pages/{posts_id}/edit",
+        data={
+            "title": "Blog",
+            "slug": "posts",
+            "parent_id": "",
+            "body_markdown": "",
+            "status": "published",
+            "kind": "static",
+            "acknowledge_demotion": "1",
+            "_csrf_token": token,
+        },
+    )
+    with db_session_factory() as db:
+        rows = (
+            db.execute(select(Redirect).where(Redirect.source == RedirectSource.KIND_CHANGE))
+            .scalars()
+            .all()
+        )
+    assert rows == []
