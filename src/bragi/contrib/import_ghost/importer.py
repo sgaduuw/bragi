@@ -40,7 +40,7 @@ def _parsed_iso(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        # Ghost timestamps come as `2024-05-14T12:00:00.000Z` —
+        # Ghost timestamps come as `2024-05-14T12:00:00.000Z`.
         # `fromisoformat` accepts that in 3.11+, but the trailing
         # `Z` needs swapping to `+00:00` for older parsers. Keep
         # the explicit replace for portability.

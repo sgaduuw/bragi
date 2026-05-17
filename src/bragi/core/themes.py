@@ -12,7 +12,7 @@ everything else.
 The in-tree `bragi.contrib.theme_default` package registers the
 `"default"` slug and owns the canonical site shell. A site with
 `theme=NULL` is treated as "use the default" rather than "no
-theme dispatch" — disable `theme_default` via entry-points to
+theme dispatch"; disable `theme_default` via entry-points to
 test the truly-unthemed path.
 
 The admin app does NOT wrap its loader: only delivery is
@@ -64,8 +64,8 @@ class ThemeAwareLoader(jinja2.BaseLoader):
         # `Site.theme="<uninstalled-slug>"` (the operator uninstalled
         # a theme without first un-picking it on every site). Only
         # when "default" itself isn't registered do we give up and
-        # fall through to the chain — i.e. theme_default was disabled
-        # via entry-points and no replacement was installed.
+        # fall through to the chain (i.e. theme_default was disabled
+        # via entry-points and no replacement was installed).
         slug = getattr(site, "theme", None)
         spec = registry.theme(slug) if slug else None
         if spec is None:

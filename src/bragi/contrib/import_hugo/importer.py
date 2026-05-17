@@ -4,7 +4,7 @@ The Hugo config file at the source root marks a valid source
 tree; `content/` underneath holds the markdown corpus. Each
 `.md` becomes a Post; `aliases:` entries become Redirect rows.
 `_index.md` files are section indexes (Hugo's home / list pages)
-and are skipped for v1 — they don't map cleanly onto a single
+and are skipped for v1; they don't map cleanly onto a single
 content type.
 """
 
@@ -42,7 +42,7 @@ def detect(path: Any) -> bool:
     """True if `path` looks like a Hugo source tree.
 
     Looks for a recognised config file plus a `content/` directory.
-    Per CONTEXT.md "URL preservation is non-negotiable" — a stricter
+    Per CONTEXT.md "URL preservation is non-negotiable": a stricter
     detector here means we don't accidentally rewrite a non-Hugo
     tree as if it were Hugo.
     """

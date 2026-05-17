@@ -326,7 +326,7 @@ def test_authenticated_admin_hit_passes_through(admin_app: Flask) -> None:
 def test_admin_index_renders_chrome_with_nav(admin_app: Flask) -> None:
     """The `/` route must render the admin base template, not bare
     inline HTML. Otherwise the only page the auth bounce lands the
-    operator on has no nav, no logout button, no flash slot — and
+    operator on has no nav, no logout button, no flash slot, and
     no way to navigate without already knowing the URL space.
     Regression net for #75 / B9."""
     client = admin_app.test_client()

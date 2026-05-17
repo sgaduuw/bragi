@@ -377,8 +377,12 @@ shape needs it.
 
 Task-runner cadences (all in seconds, set on the `bragi-tasks`
 service) default to `SCHEDULED_PUBLISH_EVERY=60`,
-`ANALYZE_EVERY=86400`, `VACUUM_EVERY=604800`. Override in
-`compose.yml` if a different rhythm suits your workload.
+`EMBEDS_RERENDER_EVERY=600`, `WEBMENTIONS_SEND_EVERY=300`,
+`ACTIVITYPUB_SEND_EVERY=60`, `ANALYZE_EVERY=86400`,
+`VACUUM_EVERY=604800`. Override in `compose.yml` if a different
+rhythm suits your workload. The webmentions / ActivityPub
+cadences only do work when there are queued rows; a site that
+hasn't enabled either plugin pays nothing per tick.
 
 ## Project layout
 
