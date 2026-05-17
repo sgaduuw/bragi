@@ -56,6 +56,12 @@
       {% endif %}
     </p>
   </header>
+  {% if toc_html %}
+  <aside class="toc-wrapper" aria-label="Table of contents">
+    <h2>Contents</h2>
+    {{ toc_html | safe }}
+  </aside>
+  {% endif %}
   <div class="body">
     {{ post.body_html | internal_link_rewrite | safe }}
   </div>
