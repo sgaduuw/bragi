@@ -38,6 +38,7 @@ from bragi.core.models.site import Site
 from bragi.core.url import (
     invalidate_post_index_cache,
     page_url_for,
+    post_index_page_for,
     post_url_for,
 )
 
@@ -199,12 +200,15 @@ def _upsert_redirect(
     source_path: str,
     target: str,
     match_type: str,
+    source: str = RedirectSource.SLUG_CHANGE,
 ) -> None:
-    """Insert or update a SLUG_CHANGE 301 redirect.
+    """Insert or update a 301 redirect with the given `source` label.
 
     Idempotent on (site_id, source_path, match_type): a churn of
     foo -> bar -> foo -> qux updates the row in place rather than
-    crashing the UNIQUE constraint or stacking dead rules.
+    crashing the UNIQUE constraint or stacking dead rules. The
+    `source` label distinguishes slug-change, kind-change, and
+    home-page-change rows in the redirects admin.
     """
     existing = session.execute(
         select(Redirect).where(
@@ -214,11 +218,12 @@ def _upsert_redirect(
         )
     ).scalar_one_or_none()
     if existing is not None:
-        if existing.target != target or not existing.active:
+        changed = existing.target != target or not existing.active or existing.source != source
+        if changed:
             existing.target = target
             existing.status_code = 301
             existing.active = True
-            existing.source = RedirectSource.SLUG_CHANGE
+            existing.source = source
             session.commit()
         return
     session.add(
@@ -228,7 +233,7 @@ def _upsert_redirect(
             target=target,
             status_code=301,
             match_type=match_type,
-            source=RedirectSource.SLUG_CHANGE,
+            source=source,
             active=True,
         )
     )
@@ -263,32 +268,44 @@ def _page_url_with_substituted_slug(session: Any, page: Page, leaf_slug: str) ->
 
 @hookimpl
 def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) -> None:
-    """Insert a 301 from the pre-rename URL when content slugs change.
+    """Insert 301s when content slugs or page kinds change.
 
     Handles both Post and Page rows (the hookspec fires for either).
-    For posts, the new URL derives from the active site's POST_INDEX
-    page via `post_url_for`. For pages, the URL is the slug-derived
-    chain; a STATIC page gets an EXACT 301 from old chain → new,
-    while a POST_INDEX page gets a PREFIX 301 so its post subtree
-    (`<old>/<post-slug>/`, `<old>/tag/<tag-slug>/`) follows in one
-    rule.
+    Two distinct triggers:
+
+    * Slug change. For posts, the new URL derives from the active
+      site's POST_INDEX page via `post_url_for`. For pages, the
+      URL is the slug-derived chain; a STATIC page gets an EXACT
+      301 from old chain → new, while a POST_INDEX page gets a
+      PREFIX 301 so its post subtree (`<old>/<post-slug>/`,
+      `<old>/tag/<tag-slug>/`) follows in one rule.
+
+    * Kind change. When a Page is demoted from POST_INDEX to STATIC
+      (typically because another page was promoted in the same
+      transaction), the demoted page's URL prefix is no longer
+      where posts and tags live; a PREFIX 301 carries the subtree
+      onto the new POST_INDEX page. The demoted page itself stays
+      at its own URL (the resolve order is content-first, so the
+      page response wins over the empty-tail prefix hop).
 
     The hookimpl opens its own SessionLocal so the caller's
     transaction shape is decoupled from ours.
 
-    Limitations (deferred to follow-ups):
-    - Kind change (STATIC ↔ POST_INDEX) is not redirected here
-      because the on_post_updated `before/after` dicts don't yet
-      carry `kind`. Promote the page first, then rename, to land
-      both effects in two predictable steps.
-    - Home page change (which shadows the POST_INDEX URL to `/`)
-      is handled by the site admin, not by this hook.
+    Out of scope (per #130): demotion with no replacement
+    POST_INDEX page leaves posts orphaned; a 410 Gone per orphan
+    post is appropriate but tracked separately. Home_page_id
+    changes are handled by the site admin handler inline, not by
+    this hook.
     """
     if not item or not getattr(item, "site_id", None):
         return
     old_slug = (before or {}).get("slug")
     new_slug = (after or {}).get("slug")
-    if not old_slug or not new_slug or old_slug == new_slug:
+    old_kind = (before or {}).get("kind")
+    new_kind = (after or {}).get("kind")
+    slug_changed = bool(old_slug and new_slug and old_slug != new_slug)
+    kind_changed = bool(old_kind and new_kind and old_kind != new_kind)
+    if not slug_changed and not kind_changed:
         return
 
     site_id = int(item.site_id)
@@ -304,8 +321,10 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) ->
             return
 
         if isinstance(item, Post):
-            old_path = post_url_for(site, old_slug)
-            new_path = post_url_for(site, new_slug)
+            if not slug_changed:
+                return
+            old_path = post_url_for(site, str(old_slug))
+            new_path = post_url_for(site, str(new_slug))
             if old_path is None or new_path is None or old_path == new_path:
                 # No post_index page on this site (no public URL
                 # exists), or the URL didn't actually change.
@@ -320,18 +339,40 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) ->
             return
 
         if isinstance(item, Page):
-            old_path = _page_url_with_substituted_slug(session, item, str(old_slug))
-            new_path = page_url_for(item, db=session)
-            if old_path == new_path:
-                return
-            # POST_INDEX pages move a subtree (the page itself, all
-            # posts under it, and tag listings). One PREFIX rule
-            # covers them all.
-            match_type = MatchType.PREFIX if item.kind == PageKind.POST_INDEX else MatchType.EXACT
-            _upsert_redirect(
-                session,
-                site_id=site_id,
-                source_path=old_path,
-                target=new_path,
-                match_type=match_type,
-            )
+            if slug_changed:
+                old_path = _page_url_with_substituted_slug(session, item, str(old_slug))
+                new_path = page_url_for(item, db=session)
+                if old_path != new_path:
+                    # POST_INDEX pages move a subtree (the page
+                    # itself, all posts under it, and tag listings).
+                    # One PREFIX rule covers them all.
+                    match_type = (
+                        MatchType.PREFIX if item.kind == PageKind.POST_INDEX else MatchType.EXACT
+                    )
+                    _upsert_redirect(
+                        session,
+                        site_id=site_id,
+                        source_path=old_path,
+                        target=new_path,
+                        match_type=match_type,
+                    )
+            if kind_changed and old_kind == PageKind.POST_INDEX and new_kind != PageKind.POST_INDEX:
+                # Demotion: the page's subtree no longer hosts
+                # posts/tags. Insert a PREFIX redirect to the
+                # current POST_INDEX URL so old links resolve to
+                # the new blog home. When no POST_INDEX exists
+                # (the swap-with-nothing case), skip; the orphan-
+                # post 410 path is deferred per issue.
+                new_post_index = post_index_page_for(site)
+                if new_post_index is not None and new_post_index.id != item.id:
+                    old_prefix_path = page_url_for(item, db=session)
+                    new_index_path = page_url_for(new_post_index, db=session)
+                    if old_prefix_path != new_index_path:
+                        _upsert_redirect(
+                            session,
+                            site_id=site_id,
+                            source_path=old_prefix_path,
+                            target=new_index_path,
+                            match_type=MatchType.PREFIX,
+                            source=RedirectSource.KIND_CHANGE,
+                        )

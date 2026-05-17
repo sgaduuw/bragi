@@ -38,6 +38,8 @@ class RedirectSource:
 
     MANUAL = "manual"
     SLUG_CHANGE = "slug-change"
+    KIND_CHANGE = "kind-change"
+    HOME_PAGE_CHANGE = "home-change"
     IMPORT_HUGO = "import:hugo"
     IMPORT_GHOST = "import:ghost"
     IMPORT_WORDPRESS = "import:wordpress"

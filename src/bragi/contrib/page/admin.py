@@ -231,6 +231,28 @@ def new_page(site_slug: str) -> ResponseReturnValue:
         new_id = page_row.id
         new_slug = page_row.slug
         pm = current_app.extensions["plugin_manager"]
+        # Swap-on-create: when this new page demoted an existing
+        # POST_INDEX in the same transaction, fire on_post_updated
+        # for the demoted page so the redirects plugin inserts the
+        # subtree 301 (see issue #130). The newly-created page
+        # itself has no prior state to redirect from.
+        if existing_index is not None:
+            pm.hook.on_post_updated(
+                item=existing_index,
+                before={
+                    "slug": existing_index.slug,
+                    "title": existing_index.title,
+                    "status": existing_index.status,
+                    "kind": PageKind.POST_INDEX,
+                },
+                after={
+                    "slug": existing_index.slug,
+                    "title": existing_index.title,
+                    "status": existing_index.status,
+                    "kind": existing_index.kind,
+                },
+                session=db,
+            )
         if new_status == PageStatus.PUBLISHED:
             # Mirror the post admin's first-publish path: subscribers
             # (search index, sitemap rebuild, indexnow ping, webhook
@@ -384,6 +406,28 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         # fix-in-draft renames don't need a stale-URL 301).
         if not skip_redirect:
             pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+            # When a swap demoted an existing POST_INDEX page in
+            # the same transaction, that page's URL prefix is no
+            # longer where posts live; fire on_post_updated for it
+            # too so the redirects plugin can insert the subtree
+            # 301 (see issue #130).
+            if existing_index is not None:
+                pm.hook.on_post_updated(
+                    item=existing_index,
+                    before={
+                        "slug": existing_index.slug,
+                        "title": existing_index.title,
+                        "status": existing_index.status,
+                        "kind": PageKind.POST_INDEX,
+                    },
+                    after={
+                        "slug": existing_index.slug,
+                        "title": existing_index.title,
+                        "status": existing_index.status,
+                        "kind": existing_index.kind,
+                    },
+                    session=db,
+                )
         # First-publish transition fires on_post_published so
         # subscribers see the same lifecycle as posts.
         if page.status == PageStatus.PUBLISHED and not was_published:

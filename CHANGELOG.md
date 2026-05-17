@@ -28,9 +28,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `on_post_updated`. Renaming a static page inserts an EXACT
   301 from old slug-path to new; renaming a `post_index` page
   inserts a PREFIX 301 that covers the index, every post URL,
-  and the tag listings in one rule. Limitation: kind toggles
-  (STATIC ↔ POST_INDEX) and `home_page_id` changes don't insert
-  redirects in this PR; tracked as follow-ups.
+  and the tag listings in one rule. (#130 follow-up extends the
+  same hook to cover kind toggles and home_page_id changes; see
+  the "Added" section.)
 - **#124 update.** The post plugin's `resolve_home` fallback
   (the recent-posts list at `/`) has been removed. The page
   plugin's `tryfirst` impl still handles `home_page_id`; new:
@@ -53,6 +53,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Kind toggle and home_page_id changes now insert redirects
+  (#130).** Promoting one page to `post_index` while demoting
+  another (the swap path) now fires `on_post_updated` for the
+  demoted page too; the redirects plugin reads the
+  before/after `kind` and inserts a PREFIX 301 from the old
+  index URL to the new. Setting / clearing / changing a site's
+  `home_page_id` is handled inline in the sites admin save
+  handler: an EXACT 301 (STATIC home) or PREFIX 301 (POST_INDEX
+  home) is inserted alongside the site update, and the previous
+  redirect is deactivated atomically. New `RedirectSource` labels
+  `kind-change` and `home-change` distinguish these rows from
+  slug-renames in the redirects admin. Demotion with no
+  replacement `post_index` still leaves posts orphaned (410-per
+  -post deferred).
 - **Demotion-confirmation banner for the only POST_INDEX page
   (#131).** Demoting a site's only `post_index` page to `static`
   now re-renders the edit form with a warning that quantifies
