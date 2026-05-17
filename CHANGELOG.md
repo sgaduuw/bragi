@@ -7,6 +7,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Static homepage per site (#124).** Each Site grew a new
+  `home_page_id` column (nullable FK to `pages`, `ON DELETE SET
+  NULL`). When set on the site edit form, `/` renders the
+  referenced Page instead of the recent-posts index; clearing
+  the selection reverts to the index without any code change.
+  The new `resolve_home(site)` hookspec (`firstresult=True`)
+  arbitrates this: the page plugin ships a `tryfirst` impl that
+  serves the configured static page, and the post plugin ships
+  the default-priority impl that returns the paginated index as
+  the fallback. The `/` route itself is owned by the core
+  delivery dispatcher; the post plugin no longer registers a
+  Blueprint for it. Note: when a static homepage is configured
+  the recent-posts list is no longer addressable; track that as
+  a follow-up if a real site needs both.
 - **Per-site landing page at `/`.** The delivery app's `/` is no
   longer a scaffold stub: each site now serves a paginated list
   of its recent published posts, newest first. Page size is

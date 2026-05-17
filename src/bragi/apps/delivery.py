@@ -7,9 +7,13 @@ event sink are wired in this app as the corresponding plugins ship.
 
 from __future__ import annotations
 
+from typing import cast
+
 import click
 import jinja2
-from flask import Flask
+from flask import Flask, abort, g
+from flask.typing import ResponseReturnValue
+from werkzeug.wrappers import Response
 
 from bragi.core.cache import apply_cache_policy
 from bragi.core.middleware.redirects import register_redirect_handler
@@ -107,6 +111,24 @@ def create_delivery_app() -> Flask:
     # markdown-it extensions (container directives, etc.) and stash
     # on app.extensions so `render_markdown()` picks it up.
     install_app_renderer(app, pm.hook.register_markdown_extension())
+
+    # Per-site `/` dispatcher. The route itself is owned by core
+    # because every site has a landing page; the *content* of that
+    # page comes from `resolve_home` hookimpls. The page plugin's
+    # tryfirst impl serves a static homepage when configured; the
+    # post plugin's default-priority impl returns the recent-posts
+    # index as the fallback. A 404 here means no impl returned a
+    # response, which only happens if every content plugin is
+    # disabled (pragmatic edge case, no fancier handling needed).
+    @app.route("/")
+    def home() -> ResponseReturnValue:
+        site = g.get("site")
+        if site is None:
+            abort(404)
+        response = pm.hook.resolve_home(site=site)
+        if response is None:
+            abort(404)
+        return cast(Response, response)
 
     return app
 

@@ -73,6 +73,27 @@
     </small>
   </fieldset>
 
+  {% if is_edit %}
+  <fieldset>
+    <label for="home_page_id">Home page</label>
+    <select name="home_page_id" id="home_page_id">
+      <option value=""{% if not form.get('home_page_id') %} selected{% endif %}>Recent posts (default)</option>
+      {% for p in home_pages %}
+        <option value="{{ p.id }}"{% if form.get('home_page_id') == p.id|string %} selected{% endif %}>
+          {{ p.title }}
+        </option>
+      {% endfor %}
+    </select>
+    <small>
+      {% if home_pages %}
+        Pick a published page to serve as this site's <code>/</code> instead of the recent-posts list.
+      {% else %}
+        No published pages on this site yet; publish one to enable a static homepage.
+      {% endif %}
+    </small>
+  </fieldset>
+  {% endif %}
+
   <div class="actions">
     <button type="submit">{{ 'Save' if is_edit else 'Create' }}</button>
     <a href="{{ url_for('site_admin.list_sites') }}" class="btn secondary">Cancel</a>
