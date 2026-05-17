@@ -30,7 +30,9 @@ class PostRevision(IdMixin, TimestampsMixin, Base):
     __tablename__ = "post_revisions"
 
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), index=True)
-    editor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
+    editor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     # Snapshot fields. Mirrors the subset of `Post` that an editor
     # would want to inspect or roll back to. Body is kept as

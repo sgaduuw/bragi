@@ -7,6 +7,45 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`ON DELETE` actions extended across the rest of the model
+  graph.** The first FK-ondelete migration only touched the
+  federation tables (#162-#166). This migration covers the other
+  14 tables that hard-FK into `users` / `sites` / `posts` /
+  `pages` / `attachments`. Cascade rules:
+  - **CASCADE on user delete**: `user_identities.user_id`,
+    `local_credentials.user_id`, `sessions.user_id`,
+    `user_site_roles.user_id`. A future `cms user delete`
+    sweeps the dependent rows in one statement.
+  - **CASCADE on site delete**: `user_site_roles.site_id`,
+    `redirects.site_id`, `site_aliases.site_id`, `tags.site_id`,
+    `attachments.site_id`, `analytics_events.site_id`,
+    `posts.site_id`, `pages.site_id`. Removing a site no longer
+    leaves orphan tags / redirects / analytics rows behind.
+  - **SET NULL on user delete** (history preservation):
+    `audit_log.actor_user_id`, `audit_log.site_id`,
+    `analytics_events.user_id`, `attachments.uploaded_by`,
+    `page_revisions.editor_user_id`,
+    `post_revisions.editor_user_id`. The forensic value of an
+    audit row or page revision outlasts the user; nullable FKs
+    drop attribution rather than the row.
+  - **SET NULL on attachment delete**:
+    `posts.featured_image_id`, `posts.og_image_id`,
+    `pages.og_image_id`, `sites.default_og_image_id`. Removing
+    an image leaves the post / page / site row in place with no
+    media; the delivery template falls back to the site default.
+  - **SET NULL on parent page delete (self-ref)**:
+    `pages.parent_id`. Removing a parent page promotes children
+    to root rather than cascading the delete subtree.
+  Deliberately UNCHANGED (RESTRICT default): `posts.author_id`,
+  `pages.author_id`, `sites.owner_user_id`. Deleting a user who
+  still authors posts / owns sites must be blocked until the
+  operator reassigns them; this is a policy decision, not a
+  technical one.
+- **Webmention moderation requires Editor role**, not just site
+  membership. An "author" can write their own posts but shouldn't
+  decide what other authors' posts surface as mentions
+  (publication-surface decision, not authoring). Mirrors the
+  post / page admin's editor-role gate.
 - **SQLite `busy_timeout = 5000` now set on every connection.**
   The sidecar + admin + delivery workers all write to one
   SQLite file under WAL; without a busy_timeout, a write
