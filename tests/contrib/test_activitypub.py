@@ -22,7 +22,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-import requests
 from click.testing import CliRunner
 from flask import Flask
 from flask.testing import FlaskClient
@@ -307,7 +306,7 @@ def test_inbox_accepts_signed_follow(
         def json(self):
             return remote_actor_doc
 
-    monkeypatch.setattr(requests, "get", lambda url, **kw: _Resp())
+    monkeypatch.setattr("bragi.contrib.activitypub.views.safe_get", lambda url, **kw: _Resp())
 
     follow_activity = {
         "@context": "https://www.w3.org/ns/activitystreams",
@@ -404,7 +403,7 @@ def test_send_pending_marks_sent_on_2xx(
     class _Resp:
         status_code = 202
 
-    monkeypatch.setattr(requests, "post", lambda *a, **kw: _Resp())
+    monkeypatch.setattr("bragi.contrib.activitypub.sender.safe_post", lambda *a, **kw: _Resp())
 
     counts = send_pending(db_session)
     assert counts["sent"] == 1

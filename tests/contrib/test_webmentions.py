@@ -20,7 +20,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-import requests
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import select
@@ -188,8 +187,12 @@ def test_send_pending_marks_sent_on_2xx(
     def fake_post(url: str, **kw: Any) -> _PostResp:
         return _PostResp()
 
-    monkeypatch.setattr(requests, "head", fake_head)
-    monkeypatch.setattr(requests, "post", fake_post)
+    # Sender now goes through the SSRF-guarded helpers; mock at
+    # the import site (sender module) rather than the requests
+    # library, so the guard's DNS / IP checks are bypassed in
+    # the test environment.
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_head", fake_head)
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_post", fake_post)
 
     counts = send_pending(db_session)
     assert counts["sent"] == 1
@@ -217,8 +220,8 @@ def test_send_pending_skips_when_no_endpoint(
         headers: dict[str, str] = {}
         text = "<html></html>"
 
-    monkeypatch.setattr(requests, "head", lambda url, **kw: _HeadResp())
-    monkeypatch.setattr(requests, "get", lambda url, **kw: _GetResp())
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_head", lambda url, **kw: _HeadResp())
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_get", lambda url, **kw: _GetResp())
 
     counts = send_pending(db_session)
     assert counts["skipped"] == 1
@@ -251,14 +254,12 @@ def test_inbox_accepts_valid_mention(
 ) -> None:
     class _Resp:
         status_code = 200
+        content = (
+            b'<a class="h-card" href="https://author.example">Ada</a>'
+            b'<a href="https://blog.example.com/posts/hello/">link</a>'
+        )
 
-        def iter_content(self, n: int):
-            yield (
-                b'<a class="h-card" href="https://author.example">Ada</a>'
-                b'<a href="https://blog.example.com/posts/hello/">link</a>'
-            )
-
-    monkeypatch.setattr(requests, "get", lambda *a, **kw: _Resp())
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", lambda *a, **kw: _Resp())
 
     resp = client.post(
         "/webmentions",
@@ -284,11 +285,9 @@ def test_inbox_rejects_when_source_does_not_link_to_target(
 ) -> None:
     class _Resp:
         status_code = 200
+        content = b"<html>no link here</html>"
 
-        def iter_content(self, n: int):
-            yield b"<html>no link here</html>"
-
-    monkeypatch.setattr(requests, "get", lambda *a, **kw: _Resp())
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", lambda *a, **kw: _Resp())
 
     resp = client.post(
         "/webmentions",

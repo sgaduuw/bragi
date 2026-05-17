@@ -12,13 +12,13 @@ import json
 import logging
 from datetime import UTC, datetime
 
-import requests
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bragi.contrib.activitypub.activities import create_for_note, note_for_post
 from bragi.contrib.activitypub.keys import get_or_create_keypair
 from bragi.contrib.activitypub.signature import sign_post
+from bragi.core.http import SafeHTTPError, safe_post
 from bragi.core.models.activitypub import (
     ActivityPubFollower,
     ActivityPubOutbox,
@@ -93,16 +93,21 @@ def send_one(db: Session, outbox: ActivityPubOutbox) -> None:
         private_key_pem=keypair.private_key_pem,
     )
     try:
-        # cast to the dict shape requests expects
-        post_headers: dict[str, str | bytes] = {k: v for k, v in signed.headers.items()}
-        resp = requests.post(
+        resp = safe_post(
             signed.url,
             data=body,
-            headers=post_headers,
+            headers=dict(signed.headers),
             timeout=HTTP_TIMEOUT_SECONDS,
-            allow_redirects=True,
         )
-    except requests.RequestException as exc:
+    except SafeHTTPError as exc:
+        # Defence in depth: the storage-time gate in
+        # views._handle_follow should have caught this, but a row
+        # pre-dating the gate (or any future relaxation) should
+        # still be refused at dispatch time.
+        outbox.last_error = f"inbox blocked: {exc}"
+        outbox.status = ActivityPubOutboxStatus.FAILED
+        return
+    except Exception as exc:  # noqa: BLE001 -- network errors mapped uniformly
         outbox.last_error = f"POST failed: {exc}"
         if outbox.attempt_count >= MAX_ATTEMPTS:
             outbox.status = ActivityPubOutboxStatus.FAILED

@@ -223,6 +223,25 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _bypass_ssrf_dns_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip `bragi.core.http`'s DNS / private-IP guard in tests.
+
+    The federation plugins now call SSRF-guarded helpers that
+    resolve every host against `socket.getaddrinfo` and reject
+    non-public IPs. Test fixtures use synthetic domains
+    (`*.example`, `*.test`, ...) that either don't resolve or
+    resolve to NXDOMAIN; either case raises `SafeHTTPError`
+    before the test's `safe_get` / `safe_post` mock can run.
+
+    For most tests we want the mock to take over; for the
+    dedicated SSRF tests the bypass is undone case by case via
+    `monkeypatch.undo()` or by re-patching `_assert_public_host`
+    back to the real function.
+    """
+    monkeypatch.setattr("bragi.core.http._assert_public_host", lambda host: None)
+
+
 @pytest.fixture
 def patched_session_locals(
     db_session_factory: sessionmaker[Session],

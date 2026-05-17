@@ -49,6 +49,10 @@ def create_admin_app() -> Flask:
     """
     app = Flask("bragi-admin")
     app.config["SECRET_KEY"] = settings.secret_key
+    # Hard cap so a streaming-body attack can't OOM the worker.
+    # See `Settings.max_request_bytes`; the attachment upload
+    # path enforces its own per-file ceiling on top of this.
+    app.config["MAX_CONTENT_LENGTH"] = settings.max_request_bytes
 
     # Server-side sessions back the admin's session storage. Replaces
     # Flask's signed-cookie default; cookie carries only an opaque
