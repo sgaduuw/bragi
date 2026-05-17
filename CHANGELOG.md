@@ -53,6 +53,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Per-tag Atom feeds (#140).** New endpoint
+  `<post_index>/<tag_segment>/<tag-slug>/feed.xml` lets focused
+  subscribers track a single topic. Same Atom 1.0 envelope as the
+  site-wide `/feed.xml`, filtered to posts carrying the tag.
+  Tag-listing template surfaces both the site-wide and per-tag
+  feeds via `<link rel="alternate" type="application/atom+xml">`
+  for browser / reader auto-discovery. Site-wide feed discovery
+  is also added to the default theme's `base.html` so every page
+  now exposes it. Atom-builder logic moved to `bragi.core.feed`
+  so the seo plugin's site-wide feed and the page plugin's
+  per-tag feed share one entry-XML helper (no plugin-to-plugin
+  imports).
 - **Related posts at end of article (#139).** Each post page now
   renders a "You may also like" aside below the body listing up
   to N same-site published posts ranked by tag-overlap count

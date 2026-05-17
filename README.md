@@ -162,8 +162,10 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   Card meta on every post and page (with a per-post / per-page
   attachment override and a per-site default OG image), so
   social shares render rich previews. Per-site `sitemap.xml`,
-  `robots.txt`, `security.txt`. Server-side Pygments highlighting
-  for code blocks (Ansible / Python / Terraform lexers in core).
+  `robots.txt`, `security.txt`. Atom 1.0 feeds at `/feed.xml`
+  (whole site) and `<post_index>/<tag_segment>/<slug>/feed.xml`
+  (per tag). Server-side Pygments highlighting for code blocks
+  (Ansible / Python / Terraform lexers in core).
 - **Redirects as a core subsystem.** Slug renames auto-301;
   importers preserve source URLs as redirect rows; resolution
   middleware runs on every public 404. `410 Gone` for tombstoned
