@@ -66,17 +66,18 @@ def register_csrf(app: Flask) -> None:
             return
         if request.endpoint in app.config["CSRF_EXEMPT_ENDPOINTS"]:
             return
-        # Bearer-token requests are CSRF-exempt by construction.
-        # An `Authorization` header is a CORS-restricted header,
-        # so cross-origin browsers can't add it without a preflight
-        # the attacker page can't satisfy. The downstream bearer
-        # middleware (bragi.contrib.api_tokens.auth) does the
-        # actual token verification; CSRF only needs to step out
-        # of the way when the request shape is API-like. The
-        # `g.api_csrf_exempt` flag exists for downstream code that
-        # wants to assert which path won.
-        if request.headers.get("Authorization", "").lower().startswith("bearer "):
-            g.api_csrf_exempt = True
+        # Bearer-token requests are CSRF-exempt by construction:
+        # an Authorization header doesn't ride cookies, and a
+        # cross-origin browser can't add it without a preflight
+        # the attacker page can't satisfy. BUT we only honour the
+        # exemption when the bearer middleware has VERIFIED the
+        # token (and set `g.api_csrf_exempt` in
+        # `bragi.contrib.api_tokens.auth`). Honouring it on raw
+        # header presence would let an attacker on a session-
+        # cookie request smuggle a junk `Authorization: bearer x`
+        # and bypass CSRF while still authenticating via the
+        # cookie.
+        if g.get("api_csrf_exempt"):
             return
 
         submitted = request.form.get(FORM_FIELD) or request.headers.get(HEADER_NAME) or ""

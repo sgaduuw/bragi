@@ -7,6 +7,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **CSRF exemption now requires a verified bearer token, not
+  just an `Authorization` header.** The previous logic skipped
+  CSRF whenever `Authorization: bearer …` appeared, on the
+  theory that the header is CORS-restricted. That holds for
+  cross-origin browsers, but a logged-in session POST with a
+  smuggled junk Authorization header (via a misconfigured CORS
+  proxy or any future middleware bug) would have bypassed CSRF
+  while still authenticating via the cookie. `csrf.py` now
+  gates exclusively on `g.api_csrf_exempt`, which
+  `bragi.contrib.api_tokens.auth` sets only after a successful
+  `verify()`. `register_csrf` moved to run after plugin
+  `on_app_init` so the bearer middleware's `before_request`
+  fires first.
 - **HTTP signature verifier hardened against scope downgrade,
   body tamper, and replay.** The fediverse inbox accepted any
   signature whose listed `headers=` covered only a subset of the

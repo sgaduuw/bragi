@@ -77,13 +77,16 @@ def create_admin_app() -> Flask:
     app.extensions["md_transforms"] = md_transforms
     app.extensions["html_transforms"] = html_transforms
 
-    # Core middleware: resolve Host -> Site, then enforce CSRF on
-    # unsafe methods. Both fire as before_request hooks; ordering
-    # follows registration order, so site_resolver runs first and
-    # the CSRF check sees the resolved site (not that it needs it,
-    # but the request shape is predictable downstream).
+    # Core middleware: resolve Host -> Site first. CSRF is
+    # registered AFTER plugin `on_app_init` (below) so the bearer
+    # middleware in `bragi.contrib.api_tokens` gets to set
+    # `g.api_csrf_exempt` before CSRF reads it. Flask runs
+    # before_request hooks in registration order; tying the
+    # exemption flag to verified-bearer-only means a request with
+    # `Authorization: bearer junk` can't bypass CSRF on a session-
+    # cookie POST. The bearer plugin uses `tryfirst=True` so its
+    # own `on_app_init` registers its hook ahead of others.
     register_site_resolver(app)
-    register_csrf(app)
 
     # Site-prefixed admin routes (`/admin/sites/<site_slug>/...`)
     # capture the slug as a URL converter. Stash it on `g` so the
@@ -123,6 +126,12 @@ def create_admin_app() -> Flask:
     app.cli.add_command(cms)
 
     pm.hook.on_app_init(app=app, registry=registry)
+
+    # CSRF guard: registered AFTER plugin on_app_init so the
+    # bearer middleware's before_request fires first and can set
+    # `g.api_csrf_exempt` on verified API requests. See the note
+    # above register_site_resolver.
+    register_csrf(app)
 
     # Collect plugin-contributed specs into the registry.
     for spec in pm.hook.register_content_type():
