@@ -53,6 +53,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **`cms backup` CLI: one-file DB + attachments tarball (#143).**
+  `flask --app bragi.apps.admin cms backup [--output PATH]`
+  runs `VACUUM INTO` against the SQLite DB (a consistent
+  snapshot that includes the WAL state with no -wal / -shm
+  companion files), then tars the snapshot plus the contents of
+  `Settings.attachments_root` into a `.tar.gz`. Default output
+  is `bragi-backup-YYYYMMDD-HHMMSS.tar.gz` in the CWD. No paired
+  `restore` subcommand on purpose: the documented restore step
+  is "extract the tarball, drop into a fresh deployment,
+  restart"; a CLI that overwrites live state is a big risk for
+  not much help.
 - **Auto-generated table of contents on multi-section posts
   (#142).** Posts whose rendered HTML carries two or more
   qualifying headings (h2 / h3 by default) now render an
