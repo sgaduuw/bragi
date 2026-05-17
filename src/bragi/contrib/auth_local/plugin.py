@@ -10,6 +10,7 @@ from bragi.api import AuthMethodSpec, hookimpl
 from bragi.contrib.auth_local.cli import user_group
 from bragi.contrib.auth_local.views import bp as auth_local_bp
 from bragi.contrib.auth_local.views import login as login_view
+from bragi.core.security import current_user
 
 # Endpoints that anonymous users may hit without being redirected
 # to /login. Includes Flask's `static` and the login/logout views
@@ -49,7 +50,13 @@ def _require_authentication() -> ResponseReturnValue | None:
     """
     if request.endpoint in PUBLIC_ENDPOINTS:
         return None
-    if "user_id" not in session:
+    # `current_user()` consults `g._cached_user` first, which the
+    # `bragi.contrib.api_tokens` bearer middleware populates on a
+    # successful token verify. So a bearer-authenticated request
+    # is accepted here without a session cookie. Sessioned users
+    # still resolve through the same call (current_user reads
+    # `session["user_id"]` when no g cache exists).
+    if current_user() is None:
         return redirect(url_for("auth_local.login", next=request.path))
     if session.get("must_change_password"):
         if request.endpoint in MUST_CHANGE_ALLOWED_ENDPOINTS:

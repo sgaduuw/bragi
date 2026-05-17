@@ -45,6 +45,11 @@ class AuditAction:
     TEAM_ROLE_CHANGED = "team.role_changed"
     TEAM_REVOKED = "team.revoked"
 
+    # Personal access tokens (#146)
+    TOKEN_CREATED = "token.created"
+    TOKEN_REVOKED = "token.revoked"
+    TOKEN_USED = "token.used"
+
 
 def audit(
     action: str,

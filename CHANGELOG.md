@@ -53,6 +53,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **API tokens for programmatic posting (#146).** New
+  `personal_access_tokens` table backs long-lived bearer
+  credentials in the format
+  `brg_<public_id>_<secret>` (public_id is a 22-char urlsafe
+  base64 of a uuid4; secret is 32 url-safe chars argon2id-hashed
+  at rest). The new `bragi.contrib.api_tokens` plugin installs a
+  `before_request` (with `tryfirst=True` so it runs ahead of the
+  session auth guard) that accepts
+  `Authorization: Bearer ...`, populates `g._cached_user` from
+  the token's owner, bumps `last_used_at`, and writes a
+  `token.used` audit row. CSRF middleware steps aside when an
+  `Authorization: Bearer` header is present (a CORS-restricted
+  header that cross-origin browser scripts can't add). Admin
+  pages at `/admin/account/tokens/` list / create / revoke
+  tokens (plaintext shown ONCE on create); a JSON REST surface at
+  `/admin/api/sites/<slug>/posts/` covers GET list, POST create
+  (201), PATCH update, and POST publish, scope-gated by
+  `post:write` on bearer requests. Token scopes are a JSON list;
+  `page:write` is reserved for a follow-up page REST surface.
+  Audit rows: `token.created`, `token.revoked`, `token.used`.
 - **`cms export` CLI: per-site Hugo-shaped corpus dump (#145).**
   `flask --app bragi.apps.admin cms export [--site SLUG] [--output DIR]`
   writes a Hugo content tree for each site: posts as

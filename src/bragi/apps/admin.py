@@ -140,9 +140,16 @@ def create_admin_app() -> Flask:
     for spec in pm.hook.register_theme():
         registry.add_theme(spec)
 
-    # Mount plugin-contributed Blueprints on the admin app.
-    for bp in pm.hook.register_admin_blueprint():
-        app.register_blueprint(bp)
+    # Mount plugin-contributed Blueprints on the admin app. A
+    # plugin may return either a single Blueprint or a list (some
+    # plugins, e.g. api_tokens, contribute multiple URL spaces
+    # with different prefixes).
+    for entry in pm.hook.register_admin_blueprint():
+        if isinstance(entry, list):
+            for bp in entry:
+                app.register_blueprint(bp)
+        else:
+            app.register_blueprint(entry)
 
     # Plumb CLI, Jinja, and transform registries through.
     pm.hook.register_cli_command(group=cms)

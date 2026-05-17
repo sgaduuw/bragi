@@ -222,10 +222,16 @@ def resolve_home(site: Any) -> Any:
 
 
 @hookspec
-def register_admin_blueprint() -> Blueprint:
-    """Return a Flask Blueprint to mount under the admin app.
-    Only fires on the admin app; the delivery app does not call
-    this hook.
+def register_admin_blueprint() -> Blueprint | list[Blueprint]:
+    """Return a Flask Blueprint (or a list of them) to mount under
+    the admin app. Only fires on the admin app; the delivery app
+    does not call this hook.
+
+    Most plugins return a single Blueprint. A plugin contributing
+    multiple URL spaces with different prefixes (e.g.
+    `bragi.contrib.api_tokens` exposing both a token-management
+    UI and a JSON REST surface) may return a list, which the
+    loader flattens.
     """
     ...
 

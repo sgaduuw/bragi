@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import secrets
 
-from flask import Flask, abort, request, session
+from flask import Flask, abort, g, request, session
 
 UNSAFE_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 SESSION_KEY = "_csrf_token"
@@ -65,6 +65,18 @@ def register_csrf(app: Flask) -> None:
         if request.method not in UNSAFE_METHODS:
             return
         if request.endpoint in app.config["CSRF_EXEMPT_ENDPOINTS"]:
+            return
+        # Bearer-token requests are CSRF-exempt by construction.
+        # An `Authorization` header is a CORS-restricted header,
+        # so cross-origin browsers can't add it without a preflight
+        # the attacker page can't satisfy. The downstream bearer
+        # middleware (bragi.contrib.api_tokens.auth) does the
+        # actual token verification; CSRF only needs to step out
+        # of the way when the request shape is API-like. The
+        # `g.api_csrf_exempt` flag exists for downstream code that
+        # wants to assert which path won.
+        if request.headers.get("Authorization", "").lower().startswith("bearer "):
+            g.api_csrf_exempt = True
             return
 
         submitted = request.form.get(FORM_FIELD) or request.headers.get(HEADER_NAME) or ""
