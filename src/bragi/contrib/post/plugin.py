@@ -28,6 +28,7 @@ from bragi.api import ContentTypeSpec, FieldSpec, InternalLinkResolution, NavIte
 from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.contrib.post.cli import scheduled_publish
 from bragi.contrib.post.delivery import bp as post_templates_bp
+from bragi.contrib.post.related import related_posts_count_for, related_posts_for
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
@@ -124,12 +125,19 @@ def _render_post(post: Any, _request: Any) -> str:
     )
     author_name: str | None = None
     author_bio: str | None = None
-    if post.author_id:
-        with SessionLocal() as db:
+    related: list[Post] = []
+    with SessionLocal() as db:
+        if post.author_id:
             author = db.get(User, post.author_id)
             if author is not None:
                 author_name = author.display_name
                 author_bio = author.bio
+        if site is not None:
+            related = related_posts_for(db, post, limit=related_posts_count_for(site))
+            # Expunge so the template can read attributes after the
+            # session closes without a DetachedInstance issue.
+            for r in related:
+                db.expunge(r)
     # "Updated" only renders when the edit is meaningfully after
     # first publish (see UPDATED_MIN_DELTA). Suppresses noise for
     # trivial typo fixes minutes after a post goes live.
@@ -150,6 +158,7 @@ def _render_post(post: Any, _request: Any) -> str:
         canonical_url=canonical,
         noindex=post.noindex,
         og_image_url=og_image_url_for(item=post, site=site),
+        related_posts=related,
     )
 
 
