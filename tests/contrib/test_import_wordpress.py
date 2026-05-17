@@ -17,6 +17,7 @@ from bragi.core.models.redirect import Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
+from tests.conftest import seed_blog_index
 
 # ============================================================
 # fixture builder
@@ -198,7 +199,11 @@ def test_plan_warns_on_shortcodes_and_comments(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def site_id(db_session: Session) -> Iterator[int]:
+def site_id(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[int]:
     # Importer needs at least one user as the fallback author. The
     # first user doubles as the site owner.
     ada = User(email="ada@example.com", display_name="Ada", is_active=True)
@@ -214,6 +219,14 @@ def site_id(db_session: Session) -> Iterator[int]:
     )
     db_session.add(site)
     db_session.commit()
+    # Importer redirect targets now resolve through `post_url_for`
+    # / `page_url_for`; both need the site to carry a POST_INDEX
+    # page. Seed `slug="posts"` so existing `/posts/<slug>/`
+    # assertions in this file keep matching. Also patch the url
+    # helper's SessionLocal so it hits the same in-memory DB the
+    # test session writes to.
+    seed_blog_index(db_session, site, slug="posts")
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id
 
 
@@ -300,11 +313,16 @@ def test_apply_inserts_permalink_redirects(
         tmp_path,
         [
             _item(post_id="1", slug="alpha", link="https://blog.example.com/2024/05/alpha/"),
+            # WP served this page at `/wp/about-us/`; bragi serves
+            # it at `/about/`. The slug differs from the legacy
+            # path so a 301 is needed; if they matched, no row
+            # would be emitted (a no-op same-path redirect is
+            # useless and `_maybe_emit_redirect` skips it).
             _item(
                 post_id="2",
                 slug="about",
                 post_type="page",
-                link="https://blog.example.com/about/",
+                link="https://blog.example.com/wp/about-us/",
             ),
         ],
     )
@@ -314,8 +332,11 @@ def test_apply_inserts_permalink_redirects(
     with db_session_factory() as db:
         rows = db.execute(select(Redirect)).scalars().all()
     by_source = {r.source_path: r for r in rows}
+    # Posts resolve via the site's post_index page (seeded as
+    # `slug="posts"` by the fixture); pages via the canonical
+    # page URL (`/about/` for a root page).
     assert by_source["/2024/05/alpha/"].target == "/posts/alpha/"
-    assert by_source["/about/"].target == "/pages/about/"
+    assert by_source["/wp/about-us/"].target == "/about/"
     for r in rows:
         assert r.source == RedirectSource.IMPORT_WORDPRESS
         assert r.status_code == 301
@@ -351,7 +372,10 @@ def test_apply_is_idempotent_via_source_id(
 
     with db_session_factory() as db:
         post = db.execute(select(Post)).scalar_one()
-        page = db.execute(select(Page)).scalar_one()
+        # `select(Page)` returns both the imported page AND the
+        # POST_INDEX page the fixture seeds. Filter to the
+        # imported "about" page so the test reads what it claims.
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
     assert post.title == "Alpha v2"
     assert page.title == "About v2"
 

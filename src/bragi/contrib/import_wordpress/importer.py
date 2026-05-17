@@ -9,8 +9,11 @@ syntax that didn't survive the import.
 URL preservation: each item's `<link>` is the rendered permalink
 (respecting whatever permalink structure the source WP install
 used). On apply, every published post / page gets a redirect row
-from that legacy path to bragi's `/posts/<slug>/` or
-`/pages/<slug>/`.
+from that legacy path to bragi's canonical URL for the row, which
+is `post_url_for(site, post.slug)` for posts (driven by the
+target site's post_index page, so `/blog/<slug>/` on a default
+new site, `/posts/<slug>/` on a migrated v1.10.x site, ...) and
+`page_url_for(page)` for pages (built from the parent chain).
 
 Categories and tags both land in `Tag`. WordPress treats them as
 separate taxonomies; bragi has only tags. Categories get a
@@ -44,6 +47,7 @@ from bragi.core.models.redirect import Redirect, RedirectSource
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
 from bragi.core.render.markdown import make_excerpt, render_markdown
+from bragi.core.url import page_url_for, post_url_for
 
 # `[shortcode_name attr="value"]inner[/shortcode_name]` and the
 # self-closing form. WP shortcodes are alphanumeric + underscores.
@@ -485,9 +489,15 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 posts_created += 1
             else:
                 posts_updated += 1
+            # Hardcoding `/posts/<slug>/` would 404 on any site
+            # whose post_index isn't named "posts". Resolve through
+            # `post_url_for` so the redirect targets the URL the
+            # delivery app will actually serve.
             if post.status == PostStatus.PUBLISHED:
-                target = f"/posts/{post.slug}/"
-                if _maybe_emit_redirect(db, site_id, _link_path(item["link"]), target):
+                target = post_url_for(site, post.slug, db=db)
+                if target is not None and _maybe_emit_redirect(
+                    db, site_id, _link_path(item["link"]), target
+                ):
                     redirects_inserted += 1
 
         # Pages: process parents before children so parent_id resolves.
@@ -507,9 +517,17 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 pages_created += 1
             else:
                 pages_updated += 1
+            # Pages are accessible at the canonical URL the
+            # delivery page resolver constructs from the page's
+            # parent chain (`/about/` for a root page,
+            # `/about/team/` for a child). Hardcoded `/pages/<slug>/`
+            # was always wrong; even with the previous URL space
+            # there was no `/pages/` prefix.
             if page.status == PageStatus.PUBLISHED:
-                target = f"/pages/{page.slug}/"
-                if _maybe_emit_redirect(db, site_id, _link_path(item["link"]), target):
+                target = page_url_for(page, db=db)
+                if target is not None and _maybe_emit_redirect(
+                    db, site_id, _link_path(item["link"]), target
+                ):
                     redirects_inserted += 1
 
         db.commit()
