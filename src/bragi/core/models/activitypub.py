@@ -41,7 +41,9 @@ class SiteKeypair(TimestampsMixin, Base):
     # PK = site_id: exactly one keypair per site. The actor
     # document advertises this site's public key; rotating means
     # bumping `key_id` and rewriting both columns.
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), primary_key=True)
+    site_id: Mapped[int] = mapped_column(
+        ForeignKey("sites.id", ondelete="CASCADE"), primary_key=True
+    )
     # PEM-encoded RSA private key. Stored at-rest in the DB; in
     # production an operator who wants to keep keys out of the DB
     # can swap the storage layer behind `keypair_for()`. v1 keeps
@@ -58,7 +60,7 @@ class ActivityPubFollower(IdMixin, TimestampsMixin, Base):
     __tablename__ = "activitypub_followers"
     __table_args__ = (UniqueConstraint("site_id", "actor_url", name="uq_apfollower_site_actor"),)
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     actor_url: Mapped[str] = mapped_column(String(2048))
     inbox_url: Mapped[str] = mapped_column(String(2048))
     # Shared inbox URL when the remote actor advertises one;
@@ -72,10 +74,14 @@ class ActivityPubFollower(IdMixin, TimestampsMixin, Base):
 class ActivityPubOutbox(IdMixin, TimestampsMixin, Base):
     __tablename__ = "activitypub_outbox"
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
-    post_id: Mapped[int | None] = mapped_column(ForeignKey("posts.id"), default=None, index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    post_id: Mapped[int | None] = mapped_column(
+        ForeignKey("posts.id", ondelete="CASCADE"), default=None, index=True
+    )
     follower_id: Mapped[int | None] = mapped_column(
-        ForeignKey("activitypub_followers.id"), default=None, index=True
+        ForeignKey("activitypub_followers.id", ondelete="CASCADE"),
+        default=None,
+        index=True,
     )
     # JSON of the activity to deliver (Create + Note, Delete,
     # Update, ...). Serialised at queue time so the sender just
