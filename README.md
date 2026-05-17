@@ -199,6 +199,14 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   bootstrapped with `cms indexnow setup --site <slug>`; the
   verification key file lives at `/<key>.txt` on the delivery
   app.
+- **Programmatic posting via API tokens.** Personal access
+  tokens at `/admin/account/tokens/` (list / create / revoke;
+  plaintext shown once on create) authenticate scripts and bots
+  via `Authorization: Bearer brg_<id>_<secret>`. The JSON REST
+  surface at `/admin/api/sites/<slug>/posts/` covers GET list,
+  POST create, PATCH update, and POST publish, scope-gated by
+  `post:write`. Argon2id-hashed at rest; expiry honoured; every
+  use recorded in the audit log.
 
 ## What bragi is not
 

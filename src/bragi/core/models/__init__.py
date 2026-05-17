@@ -19,6 +19,7 @@ from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.page_revision import PageRevision
+from bragi.core.models.personal_access_token import PersonalAccessToken, TokenScope
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
@@ -41,6 +42,7 @@ __all__ = [
     "Page",
     "PageRevision",
     "PageStatus",
+    "PersonalAccessToken",
     "Post",
     "PostRevision",
     "PostStatus",
@@ -51,6 +53,7 @@ __all__ = [
     "Site",
     "SiteAlias",
     "Tag",
+    "TokenScope",
     "User",
     "UserIdentity",
     "UserSiteRole",

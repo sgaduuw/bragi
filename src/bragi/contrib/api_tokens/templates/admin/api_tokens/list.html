@@ -1,0 +1,72 @@
+{% extends "admin/base.html" %}
+{% block title %}API tokens &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>API tokens</h1>
+<p>Personal access tokens authenticate scripts and bots. Use them with the <code>Authorization: Bearer ...</code> header on any admin endpoint or the JSON REST surface at <code>/admin/api/sites/&lt;slug&gt;/posts/</code>.</p>
+
+<section style="margin-top: 2rem;">
+  <h2>Create a token</h2>
+  <form method="post" action="{{ url_for('api_tokens_admin.create_token') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <p>
+      <label>Name<br>
+        <input type="text" name="name" required maxlength="100" placeholder="blog-bot">
+      </label>
+    </p>
+    <fieldset style="border: 1px solid #ddd; padding: 0.75rem;">
+      <legend>Scopes</legend>
+      {% for value, label in scopes %}
+      <p>
+        <label>
+          <input type="checkbox" name="scopes" value="{{ value }}">
+          <strong>{{ value }}</strong>: {{ label }}
+        </label>
+      </p>
+      {% endfor %}
+    </fieldset>
+    <p>
+      <label>Expires in (days)<br>
+        <input type="number" name="expires_in_days" min="1" placeholder="never">
+      </label>
+    </p>
+    <p><button type="submit" class="btn">Create token</button></p>
+  </form>
+</section>
+
+<section style="margin-top: 2rem;">
+  <h2>Active tokens ({{ tokens | length }})</h2>
+  {% if not tokens %}
+  <p><em>No tokens yet.</em></p>
+  {% else %}
+  <table style="width: 100%; border-collapse: collapse;">
+    <thead>
+      <tr>
+        <th style="text-align: left;">Name</th>
+        <th style="text-align: left;">Scopes</th>
+        <th style="text-align: left;">Created</th>
+        <th style="text-align: left;">Last used</th>
+        <th style="text-align: left;">Expires</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tok in tokens %}
+      <tr>
+        <td>{{ tok.name }}<br><code style="font-size: 0.8em; color: #666;">brg_{{ tok.public_id }}_...</code></td>
+        <td>{{ tok.scopes | join(', ') or 'none' }}</td>
+        <td>{{ tok.created_at or '-' }}</td>
+        <td>{{ tok.last_used_at or 'never' }}</td>
+        <td>{{ tok.expires_at or 'never' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('api_tokens_admin.revoke_token', token_id=tok.id) }}" style="display: inline;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn danger" onclick="return confirm('Revoke {{ tok.name }}?');">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}
