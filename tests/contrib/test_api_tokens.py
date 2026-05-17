@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from flask import Flask
@@ -372,3 +373,151 @@ def test_created_post_author_id_is_token_owner(
     db_session.rollback()
     post = db_session.execute(select(Post).where(Post.slug == "owned")).scalar_one()
     assert post.author_id == user_id
+
+
+# --------------------------- lifecycle hooks ---------------------------
+#
+# Without the on_post_* hook dispatch the API would silently bypass
+# every plugin that listens for post lifecycle events: AP fanout,
+# webmention sender, sitemap rebuild, the redirects plugin's slug-
+# change auto-301. These tests pin that the API now fires the same
+# hooks the admin Blueprint does.
+
+
+def test_api_create_published_fires_post_published(
+    admin_app: Flask, client: FlaskClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    captured: list[dict[str, Any]] = []
+
+    def _record(**kwargs: Any) -> None:
+        captured.append(kwargs)
+
+    pm = admin_app.extensions["plugin_manager"]
+    monkeypatch.setattr(pm.hook, "on_post_published", _record)
+
+    resp = client.post(
+        "/admin/api/sites/blog/posts/",
+        json={
+            "slug": "first-published",
+            "title": "Published On Create",
+            "body_markdown": "hi",
+            "status": PostStatus.PUBLISHED,
+        },
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201
+    assert len(captured) == 1
+    assert captured[0]["item"].slug == "first-published"
+
+
+def test_api_create_draft_does_not_fire_post_published(
+    admin_app: Flask, client: FlaskClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    captured: list[dict[str, Any]] = []
+    pm = admin_app.extensions["plugin_manager"]
+    monkeypatch.setattr(pm.hook, "on_post_published", lambda **kw: captured.append(kw))
+
+    resp = client.post(
+        "/admin/api/sites/blog/posts/",
+        json={"slug": "still-draft", "title": "D", "body_markdown": "x"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 201
+    assert captured == []
+
+
+def test_api_patch_fires_on_post_updated(
+    admin_app: Flask, client: FlaskClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    created = client.post(
+        "/admin/api/sites/blog/posts/",
+        json={"slug": "to-rename", "title": "X", "body_markdown": "x"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    ).get_json()
+    post_id = created["post"]["id"]
+
+    captured: list[dict[str, Any]] = []
+    pm = admin_app.extensions["plugin_manager"]
+    monkeypatch.setattr(pm.hook, "on_post_updated", lambda **kw: captured.append(kw))
+
+    client.patch(
+        f"/admin/api/sites/blog/posts/{post_id}/",
+        json={"slug": "renamed"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert len(captured) == 1
+    assert captured[0]["before"]["slug"] == "to-rename"
+    assert captured[0]["after"]["slug"] == "renamed"
+
+
+def test_api_publish_endpoint_fires_post_published_first_time_only(
+    admin_app: Flask, client: FlaskClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    created = client.post(
+        "/admin/api/sites/blog/posts/",
+        json={"slug": "to-publish", "title": "Y", "body_markdown": "x"},
+        headers={"Authorization": f"Bearer {plaintext}"},
+    ).get_json()
+    post_id = created["post"]["id"]
+
+    captured: list[dict[str, Any]] = []
+    pm = admin_app.extensions["plugin_manager"]
+    monkeypatch.setattr(pm.hook, "on_post_published", lambda **kw: captured.append(kw))
+
+    # First publish: fires.
+    client.post(
+        f"/admin/api/sites/blog/posts/{post_id}/publish",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert len(captured) == 1
+
+    # Re-publish on an already-PUBLISHED post is a no-op for
+    # subscribers (we'd otherwise re-fan to AP followers and
+    # re-send webmentions on every accidental POST).
+    client.post(
+        f"/admin/api/sites/blog/posts/{post_id}/publish",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert len(captured) == 1
+
+
+def test_api_list_paginates(admin_app: Flask, client: FlaskClient, db_session: Session) -> None:
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    for i in range(7):
+        client.post(
+            "/admin/api/sites/blog/posts/",
+            json={"slug": f"p{i}", "title": f"P{i}", "body_markdown": "x"},
+            headers={"Authorization": f"Bearer {plaintext}"},
+        )
+
+    listing = client.get(
+        "/admin/api/sites/blog/posts/?limit=3&offset=0",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert listing.status_code == 200
+    body = listing.get_json()
+    assert len(body["posts"]) == 3
+    assert body["total"] == 7
+    assert body["limit"] == 3
+    assert body["offset"] == 0
+
+
+def test_api_list_bad_pagination_400(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    resp = client.get(
+        "/admin/api/sites/blog/posts/?limit=0",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert resp.status_code == 400
