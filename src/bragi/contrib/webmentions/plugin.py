@@ -19,12 +19,14 @@ import click
 import jinja2
 from flask import Blueprint, has_request_context, request
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from bragi.api import NavItem, hookimpl
 from bragi.contrib.webmentions.admin import bp as admin_bp
 from bragi.contrib.webmentions.cli import webmentions_group
 from bragi.contrib.webmentions.parse import extract_links, is_external
 from bragi.contrib.webmentions.receiver import bp as receiver_bp
+from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
 from bragi.core.models.webmention import (
@@ -87,28 +89,37 @@ def _webmention_endpoint_url() -> str | None:
 
 
 def _approved_webmentions_for_post(post: Any) -> list[Webmention]:
-    """Approved + verified rows pointing at this post, oldest first."""
+    """Approved + verified rows pointing at this post, oldest first.
+
+    Defensive on the DB call: an operator running an older
+    deployment that hasn't applied the webmentions migration
+    yet (or a test fixture that doesn't patch SessionLocal for
+    this plugin) should not 500 the post page. Missing-table
+    and similar SQL errors degrade to "no mentions" silently.
+    """
     if post is None:
         return []
     post_id = getattr(post, "id", None)
     if not isinstance(post_id, int):
         return []
-    from bragi.core.db import SessionLocal
-
-    with SessionLocal() as db:
-        rows = list(
-            db.execute(
-                select(Webmention)
-                .where(
-                    Webmention.post_id == post_id,
-                    Webmention.approved.is_(True),
-                    Webmention.status == WebmentionStatus.VERIFIED,
-                )
-                .order_by(Webmention.verified_at.asc().nulls_last(), Webmention.id.asc())
-            ).scalars()
-        )
-        for r in rows:
-            db.expunge(r)
+    try:
+        with SessionLocal() as db:
+            rows = list(
+                db.execute(
+                    select(Webmention)
+                    .where(
+                        Webmention.post_id == post_id,
+                        Webmention.approved.is_(True),
+                        Webmention.status == WebmentionStatus.VERIFIED,
+                    )
+                    .order_by(Webmention.verified_at.asc().nulls_last(), Webmention.id.asc())
+                ).scalars()
+            )
+            for r in rows:
+                db.expunge(r)
+    except SQLAlchemyError as exc:
+        LOG.warning("webmentions_for_post lookup failed: %s", exc)
+        return []
     return rows
 
 
