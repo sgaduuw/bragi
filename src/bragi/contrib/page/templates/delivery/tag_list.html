@@ -1,5 +1,9 @@
 {% extends "delivery/base.html" %}
 {% block title %}Posts tagged "{{ tag.label }}" &middot; {{ site.title }}{% endblock %}
+{% block feed_links %}
+  {% if site %}<link rel="alternate" type="application/atom+xml" title="{{ site.title }}" href="/feed.xml">{% endif %}
+  {% if tag_feed_url %}<link rel="alternate" type="application/atom+xml" title="{{ site.title }} - posts tagged &quot;{{ tag.label }}&quot;" href="{{ tag_feed_url }}feed.xml">{% endif %}
+{% endblock %}
 {% block content %}
 <h1>Posts tagged &ldquo;{{ tag.label }}&rdquo;</h1>
 {% if posts %}

@@ -49,12 +49,14 @@ from werkzeug.wrappers import Response
 
 from bragi.core.cache import attach_validators, etag_for, maybe_304
 from bragi.core.db import SessionLocal
+from bragi.core.feed import build_atom_feed
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
+from bragi.core.models.user import User
 from bragi.core.seo import og_image_url_for
-from bragi.core.url import page_url_for, post_index_page_for, tag_segment_for
+from bragi.core.url import page_url_for, post_index_page_for, tag_segment_for, tag_url_for
 
 DEFAULT_POSTS_PER_PAGE = 10
 
@@ -253,8 +255,67 @@ def render_tag(site: Site, tag_slug: str) -> Response | None:
             .scalars()
             .all()
         )
-        body = render_template("delivery/tag_list.html", site=site, tag=tag, posts=posts)
+        body = render_template(
+            "delivery/tag_list.html",
+            site=site,
+            tag=tag,
+            posts=posts,
+            tag_feed_url=tag_url_for(site, tag.slug),
+        )
         return cast(Response, make_response(body))
+
+
+TAG_FEED_ENTRY_LIMIT = 50
+
+
+def render_tag_feed(site: Site, tag_slug: str) -> Response | None:
+    """Atom 1.0 feed for posts tagged with `tag_slug` on `site`.
+
+    Same envelope / entry shape as the site-wide `/feed.xml`, just
+    filtered by tag. Returns None when no Tag with `tag_slug`
+    exists; the dispatcher converts that to a 404.
+    """
+    base = (site.canonical_url or "").rstrip("/")
+    with SessionLocal() as db:
+        tag = db.execute(
+            select(Tag).where(Tag.site_id == site.id, Tag.slug == tag_slug)
+        ).scalar_one_or_none()
+        if tag is None:
+            return None
+        posts = (
+            db.execute(
+                select(Post)
+                .where(
+                    Post.site_id == site.id,
+                    Post.status == PostStatus.PUBLISHED,
+                    Post.tags.any(Tag.id == tag.id),
+                )
+                .order_by(Post.published_at.desc())
+                .limit(TAG_FEED_ENTRY_LIMIT)
+            )
+            .scalars()
+            .all()
+        )
+        author_ids = {p.author_id for p in posts if p.author_id is not None}
+        authors_by_id: dict[int, str] = {}
+        if author_ids:
+            for u in db.execute(select(User).where(User.id.in_(author_ids))).scalars():
+                authors_by_id[u.id] = u.display_name
+
+    tag_path = tag_url_for(site, tag.slug) or "/"
+    alternate_url = f"{base}{tag_path}"
+    body = build_atom_feed(
+        site,
+        list(posts),
+        authors_by_id,
+        title=f"{site.title} - posts tagged {tag.label!r}",
+        self_url=f"{alternate_url}feed.xml",
+        alternate_url=alternate_url,
+        feed_id=alternate_url,
+    )
+    response = make_response(body)
+    response.mimetype = "application/atom+xml"
+    return response
 
 
 # ============================================================
@@ -330,6 +391,14 @@ def show_page(slug_path: str) -> ResponseReturnValue:
     tag_segment = tag_segment_for(site)
     if len(remainder) == 2 and remainder[0] == tag_segment:
         response = render_tag(site, remainder[1])
+        if response is None:
+            abort(404)
+        return response
+
+    # 4b. Per-tag Atom feed:
+    #     `<index>/<tag-segment>/<tag-slug>/feed.xml` (#140).
+    if len(remainder) == 3 and remainder[0] == tag_segment and remainder[2] == "feed.xml":
+        response = render_tag_feed(site, remainder[1])
         if response is None:
             abort(404)
         return response
