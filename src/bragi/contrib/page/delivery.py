@@ -47,6 +47,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from werkzeug.wrappers import Response
 
+from bragi.contrib.page.archive import (
+    render_archive_index,
+    render_archive_month,
+    render_archive_year,
+)
 from bragi.core.cache import attach_validators, etag_for, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.feed import build_atom_feed
@@ -402,6 +407,27 @@ def show_page(slug_path: str) -> ResponseReturnValue:
         if response is None:
             abort(404)
         return response
+
+    # 4c. Chronological archive (#144).
+    #     `<index>/archive/` / `<index>/archive/<year>/`
+    #     / `<index>/archive/<year>/<month>/`.
+    if remainder and remainder[0] == "archive":
+        if len(remainder) == 1:
+            return render_archive_index(site)
+        if len(remainder) == 2:
+            try:
+                year = int(remainder[1])
+            except ValueError:
+                abort(404)
+            return render_archive_year(site, year)
+        if len(remainder) == 3:
+            try:
+                year = int(remainder[1])
+                month = int(remainder[2])
+            except ValueError:
+                abort(404)
+            return render_archive_month(site, year, month)
+        abort(404)
 
     # 5. Single-segment post: `<index>/<post-slug>/`.
     if len(remainder) == 1:

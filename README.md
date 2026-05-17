@@ -157,6 +157,12 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   ties"); rendered as a "You may also like" aside under the body.
   Per-site count override via `Site.extra_settings["related_posts_count"]`
   (default 3); zero-tag posts render no aside.
+- **Chronological archive.** `<post_index>/archive/` lists years
+  with counts (newest first); drilling in shows months for that
+  year, then posts in that month (oldest first, journal-style).
+  Drafts are excluded; out-of-range or empty buckets 404. Each
+  level carries the standard `ETag` + `Last-Modified` validators
+  so feed readers and crawlers get cheap 304s.
 - **Plugin-extensible from day one.** Built-ins (Post, Page,
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties

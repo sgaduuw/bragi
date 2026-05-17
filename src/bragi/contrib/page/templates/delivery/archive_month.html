@@ -1,0 +1,20 @@
+{% extends "delivery/base.html" %}
+{% block title %}Archive {{ year }}-{{ '%02d' % month }} &middot; {{ site.title }}{% endblock %}
+{% set month_names = ['January','February','March','April','May','June','July','August','September','October','November','December'] %}
+{% block content %}
+<h1>{{ month_names[month - 1] }} {{ year }}</h1>
+<p><a href="../">&larr; {{ year }}</a></p>
+<ul class="archive-posts">
+  {% for post in posts %}
+  <li>
+    <a href="{{ url_for_post(post) }}">{{ post.title }}</a>
+    {% if post.published_at %}
+    <time datetime="{{ post.published_at.isoformat() }}" class="meta">
+      {{ post.published_at.strftime('%Y-%m-%d') }}
+    </time>
+    {% endif %}
+    {% if post.body_excerpt %}<p class="excerpt">{{ post.body_excerpt }}</p>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

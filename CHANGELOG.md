@@ -53,6 +53,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Chronological archive at `<post_index>/archive/` (#144).** Three
+  levels, each rendering a flat list of the next level's counts:
+  the archive index shows years (descending) with post counts; a
+  year page shows months (January through December) with counts;
+  a month page shows the posts published in that bucket in
+  chronological order (oldest first, journal-style). Drafts are
+  excluded from counts and listings. Out-of-range months
+  (`13`/`00`), non-integer segments, and empty buckets all 404.
+  Each level attaches the standard `ETag` + `Last-Modified`
+  validators (the per-row `updated_at` folds into `Last-Modified`;
+  a sentinel `ARCHIVE_ETAG_VERSION` lets a future markup change
+  bust caches without waiting for content edits). Routes are
+  peeled by the page plugin's catch-all dispatcher, so the URL
+  prefix follows whatever `post_index` page the site has
+  configured. Lives in `bragi.contrib.page.archive` next to the
+  other post-index renderers.
 - **`cms backup` CLI: one-file DB + attachments tarball (#143).**
   `flask --app bragi.apps.admin cms backup [--output PATH]`
   runs `VACUUM INTO` against the SQLite DB (a consistent
