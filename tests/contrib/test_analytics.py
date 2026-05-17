@@ -20,7 +20,7 @@ from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.useragent import classify
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, seed_blog_index
 
 # ============================================================
 # UA classifier
@@ -92,6 +92,7 @@ def delivery_app(
     )
     db_session.add(site)
     db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
     db_session.add(
         Post(
             site_id=site.id,

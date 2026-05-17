@@ -20,6 +20,7 @@ from bragi.apps.delivery import create_delivery_app
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from tests.conftest import seed_blog_index
 
 _JSONLD_RE = re.compile(
     r'<script type="application/ld\+json">(.*?)</script>',
@@ -45,6 +46,7 @@ def delivery_app(
     )
     db_session.add(site)
     db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
 
     db_session.add(
         Post(
@@ -63,9 +65,12 @@ def delivery_app(
     db_session.commit()
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.plugin.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.page.plugin.SessionLocal", db_session_factory)
 
     yield create_delivery_app()
 

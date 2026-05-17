@@ -1,8 +1,15 @@
-"""Tests for the per-site landing page Blueprint at `/`.
+"""Tests for the post listing rendered by a POST_INDEX page.
 
-Covers the published-only filter, multisite isolation, pagination
-clamps, the empty-site path, and the `posts_per_page` knob from
-`Site.extra_settings`.
+The site's POST_INDEX page hosts the blog: its URL is where the
+paginated recent-posts listing renders, and individual post URLs
+derive from it. These tests hit the seeded `/posts/` POST_INDEX
+page directly; the "blog at /" behaviour from before the
+page-as-blog refactor is gone (now `/` is governed by
+`home_page_id` and the welcome stub fallback).
+
+Covers published-only filtering, multisite isolation, pagination
+clamps, empty-state copy, the `posts_per_page` knob, and the
+conditional-GET / ETag headers.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ from bragi.apps.delivery import create_delivery_app
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from tests.conftest import seed_blog_index
 
 
 @pytest.fixture
@@ -27,7 +35,7 @@ def delivery_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
-    """Delivery app with two sites:
+    """Delivery app with three sites, each with a POST_INDEX at /posts/:
 
     - blog.example.com: 12 published posts (recency-staggered),
       1 draft, 1 archived, 1 scheduled. `posts_per_page` = 5.
@@ -62,6 +70,9 @@ def delivery_app(
     )
     db_session.add_all([site, other_site, empty_site])
     db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
+    seed_blog_index(db_session, other_site, commit=False)
+    seed_blog_index(db_session, empty_site, commit=False)
 
     base = datetime(2026, 5, 1, tzinfo=UTC)
     for i in range(12):
@@ -138,29 +149,29 @@ def delivery_app(
     yield create_delivery_app()
 
 
+# The POST_INDEX page seeded by `seed_blog_index` has slug
+# "posts", so the listing URL is `/posts/`.
+
+
 def test_index_lists_published_posts_recency_desc(delivery_app: Flask) -> None:
-    """`/` returns published posts, newest first, up to per_page."""
+    """`/posts/` returns published posts, newest first, up to per_page."""
     client = delivery_app.test_client()
-    resp = client.get("/", headers={"Host": "blog.example.com"})
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     body = resp.data.decode()
     # Page 1: 5 newest of 12 are Published 11..07.
     for i in range(7, 12):
         assert f"Published {i:02d}" in body
-    # Older posts not on page 1
     assert "Published 06" not in body
-    # Excerpt rendered
     assert "excerpt-11" in body
-    # Recency ordering: Published 11 must appear before Published 07
     assert body.index("Published 11") < body.index("Published 07")
 
 
 def test_index_excludes_non_published(delivery_app: Flask) -> None:
     """Drafts, scheduled, archived posts never appear on the index."""
     client = delivery_app.test_client()
-    # Walk every page so we don't miss a leak on a later page.
     for page in (1, 2, 3):
-        resp = client.get(f"/?page={page}", headers={"Host": "blog.example.com"})
+        resp = client.get(f"/posts/?page={page}", headers={"Host": "blog.example.com"})
         body = resp.data.decode()
         assert "Drafted" not in body
         assert "Archived" not in body
@@ -170,78 +181,76 @@ def test_index_excludes_non_published(delivery_app: Flask) -> None:
 def test_index_multisite_isolation(delivery_app: Flask) -> None:
     """Posts from one site do not leak into another site's index."""
     client = delivery_app.test_client()
-    resp = client.get("/", headers={"Host": "blog.example.com"})
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
     assert "Cross-Site Leak Canary" not in resp.data.decode()
 
-    resp = client.get("/", headers={"Host": "other.example.com"})
+    resp = client.get("/posts/", headers={"Host": "other.example.com"})
     body = resp.data.decode()
     assert "Cross-Site Leak Canary" in body
     assert "Published 11" not in body
 
 
 def test_index_pagination_links(delivery_app: Flask) -> None:
-    """First page has a Next link only; middle has both; last has Prev only."""
+    """First page has Next only; middle has both; last has Prev only."""
     client = delivery_app.test_client()
 
-    p1 = client.get("/", headers={"Host": "blog.example.com"}).data.decode()
+    p1 = client.get("/posts/", headers={"Host": "blog.example.com"}).data.decode()
     assert "Older" in p1
     assert "Newer" not in p1
 
-    p2 = client.get("/?page=2", headers={"Host": "blog.example.com"}).data.decode()
+    p2 = client.get("/posts/?page=2", headers={"Host": "blog.example.com"}).data.decode()
     assert "Newer" in p2
     assert "Older" in p2
 
-    # 12 posts / 5 per page → 3 pages
-    p3 = client.get("/?page=3", headers={"Host": "blog.example.com"}).data.decode()
+    p3 = client.get("/posts/?page=3", headers={"Host": "blog.example.com"}).data.decode()
     assert "Newer" in p3
     assert "Older" not in p3
 
 
 def test_index_page_beyond_last_404s(delivery_app: Flask) -> None:
     client = delivery_app.test_client()
-    resp = client.get("/?page=99", headers={"Host": "blog.example.com"})
+    resp = client.get("/posts/?page=99", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
 
 
 def test_index_non_positive_page_404s(delivery_app: Flask) -> None:
     client = delivery_app.test_client()
-    assert client.get("/?page=0", headers={"Host": "blog.example.com"}).status_code == 404
-    assert client.get("/?page=-1", headers={"Host": "blog.example.com"}).status_code == 404
+    assert client.get("/posts/?page=0", headers={"Host": "blog.example.com"}).status_code == 404
+    assert client.get("/posts/?page=-1", headers={"Host": "blog.example.com"}).status_code == 404
 
 
 def test_index_non_integer_page_404s(delivery_app: Flask) -> None:
     client = delivery_app.test_client()
-    resp = client.get("/?page=abc", headers={"Host": "blog.example.com"})
+    resp = client.get("/posts/?page=abc", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
 
 
 def test_index_empty_site_renders_empty_state(delivery_app: Flask) -> None:
     """An empty site returns 200 with empty-state copy, not 404."""
     client = delivery_app.test_client()
-    resp = client.get("/", headers={"Host": "empty.example.com"})
+    resp = client.get("/posts/", headers={"Host": "empty.example.com"})
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "No posts yet" in body
-    # Empty site has no pagination chrome.
     assert "Page 1 of" not in body
 
 
 def test_index_empty_site_page_2_404s(delivery_app: Flask) -> None:
     client = delivery_app.test_client()
-    resp = client.get("/?page=2", headers={"Host": "empty.example.com"})
+    resp = client.get("/posts/?page=2", headers={"Host": "empty.example.com"})
     assert resp.status_code == 404
 
 
 def test_index_unknown_host_404s(delivery_app: Flask) -> None:
     """No resolved site -> 404 (site_resolver leaves g.site None)."""
     client = delivery_app.test_client()
-    resp = client.get("/", headers={"Host": "nope.example.com"})
+    resp = client.get("/posts/", headers={"Host": "nope.example.com"})
     assert resp.status_code == 404
 
 
 def test_index_sets_etag_and_last_modified(delivery_app: Flask) -> None:
     client = delivery_app.test_client()
-    resp = client.get("/", headers={"Host": "blog.example.com"})
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert resp.headers.get("ETag", "").startswith("W/")
     assert "Last-Modified" in resp.headers
@@ -249,10 +258,10 @@ def test_index_sets_etag_and_last_modified(delivery_app: Flask) -> None:
 
 def test_index_conditional_get_returns_304(delivery_app: Flask) -> None:
     client = delivery_app.test_client()
-    first = client.get("/", headers={"Host": "blog.example.com"})
+    first = client.get("/posts/", headers={"Host": "blog.example.com"})
     etag = first.headers["ETag"]
     second = client.get(
-        "/",
+        "/posts/",
         headers={"Host": "blog.example.com", "If-None-Match": etag},
     )
     assert second.status_code == 304
@@ -260,27 +269,18 @@ def test_index_conditional_get_returns_304(delivery_app: Flask) -> None:
 
 def test_posts_per_page_default_when_setting_absent(delivery_app: Flask) -> None:
     """A site without `posts_per_page` set falls back to the default."""
-    # `other.example.com` has 1 post and no `extra_settings` override.
-    # We can't easily count posts on the default of 10 with only 1
-    # available, but we can at least verify the request succeeds and
-    # paginates within bounds.
     client = delivery_app.test_client()
-    resp = client.get("/", headers={"Host": "other.example.com"})
+    resp = client.get("/posts/", headers={"Host": "other.example.com"})
     assert resp.status_code == 200
     assert "Cross-Site Leak Canary" in resp.data.decode()
 
 
-def test_post_plugin_contributes_resolve_home_hookimpl() -> None:
-    """The post plugin's resolve_home is the default landing-page impl.
+def test_page_plugin_owns_post_index_dispatch() -> None:
+    """The page plugin's delivery Blueprint dispatches the listing.
 
-    The route at `/` is owned by the core delivery dispatcher;
-    this test only confirms the post plugin still participates in
-    the hook so the fallback exists even when the page plugin's
-    tryfirst impl declines (no `home_page_id` set).
+    Posts no longer have a self-owned URL space; the page plugin's
+    catch-all renders both POST_INDEX pages (as the listing) and
+    posts beneath them.
     """
-    from bragi.plugins import create_plugin_manager
-
-    pm = create_plugin_manager()
-    impls = pm.hook.resolve_home.get_hookimpls()
-    plugins = {impl.plugin.__name__ for impl in impls}
-    assert "bragi.contrib.post.plugin" in plugins
+    app = create_delivery_app()
+    assert "page_delivery" in app.blueprints

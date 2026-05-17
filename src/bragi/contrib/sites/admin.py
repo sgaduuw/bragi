@@ -23,7 +23,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
-from bragi.core.models.page import Page, PageStatus
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
@@ -194,9 +194,30 @@ def site_dashboard(site_slug: str) -> ResponseReturnValue:
     """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
-    # `resolve_site_or_abort` already expunged the row so the
-    # chrome can read it post-render; no further detach needed.
-    return render_template("admin/site_dashboard.html", site=site, is_superuser=is_superuser())
+        # The "/" handler check is config-quality info for the
+        # admin: if no home_page_id is set and the site has no
+        # POST_INDEX page, visitors see theme_default's welcome
+        # stub. A banner on the dashboard surfaces that fact so
+        # the operator notices.
+        has_post_index = (
+            db.execute(
+                select(Page.id).where(
+                    Page.site_id == site.id,
+                    Page.kind == PageKind.POST_INDEX,
+                    Page.status == PageStatus.PUBLISHED,
+                )
+            ).first()
+            is not None
+        )
+        home_status = (
+            "welcome_fallback" if site.home_page_id is None and not has_post_index else "configured"
+        )
+    return render_template(
+        "admin/site_dashboard.html",
+        site=site,
+        is_superuser=is_superuser(),
+        home_status=home_status,
+    )
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -234,19 +255,38 @@ def new_site() -> ResponseReturnValue:
         # request, so `current_user()` is not None here.
         creator = current_user()
         assert creator is not None  # gated by _gate / superuser check
-        db.add(
-            Site(
-                slug=form["slug"],
-                hostname=form["hostname"],
-                title=form["title"],
-                locale=form["locale"],
-                timezone=form["timezone"],
-                canonical_url=canonical,
-                active=True,
-                theme=theme_value,
-                owner_user_id=creator.id,
-            )
+        new_site_row = Site(
+            slug=form["slug"],
+            hostname=form["hostname"],
+            title=form["title"],
+            locale=form["locale"],
+            timezone=form["timezone"],
+            canonical_url=canonical,
+            active=True,
+            theme=theme_value,
+            owner_user_id=creator.id,
         )
+        db.add(new_site_row)
+        db.flush()
+
+        # Optional scaffold: a POST_INDEX page at /blog/ so post
+        # URLs immediately have a home. Checkbox defaults to on
+        # in the template; operators uncheck for sites without a
+        # blog (a docs-only site, a landing-page-only site, etc.).
+        if request.form.get("create_blog") == "1":
+            db.add(
+                Page(
+                    site_id=new_site_row.id,
+                    slug="blog",
+                    title="Blog",
+                    body_markdown="",
+                    body_html="",
+                    body_excerpt="",
+                    author_id=creator.id,
+                    status=PageStatus.PUBLISHED,
+                    kind=PageKind.POST_INDEX,
+                )
+            )
         db.commit()
         flash(f"Site '{form['slug']}' created.", "success")
 

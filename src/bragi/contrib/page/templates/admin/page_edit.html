@@ -4,9 +4,24 @@
 {% block content %}
 <h1>{{ 'Edit page' if is_edit else 'New page' }}</h1>
 
+{% if swap_pending %}
+<div class="banner banner--warning">
+  <p><strong>Confirm post_index swap</strong></p>
+  <p>
+    Saving will demote <code>{{ swap_target.title }}</code>
+    (slug <code>{{ swap_target.slug }}</code>) from post_index
+    to static. Post URLs on this site will move from that page's
+    path to this page's path; a prefix 301 will be inserted to
+    cover the change.
+  </p>
+  <p>Cancel by going back; confirm by saving again below.</p>
+</div>
+{% endif %}
+
 <form method="post"
       action="{{ url_for('page_admin.edit_page', page_id=page.id) if is_edit else url_for('page_admin.new_page') }}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  {% if swap_pending %}<input type="hidden" name="acknowledge_swap" value="1">{% endif %}
 
   <fieldset>
     <label for="title">Title</label>
@@ -48,6 +63,20 @@
       <option value="published" {% if current_status == 'published' %}selected{% endif %}>Published</option>
       <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archived</option>
     </select>
+  </fieldset>
+
+  <fieldset>
+    <label for="kind">Kind</label>
+    <select name="kind" id="kind">
+      {% set current_kind = form.get('kind', 'static') %}
+      <option value="static" {% if current_kind == 'static' %}selected{% endif %}>Static page</option>
+      <option value="post_index" {% if current_kind == 'post_index' %}selected{% endif %}>Post index (hosts blog listing)</option>
+    </select>
+    <small>
+      A site can have at most one post_index page. Promoting another
+      page to post_index will demote the existing one back to static
+      and you'll be asked to confirm before the change is saved.
+    </small>
   </fieldset>
 
   {% if is_edit %}

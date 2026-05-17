@@ -2,10 +2,16 @@
 
 Owns:
 - the ContentTypeSpec for Post (registered via
-  register_content_type)
-- the admin Blueprint at /admin/posts (register_admin_blueprint)
-- the delivery Blueprint at /posts/<slug>/ (register_delivery_blueprint)
-- the admin nav entry (register_admin_nav)
+  `register_content_type`)
+- the admin Blueprint at /admin/posts (`register_admin_blueprint`)
+- the admin nav entry
+- the `cms scheduled-publish` CLI command
+- the internal-link resolver for `post:` keys
+
+Public URL dispatch (including the post listing and individual
+post URLs) is owned by `bragi.contrib.page` because post URLs
+derive from the site's POST_INDEX page. The post plugin no longer
+registers a delivery Blueprint or a `resolve_home` impl.
 """
 
 from __future__ import annotations
@@ -13,18 +19,19 @@ from __future__ import annotations
 from typing import Any
 
 import click
-from flask import Blueprint, g, render_template
+import jinja2
+from flask import Blueprint, g, has_app_context, render_template
 from sqlalchemy import or_, select
 
 from bragi.api import ContentTypeSpec, FieldSpec, InternalLinkResolution, NavItem, hookimpl
 from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.contrib.post.cli import scheduled_publish
-from bragi.contrib.post.delivery import bp as post_delivery_bp
-from bragi.contrib.post.delivery import render_post_index
-from bragi.contrib.post.delivery import tag_bp as post_tag_delivery_bp
+from bragi.contrib.post.delivery import bp as post_templates_bp
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
+from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from bragi.core.url import post_url_for
 
 POST_EDIT_FIELDS: list[FieldSpec] = [
     FieldSpec(name="title", label="Title", field_type="text", required=True),
@@ -39,10 +46,34 @@ POST_EDIT_FIELDS: list[FieldSpec] = [
 ]
 
 
-def _url_for_post(post: Any) -> str:
-    """Canonical public URL for a Post. Site context is implicit in
-    the delivery request (request.site)."""
-    return f"/posts/{post.slug}/"
+def _url_for_post(post: Any) -> str | None:
+    """Canonical public URL for a Post, or None if unreachable.
+
+    Returns None when the active site has no POST_INDEX page (no
+    public URL exists in that case); sitemap and feed filter such
+    posts out, and the internal-link rewriter falls back to the
+    broken-link class. Outside a request context (pure-unit tests
+    on a bare ContentTypeSpec) returns None.
+
+    Resolution order for the site:
+    1. `g.site` if set (delivery app: site_resolver middleware
+       populated it).
+    2. Look up `post.site_id` from the DB (admin app: hooks fire
+       after a save and there's no site_resolver to populate `g`).
+    """
+    if not has_app_context():
+        return None
+    site = g.get("site")
+    if site is None:
+        site_id = getattr(post, "site_id", None)
+        if site_id is None:
+            return None
+        with SessionLocal() as db:
+            site = db.get(Site, site_id)
+            if site is None:
+                return None
+            db.expunge(site)
+    return post_url_for(site, post.slug)
 
 
 def _resolve_internal_post_link(key: str, site_id: int) -> InternalLinkResolution | None:
@@ -50,10 +81,10 @@ def _resolve_internal_post_link(key: str, site_id: int) -> InternalLinkResolutio
 
     `key` is accepted as either a numeric id (the persisted form
     after a save) or a current slug (what an author types).
-    Same-site only: a key that exists under a different site_id
-    is treated as not found. Drafts and archived posts resolve
-    too; admin previews and forthcoming-post drafts must be
-    able to author internal links to each other.
+    Same-site only. Drafts and archived posts still resolve in
+    admin previews so authors can link to forthcoming work; the
+    public href falls back to None (broken-link class) when no
+    POST_INDEX page exists.
     """
     int_id: int | None
     try:
@@ -69,22 +100,19 @@ def _resolve_internal_post_link(key: str, site_id: int) -> InternalLinkResolutio
         row = db.execute(stmt).first()
     if row is None:
         return None
-    return InternalLinkResolution(entity_id=row.id, href=f"/posts/{row.slug}/")
+    site = g.get("site")
+    href = post_url_for(site, row.slug) if site is not None else None
+    if href is None:
+        return None
+    return InternalLinkResolution(entity_id=row.id, href=href)
 
 
 def _render_post(post: Any, _request: Any) -> str:
-    """Render a Post into a full HTML page via Jinja.
-
-    Pulls the resolved Site off `g.site` (site_resolver runs in
-    the before_request chain). Per-post SEO overrides (meta_title,
-    meta_description, canonical_url, noindex) thread into the
-    template; defaults fall back to body_excerpt and the computed
-    canonical URL when fields are blank. The author display name
-    is loaded for the JSON-LD `author` field.
-    """
+    """Render a Post into a full HTML page via Jinja."""
     site = g.get("site")
+    post_path = post_url_for(site, post.slug) if site is not None else None
     canonical = post.canonical_url or (
-        f"{site.canonical_url}/posts/{post.slug}/" if site and site.canonical_url else None
+        f"{site.canonical_url}{post_path}" if site and site.canonical_url and post_path else None
     )
     author_name: str | None = None
     if post.author_id:
@@ -131,27 +159,25 @@ def register_admin_blueprint() -> Blueprint:
 
 @hookimpl
 def register_delivery_blueprint() -> Blueprint:
-    """Mount the post delivery Blueprint at /posts/<slug>/."""
-    return post_delivery_bp
+    """Expose the post `templates/` folder to the Jinja loader.
 
-
-@hookimpl(specname="register_delivery_blueprint")
-def _register_tag_bp() -> Blueprint:
-    """Mount the per-tag listing at /tags/<slug>/."""
-    return post_tag_delivery_bp
+    The Blueprint has no routes; routing lives in the page
+    plugin's dispatcher. This is the lightest way to keep the
+    template folder reachable now that the post plugin doesn't
+    own its own URL space.
+    """
+    return post_templates_bp
 
 
 @hookimpl
-def resolve_home(site: Any) -> Any:
-    """Default landing page: paginated recent published posts.
+def register_template_globals(env: jinja2.Environment) -> None:
+    """Expose `url_for_post(post)` to delivery templates.
 
-    Runs at default priority, so the page plugin's `tryfirst`
-    impl preempts it when the site has `home_page_id` set; this
-    fallback is what every site without a static homepage gets.
-    Returns the index response unconditionally: an empty site
-    still surfaces the empty-state copy with a 200, not a 404.
+    The global resolves a post to its public URL via the active
+    site's POST_INDEX page. Listing and tag templates use it for
+    detail-page hrefs.
     """
-    return render_post_index(site)
+    env.globals["url_for_post"] = _url_for_post
 
 
 @hookimpl

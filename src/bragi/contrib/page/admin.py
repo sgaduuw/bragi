@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
-from bragi.core.models.page import Page, PageStatus
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.render.markdown import make_excerpt, render_markdown
@@ -58,8 +58,24 @@ def _form_from_request() -> dict[str, str]:
         "slug": (request.form.get("slug") or "").strip(),
         "body_markdown": request.form.get("body_markdown") or "",
         "status": request.form.get("status") or PageStatus.DRAFT,
+        "kind": (request.form.get("kind") or PageKind.STATIC).strip(),
         "parent_id": (request.form.get("parent_id") or "").strip(),
     }
+
+
+def _existing_post_index(
+    db: Session, site_id: int, exclude_page_id: int | None = None
+) -> Page | None:
+    """Return the current POST_INDEX page on `site_id`, or None.
+
+    Used to detect the swap case on save: if a different page is
+    being promoted to POST_INDEX, the existing one needs to be
+    demoted (with confirmation).
+    """
+    stmt = select(Page).where(Page.site_id == site_id, Page.kind == PageKind.POST_INDEX)
+    if exclude_page_id is not None:
+        stmt = stmt.where(Page.id != exclude_page_id)
+    return db.execute(stmt).scalar_one_or_none()
 
 
 def _normalized_parent_id(value: str) -> int | None:
@@ -158,6 +174,11 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             flash("Title and slug are required.", "error")
             return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
 
+        new_kind = str(form["kind"])
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
+            flash("Kind must be 'static' or 'post_index'.", "error")
+            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+
         parent_id = _normalized_parent_id(form["parent_id"])
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
@@ -167,8 +188,31 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             )
             return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
 
+        # Promotion to POST_INDEX swaps any existing POST_INDEX page
+        # back to STATIC. Require explicit confirmation so the
+        # operator sees the consequence before redirects are inserted.
+        existing_index = (
+            _existing_post_index(db, site_id) if new_kind == PageKind.POST_INDEX else None
+        )
+        acknowledge_swap = request.form.get("acknowledge_swap") == "1"
+        if existing_index is not None and not acknowledge_swap:
+            return render_template(
+                "admin/page_edit.html",
+                page=None,
+                form=form,
+                parents=parents,
+                swap_pending=True,
+                swap_target=existing_index,
+            )
+
         body_markdown = str(form["body_markdown"])
         new_status = str(form["status"])
+        if existing_index is not None:
+            # Demote in the same transaction so the partial unique
+            # index doesn't fire on the INSERT of the new POST_INDEX
+            # row. The demoted page stays published; only its kind
+            # changes.
+            existing_index.kind = PageKind.STATIC
         page_row = Page(
             site_id=site_id,
             parent_id=parent_id,
@@ -179,6 +223,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             body_excerpt=make_excerpt(body_markdown),
             author_id=int(session["user_id"]),
             status=new_status,
+            kind=new_kind,
         )
         db.add(page_row)
         db.commit()
@@ -222,6 +267,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "slug": page.slug,
                 "body_markdown": page.body_markdown,
                 "status": page.status,
+                "kind": page.kind,
                 "parent_id": str(page.parent_id) if page.parent_id else "",
             }
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
@@ -229,6 +275,10 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
+            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+        new_kind = str(form["kind"])
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
+            flash("Kind must be 'static' or 'post_index'.", "error")
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
         parent_id = _normalized_parent_id(form["parent_id"])
         if parent_id == page.id:
@@ -242,6 +292,25 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             )
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
 
+        # Promotion-to-POST_INDEX swap requires explicit confirmation.
+        # Excludes self so editing an already-POST_INDEX page doesn't
+        # trip the check on every save.
+        existing_index = (
+            _existing_post_index(db, page.site_id, exclude_page_id=page.id)
+            if new_kind == PageKind.POST_INDEX
+            else None
+        )
+        acknowledge_swap = request.form.get("acknowledge_swap") == "1"
+        if existing_index is not None and not acknowledge_swap:
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                swap_pending=True,
+                swap_target=existing_index,
+            )
+
         # Capture pre-edit state before mutating; mirrors the
         # post admin's snapshot semantics so a rollback returns
         # the page to its prior shape (including parent).
@@ -250,8 +319,16 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         # `before` snapshot for the on_post_updated hook (slug
         # changes drive auto-301 redirects via the redirects
         # plugin's subscriber). Capture BEFORE mutating.
-        before = {"slug": page.slug, "title": page.title, "status": page.status}
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "kind": page.kind,
+        }
         was_published = page.status == PageStatus.PUBLISHED
+
+        if existing_index is not None:
+            existing_index.kind = PageKind.STATIC
 
         page.title = str(form["title"])
         page.slug = slug
@@ -260,11 +337,17 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page.body_html = render_markdown(str(form["body_markdown"]))
         page.body_excerpt = make_excerpt(str(form["body_markdown"]))
         page.status = str(form["status"])
+        page.kind = new_kind
 
         db.commit()
         updated_id = page.id
         updated_site_id = page.site_id
-        after = {"slug": page.slug, "title": page.title, "status": page.status}
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "kind": page.kind,
+        }
         skip_redirect = request.form.get("skip_redirect") == "1"
 
         pm = current_app.extensions["plugin_manager"]

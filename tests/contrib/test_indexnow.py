@@ -22,7 +22,7 @@ from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from tests.conftest import csrf_token, make_test_user
+from tests.conftest import csrf_token, make_test_user, seed_blog_index
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -53,6 +53,7 @@ def delivery_app(
     db_session.commit()
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
@@ -90,6 +91,7 @@ def test_key_file_404s_when_unconfigured(
     )
     db_session.commit()
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
@@ -124,6 +126,7 @@ def admin_app(
     )
     db_session.add(site)
     db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
         Post(
@@ -143,9 +146,11 @@ def admin_app(
     monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.post.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.page.admin.SessionLocal", db_session_factory)
     yield create_admin_app()
 
@@ -344,6 +349,7 @@ def test_no_key_means_no_post(
     )
     db_session.add(site)
     db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     db_session.add(
         Post(
@@ -363,9 +369,11 @@ def test_no_key_means_no_post(
     monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.contrib.post.plugin.SessionLocal", db_session_factory)
 
     calls = _captured_post(monkeypatch)
 

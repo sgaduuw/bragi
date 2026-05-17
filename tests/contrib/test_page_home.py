@@ -115,8 +115,10 @@ def test_home_unset_falls_through_to_post_index(delivery_app: Flask) -> None:
     resp = delivery_app.test_client().get("/", headers={"Host": "a.example.com"})
     assert resp.status_code == 200
     body = resp.data.decode()
-    # Post fallback empty-state copy
-    assert "No posts yet" in body
+    # theme_default's welcome stub takes over when nothing else
+    # claims `/` (the post fallback was removed when the page-as-
+    # blog refactor landed; the welcome stub guarantees a Response).
+    assert "Welcome to Site A" in body
     # Static-page body must not appear
     assert "hello from a" not in body
 
@@ -132,8 +134,8 @@ def test_home_set_to_published_page_renders_it(
     body = resp.data.decode()
     assert "A Welcome" in body
     assert "hello from a" in body
-    # Confirm we got the page render, not the post index fallback
-    assert "No posts yet" not in body
+    # Confirm we got the page render, not the welcome stub
+    assert "Welcome to Site A" not in body or "A Welcome" in body
 
 
 def test_home_set_to_draft_falls_through(
@@ -154,8 +156,8 @@ def test_home_set_to_draft_falls_through(
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "A Draft" not in body
-    # Fell through to the post fallback
-    assert "No posts yet" in body
+    # Fell through to theme_default's welcome stub
+    assert "Welcome to Site A" in body
 
 
 def test_home_set_to_archived_falls_through(
@@ -178,7 +180,7 @@ def test_home_set_to_archived_falls_through(
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "hello from a" not in body
-    assert "No posts yet" in body
+    assert "Welcome to Site A" in body
 
 
 def test_home_set_to_cross_site_page_falls_through(
@@ -193,7 +195,7 @@ def test_home_set_to_cross_site_page_falls_through(
     body = resp.data.decode()
     # Other site's page body must not appear at this hostname
     assert "hello from b" not in body
-    assert "No posts yet" in body
+    assert "Welcome to Site A" in body
 
 
 def test_home_page_deletion_fk_set_null_then_falls_through(
@@ -223,7 +225,7 @@ def test_home_page_deletion_fk_set_null_then_falls_through(
 
     resp = delivery_app.test_client().get("/", headers={"Host": "a.example.com"})
     assert resp.status_code == 200
-    assert "No posts yet" in resp.data.decode()
+    assert "Welcome to Site A" in resp.data.decode()
 
 
 def test_page_plugin_contributes_resolve_home() -> None:

@@ -6,6 +6,52 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Posts now live under a per-site `Page` of kind `post_index`.**
+  The hardcoded `/posts/` and `/tags/` URL spaces are gone. Each
+  site has at most one `post_index` page (enforced by a partial
+  unique index); post URLs become `<post_index_url>/<post-slug>/`
+  and tag URLs become `<post_index_url>/tag/<tag-slug>/`. The
+  alembic migration auto-creates a `slug="posts"` post_index
+  page on every existing site, so legacy `/posts/<slug>/` URLs
+  keep resolving without operator intervention. The new-site
+  admin form ships with a "Create default /blog/ page" checkbox
+  (default on) so greenfield sites get a post index without
+  extra steps. Pages, the post listing, and individual posts now
+  all flow through the page plugin's catch-all dispatcher; the
+  post plugin no longer owns a delivery Blueprint or a
+  `resolve_home` impl. Sites with no post_index page have no
+  public post URLs (admin can still write/edit posts; they're
+  not reachable until a `post_index` page exists).
+- **Slug-rename redirects extend to pages.**
+  `bragi.contrib.redirects` now discriminates Post vs Page on
+  `on_post_updated`. Renaming a static page inserts an EXACT
+  301 from old slug-path to new; renaming a `post_index` page
+  inserts a PREFIX 301 that covers the index, every post URL,
+  and the tag listings in one rule. Limitation: kind toggles
+  (STATIC ↔ POST_INDEX) and `home_page_id` changes don't insert
+  redirects in this PR; tracked as follow-ups.
+- **#124 update.** The post plugin's `resolve_home` fallback
+  (the recent-posts list at `/`) has been removed. The page
+  plugin's `tryfirst` impl still handles `home_page_id`; new:
+  `bragi.contrib.theme_default` ships a `trylast` welcome-stub
+  impl that guarantees a Response at `/` even when nothing else
+  claims it. Visitors see "Welcome to <site>" with
+  `Cache-Control: no-store` and a noindex robots meta until the
+  admin sets a real home; the per-site dashboard surfaces a
+  banner pointing at the fix.
+- **Page admin: Kind selector with swap confirmation.** The page
+  edit form gets a "Kind" dropdown (Static / Post index).
+  Promoting a page to `post_index` while another exists on the
+  site shows an intermediate confirmation; saving again with
+  the implicit `acknowledge_swap` field demotes the previous
+  post_index back to static in the same transaction.
+- **`ContentTypeSpec.url_for` may return `None`.** Reflects the
+  reality that posts have no public URL when the site has no
+  post_index page. Sitemap and feed filter `None` entries; the
+  internal-link rewriter renders the broken-link class for
+  posts without a public URL.
+
 ### Added
 - **Static homepage per site (#124).** Each Site grew a new
   `home_page_id` column (nullable FK to `pages`, `ON DELETE SET

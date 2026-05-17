@@ -112,23 +112,20 @@ def create_delivery_app() -> Flask:
     # on app.extensions so `render_markdown()` picks it up.
     install_app_renderer(app, pm.hook.register_markdown_extension())
 
-    # Per-site `/` dispatcher. The route itself is owned by core
-    # because every site has a landing page; the *content* of that
-    # page comes from `resolve_home` hookimpls. The page plugin's
-    # tryfirst impl serves a static homepage when configured; the
-    # post plugin's default-priority impl returns the recent-posts
-    # index as the fallback. A 404 here means no impl returned a
-    # response, which only happens if every content plugin is
-    # disabled (pragmatic edge case, no fancier handling needed).
+    # Per-site `/` dispatcher. The route is owned by core; the
+    # *content* of `/` comes from `resolve_home` hookimpls. The
+    # page plugin's `tryfirst` impl handles `Site.home_page_id`
+    # (covering both static pages and a promoted post_index page);
+    # `theme_default` ships a `trylast` welcome stub so the hook
+    # is guaranteed to return a Response (no 404 path needed here).
+    # Other plugins can register their own resolve_home at default
+    # priority to slot between the two.
     @app.route("/")
     def home() -> ResponseReturnValue:
         site = g.get("site")
         if site is None:
             abort(404)
-        response = pm.hook.resolve_home(site=site)
-        if response is None:
-            abort(404)
-        return cast(Response, response)
+        return cast(Response, pm.hook.resolve_home(site=site))
 
     return app
 

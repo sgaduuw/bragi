@@ -66,7 +66,7 @@ class ContentTypeSpec:
     label: str  # 'Post' (singular)
     label_plural: str  # 'Posts'
     model: type  # SQLAlchemy model class
-    url_for: Callable[[Any], str]  # canonical public URL builder
+    url_for: Callable[[Any], str | None]  # canonical public URL builder; None when unreachable
     render: Callable[[Any, Any], str]  # delivery-side template render
     admin_list_columns: list[str]  # admin table view columns
     admin_edit_fields: list[FieldSpec]  # admin edit form fields

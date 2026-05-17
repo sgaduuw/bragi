@@ -19,7 +19,9 @@ from sqlalchemy import select
 from bragi.core.cache import apply_cache_policy
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post, PostStatus
+from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from bragi.core.url import post_url_for
 
 bp = Blueprint("seo_feed", __name__)
 
@@ -34,10 +36,15 @@ def _iso(dt: datetime | None) -> str:
 def _entry_xml(
     post: Post,
     author_name: str,
-    site_canonical: str,
+    site: Site,
 ) -> str:
-    base = site_canonical.rstrip("/")
-    canonical = f"{base}/posts/{post.slug}/"
+    base = (site.canonical_url or "").rstrip("/")
+    post_path = post_url_for(site, post.slug)
+    if post_path is None:
+        # No POST_INDEX page on this site -> no public URL.
+        # Caller filters these out; this branch is defensive.
+        return ""
+    canonical = f"{base}{post_path}"
     title = escape(post.title or "")
     summary = escape(post.body_excerpt or "")
     # The body_html is already HTML; embed via CDATA so any `<` /
@@ -103,7 +110,9 @@ def feed_xml() -> ResponseReturnValue:
         parts.append(f"  <updated>{feed_updated}</updated>")
     for post in posts:
         author_name = authors_by_id.get(post.author_id or -1, "Unknown")
-        parts.append(_entry_xml(post, author_name, base))
+        entry = _entry_xml(post, author_name, site)
+        if entry:
+            parts.append(entry)
     parts.append("</feed>")
 
     response = Response("\n".join(parts), mimetype="application/atom+xml")

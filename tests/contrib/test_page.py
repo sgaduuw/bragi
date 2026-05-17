@@ -77,6 +77,7 @@ def delivery_app(
     db_session.commit()
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.page.plugin.SessionLocal", db_session_factory)
