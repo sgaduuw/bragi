@@ -1,5 +1,18 @@
 {% extends "delivery/base.html" %}
 {% block title %}{{ page.meta_title or page.title }} &middot; {{ site.title }}{% endblock %}
+{% block social_meta %}
+  {%- set _title = page.meta_title or page.title -%}
+  <meta property="og:title" content="{{ _title }}">
+  <meta property="og:type" content="website">
+  {% if canonical_url %}<meta property="og:url" content="{{ canonical_url }}">{% endif %}
+  {% if meta_description %}<meta property="og:description" content="{{ meta_description }}">{% endif %}
+  {% if site %}<meta property="og:site_name" content="{{ site.title }}">{% endif %}
+  {% if og_image_url %}<meta property="og:image" content="{{ og_image_url }}">{% endif %}
+  <meta name="twitter:card" content="{{ 'summary_large_image' if og_image_url else 'summary' }}">
+  <meta name="twitter:title" content="{{ _title }}">
+  {% if meta_description %}<meta name="twitter:description" content="{{ meta_description }}">{% endif %}
+  {% if og_image_url %}<meta name="twitter:image" content="{{ og_image_url }}">{% endif %}
+{% endblock %}
 {% block jsonld %}
   {%- set jsonld = {
         "@context": "https://schema.org",

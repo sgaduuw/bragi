@@ -13,6 +13,7 @@
      exposes a Jinja global (e.g. `pygments_css_url`) via
      `register_template_globals`; this list grows organically. #}
   {% if pygments_css_url is defined %}<link rel="stylesheet" href="{{ pygments_css_url }}">{% endif %}
+  {% block social_meta %}{# Content-type templates override this with og:* and twitter:* tags. #}{% endblock %}
   {% block jsonld %}{# Content-type templates override this with a JSON-LD <script>. #}{% endblock %}
   <style>
     body {

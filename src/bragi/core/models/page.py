@@ -97,6 +97,13 @@ class Page(IdMixin, TimestampsMixin, Base):
     canonical_url: Mapped[str | None] = mapped_column(String(255), default=None)
     noindex: Mapped[bool] = mapped_column(default=False)
 
+    # OG / Twitter Card image. Nullable; falls back through the
+    # site's default_og_image, then omitted entirely. ON DELETE
+    # SET NULL on the FK (defined in the alembic migration) so
+    # deleting the underlying attachment reverts to fallback
+    # rather than dangling the column.
+    og_image_id: Mapped[int | None] = mapped_column(ForeignKey("attachments.id"), default=None)
+
     # Import provenance: `(site_id, source_id)` is the idempotency
     # key for re-imports (a second run updates in place rather than
     # creating a duplicate row). source_meta is a JSON blob for

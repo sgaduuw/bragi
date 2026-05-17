@@ -44,6 +44,15 @@
        tags are re-used by slug.</small>
   </fieldset>
 
+  <fieldset>
+    <label for="og_image_id">Social-share image (attachment id)</label>
+    <input type="number" name="og_image_id" id="og_image_id" min="1"
+           value="{{ form.get('og_image_id', '') }}">
+    <small>Optional. Renders as og:image / twitter:image. Look up
+      the attachment id in the attachments admin; falls back to
+      the site's default OG image when blank.</small>
+  </fieldset>
+
   {% if is_edit %}
   <fieldset style="flex-direction: row; align-items: center; gap: 0.5rem;">
     <input type="checkbox" name="skip_redirect" id="skip_redirect" value="1">
