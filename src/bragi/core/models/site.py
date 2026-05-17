@@ -66,11 +66,10 @@ class Site(IdMixin, TimestampsMixin, Base):
     )
     # Default OG / Twitter Card image for posts and pages that
     # don't specify one of their own. NULL leaves the meta tag
-    # omitted entirely. ON DELETE SET NULL on the FK (defined in
-    # the alembic migration) so deleting the attachment doesn't
-    # leave a dangling column.
+    # omitted entirely. ON DELETE SET NULL so removing the
+    # attachment cleanly reverts the site to no default OG image.
     default_og_image_id: Mapped[int | None] = mapped_column(
-        ForeignKey("attachments.id"),
+        ForeignKey("attachments.id", ondelete="SET NULL"),
         nullable=True,
         default=None,
     )

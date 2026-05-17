@@ -26,5 +26,5 @@ from bragi.core.models._mixins import IdMixin, TimestampsMixin
 class SiteAlias(IdMixin, TimestampsMixin, Base):
     __tablename__ = "site_aliases"
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     hostname: Mapped[str] = mapped_column(String(255), unique=True)

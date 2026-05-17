@@ -8,8 +8,9 @@ from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
+from bragi.core.models.user_site_role import Role
 from bragi.core.models.webmention import Webmention, WebmentionStatus
-from bragi.core.permissions import resolve_site_or_abort
+from bragi.core.permissions import require_role, resolve_site_or_abort
 
 bp = Blueprint(
     "webmentions_admin",
@@ -48,9 +49,17 @@ def list_webmentions(site_slug: str) -> ResponseReturnValue:
 
 @bp.route("/<int:row_id>/approve", methods=["POST"])
 def approve(site_slug: str, row_id: int) -> ResponseReturnValue:
-    """Flip approved=True. Approved rows render on the public post."""
+    """Flip approved=True. Approved rows render on the public post.
+
+    Editor role gate: an "author" can write their own posts but
+    should not be able to approve a mention against another
+    author's post (it's a publication-surface decision, not an
+    authoring one). Mirrors the post / page admin which gates
+    mutations on editor too.
+    """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
+        require_role(Role.EDITOR, site.id)
         row = db.get(Webmention, row_id)
         if row is None or row.site_id != site.id:
             abort(404)
@@ -64,9 +73,14 @@ def approve(site_slug: str, row_id: int) -> ResponseReturnValue:
 
 @bp.route("/<int:row_id>/reject", methods=["POST"])
 def reject(site_slug: str, row_id: int) -> ResponseReturnValue:
-    """Mark row rejected. Stays in the admin view as audit trail."""
+    """Mark row rejected. Stays in the admin view as audit trail.
+
+    Editor role gate: same reasoning as `approve` above. Rejection
+    is also a publication-surface decision.
+    """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
+        require_role(Role.EDITOR, site.id)
         row = db.get(Webmention, row_id)
         if row is None or row.site_id != site.id:
             abort(404)

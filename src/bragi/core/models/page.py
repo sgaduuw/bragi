@@ -79,8 +79,13 @@ class Page(IdMixin, TimestampsMixin, Base):
         ),
     )
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
-    parent_id: Mapped[int | None] = mapped_column(ForeignKey("pages.id"), default=None, index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    # Self-ref: parent delete promotes children to root rather than
+    # cascading the delete (operator's most-likely intent is to
+    # rearrange, not to remove the subtree).
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pages.id", ondelete="SET NULL"), default=None, index=True
+    )
     slug: Mapped[str] = mapped_column(String(255))
     title: Mapped[str] = mapped_column(String(255))
 
@@ -99,10 +104,11 @@ class Page(IdMixin, TimestampsMixin, Base):
 
     # OG / Twitter Card image. Nullable; falls back through the
     # site's default_og_image, then omitted entirely. ON DELETE
-    # SET NULL on the FK (defined in the alembic migration) so
-    # deleting the underlying attachment reverts to fallback
-    # rather than dangling the column.
-    og_image_id: Mapped[int | None] = mapped_column(ForeignKey("attachments.id"), default=None)
+    # SET NULL so removing the underlying attachment reverts to
+    # fallback rather than dangling the column.
+    og_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attachments.id", ondelete="SET NULL"), default=None
+    )
 
     # Import provenance: `(site_id, source_id)` is the idempotency
     # key for re-imports (a second run updates in place rather than

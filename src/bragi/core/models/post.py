@@ -37,7 +37,7 @@ class Post(IdMixin, TimestampsMixin, Base):
     __tablename__ = "posts"
     __table_args__ = (UniqueConstraint("site_id", "slug", name="uq_posts_site_slug"),)
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"))
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
     slug: Mapped[str] = mapped_column(String(255))
     title: Mapped[str] = mapped_column(String(255))
     subtitle: Mapped[str | None] = mapped_column(String(255), default=None)
@@ -62,10 +62,14 @@ class Post(IdMixin, TimestampsMixin, Base):
     # Featured / OG image FKs into `attachments`. Nullable so a post
     # without media works; the delivery template falls back to
     # `(site.canonical_url)` social previews when og_image is unset.
+    # SET NULL so removing an attachment doesn't cascade-delete the
+    # post or leave a dangling FK; the post just loses its image.
     featured_image_id: Mapped[int | None] = mapped_column(
-        ForeignKey("attachments.id"), default=None
+        ForeignKey("attachments.id", ondelete="SET NULL"), default=None
     )
-    og_image_id: Mapped[int | None] = mapped_column(ForeignKey("attachments.id"), default=None)
+    og_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attachments.id", ondelete="SET NULL"), default=None
+    )
 
     # Import provenance: `(site_id, source_id)` is unique enough
     # that importers can update-or-insert idempotently without a
