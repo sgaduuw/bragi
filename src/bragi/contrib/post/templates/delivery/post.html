@@ -90,4 +90,26 @@
   </ul>
 </aside>
 {% endif %}
+{% if webmentions_for_post is defined %}
+  {%- set mentions = webmentions_for_post(post) -%}
+  {% if mentions %}
+  <aside class="webmentions">
+    <h2>Mentioned by</h2>
+    <ul>
+      {% for m in mentions %}
+      <li>
+        {% if m.author_url %}<a href="{{ m.author_url }}" rel="nofollow ugc">{% endif %}
+        <strong>{{ m.author_name or m.source_url }}</strong>
+        {% if m.author_url %}</a>{% endif %}
+        <span class="meta"> ({{ m.mention_type }})</span>
+        {% if m.content_text %}
+        <p class="excerpt">{{ m.content_text }}</p>
+        {% endif %}
+        <small><a href="{{ m.source_url }}" rel="nofollow ugc">source</a></small>
+      </li>
+      {% endfor %}
+    </ul>
+  </aside>
+  {% endif %}
+{% endif %}
 {% endblock %}

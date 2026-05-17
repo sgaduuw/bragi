@@ -69,6 +69,7 @@ embeds = "bragi.contrib.embeds.plugin"
 internal_links = "bragi.contrib.internal_links.plugin"
 markdown_extras = "bragi.contrib.markdown_extras.plugin"
 api_tokens = "bragi.contrib.api_tokens.plugin"
+webmentions = "bragi.contrib.webmentions.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

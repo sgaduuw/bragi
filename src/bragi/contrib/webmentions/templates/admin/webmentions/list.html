@@ -1,0 +1,53 @@
+{% extends "admin/base.html" %}
+{% block title %}Webmentions &middot; {{ site.title }}{% endblock %}
+{% block content %}
+<h1>Webmentions for {{ site.title }}</h1>
+<p>Incoming mentions from other indieweb sites. Approve to surface on the public post.</p>
+{% if not rows %}
+<p><em>No webmentions yet.</em></p>
+{% else %}
+<table style="width: 100%; border-collapse: collapse;">
+  <thead>
+    <tr>
+      <th style="text-align: left;">Source</th>
+      <th style="text-align: left;">Target</th>
+      <th style="text-align: left;">Type</th>
+      <th style="text-align: left;">Status</th>
+      <th style="text-align: left;">Author</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><a href="{{ row.source_url }}" rel="noopener nofollow">{{ row.source_url[:80] }}{% if row.source_url|length > 80 %}...{% endif %}</a></td>
+      <td>
+        {% if row.post_id and post_titles.get(row.post_id) %}
+        <strong>{{ post_titles[row.post_id] }}</strong><br>
+        {% endif %}
+        <small>{{ row.target_url[:60] }}{% if row.target_url|length > 60 %}...{% endif %}</small>
+      </td>
+      <td>{{ row.mention_type }}</td>
+      <td>{{ row.status }}{% if row.approved %} (approved){% endif %}{% if row.last_error %}<br><small style="color: #b22;">{{ row.last_error }}</small>{% endif %}</td>
+      <td>
+        {% if row.author_name %}<strong>{{ row.author_name }}</strong>{% endif %}
+        {% if row.author_url %}<br><small>{{ row.author_url[:50] }}</small>{% endif %}
+      </td>
+      <td>
+        {% if not row.approved %}
+        <form method="post" action="{{ url_for('webmentions_admin.approve', site_slug=site.slug, row_id=row.id) }}" style="display: inline;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn">Approve</button>
+        </form>
+        {% endif %}
+        <form method="post" action="{{ url_for('webmentions_admin.reject', site_slug=site.slug, row_id=row.id) }}" style="display: inline;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn danger">Reject</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

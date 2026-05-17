@@ -53,6 +53,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Webmentions: send + receive + moderate (#147).** New
+  `bragi.contrib.webmentions` plugin closes the indieweb loop on
+  both sides. On `on_post_published` / `on_post_updated` (when
+  the post lands published), every external `<a href>` in the
+  rendered body is queued in `webmention_outbox`; the new
+  `cms webmentions send-pending` CLI walks the queue, performs
+  endpoint discovery per W3C §3.1.2 (Link header first, then
+  `<link rel="webmention">` in `<head>`), and POSTs the mention.
+  Idempotent on already-sent rows; bounded by `--limit` for
+  cron-friendly runs. On the inbox side, `POST /webmentions` on
+  the delivery app validates the source URL fetches and links to
+  the target (per W3C §3.2.1), extracts an h-card author shape
+  (regex subset; full mf2py is out of v1 per the issue), and
+  inserts a row with `status=verified, approved=false`. Admin
+  moderation at `/admin/sites/<slug>/webmentions/` approves /
+  rejects; the post template renders an "Mentioned by" aside
+  listing approved verified rows. Discovery
+  `<link rel="webmention">` is injected into the delivery
+  `<head>` automatically.
 - **API tokens for programmatic posting (#146).** New
   `personal_access_tokens` table backs long-lived bearer
   credentials in the format
