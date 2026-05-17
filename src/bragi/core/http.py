@@ -34,7 +34,6 @@ from urllib.parse import urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
-from urllib3.util.connection import _set_socket_options
 
 LOG = logging.getLogger(__name__)
 
@@ -58,9 +57,12 @@ def safe_get(
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     max_bytes: int = DEFAULT_MAX_BYTES,
     headers: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> requests.Response:
     """SSRF-checked GET. Truncates body at `max_bytes`."""
-    return _safe_request("GET", url, timeout=timeout, max_bytes=max_bytes, headers=headers)
+    return _safe_request(
+        "GET", url, timeout=timeout, max_bytes=max_bytes, headers=headers, params=params
+    )
 
 
 def safe_head(
@@ -121,6 +123,7 @@ def _safe_request(
     headers: dict[str, Any] | None,
     data: Any = None,
     json: Any = None,
+    params: dict[str, Any] | None = None,
 ) -> requests.Response:
     _validate_url(url)
     session = requests.Session()
@@ -140,6 +143,7 @@ def _safe_request(
             headers=headers,
             data=data,
             json=json,
+            params=params,
         )
         if max_bytes > 0:
             # Materialise up to `max_bytes` then drop the rest.
@@ -222,10 +226,3 @@ class _GuardedAdapter(HTTPAdapter):
     def send(self, request: Any, **kwargs: Any) -> Any:  # type: ignore[override]
         _validate_url(request.url)
         return super().send(request, **kwargs)
-
-
-# Re-export for stubs / unused-import lints; urllib3's helper is
-# imported above for downstream tweakers (TCP_NODELAY etc.) and
-# kept here so future hardening (e.g., binding source address)
-# has a tested entrypoint.
-_ = _set_socket_options

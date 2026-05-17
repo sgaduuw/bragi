@@ -45,7 +45,7 @@ def discover_endpoint(target_url: str) -> str | None:
     """
     try:
         head = safe_head(target_url, timeout=HTTP_TIMEOUT_SECONDS)
-    except (SafeHTTPError, Exception) as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - includes SafeHTTPError; discovery is best-effort
         LOG.info("webmention discover HEAD failed for %s: %s", target_url, exc)
         return None
     endpoint = find_endpoint(dict(head.headers), "", head.url or target_url)
@@ -53,7 +53,7 @@ def discover_endpoint(target_url: str) -> str | None:
         return endpoint
     try:
         resp = safe_get(target_url, timeout=HTTP_TIMEOUT_SECONDS)
-    except (SafeHTTPError, Exception) as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - includes SafeHTTPError; discovery is best-effort
         LOG.info("webmention discover GET failed for %s: %s", target_url, exc)
         return None
     return find_endpoint(dict(resp.headers), resp.text, resp.url or target_url)

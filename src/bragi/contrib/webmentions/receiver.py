@@ -156,7 +156,11 @@ def _resolve_site_for(db: Session, target_url: str) -> Site | None:
     middleware does for delivery routing. Returns None when no
     site claims the host.
     """
-    host = urlparse(target_url).netloc.lower()
+    parsed = urlparse(target_url)
+    # `hostname` lowercases and strips port / userinfo, matching
+    # how `Site.hostname` is stored. Using `netloc` directly would
+    # mismatch on a target carrying `:443` or `user@host`.
+    host = (parsed.hostname or "").lower()
     if not host:
         return None
     site: Site | None = db.execute(select(Site).where(Site.hostname == host)).scalar_one_or_none()

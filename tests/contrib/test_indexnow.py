@@ -177,7 +177,11 @@ def _captured_post(
         resp.text = ""
         return resp
 
-    monkeypatch.setattr("bragi.contrib.indexnow.client.requests.post", fake_post)
+    # Production code now goes through `bragi.core.http.safe_post`,
+    # which is imported into the indexnow client at module level.
+    # Patching at the import site (sender module) makes the fake
+    # take effect regardless of which call shape is used internally.
+    monkeypatch.setattr("bragi.contrib.indexnow.client.safe_post", fake_post)
     return calls
 
 
@@ -404,12 +408,16 @@ def test_http_failure_swallowed(
 ) -> None:
     """A connection error from the endpoint must not break the
     publish flow."""
-    import requests
 
     def fake_post(*args: Any, **kwargs: Any) -> Any:
-        raise requests.ConnectionError("nope")
+        # SafeHTTPError represents the SSRF guard tripping; the
+        # bare `Exception` catch in the client also covers other
+        # network errors. Either way, the publish must not fail.
+        from bragi.core.http import SafeHTTPError
 
-    monkeypatch.setattr("bragi.contrib.indexnow.client.requests.post", fake_post)
+        raise SafeHTTPError("nope")
+
+    monkeypatch.setattr("bragi.contrib.indexnow.client.safe_post", fake_post)
 
     with db_session_factory() as db:
         post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id

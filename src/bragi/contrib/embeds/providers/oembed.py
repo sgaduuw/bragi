@@ -23,9 +23,8 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-import requests
-
 from bragi.contrib.embeds.providers.base import EmbedError
+from bragi.core.http import SafeHTTPError, safe_get
 
 # host (without scheme) -> oEmbed JSON endpoint. Subdomains aren't
 # matched: add `www.example.com` and `example.com` separately
@@ -63,13 +62,20 @@ class GenericOEmbedProvider:
             raise EmbedError(f"oembed: unknown host {host!r}")
 
         try:
-            resp = requests.get(
+            # Route through `safe_get` so 3xx redirects returned by
+            # the allowlisted endpoint are re-validated against the
+            # public-IP guard. The endpoint host itself is allowlisted
+            # above, but a compromised/misconfigured provider that
+            # 302s into RFC 1918 would otherwise pivot us.
+            resp = safe_get(
                 endpoint,
                 params={"url": url, "format": "json"},
                 headers={"User-Agent": user_agent},
                 timeout=timeout,
             )
-        except requests.RequestException as exc:
+        except SafeHTTPError as exc:
+            raise EmbedError(f"oembed blocked by SSRF guard for {url!r}: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 - render fallbacks downstream
             raise EmbedError(f"oembed network error for {url!r}: {exc}") from exc
 
         if resp.status_code != 200:
