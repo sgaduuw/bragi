@@ -14,7 +14,7 @@ flip came from a human in the UI or this CLI.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import logging
 
 import click
 from flask import current_app
@@ -23,6 +23,9 @@ from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post, PostStatus
+from bragi.core.time import naive_utcnow
+
+LOG = logging.getLogger(__name__)
 
 
 @click.command("scheduled-publish")
@@ -40,7 +43,7 @@ def scheduled_publish(dry_run: bool) -> None:
     alone. Exit code is always 0; a clean tick prints a single
     no-op line.
     """
-    now = datetime.now(UTC)
+    now = naive_utcnow()
     with SessionLocal() as db:
         due = (
             db.execute(
@@ -66,17 +69,31 @@ def scheduled_publish(dry_run: bool) -> None:
 
         pm = current_app.extensions["plugin_manager"]
         published: list[int] = []
+        failed: list[int] = []
         for post in due:
-            post.status = PostStatus.PUBLISHED
-            if post.published_at is None:
-                post.published_at = now
-            db.commit()
-            # Lifecycle hooks fire after commit so subscribers see
-            # the post in its post-transition state. Same shape as
-            # the admin edit-time publish path.
-            pm.hook.on_post_published(item=post, session=db)
-            pm.hook.on_cache_purge(scope="post", key=str(post.id))
-            published.append(post.id)
-            click.echo(f"scheduled-publish: published id={post.id} slug={post.slug!r}")
+            # Wrap each row independently. The earlier shape let one
+            # hook implementation raising (AP fanout, search index,
+            # webmention sender, ...) abandon every subsequent row;
+            # an operator would only notice when a follow-up tick
+            # accidentally re-picked the same row up. Each iteration
+            # now rolls back the partial transition on failure and
+            # the loop carries on.
+            try:
+                post.status = PostStatus.PUBLISHED
+                if post.published_at is None:
+                    post.published_at = now
+                db.commit()
+                pm.hook.on_post_published(item=post, session=db)
+                pm.hook.on_cache_purge(scope="post", key=str(post.id))
+                published.append(post.id)
+                click.echo(f"scheduled-publish: published id={post.id} slug={post.slug!r}")
+            except Exception:
+                LOG.exception("scheduled-publish: failed for post id=%s", post.id)
+                db.rollback()
+                failed.append(post.id)
+                click.echo(f"scheduled-publish: FAILED id={post.id} slug={post.slug!r} (see logs)")
 
-        click.echo(f"scheduled-publish: {len(published)} post(s) published.")
+        msg = f"scheduled-publish: {len(published)} post(s) published"
+        if failed:
+            msg += f", {len(failed)} failed"
+        click.echo(f"{msg}.")

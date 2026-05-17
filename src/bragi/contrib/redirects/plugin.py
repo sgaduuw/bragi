@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, datetime
 from typing import Any, cast
 
 from flask import Blueprint
@@ -35,6 +34,7 @@ from bragi.core.models.page import Page, PageKind
 from bragi.core.models.post import Post
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
+from bragi.core.time import naive_utcnow
 from bragi.core.url import (
     invalidate_post_index_cache,
     page_url_for,
@@ -42,18 +42,26 @@ from bragi.core.url import (
     post_url_for,
 )
 
-log = logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 def _bump_hit(session: Any, row: Redirect) -> None:
     """Best-effort hit_count bump. Failures log and roll back so the
-    redirect is still served when the counter update collides."""
+    redirect is still served when the counter update collides.
+
+    Commits inside the resolver's own session intentionally: the
+    redirect resolver is a before_request hook that opens its own
+    SessionLocal scope, so this commit doesn't compete with an
+    outer transaction. If a future caller threads in a shared
+    session, this becomes a footgun; switch to flush + caller-side
+    commit at that point.
+    """
     try:
         row.hit_count = (row.hit_count or 0) + 1
-        row.last_hit_at = datetime.now(UTC).replace(tzinfo=None)
+        row.last_hit_at = naive_utcnow()
         session.commit()
     except Exception:
-        log.exception("Failed to bump hit_count for redirect id=%s", row.id)
+        LOG.exception("Failed to bump hit_count for redirect id=%s", row.id)
         session.rollback()
 
 
@@ -117,7 +125,7 @@ def _resolve_regex(session: Any, site_id: int, path: str) -> tuple[Redirect, str
         try:
             pattern = re.compile(row.source_path)
         except re.error as exc:
-            log.warning(
+            LOG.warning(
                 "Skipping redirect id=%s: bad regex %r (%s)",
                 row.id,
                 row.source_path,
@@ -130,7 +138,7 @@ def _resolve_regex(session: Any, site_id: int, path: str) -> tuple[Redirect, str
         try:
             resolved = match.expand(row.target)
         except (re.error, IndexError) as exc:
-            log.warning(
+            LOG.warning(
                 "Skipping redirect id=%s: target expand failed (%s)",
                 row.id,
                 exc,

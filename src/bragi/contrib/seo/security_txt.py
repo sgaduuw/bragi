@@ -9,12 +9,13 @@ returns 404 rather than emit a placeholder.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from flask import Blueprint, Response, abort
 from flask.typing import ResponseReturnValue
 
 from bragi.core.cache import apply_cache_policy
+from bragi.core.time import aware_utcnow
 from bragi.settings import settings
 
 bp = Blueprint("seo_security_txt", __name__)
@@ -25,7 +26,7 @@ def security_txt() -> ResponseReturnValue:
     contact = settings.security_contact
     if not contact:
         abort(404)
-    expires = datetime.now(UTC) + timedelta(days=settings.security_expires_days)
+    expires = aware_utcnow() + timedelta(days=settings.security_expires_days)
     body = f"Contact: {contact}\nExpires: {expires.strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
     response = Response(body, mimetype="text/plain")
     apply_cache_policy(response, "security")

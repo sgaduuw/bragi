@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+import threading
 
 from flask import Blueprint, abort, g, jsonify, request
 from flask.typing import ResponseReturnValue
@@ -33,6 +33,7 @@ from bragi.core.models.activitypub import (
 )
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
+from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)
 
@@ -42,16 +43,26 @@ bp = Blueprint("activitypub", __name__)
 # check needs the actor's public key, and we don't want every
 # Follow to slow-path through HTTPS. Bounded by a max-entries
 # cap so a fuzzing inbox attacker can't grow it without limit.
+# The lock guards the overflow-eviction path: `min()` over the
+# dict iterates and then we `pop` the result; under gunicorn's
+# threaded workers two concurrent fetches in overflow can step on
+# each other (one corruption-free worst-case is `pop` returning
+# KeyError, but the lock removes that branch entirely).
 _ACTOR_CACHE_SECONDS = 300
 _ACTOR_CACHE_MAX_ENTRIES = 1024
 _ACTOR_CACHE: dict[str, tuple[float, dict[str, object]]] = {}
+_ACTOR_CACHE_LOCK = threading.Lock()
 
 # Module-level signed-request replay cache. Lives in process
 # memory; a multi-worker deployment has one cache per worker,
 # which still tightens the replay window for any single attacker
 # (they'd have to spread replays across workers). A shared cache
 # (Redis, DB row) is the right next step if the threat ever
-# warrants it.
+# warrants it. `_ReplayCache.add` is the only mutator and is
+# itself short; the lock is taken at the call-site in
+# `_fetch_actor` for the actor cache rather than inside the
+# replay cache because the replay cache is internally consistent
+# under the GIL for single-step `dict[k] = v`.
 _REPLAY_CACHE = _ReplayCache()
 
 
@@ -262,7 +273,7 @@ def _handle_follow(
                     inbox_url=inbox_url,
                     shared_inbox_url=shared_inbox,
                     actor_name=name if isinstance(name, str) else None,
-                    accepted_at=datetime.now(UTC).replace(tzinfo=None),
+                    accepted_at=naive_utcnow(),
                 )
             )
         db.commit()
@@ -383,10 +394,16 @@ def _fetch_actor(actor_iri: str) -> dict[str, object] | None:
         return None
     # Bound the cache so a fuzzing attacker can't grow it
     # without limit. Drop the oldest entry on overflow.
-    if len(_ACTOR_CACHE) >= _ACTOR_CACHE_MAX_ENTRIES:
-        oldest_key = min(_ACTOR_CACHE, key=lambda k: _ACTOR_CACHE[k][0])
-        _ACTOR_CACHE.pop(oldest_key, None)
-    _ACTOR_CACHE[actor_iri] = (now, doc)
+    # `min(...)` iterates the dict then `pop` removes the result;
+    # under gunicorn's threaded workers two concurrent overflows
+    # can otherwise step on each other (`pop` could see the key
+    # already removed by the other thread). The lock collapses
+    # the iterate+pop+set into a single critical section.
+    with _ACTOR_CACHE_LOCK:
+        if len(_ACTOR_CACHE) >= _ACTOR_CACHE_MAX_ENTRIES:
+            oldest_key = min(_ACTOR_CACHE, key=lambda k: _ACTOR_CACHE[k][0])
+            _ACTOR_CACHE.pop(oldest_key, None)
+        _ACTOR_CACHE[actor_iri] = (now, doc)
     return doc
 
 

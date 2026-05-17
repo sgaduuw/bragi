@@ -22,7 +22,6 @@ with a `last_error` note for admin visibility.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from flask import Blueprint, abort, jsonify, request
@@ -48,6 +47,7 @@ from bragi.core.models.webmention import (
     Webmention,
     WebmentionStatus,
 )
+from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)
 HTTP_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS
@@ -110,7 +110,7 @@ def receive() -> ResponseReturnValue:
         row.content_text = _content_snippet(html)
         row.mention_type = classify_mention(html)
         row.status = WebmentionStatus.VERIFIED
-        row.verified_at = datetime.now(UTC).replace(tzinfo=None)
+        row.verified_at = naive_utcnow()
         db.commit()
 
     return jsonify({"status": "accepted"}), 202

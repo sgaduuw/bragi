@@ -7,7 +7,7 @@ show the public_id prefix.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from flask import (
     Blueprint,
@@ -26,6 +26,7 @@ from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.personal_access_token import PersonalAccessToken, TokenScope
 from bragi.core.security import current_user
+from bragi.core.time import naive_utcnow_plus
 
 bp = Blueprint(
     "api_tokens_admin",
@@ -99,7 +100,7 @@ def create_token() -> ResponseReturnValue:
         if days <= 0:
             flash("Expires-in-days must be positive.", "error")
             return redirect(url_for("api_tokens_admin.list_tokens"))
-        expires_at = (datetime.now(UTC) + timedelta(days=days)).replace(tzinfo=None)
+        expires_at = naive_utcnow_plus(timedelta(days=days))
 
     with SessionLocal() as db:
         minted = mint_token(

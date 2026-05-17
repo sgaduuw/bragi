@@ -7,7 +7,6 @@ plain functions on a session for fixture-friendliness.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -27,6 +26,7 @@ from bragi.core.models.webmention import (
     WebmentionOutbox,
     WebmentionOutboxStatus,
 )
+from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def send_one(db: Session, outbox: WebmentionOutbox) -> None:
     bumped so the next run retries.
     """
     outbox.attempt_count += 1
-    outbox.last_attempt_at = datetime.now(UTC).replace(tzinfo=None)
+    outbox.last_attempt_at = naive_utcnow()
     site = db.get(Site, outbox.site_id)
     post = db.get(Post, outbox.post_id)
     if site is None or post is None:
