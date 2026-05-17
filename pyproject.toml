@@ -67,6 +67,7 @@ themes = "bragi.contrib.themes.plugin"
 theme_default = "bragi.contrib.theme_default.plugin"
 embeds = "bragi.contrib.embeds.plugin"
 internal_links = "bragi.contrib.internal_links.plugin"
+markdown_extras = "bragi.contrib.markdown_extras.plugin"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]
