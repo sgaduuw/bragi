@@ -53,6 +53,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **ActivityPub federation: one actor per site (#148).** New
+  `bragi.contrib.activitypub` plugin turns each Site into a
+  follow-able fediverse actor addressed as
+  `@<site-slug>@<hostname>`. Mastodon users follow the actor;
+  published posts arrive as Create+Note activities with a link
+  back to the canonical post URL. New tables: `site_keypairs`
+  (per-site RSA 2048, generated on first /actor hit or via
+  `cms activitypub keygen --site SLUG`), `activitypub_followers`
+  (one row per remote actor), `activitypub_outbox` (per-recipient
+  delivery queue). Endpoints on the delivery app:
+  `/.well-known/webfinger`, `/actor`, `/actor/inbox`,
+  `/actor/outbox`, `/actor/followers`. HTTP signatures
+  (draft-cavage-http-signatures-12, RSA-SHA256) on outbound
+  POSTs; inbound POSTs verified against the sender's published
+  `publicKeyPem`. `Follow` and `Undo Follow` activities are
+  handled; other types ACK silently. On post publish, a fanout
+  queues one row per follower, and `cms activitypub send-pending`
+  ships them. Out of v1: receiving replies as comments (bragi
+  has no comment system), outbound Like / Boost / Reply, DM-
+  style ActivityPub, multi-actor per author. New `cryptography`
+  dep (was already transitively present via authlib).
 - **Webmentions: send + receive + moderate (#147).** New
   `bragi.contrib.webmentions` plugin closes the indieweb loop on
   both sides. On `on_post_published` / `on_post_updated` (when

@@ -176,6 +176,8 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.contrib.webmentions.cli.SessionLocal",
     "bragi.contrib.webmentions.plugin.SessionLocal",
     "bragi.contrib.webmentions.receiver.SessionLocal",
+    "bragi.contrib.activitypub.cli.SessionLocal",
+    "bragi.contrib.activitypub.views.SessionLocal",
     "bragi.contrib.attachments.admin.SessionLocal",
     "bragi.contrib.attachments.cli.SessionLocal",
     "bragi.contrib.attachments.delivery.SessionLocal",
