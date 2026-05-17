@@ -244,3 +244,59 @@ def test_session_cookie_is_httponly(admin_app: Flask) -> None:
     sid_header = next((h for h in set_cookies if h.startswith(f"{COOKIE_NAME}=")), None)
     assert sid_header is not None
     assert "HttpOnly" in sid_header
+
+
+def test_last_seen_at_throttled_within_window(
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read-only load within `LAST_SEEN_BUMP_INTERVAL` of the row's
+    existing last_seen_at must not rewrite the column. The first
+    load after the window expires does write."""
+    from bragi.core.middleware.sessions import (
+        LAST_SEEN_BUMP_INTERVAL,
+        BragiSessionInterface,
+    )
+
+    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
+
+    sid = "c" * 32
+    now = datetime.now(UTC).replace(tzinfo=None)
+    fresh = now - timedelta(seconds=5)
+    stale = now - LAST_SEEN_BUMP_INTERVAL - timedelta(seconds=5)
+    with db_session_factory() as db:
+        db.add(
+            SessionRow(
+                id=sid,
+                expires_at=now + timedelta(days=1),
+                last_seen_at=fresh,
+                data={},
+            )
+        )
+        db.commit()
+
+    interface = BragiSessionInterface()
+
+    # Forge a minimal request object: open_session only reads
+    # `request.cookies` from it.
+    class _Req:
+        cookies = {COOKIE_NAME: sid}
+
+    app = Flask(__name__)
+    interface.open_session(app, _Req())  # type: ignore[arg-type]
+    with db_session_factory() as db:
+        row = db.get(SessionRow, sid)
+        assert row is not None
+        # Within-window load left the existing timestamp intact.
+        assert row.last_seen_at == fresh
+        row.last_seen_at = stale
+        db.commit()
+
+    interface.open_session(app, _Req())  # type: ignore[arg-type]
+    with db_session_factory() as db:
+        row = db.get(SessionRow, sid)
+        assert row is not None
+        # Beyond-window load did rewrite (close-to-now, not still `stale`).
+        assert row.last_seen_at != stale
+        # Sanity bound: the bump landed within the test's clock window.
+        assert (datetime.now(UTC).replace(tzinfo=None) - row.last_seen_at) < timedelta(minutes=1)

@@ -6,6 +6,53 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **FTS5 search pushes pagination to SQL.** The mixed post + page
+  search previously loaded every matching row from both FTS
+  tables, sorted in Python by bm25, then sliced to the requested
+  page. On a paginated UI that only ever renders 10 to 20 hits,
+  the matching set growing into the thousands was a steady-state
+  waste. The two SELECTs are now a single UNION ALL with
+  `ORDER BY rank ASC LIMIT :limit OFFSET :offset`; `total` comes
+  from two MATCH-only `COUNT(*)` queries that skip the snippet()
+  expansion and per-row hydration.
+- **Search reindex commits once, not per row.** `_reindex_all`
+  walked every published post and page and called the per-row
+  `_index` helper, which opened its own `SessionLocal` and
+  committed each upsert. On a corpus of N rows that meant 1
+  DELETE pass + N transactions (so N fsyncs of the WAL and N
+  busy-timeout windows for any concurrent reader). All FTS
+  writes for the reindex now stage in one session with a single
+  trailing commit; the per-row API stays single-transaction for
+  the lifecycle-hook path.
+- **Redirect PREFIX resolution pushes the match to SQL.** The
+  resolver previously loaded every active PREFIX rule for the
+  site into memory, then walked them longest-first looking for a
+  startswith match. The predicate is now
+  `substr(:path, 1, length(source_path)) = source_path` with
+  `ORDER BY length(source_path) DESC LIMIT 1`, so SQLite returns
+  the single winning row directly. `substr` was picked over LIKE
+  so source_path strings containing `%` or `_` do not need
+  escaping.
+- **Session `last_seen_at` writes are throttled to one per
+  minute per session.** Every admin page render fires N htmx
+  subrequests; without the throttle each one wrote
+  `UPDATE sessions SET last_seen_at = ...` on the same row. The
+  new threshold (`LAST_SEEN_BUMP_INTERVAL = 60s`) matches what
+  the "Last seen" column is actually for (operator visibility,
+  not per-request precision) and keeps SQLite WAL pressure off
+  during burst editing.
+- **`AuditAction.TOKEN_USED` is downsampled to at most one row
+  per token per 60s per worker.** A high-QPS bearer integration
+  (a poller hitting the JSON API every few seconds) previously
+  wrote one indistinguishable audit row per request. The new
+  per-process map keys on token id with a 60s window; the first
+  use in any window writes, subsequent uses are silent. Map is
+  bounded at 4096 entries so a fuzzer presenting many distinct
+  ids cannot grow it without limit. Per-request provenance still
+  lives in the access log; the audit row's signal is "this
+  token was active around time T".
+
 ### Added
 - **`/healthz` liveness endpoint on both apps.** GET returns
   200 + `ok` after a `SELECT 1` round-trip; 503 + a logged

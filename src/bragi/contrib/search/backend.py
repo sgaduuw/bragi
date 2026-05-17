@@ -69,6 +69,33 @@ def _safe_query(raw: str) -> str | None:
     return " AND ".join(tokens)
 
 
+def _index_in_session(db: Any, scope: str, entity_id: int, fields: dict[str, Any]) -> None:
+    """Inner upsert that takes an open session and does NOT commit.
+
+    Pulled out of `_index` so the batch reindex path can stage many
+    rows into one transaction; the single-row callers (`index_post`,
+    `index_page`, the lifecycle hooks) still go through `_index`
+    which owns the session lifecycle.
+    """
+    table = _FTS_TABLES.get(scope)
+    if table is None:
+        return
+    db.execute(text(f"DELETE FROM {table} WHERE rowid = :rid"), {"rid": entity_id})
+    db.execute(
+        text(
+            f"INSERT INTO {table} (rowid, title, body, meta_description, excerpt)"
+            " VALUES (:rid, :title, :body, :meta_desc, :excerpt)"
+        ),
+        {
+            "rid": entity_id,
+            "title": fields.get("title") or "",
+            "body": fields.get("body") or "",
+            "meta_desc": fields.get("meta_description") or "",
+            "excerpt": fields.get("excerpt") or "",
+        },
+    )
+
+
 def _index(scope: str, entity_id: int, fields: dict[str, Any]) -> None:
     """Upsert a single row into the scope's FTS table.
 
@@ -80,24 +107,8 @@ def _index(scope: str, entity_id: int, fields: dict[str, Any]) -> None:
     `strip_code_fences` so a future plugin with different
     pre-processing isn't locked in).
     """
-    table = _FTS_TABLES.get(scope)
-    if table is None:
-        return
     with SessionLocal() as db:
-        db.execute(text(f"DELETE FROM {table} WHERE rowid = :rid"), {"rid": entity_id})
-        db.execute(
-            text(
-                f"INSERT INTO {table} (rowid, title, body, meta_description, excerpt)"
-                " VALUES (:rid, :title, :body, :meta_desc, :excerpt)"
-            ),
-            {
-                "rid": entity_id,
-                "title": fields.get("title") or "",
-                "body": fields.get("body") or "",
-                "meta_desc": fields.get("meta_description") or "",
-                "excerpt": fields.get("excerpt") or "",
-            },
-        )
+        _index_in_session(db, scope, entity_id, fields)
         db.commit()
 
 
@@ -113,11 +124,20 @@ def _remove(scope: str, entity_id: int) -> None:
 def _search(site_id: int, query: str, page: int, page_size: int) -> SearchResults:
     """Mixed post + page search, bm25-ranked, scoped to one site.
 
-    Two separate FTS queries (one per scope) merged in memory and
-    re-sorted by `rank`. The page is then sliced; total count is
-    the sum of matching rows across both scopes. Fine for the v1
-    expected corpus size (a personal blog is well under any
-    threshold where merge-in-memory hurts).
+    Pushes pagination to SQL via a UNION ALL of the per-scope FTS
+    SELECTs, with `ORDER BY rank ASC LIMIT :limit OFFSET :offset`
+    (bm25 returns negatives; lower / more negative is better). The
+    total count is the sum of two cheap COUNT(*) queries against
+    the same MATCH predicates. Before this, every search loaded
+    every matching row from both tables, sorted in Python, then
+    sliced; fine at personal-blog scale, painful as soon as the
+    matching set spans thousands of rows on a paginated UI that
+    only ever wants 10 to 20 hits.
+
+    The COUNTs run independently of the paginated SELECT; the
+    cost is two MATCH-evaluation passes per request rather than
+    one, but each MATCH-only count avoids the snippet() expansion
+    and per-row hydration of the paged query.
     """
     page = max(1, page)
     page_size = max(1, min(page_size, 100))
@@ -125,78 +145,88 @@ def _search(site_id: int, query: str, page: int, page_size: int) -> SearchResult
     if safe is None:
         return SearchResults(page=page, page_size=page_size, query=query)
 
-    hits: list[SearchHit] = []
-    total = 0
+    offset = (page - 1) * page_size
     with SessionLocal() as db:
-        # Posts: only include published rows. snippet() args:
+        # snippet() args:
         # (table, col_idx, start_marker, end_marker, ellipsis, n_tokens).
         # col_idx -1 means "pick the first column whose tokens
         # matched", so a hit on `title` snippets the title, a hit on
         # `body` snippets the body. Pinning to a specific column
         # would return NULL for hits that didn't include that column.
+        #
+        # UNION ALL (not UNION DISTINCT) since scope+entity_id is
+        # unique by construction and we want to keep both even if
+        # rank ties.
+        union_sql = (
+            "SELECT scope, id, site_id, title, slug, snippet, rank FROM ("
+            " SELECT 'post' AS scope, posts.id AS id, posts.site_id AS site_id,"
+            "  posts.title AS title, posts.slug AS slug,"
+            "  snippet(posts_fts, -1, '<mark>', '</mark>', '…', 24) AS snippet,"
+            "  bm25(posts_fts) AS rank"
+            "  FROM posts_fts"
+            "  JOIN posts ON posts.id = posts_fts.rowid"
+            "  WHERE posts_fts MATCH :q"
+            "  AND posts.site_id = :site_id"
+            "  AND posts.status = :post_published"
+            " UNION ALL"
+            " SELECT 'page' AS scope, pages.id AS id, pages.site_id AS site_id,"
+            "  pages.title AS title, pages.slug AS slug,"
+            "  snippet(pages_fts, -1, '<mark>', '</mark>', '…', 24) AS snippet,"
+            "  bm25(pages_fts) AS rank"
+            "  FROM pages_fts"
+            "  JOIN pages ON pages.id = pages_fts.rowid"
+            "  WHERE pages_fts MATCH :q"
+            "  AND pages.site_id = :site_id"
+            "  AND pages.status = :page_published"
+            ") ORDER BY rank ASC LIMIT :limit OFFSET :offset"
+        )
         rows = db.execute(
+            text(union_sql),
+            {
+                "q": safe,
+                "site_id": site_id,
+                "post_published": PostStatus.PUBLISHED,
+                "page_published": "published",
+                "limit": page_size,
+                "offset": offset,
+            },
+        ).all()
+        post_total = db.execute(
             text(
-                "SELECT posts.id AS id, posts.site_id AS site_id,"
-                " posts.title AS title, posts.slug AS slug,"
-                " snippet(posts_fts, -1, '<mark>', '</mark>', '…', 24) AS snippet,"
-                " bm25(posts_fts) AS rank"
-                " FROM posts_fts"
+                "SELECT COUNT(*) FROM posts_fts"
                 " JOIN posts ON posts.id = posts_fts.rowid"
                 " WHERE posts_fts MATCH :q"
                 " AND posts.site_id = :site_id"
                 " AND posts.status = :published"
             ),
             {"q": safe, "site_id": site_id, "published": PostStatus.PUBLISHED},
-        ).all()
-        for row in rows:
-            hits.append(
-                SearchHit(
-                    scope="post",
-                    entity_id=row.id,
-                    site_id=row.site_id,
-                    title=row.title,
-                    slug=row.slug,
-                    snippet=row.snippet,
-                    score=row.rank,
-                )
-            )
-        total += len(rows)
-
-        # Pages: same shape, joined to the pages table.
-        page_rows = db.execute(
+        ).scalar_one()
+        page_total = db.execute(
             text(
-                "SELECT pages.id AS id, pages.site_id AS site_id,"
-                " pages.title AS title, pages.slug AS slug,"
-                " snippet(pages_fts, -1, '<mark>', '</mark>', '…', 24) AS snippet,"
-                " bm25(pages_fts) AS rank"
-                " FROM pages_fts"
+                "SELECT COUNT(*) FROM pages_fts"
                 " JOIN pages ON pages.id = pages_fts.rowid"
                 " WHERE pages_fts MATCH :q"
                 " AND pages.site_id = :site_id"
                 " AND pages.status = :published"
             ),
             {"q": safe, "site_id": site_id, "published": "published"},
-        ).all()
-        for row in page_rows:
-            hits.append(
-                SearchHit(
-                    scope="page",
-                    entity_id=row.id,
-                    site_id=row.site_id,
-                    title=row.title,
-                    slug=row.slug,
-                    snippet=row.snippet,
-                    score=row.rank,
-                )
-            )
-        total += len(page_rows)
+        ).scalar_one()
 
-    # bm25 returns negative numbers; lower is better. Sort ascending.
-    hits.sort(key=lambda h: h.score)
-    start = (page - 1) * page_size
+    hits = [
+        SearchHit(
+            scope=row.scope,
+            entity_id=row.id,
+            site_id=row.site_id,
+            title=row.title,
+            slug=row.slug,
+            snippet=row.snippet,
+            score=row.rank,
+        )
+        for row in rows
+    ]
     return SearchResults(
-        hits=hits[start : start + page_size],
-        total=total,
+        hits=hits,
+        total=int(post_total) + int(page_total),
         page=page,
         page_size=page_size,
         query=query,
@@ -228,6 +258,16 @@ def _reindex_all(site_id: int | None) -> dict[str, int]:
     coarse on purpose: contentless FTS5 has no `OPTIMIZE` or
     incremental rebuild, and a personal-blog-scale corpus is
     well within the "drop and rebuild" budget.
+
+    Writes happen in a single session: the per-row insert previously
+    opened its own SessionLocal and committed, so a reindex of N
+    rows was N+2 transactions (one DELETE pass + N upserts). On
+    SQLite that costs N fsyncs of the WAL plus N busy-timeout
+    windows for any concurrent reader. The new shape stages every
+    row in one session and commits once at the end. For a corpus
+    big enough that holding the writes in one transaction would
+    pin too much WAL, the right future move is chunking (commit
+    every K rows), not reverting to per-row commits.
     """
     counts = {"posts": 0, "pages": 0}
     with SessionLocal() as db:
@@ -259,14 +299,14 @@ def _reindex_all(site_id: int | None) -> dict[str, int]:
                 ),
                 {"site_id": site_id},
             )
-        db.commit()
 
         for post in db.execute(post_query).scalars():
-            _index("post", post.id, _post_fields(post))
+            _index_in_session(db, "post", post.id, _post_fields(post))
             counts["posts"] += 1
         for page in db.execute(page_query).scalars():
-            _index("page", page.id, _page_fields(page))
+            _index_in_session(db, "page", page.id, _page_fields(page))
             counts["pages"] += 1
+        db.commit()
     return counts
 
 
