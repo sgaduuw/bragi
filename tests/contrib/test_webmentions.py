@@ -48,7 +48,6 @@ from bragi.core.models.webmention import (
 )
 from tests.conftest import make_test_user, seed_blog_index
 
-
 # --------------------------- parse helpers ---------------------------
 
 
