@@ -53,6 +53,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **`cms export` CLI: per-site Hugo-shaped corpus dump (#145).**
+  `flask --app bragi.apps.admin cms export [--site SLUG] [--output DIR]`
+  writes a Hugo content tree for each site: posts as
+  `content/posts/<slug>.md` with YAML frontmatter (title, date,
+  draft, description, tags, aliases, og_image); pages under
+  `content/pages/` with extra `kind` + `parent_slug` keys;
+  attachment bytes as `static/attachments/<storage_key>` alongside
+  an `attachments.csv` metadata manifest (filename, content_type,
+  alt_text, dimensions, focal point); the full redirect table as
+  `redirects.csv`. Output is deterministic so re-running against
+  an unchanged DB yields a byte-identical tree, and posts
+  round-trip through `cms import hugo` per source_id: import →
+  export → re-import creates no new rows. Closes the "static-site
+  rebuild" trigger noted in MEMORY.md against the deferred JSON
+  API thread.
 - **Chronological archive at `<post_index>/archive/` (#144).** Three
   levels, each rendering a flat list of the next level's counts:
   the archive index shows years (descending) with post counts; a

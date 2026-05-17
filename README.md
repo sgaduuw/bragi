@@ -261,6 +261,23 @@ in place rather than duplicating them.
 Notion, Substack, and Medium importers are deferred to
 follow-up packages; no v1.x commitment.
 
+## Export (portability)
+
+`flask --app bragi.apps.admin cms export [--site <slug>] [--output <dir>]`
+writes a Hugo-shaped tree per site: posts as
+`content/posts/<slug>.md` with YAML frontmatter, pages under
+`content/pages/`, attachment bytes under `static/attachments/`
+alongside an `attachments.csv` metadata manifest, and the
+per-site redirect table as `redirects.csv`. Default output is
+`bragi-export-YYYYMMDD-HHMMSS/` in the CWD.
+
+Output is deterministic: re-running against an unchanged DB
+yields byte-identical files, so a periodic `cms export` doubles
+as a diffable snapshot. Posts round-trip through `cms import
+hugo`: importing the export and re-exporting changes nothing
+beyond timestamps, so the corpus is portable back into any Hugo
+build at any time.
+
 ## Backups
 
 `flask --app bragi.apps.admin cms backup [--output PATH]` writes
