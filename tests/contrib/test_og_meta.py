@@ -216,3 +216,81 @@ def test_og_image_url_for_returns_none_when_neither_set(
         assert site.default_og_image_id is None
         assert post.og_image_id is None
         assert og_image_url_for(item=post, site=site, db=db) is None
+
+
+# --------------------------- cross-site rejection ---------------------------
+
+
+def test_resolve_og_image_id_rejects_cross_site_attachment(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """An attachment from a different site must not save as og_image.
+
+    The validation lives in the post admin's `_resolve_og_image_id`
+    helper. Without it a crafted form POST could attach another
+    tenant's attachment to this site's post, leaking the image
+    through the OG meta on social previews. Same shape lives on the
+    sites admin's `_default_og_image_id_or_error` and the page
+    admin's resolver; this test pins the post helper.
+    """
+    from sqlalchemy import select
+
+    from bragi.contrib.post.admin import _resolve_og_image_id
+
+    with db_session_factory() as db:
+        site_a = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        # Seed a second site + an attachment that belongs to site_b.
+        author = db.execute(select(User)).scalars().first()
+        assert author is not None
+        site_b = Site(
+            slug="other",
+            hostname="other.example.com",
+            title="Other",
+            canonical_url="https://other.example.com",
+            owner_user_id=author.id,
+        )
+        db.add(site_b)
+        db.flush()
+        foreign = Attachment(
+            site_id=site_b.id,
+            filename="foreign.png",
+            content_type="image/png",
+            size_bytes=42,
+            storage_key="sha-foreign",
+        )
+        db.add(foreign)
+        db.commit()
+
+        # Same-site attachment OK.
+        own = Attachment(
+            site_id=site_a.id,
+            filename="ok.png",
+            content_type="image/png",
+            size_bytes=42,
+            storage_key="sha-own",
+        )
+        db.add(own)
+        db.commit()
+        value, err = _resolve_og_image_id(db, str(own.id), site_a.id)
+        assert value == own.id
+        assert err is None
+
+        # Cross-site rejected with a clear error.
+        value, err = _resolve_og_image_id(db, str(foreign.id), site_a.id)
+        assert value is None
+        assert err is not None and "this site" in err
+
+        # Unknown id rejected.
+        value, err = _resolve_og_image_id(db, "99999", site_a.id)
+        assert value is None
+        assert err is not None and "not found" in err
+
+        # Empty input clears.
+        value, err = _resolve_og_image_id(db, "", site_a.id)
+        assert value is None
+        assert err is None
+
+        # Non-integer input rejected.
+        value, err = _resolve_og_image_id(db, "abc", site_a.id)
+        assert value is None
+        assert err is not None
