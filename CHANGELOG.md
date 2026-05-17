@@ -53,6 +53,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Configurable tag-segment word per site (#132).** Sites can
+  override the URL segment used for tag listings via
+  `Site.extra_settings["tag_segment"]` (same shape as
+  `posts_per_page`). Default `"tag"`; setting it to e.g.
+  `"category"` makes the dispatcher accept
+  `<post_index_url>/category/<slug>/` and `tag_url_for()` emit
+  the same. Non-string, empty, or non-slug values fall back to
+  `"tag"` defensively. No admin UI in v1; operators edit via
+  CLI / DB, matching `posts_per_page`.
 - **Static homepage per site (#124).** Each Site grew a new
   `home_page_id` column (nullable FK to `pages`, `ON DELETE SET
   NULL`). When set on the site edit form, `/` renders the

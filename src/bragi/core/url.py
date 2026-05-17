@@ -12,6 +12,8 @@ most one DB query for the post_index lookup.
 
 from __future__ import annotations
 
+import re
+
 from flask import g, has_app_context
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,6 +23,9 @@ from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.site import Site
 
 _G_CACHE_KEY = "_bragi_post_index_cache"
+
+DEFAULT_TAG_SEGMENT = "tag"
+_TAG_SEGMENT_RE = re.compile(r"^[a-z0-9-]+$")
 
 
 def _resolve_segments(db: Session, page: Page) -> list[str]:
@@ -120,20 +125,38 @@ def post_url_for(site: Site, post_slug: str) -> str | None:
     return f"{prefix}{post_slug}/"
 
 
+def tag_segment_for(site: Site) -> str:
+    """Resolve the URL segment used for tag listings on `site`.
+
+    Reads `Site.extra_settings["tag_segment"]`, falling back to
+    `"tag"` when unset, non-string, empty, or not slug-shaped
+    (`[a-z0-9-]+`). The fallback is defensive on purpose: a
+    typo'd setting should still produce reachable URLs rather
+    than 500'ing a render.
+    """
+    raw = getattr(site, "extra_settings", {}).get("tag_segment")
+    if not isinstance(raw, str):
+        return DEFAULT_TAG_SEGMENT
+    if not _TAG_SEGMENT_RE.match(raw):
+        return DEFAULT_TAG_SEGMENT
+    return raw
+
+
 def tag_url_for(site: Site, tag_slug: str) -> str | None:
     """Build a tag listing URL under the site's post_index prefix.
 
     Tags belong to the blog, so they live under the post_index
-    page's URL using the `tag/<slug>` segment (singular to keep
-    the segment unambiguous against a post slug `tags`). Returns
-    None when no post_index page exists.
+    page's URL using a single configurable segment (default
+    `tag`, singular to keep it unambiguous against a post slug
+    `tags`). Returns None when no post_index page exists.
     """
     prefix = post_index_url_for(site)
     if prefix is None:
         return None
+    segment = tag_segment_for(site)
     if prefix == "/":
-        return f"/tag/{tag_slug}/"
-    return f"{prefix}tag/{tag_slug}/"
+        return f"/{segment}/{tag_slug}/"
+    return f"{prefix}{segment}/{tag_slug}/"
 
 
 def invalidate_post_index_cache() -> None:
