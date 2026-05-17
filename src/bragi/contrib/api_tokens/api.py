@@ -21,9 +21,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from flask import Blueprint, abort, g, jsonify, request
+from flask import Blueprint, abort, current_app, g, jsonify, request
 from flask.typing import ResponseReturnValue
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bragi.core.db import SessionLocal
@@ -107,20 +107,44 @@ def _not_found(err: Any) -> ResponseReturnValue:
     return _api_error("not_found", str(err.description), 404)
 
 
+# Conservative cap so a token holder can't OOM the worker with
+# `?limit=999999`. 100 matches typical REST pagination defaults and
+# is enough for batch operations without forcing a paginator UX.
+_LIST_LIMIT_DEFAULT = 50
+_LIST_LIMIT_MAX = 100
+
+
 @bp.route("/sites/<string:site_slug>/posts/", methods=["GET"])
 def list_posts(site_slug: str) -> ResponseReturnValue:
-    """List posts for the site, newest first. No pagination in v1."""
+    """List posts for the site, newest first.
+
+    Query params: `limit` (default 50, max 100), `offset` (default 0).
+    Response carries `total` so clients can paginate without
+    issuing a second count query.
+    """
+    try:
+        limit = int(request.args.get("limit", _LIST_LIMIT_DEFAULT))
+        offset = int(request.args.get("offset", 0))
+    except ValueError:
+        abort(400, description="limit and offset must be integers")
+    if limit < 1 or offset < 0:
+        abort(400, description="limit must be >= 1, offset must be >= 0")
+    limit = min(limit, _LIST_LIMIT_MAX)
+
     with SessionLocal() as db:
         site = _resolve_site(db, site_slug)
+        total = db.execute(select(func.count(Post.id)).where(Post.site_id == site.id)).scalar_one()
         posts = list(
             db.execute(
                 select(Post)
                 .where(Post.site_id == site.id)
                 .order_by(Post.published_at.desc().nulls_last(), Post.id.desc())
+                .limit(limit)
+                .offset(offset)
             ).scalars()
         )
         payload = [_post_to_json(p) for p in posts]
-    return jsonify({"posts": payload})
+    return jsonify({"posts": payload, "total": total, "limit": limit, "offset": offset})
 
 
 @bp.route("/sites/<string:site_slug>/posts/", methods=["POST"])
@@ -169,6 +193,19 @@ def create_post(site_slug: str) -> ResponseReturnValue:
         db.add(post)
         db.commit()
         out = _post_to_json(post)
+        new_post_id = post.id
+        is_published_now = status == PostStatus.PUBLISHED
+
+        # Mirror the admin view's lifecycle dispatch so an
+        # API-driven create reaches the same downstream subscribers
+        # (redirects, sitemap, search index, ActivityPub fanout,
+        # outbound webmentions, cache invalidation). Without these
+        # the JSON surface silently bypasses every plugin that
+        # listens for `on_post_*`.
+        pm = current_app.extensions["plugin_manager"]
+        if is_published_now:
+            pm.hook.on_post_published(item=post, session=db)
+        pm.hook.on_cache_purge(scope="post", key=str(new_post_id))
     return jsonify({"post": out}), 201
 
 
@@ -189,6 +226,12 @@ def update_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404, description="post not found")
+        # Snapshot before mutation so on_post_updated subscribers
+        # (notably the redirects plugin's slug-change auto-301)
+        # can diff what changed.
+        before = {"slug": post.slug, "title": post.title, "status": post.status}
+        was_published = post.status == PostStatus.PUBLISHED
+
         if "title" in payload:
             post.title = (payload["title"] or "").strip() or post.title
         if "subtitle" in payload:
@@ -220,6 +263,19 @@ def update_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             post.meta_description = payload["meta_description"]
         db.commit()
         out = _post_to_json(post)
+        after = {"slug": post.slug, "title": post.title, "status": post.status}
+        updated_id = post.id
+        is_first_publish = not was_published and post.status == PostStatus.PUBLISHED
+
+        # Same lifecycle dispatch the admin update path runs. The
+        # API has no `skip_redirect` flag (admin's typo-in-draft
+        # opt-out is a UX affordance not exposed over JSON), so a
+        # slug change here always inserts the auto-301.
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        if is_first_publish:
+            pm.hook.on_post_published(item=post, session=db)
+        pm.hook.on_cache_purge(scope="post", key=str(updated_id))
     return jsonify({"post": out})
 
 
@@ -232,11 +288,25 @@ def publish_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404, description="post not found")
+        was_published = post.status == PostStatus.PUBLISHED
         post.status = PostStatus.PUBLISHED
         if post.published_at is None:
             post.published_at = datetime.now(UTC).replace(tzinfo=None)
         db.commit()
         out = _post_to_json(post)
+        published_id = post.id
+        is_first_publish = not was_published
+
+        # `publish` is a state transition: fire on_post_published
+        # only on the actual transition (re-publishing an already-
+        # published post is a no-op for subscribers like AP fanout
+        # so we don't re-fan to followers). Cache invalidation
+        # always runs because subscribers may render the publish
+        # timestamp.
+        pm = current_app.extensions["plugin_manager"]
+        if is_first_publish:
+            pm.hook.on_post_published(item=post, session=db)
+        pm.hook.on_cache_purge(scope="post", key=str(published_id))
     return jsonify({"post": out})
 
 

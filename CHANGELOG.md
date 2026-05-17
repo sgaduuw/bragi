@@ -6,6 +6,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **JSON API now fires post lifecycle hooks.** `POST /admin/api/sites/<slug>/posts/`,
+  `PATCH /admin/api/sites/<slug>/posts/<id>/`, and
+  `POST /admin/api/sites/<slug>/posts/<id>/publish` previously
+  skipped `on_post_updated` / `on_post_published` /
+  `on_cache_purge`. The redirects plugin's slug-change auto-301,
+  ActivityPub fanout, outbound webmention send, sitemap rebuild,
+  search index, and post-cache invalidation all listen on those
+  hooks. The API now dispatches them in the same shape the admin
+  view does (snapshot before/after, `on_post_published` only on
+  the actual draft -> published transition, `on_cache_purge`
+  always). API-driven workflows now reach every subscriber an
+  admin-UI edit reaches.
+- **API list endpoint paginates.** `GET /admin/api/sites/<slug>/posts/`
+  now accepts `limit` (default 50, max 100) and `offset` (default
+  0) query params; response carries `total`. Previously returned
+  the full post set in one payload, which would be slow + heavy
+  on a site with thousands of posts.
+
 ### Security
 - **CSRF exemption now requires a verified bearer token, not
   just an `Authorization` header.** The previous logic skipped
