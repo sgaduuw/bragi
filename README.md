@@ -148,6 +148,11 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   "Updated YYYY-MM-DD" line that only appears when the edit is
   meaningfully after first publish. Optional `User.bio` text
   surfaces as an "About the author" aside below the body.
+- **Related posts at end of article.** Tag-overlap ranks
+  same-site published posts ("more shared tags wins, recency
+  ties"); rendered as a "You may also like" aside under the body.
+  Per-site count override via `Site.extra_settings["related_posts_count"]`
+  (default 3); zero-tag posts render no aside.
 - **Plugin-extensible from day one.** Built-ins (Post, Page,
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties

@@ -53,6 +53,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Related posts at end of article (#139).** Each post page now
+  renders a "You may also like" aside below the body listing up
+  to N same-site published posts ranked by tag-overlap count
+  (more shared tags wins), tie-broken by `published_at` desc.
+  Posts with no tags or no overlapping siblings render no aside
+  at all. Default `N` is 3; per-site override via
+  `Site.extra_settings["related_posts_count"]`. The query is a
+  single GROUP BY against the `post_tags` junction, so the
+  feature costs one extra SELECT per post render.
 - **Post-page chrome: author byline, reading time,
   updated-date, optional bio (#138).** The post template now
   carries the meta line a modern blog reader expects: "by Ada

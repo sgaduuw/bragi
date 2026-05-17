@@ -67,4 +67,21 @@
   </aside>
   {% endif %}
 </article>
+{% if related_posts %}
+<aside class="related-posts">
+  <h2>You may also like</h2>
+  <ul>
+    {% for r in related_posts %}
+    <li>
+      <a href="{{ url_for_post(r) }}">{{ r.title }}</a>
+      {% if r.published_at %}
+      <time datetime="{{ r.published_at.isoformat() }}" class="meta">
+        {{ r.published_at.strftime('%Y-%m-%d') }}
+      </time>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</aside>
+{% endif %}
 {% endblock %}
