@@ -53,6 +53,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Auto-generated table of contents on multi-section posts
+  (#142).** Posts whose rendered HTML carries two or more
+  qualifying headings (h2 / h3 by default) now render an
+  `<aside class="toc-wrapper">` above the body with a nested
+  `<ol class="toc">` linking to each heading's anchor. Single-
+  section posts render no TOC at all; the "multiple headings =
+  wants a TOC" rule is the author's natural signal of intent.
+  Builder lives in `bragi.core.render.toc` (regex on the already
+  -anchored HTML, no BeautifulSoup dep). Default theme styles
+  the aside as a contained card.
 - **KaTeX-compatible math syntax + Mermaid code fences (#141).**
   `markdown_extras` now bundles two more parser additions:
   `mdit-py-plugins.dollarmath` for `$...$` (inline) and

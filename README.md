@@ -149,7 +149,9 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   reading-time estimate (220 WPM, rounded up), and an
   "Updated YYYY-MM-DD" line that only appears when the edit is
   meaningfully after first publish. Optional `User.bio` text
-  surfaces as an "About the author" aside below the body.
+  surfaces as an "About the author" aside below the body. A
+  table of contents auto-renders for multi-section posts (h2 /
+  h3 headings).
 - **Related posts at end of article.** Tag-overlap ranks
   same-site published posts ("more shared tags wins, recency
   ties"); rendered as a "You may also like" aside under the body.
