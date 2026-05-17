@@ -15,6 +15,7 @@ from flask import Flask, g, render_template, session
 from bragi import __version__
 from bragi.cli import cms
 from bragi.core.cache import CACHE_POLICIES
+from bragi.core.healthz import register_healthz
 from bragi.core.middleware.csrf import register_csrf
 from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
@@ -94,6 +95,10 @@ def create_admin_app() -> Flask:
     # cookie POST. The bearer plugin uses `tryfirst=True` so its
     # own `on_app_init` registers its hook ahead of others.
     register_site_resolver(app)
+    # `/healthz` is the container healthcheck target. Register
+    # before the site-prefixed admin scaffolding so the route is
+    # available regardless of how site_resolver leaves `g.site`.
+    register_healthz(app)
 
     # Site-prefixed admin routes (`/admin/sites/<site_slug>/...`)
     # capture the slug as a URL converter. Stash it on `g` so the

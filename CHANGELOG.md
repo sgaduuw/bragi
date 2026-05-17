@@ -6,6 +6,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`/healthz` liveness endpoint on both apps.** GET returns
+  200 + `ok` after a `SELECT 1` round-trip; 503 + a logged
+  exception when the DB ping fails. The example
+  `compose.yml` healthcheck stanza on `admin` / `delivery`
+  watches it via stdlib `urllib` (no extra image dep) so a
+  wedged worker (process up, DB unreachable) flips to
+  unhealthy and the `restart: unless-stopped` policy kicks
+  in. Admin's auth guard now exempts `_healthz` so a probe
+  doesn't bounce through `/auth/login`. Delivery's
+  site-resolver tolerates the unknown `Host: 127.0.0.1` so
+  the probe answers regardless of site state.
+- **`compose.yml` documents `BRAGI_ENV`, `BRAGI_MAX_REQUEST_BYTES`,
+  `BRAGI_ATTACHMENTS_MAX_BYTES`, plus the three new scheduler
+  cadences** (`EMBEDS_RERENDER_EVERY`, `WEBMENTIONS_SEND_EVERY`,
+  `ACTIVITYPUB_SEND_EVERY`). The example sets `BRAGI_ENV=production`
+  on the web services so the dev-`SECRET_KEY` boot check fires
+  when an operator forgets to set `BRAGI_SECRET_KEY` outside
+  the compose-enforced `${VAR:?...}` shape.
+
 ### Fixed
 - **`ON DELETE` actions extended across the rest of the model
   graph.** The first FK-ondelete migration only touched the

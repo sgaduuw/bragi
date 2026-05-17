@@ -16,6 +16,7 @@ from flask.typing import ResponseReturnValue
 from werkzeug.wrappers import Response
 
 from bragi.core.cache import apply_cache_policy
+from bragi.core.healthz import register_healthz
 from bragi.core.middleware.redirects import register_redirect_handler
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
@@ -76,6 +77,11 @@ def create_delivery_app() -> Flask:
     # chain on every 404 before falling through to a real Not Found.
     register_site_resolver(app)
     register_redirect_handler(app)
+    # `/healthz` is the container healthcheck target; register
+    # before the 404 redirect handler so a probe against an
+    # unknown Host header still answers 200 rather than tripping
+    # the redirect chain or a real 404.
+    register_healthz(app)
 
     # Default cache policy for delivery HTML. Views that need a
     # different profile (sitemap, feed, robots, security.txt) set
