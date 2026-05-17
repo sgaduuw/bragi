@@ -7,6 +7,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **SQLite `busy_timeout = 5000` now set on every connection.**
+  The sidecar + admin + delivery workers all write to one
+  SQLite file under WAL; without a busy_timeout, a write
+  contention raised `database is locked` immediately. Five
+  seconds matches the typical request timeout budget so a
+  brief contention waits rather than 500's.
+- **`scheduled-publish` no longer abandons the queue on a single
+  failing post.** A hook failure on post N stopped commits for
+  posts N+1..N; operators only noticed when a follow-up tick
+  accidentally re-picked the same row. Each iteration now
+  rolls back on failure and the loop continues; the summary
+  reports `M published, K failed`.
+- **`_ACTOR_CACHE` and `_ReplayCache` overflow eviction now hold
+  a `threading.Lock`.** Under gunicorn threaded workers two
+  concurrent overflows could race the `min(...)` + `pop`
+  sequence (the looser worst-case is a KeyError; the lock
+  removes the branch entirely).
 - **Importers target the site's actual post URL, not hardcoded
   `/posts/<slug>/`.** Hugo / Ghost / WordPress importers built
   every redirect target as `/posts/<slug>/`. On a migrated v1.10.x

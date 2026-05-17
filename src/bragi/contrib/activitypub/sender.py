@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -26,6 +25,7 @@ from bragi.core.models.activitypub import (
 )
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
+from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)
 HTTP_TIMEOUT_SECONDS = 15.0
@@ -77,7 +77,7 @@ def send_one(db: Session, outbox: ActivityPubOutbox) -> None:
     next worker run retries.
     """
     outbox.attempt_count += 1
-    outbox.last_attempt_at = datetime.now(UTC).replace(tzinfo=None)
+    outbox.last_attempt_at = naive_utcnow()
     site = db.get(Site, outbox.site_id)
     if site is None:
         outbox.status = ActivityPubOutboxStatus.FAILED

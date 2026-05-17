@@ -87,6 +87,57 @@ def sign_post(*, url: str, body: bytes, key_id: str, private_key_pem: str) -> Si
 _REQUIRED_HEADERS_POST: frozenset[str] = frozenset({"(request-target)", "host", "date", "digest"})
 
 
+class _ReplayCache:
+    """Bounded TTL set keyed on `(keyId, signature)`.
+
+    Returns False from `add()` when the entry is already present;
+    True when it was new (and now recorded). The TTL matches the
+    signature skew window so an entry sticks around for as long
+    as a fresh signature for the same key could legitimately be
+    presented.
+
+    The internal `_lock` serialises the iterate-then-pop sequences
+    in `_evict` and the overflow drop; without it, two concurrent
+    `add()`s on threaded gunicorn workers could see the same
+    "oldest" key and one `pop` would KeyError after the other won.
+    """
+
+    __slots__ = ("_entries", "_lock", "_max_entries", "_ttl_seconds")
+
+    def __init__(self, *, ttl_seconds: int = _DATE_SKEW_SECONDS, max_entries: int = 4096) -> None:
+        import threading
+
+        self._entries: dict[tuple[str, str], float] = {}
+        self._ttl_seconds = ttl_seconds
+        self._max_entries = max_entries
+        self._lock = threading.Lock()
+
+    def add(self, key_id: str, signature_b64: str) -> bool:
+        import time
+
+        now = time.monotonic()
+        with self._lock:
+            self._evict(now)
+            key = (key_id, signature_b64)
+            if key in self._entries:
+                return False
+            if len(self._entries) >= self._max_entries:
+                # Drop the oldest in a single pass; cheap at 4096
+                # entries and saves a dependency on cachetools.
+                oldest = min(self._entries, key=lambda k: self._entries[k])
+                self._entries.pop(oldest, None)
+            self._entries[key] = now
+            return True
+
+    def _evict(self, now: float) -> None:
+        # Caller holds `_lock`. Iterate over a snapshot so we can
+        # mutate the dict.
+        cutoff = now - self._ttl_seconds
+        for k, ts in list(self._entries.items()):
+            if ts < cutoff:
+                self._entries.pop(k, None)
+
+
 def verify_post(
     *,
     method: str,
@@ -162,47 +213,6 @@ def verify_post(
         if not replay_cache.add(key_id, signature_b64):
             return False
     return True
-
-
-class _ReplayCache:
-    """Bounded TTL set keyed on `(keyId, signature)`.
-
-    Returns False from `add()` when the entry is already present;
-    True when it was new (and now recorded). The TTL matches the
-    signature skew window so an entry sticks around for as long
-    as a fresh signature for the same key could legitimately be
-    presented.
-    """
-
-    __slots__ = ("_entries", "_max_entries", "_ttl_seconds")
-
-    def __init__(self, *, ttl_seconds: int = _DATE_SKEW_SECONDS, max_entries: int = 4096) -> None:
-        self._entries: dict[tuple[str, str], float] = {}
-        self._ttl_seconds = ttl_seconds
-        self._max_entries = max_entries
-
-    def add(self, key_id: str, signature_b64: str) -> bool:
-        import time
-
-        now = time.monotonic()
-        self._evict(now)
-        key = (key_id, signature_b64)
-        if key in self._entries:
-            return False
-        if len(self._entries) >= self._max_entries:
-            # Drop the oldest in a single pass; cheap at 4096
-            # entries and saves a dependency on cachetools.
-            oldest = min(self._entries, key=lambda k: self._entries[k])
-            self._entries.pop(oldest, None)
-        self._entries[key] = now
-        return True
-
-    def _evict(self, now: float) -> None:
-        cutoff = now - self._ttl_seconds
-        # Iterate over a snapshot so we can mutate the dict.
-        for k, ts in list(self._entries.items()):
-            if ts < cutoff:
-                self._entries.pop(k, None)
 
 
 def _build_signing_string(

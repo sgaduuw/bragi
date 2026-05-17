@@ -13,11 +13,11 @@ side works.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
 from typing import Any
 
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
+from bragi.core.time import naive_utcnow
 
 # Public collection IRI per spec; signals "public-addressed" so
 # Mastodon shows the post on the actor's profile and federates it.
@@ -45,7 +45,9 @@ def note_for_post(site: Site, post: Post, post_path: str) -> dict[str, Any]:
     """
     note_id = f"{actor_url(site)}/notes/{post.id}"
     content_html = _short_html(post)
-    published = (post.published_at or datetime.now(UTC)).replace(tzinfo=None).isoformat() + "Z"
+    # `published_at` is stored naive UTC; on a not-yet-published post
+    # the fallback uses the current moment in the same shape.
+    published = (post.published_at or naive_utcnow()).isoformat() + "Z"
     return {
         "@context": "https://www.w3.org/ns/activitystreams",
         "id": note_id,

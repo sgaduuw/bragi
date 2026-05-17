@@ -15,7 +15,7 @@ move to a materialised summary.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from flask import Blueprint, render_template
 from flask.typing import ResponseReturnValue
@@ -24,6 +24,7 @@ from sqlalchemy import func, select
 from bragi.core.db import SessionLocal
 from bragi.core.models.analytics_event import AnalyticsEvent as AnalyticsEventRow
 from bragi.core.permissions import resolve_site_or_abort
+from bragi.core.time import naive_utcnow_plus
 
 bp = Blueprint(
     "analytics_admin",
@@ -37,7 +38,7 @@ WINDOW_DAYS = 30
 
 @bp.route("/", methods=["GET"])
 def list_analytics(site_slug: str) -> ResponseReturnValue:
-    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=WINDOW_DAYS)
+    since = naive_utcnow_plus(timedelta(days=-WINDOW_DAYS))
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         rows = db.execute(

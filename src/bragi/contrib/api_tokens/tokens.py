@@ -25,7 +25,7 @@ from __future__ import annotations
 import base64
 import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import NamedTuple
 
 from argon2 import PasswordHasher
@@ -34,6 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bragi.core.models.personal_access_token import PersonalAccessToken
+from bragi.core.time import naive_utcnow
 
 TOKEN_PREFIX = "brg_"
 PUBLIC_ID_LEN = 22  # 16 bytes -> 22 url-safe base64 chars (no padding)
@@ -145,6 +146,6 @@ def verify(db: Session, presented: str | None) -> PersonalAccessToken | None:
             return None
     except VerifyMismatchError:
         return None
-    if row.expires_at is not None and row.expires_at <= datetime.now(UTC).replace(tzinfo=None):
+    if row.expires_at is not None and row.expires_at <= naive_utcnow():
         return None
     return row

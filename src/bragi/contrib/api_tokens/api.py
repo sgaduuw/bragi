@@ -18,7 +18,7 @@ the HTTP status set appropriately (400 / 401 / 403 / 404 / 409).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from flask import Blueprint, abort, current_app, g, jsonify, request
@@ -33,6 +33,7 @@ from bragi.core.models.site import Site
 from bragi.core.permissions import is_site_member
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.security import current_user
+from bragi.core.time import naive_utcnow, to_naive_utc
 
 bp = Blueprint(
     "api_tokens_api",
@@ -291,7 +292,7 @@ def publish_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         was_published = post.status == PostStatus.PUBLISHED
         post.status = PostStatus.PUBLISHED
         if post.published_at is None:
-            post.published_at = datetime.now(UTC).replace(tzinfo=None)
+            post.published_at = naive_utcnow()
         db.commit()
         out = _post_to_json(post)
         published_id = post.id
@@ -315,9 +316,9 @@ def _parse_dt(raw: Any) -> datetime | None:
     if raw is None or raw == "":
         return None
     if isinstance(raw, datetime):
-        return raw.astimezone(UTC).replace(tzinfo=None) if raw.tzinfo else raw
+        return to_naive_utc(raw)
     try:
         dt = datetime.fromisoformat(str(raw))
     except ValueError:
         abort(400, description=f"unparseable datetime {raw!r}")
-    return dt.astimezone(UTC).replace(tzinfo=None) if dt.tzinfo else dt
+    return to_naive_utc(dt)

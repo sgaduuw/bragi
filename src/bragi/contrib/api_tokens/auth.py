@@ -17,8 +17,6 @@ the CSRF guard runs.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from flask import Flask, g, request
 from flask.typing import ResponseReturnValue
 from sqlalchemy import update
@@ -28,6 +26,7 @@ from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.personal_access_token import PersonalAccessToken
 from bragi.core.models.user import User
+from bragi.core.time import naive_utcnow
 
 
 def install_bearer_middleware(app: Flask) -> None:
@@ -69,7 +68,7 @@ def _bearer_before_request() -> ResponseReturnValue | None:
         db.execute(
             update(PersonalAccessToken)
             .where(PersonalAccessToken.id == token_id)
-            .values(last_used_at=datetime.now(UTC).replace(tzinfo=None))
+            .values(last_used_at=naive_utcnow())
         )
         db.commit()
         user = db.get(User, token_user_id)
