@@ -57,12 +57,16 @@ def page_url_for(page: Page, *, db: Session | None = None) -> str:
     return "/" + "/".join(_resolve_segments(db, page)) + "/"
 
 
-def post_index_page_for(site: Site) -> Page | None:
+def post_index_page_for(site: Site, *, db: Session | None = None) -> Page | None:
     """Return the site's POST_INDEX page, or None when none exists.
 
     Per-request cached on `g._bragi_post_index_cache` keyed by
     site id. Outside an app context (CLI scripts, importers) the
-    cache is bypassed and each call opens a session.
+    cache is bypassed and each call opens a session, UNLESS the
+    caller passes `db=`, in which case the existing session is
+    reused so nested SessionLocal()s under a shared connection
+    pool (SQLite SingletonThreadPool) don't roll back the
+    caller's pending transaction.
 
     A POST_INDEX page that's not PUBLISHED is treated as not
     present: posts shouldn't have public URLs while the index
@@ -75,7 +79,7 @@ def post_index_page_for(site: Site) -> Page | None:
     else:
         cache = {}
 
-    with SessionLocal() as db:
+    if db is not None:
         page = db.execute(
             select(Page).where(
                 Page.site_id == site.id,
@@ -83,10 +87,19 @@ def post_index_page_for(site: Site) -> Page | None:
                 Page.status == PageStatus.PUBLISHED,
             )
         ).scalar_one_or_none()
-        if page is not None:
-            # Expunge so the caller can read fields after the
-            # session closes without a DetachedInstance issue.
-            db.expunge(page)
+    else:
+        with SessionLocal() as owned:
+            page = owned.execute(
+                select(Page).where(
+                    Page.site_id == site.id,
+                    Page.kind == PageKind.POST_INDEX,
+                    Page.status == PageStatus.PUBLISHED,
+                )
+            ).scalar_one_or_none()
+            if page is not None:
+                # Expunge so the caller can read fields after the
+                # session closes without a DetachedInstance issue.
+                owned.expunge(page)
 
     if has_app_context():
         cache[site.id] = page
@@ -94,7 +107,7 @@ def post_index_page_for(site: Site) -> Page | None:
     return page
 
 
-def post_index_url_for(site: Site) -> str | None:
+def post_index_url_for(site: Site, *, db: Session | None = None) -> str | None:
     """Effective public URL prefix for posts on `site`.
 
     Returns "/" when `Site.home_page_id` points at the post_index
@@ -102,22 +115,26 @@ def post_index_url_for(site: Site) -> str | None:
     the page's slug-derived URL otherwise, or None when the site
     has no post_index page at all (no public post URLs exist).
     """
-    page = post_index_page_for(site)
+    page = post_index_page_for(site, db=db)
     if page is None:
         return None
     if site.home_page_id == page.id:
         return "/"
-    return page_url_for(page)
+    return page_url_for(page, db=db)
 
 
-def post_url_for(site: Site, post_slug: str) -> str | None:
+def post_url_for(site: Site, post_slug: str, *, db: Session | None = None) -> str | None:
     """Build a post's public URL from the site's post_index prefix.
 
     `post_slug` is appended as a single path segment; callers
     supply only the post's own slug, never a slash-joined chain.
     Returns None when no post_index page exists on the site.
+
+    Pass `db=` from within an open session so nested SessionLocal
+    rollbacks don't drop the caller's pending writes (importer use
+    case under SQLite's SingletonThreadPool).
     """
-    prefix = post_index_url_for(site)
+    prefix = post_index_url_for(site, db=db)
     if prefix is None:
         return None
     if prefix == "/":

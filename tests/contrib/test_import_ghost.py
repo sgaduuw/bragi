@@ -17,6 +17,7 @@ from bragi.core.models.redirect import Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
+from tests.conftest import seed_blog_index
 
 
 def _make_export(tmp_path: Path, posts: list[dict[str, object]], **extra: object) -> Path:
@@ -150,7 +151,11 @@ def test_plan_warns_on_missing_slug(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def site_id(db_session: Session) -> Iterator[int]:
+def site_id(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[int]:
     # Importer needs at least one user for the author fallback; the
     # same user doubles as the site owner.
     user = User(email="ada@example.com", display_name="Ada", is_active=True)
@@ -165,6 +170,14 @@ def site_id(db_session: Session) -> Iterator[int]:
     )
     db_session.add(site)
     db_session.commit()
+    # Importer now resolves redirect targets via `post_url_for`,
+    # which needs a POST_INDEX page on the site to produce a URL.
+    # Seed `slug="posts"` so the existing `/posts/<slug>/`
+    # assertions hold. Also patch the url helper's SessionLocal so
+    # `post_url_for` reads from the same in-memory DB the test
+    # session writes to.
+    seed_blog_index(db_session, site, slug="posts")
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id
 
 

@@ -6,6 +6,28 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Importers target the site's actual post URL, not hardcoded
+  `/posts/<slug>/`.** Hugo / Ghost / WordPress importers built
+  every redirect target as `/posts/<slug>/`. On a migrated v1.10.x
+  site whose alembic auto-create kept the legacy "posts" slug the
+  output happened to resolve; on a brand-new site (where the
+  admin form's default seeds `slug="blog"`) every imported alias
+  pointed at a URL the delivery app would 404. Importers now
+  resolve through `post_url_for(site, slug, db=...)` (and
+  `page_url_for(page, db=...)` for WordPress pages); when the
+  target site has no POST_INDEX page yet the redirect emission is
+  skipped entirely (post URLs are unreachable until one exists
+  anyway). `post_url_for` and `post_index_page_for` grew an
+  optional `db=` so importers can reuse their open session
+  without the nested SessionLocal under SQLite's
+  SingletonThreadPool rolling back pending writes.
+- **Hugo aliases tolerate query / fragment suffixes.** `_normalise_alias`
+  in the Hugo importer now strips a trailing `?...` and `#...`
+  before normalising slashes, so an alias of
+  `/old/?ref=tw#section` matches the redirect resolver's
+  path-only compare.
+
 ### Changed
 - **JSON API now fires post lifecycle hooks.** `POST /admin/api/sites/<slug>/posts/`,
   `PATCH /admin/api/sites/<slug>/posts/<id>/`, and

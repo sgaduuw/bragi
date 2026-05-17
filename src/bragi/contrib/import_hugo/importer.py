@@ -26,6 +26,7 @@ from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.text import slugify
+from bragi.core.url import post_url_for
 
 # Hugo config files at the source root. Any one match counts.
 HUGO_CONFIG_CANDIDATES: tuple[str, ...] = (
@@ -93,9 +94,14 @@ def _normalise_alias(alias: str) -> str:
 
     Normalise to leading slash + trailing slash so the alias
     matches what the redirect resolver compares against (the
-    request path).
+    request path). Strip any query / fragment that might've been
+    appended (Hugo allows `/old/?ref=foo`-shaped aliases in
+    practice; the redirect resolver only compares paths).
     """
     a = alias.strip()
+    # Drop fragment first, then query; either may be absent.
+    a = a.split("#", 1)[0]
+    a = a.split("?", 1)[0]
     if not a.startswith("/"):
         a = "/" + a
     if not a.endswith("/"):
@@ -234,9 +240,16 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
 
             # Aliases -> 301 Redirects. Idempotent: existing rows
             # for the same (site, source, match_type) are skipped.
+            # The target URL is built from the site's actual
+            # post_index page (`/blog/<slug>/`, `/posts/<slug>/`,
+            # etc.); hardcoding `/posts/<slug>/` here would 404 on
+            # any site whose post_index isn't named "posts".
+            # Skip the alias block when the site has no post_index
+            # yet (post URLs are unreachable until one exists, so
+            # an alias target wouldn't resolve either).
             aliases = meta.get("aliases") or []
-            if isinstance(aliases, list):
-                target = f"/posts/{slug}/"
+            target = post_url_for(site, slug, db=db)
+            if isinstance(aliases, list) and target is not None:
                 for alias in aliases:
                     if not isinstance(alias, str):
                         continue
