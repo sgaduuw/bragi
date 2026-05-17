@@ -141,8 +141,10 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   its markdown serializer) is the admin editor; the data model is
   editor-independent. CommonMark + tables out of the box; the
   `markdown_extras` built-in plugin adds footnotes
-  (`text[^id]` + `[^id]: body`); plugins can register more
-  extensions via the `register_markdown_extension` hookspec.
+  (`text[^id]` + `[^id]: body`), KaTeX-compatible math
+  (`$x$` / `$$x$$`), and Mermaid code fences
+  (` ```mermaid `). Plugins can register more extensions via
+  the `register_markdown_extension` hookspec.
 - **Post-page chrome.** Each post renders with an author byline,
   reading-time estimate (220 WPM, rounded up), and an
   "Updated YYYY-MM-DD" line that only appears when the edit is

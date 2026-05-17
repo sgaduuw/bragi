@@ -53,6 +53,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **KaTeX-compatible math syntax + Mermaid code fences (#141).**
+  `markdown_extras` now bundles two more parser additions:
+  `mdit-py-plugins.dollarmath` for `$...$` (inline) and
+  `$$...$$` (block) math, and a fence-rule override that
+  preserves ` ```mermaid ` blocks under
+  `<pre class="mermaid">`. Math wrappers use the standard
+  `<span class="math inline">` / `<span class="math block">`
+  shapes that KaTeX's auto-render extension finds out of the box.
+  Operators add KaTeX / Mermaid `<script>` tags to their theme's
+  `base.html` to enable rendering (no JS bundles shipped in v1;
+  CDN dependency or theme-controlled inclusion is left to the
+  operator). `allow_digits=False` on dollarmath so `$5` in
+  prose still renders as text rather than turning into math.
 - **Per-tag Atom feeds (#140).** New endpoint
   `<post_index>/<tag_segment>/<tag-slug>/feed.xml` lets focused
   subscribers track a single topic. Same Atom 1.0 envelope as the
