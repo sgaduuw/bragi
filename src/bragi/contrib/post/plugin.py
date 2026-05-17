@@ -20,6 +20,7 @@ from bragi.api import ContentTypeSpec, FieldSpec, InternalLinkResolution, NavIte
 from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.contrib.post.cli import scheduled_publish
 from bragi.contrib.post.delivery import bp as post_delivery_bp
+from bragi.contrib.post.delivery import index_bp as post_index_delivery_bp
 from bragi.contrib.post.delivery import tag_bp as post_tag_delivery_bp
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
@@ -138,6 +139,12 @@ def register_delivery_blueprint() -> Blueprint:
 def _register_tag_bp() -> Blueprint:
     """Mount the per-tag listing at /tags/<slug>/."""
     return post_tag_delivery_bp
+
+
+@hookimpl(specname="register_delivery_blueprint")
+def _register_index_bp() -> Blueprint:
+    """Mount the per-site landing page at /."""
+    return post_index_delivery_bp
 
 
 @hookimpl

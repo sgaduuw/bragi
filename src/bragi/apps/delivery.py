@@ -11,7 +11,6 @@ import click
 import jinja2
 from flask import Flask
 
-from bragi import __version__
 from bragi.core.cache import apply_cache_policy
 from bragi.core.middleware.redirects import register_redirect_handler
 from bragi.core.middleware.site_resolver import register_site_resolver
@@ -108,16 +107,6 @@ def create_delivery_app() -> Flask:
     # markdown-it extensions (container directives, etc.) and stash
     # on app.extensions so `render_markdown()` picks it up.
     install_app_renderer(app, pm.hook.register_markdown_extension())
-
-    # Index sanity route. A real per-site landing page (post list,
-    # featured content, etc.) lands when a site needs more than a
-    # version stamp on `/`.
-    @app.route("/")
-    def index() -> str:
-        return (
-            f"<h1>bragi delivery</h1>"
-            f"<p>v{__version__}. Scaffold only, no rendered content yet.</p>"
-        )
 
     return app
 

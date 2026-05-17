@@ -1,0 +1,38 @@
+{% extends "delivery/base.html" %}
+{% block title %}{{ site.title }}{% endblock %}
+{% block content %}
+{% if posts %}
+<ul class="post-list">
+  {% for post in posts %}
+  <li>
+    <h2><a href="/posts/{{ post.slug }}/">{{ post.title }}</a></h2>
+    {% if post.published_at %}
+      <time datetime="{{ post.published_at.isoformat() }}" class="meta">
+        {{ post.published_at.strftime('%Y-%m-%d') }}
+      </time>
+    {% endif %}
+    {% if post.body_excerpt %}
+      <p class="excerpt">{{ post.body_excerpt }}</p>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if total_pages > 1 %}
+<nav class="pagination" aria-label="Pagination">
+  {% if has_prev %}
+    {% if page == 2 %}
+      <a rel="prev" href="/">&larr; Newer</a>
+    {% else %}
+      <a rel="prev" href="/?page={{ page - 1 }}">&larr; Newer</a>
+    {% endif %}
+  {% endif %}
+  <span class="page-of">Page {{ page }} of {{ total_pages }}</span>
+  {% if has_next %}
+    <a rel="next" href="/?page={{ page + 1 }}">Older &rarr;</a>
+  {% endif %}
+</nav>
+{% endif %}
+{% else %}
+<p>No posts yet.</p>
+{% endif %}
+{% endblock %}
