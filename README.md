@@ -255,6 +255,21 @@ in place rather than duplicating them.
 Notion, Substack, and Medium importers are deferred to
 follow-up packages; no v1.x commitment.
 
+## Backups
+
+`flask --app bragi.apps.admin cms backup [--output PATH]` writes
+a single `.tar.gz` containing a consistent SQLite snapshot
+(produced with `VACUUM INTO`, so no companion `-wal` / `-shm`
+files) plus the contents of `Settings.attachments_root` as
+`attachments/`. Default output: `bragi-backup-YYYYMMDD-HHMMSS.tar.gz`
+in the current working directory.
+
+To restore: extract the tarball, drop `bragi.db` and
+`attachments/` into a fresh deployment (matching paths), and
+restart the admin + delivery processes. There is no `restore`
+subcommand by design; a tool that overwrites a live deployment
+is a big risk for not much help.
+
 ## Quick start (development)
 
 ```sh
