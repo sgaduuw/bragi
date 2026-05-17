@@ -22,7 +22,7 @@ from bragi.contrib.activitypub.activities import (
     webfinger_document,
 )
 from bragi.contrib.activitypub.keys import get_or_create_keypair
-from bragi.contrib.activitypub.signature import verify_post
+from bragi.contrib.activitypub.signature import _ReplayCache, verify_post
 from bragi.core.db import SessionLocal
 from bragi.core.http import SafeHTTPError, is_public_url, safe_get
 from bragi.core.models.activitypub import (
@@ -45,6 +45,14 @@ bp = Blueprint("activitypub", __name__)
 _ACTOR_CACHE_SECONDS = 300
 _ACTOR_CACHE_MAX_ENTRIES = 1024
 _ACTOR_CACHE: dict[str, tuple[float, dict[str, object]]] = {}
+
+# Module-level signed-request replay cache. Lives in process
+# memory; a multi-worker deployment has one cache per worker,
+# which still tightens the replay window for any single attacker
+# (they'd have to spread replays across workers). A shared cache
+# (Redis, DB row) is the right next step if the threat ever
+# warrants it.
+_REPLAY_CACHE = _ReplayCache()
 
 
 def _site_or_404() -> Site:
@@ -194,6 +202,7 @@ def inbox() -> ResponseReturnValue:
         headers={k: v for k, v in request.headers.items()},
         body=body,
         public_key_pem=public_key_pem,
+        replay_cache=_REPLAY_CACHE,
     ):
         abort(401, description="signature verification failed")
 

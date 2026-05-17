@@ -80,6 +80,13 @@ def sign_post(*, url: str, body: bytes, key_id: str, private_key_pem: str) -> Si
     return SignedRequest(method="POST", url=url, headers=headers, body=body)
 
 
+# Required signed headers for an inbound POST. Missing any of
+# these is grounds for rejection: a signer that lists only `date`
+# would otherwise authenticate any path / method / body with one
+# stale signature.
+_REQUIRED_HEADERS_POST: frozenset[str] = frozenset({"(request-target)", "host", "date", "digest"})
+
+
 def verify_post(
     *,
     method: str,
@@ -87,31 +94,53 @@ def verify_post(
     headers: dict[str, str],
     body: bytes,
     public_key_pem: str,
+    replay_cache: _ReplayCache | None = None,
 ) -> bool:
     """Validate the signature on an inbound request.
 
-    Returns True when:
-    - `Digest` header matches SHA-256 of the body (when present).
+    Returns True when ALL of these hold:
+    - `Signature` header is present and parses.
+    - `algorithm` is exactly `rsa-sha256` (empty / missing is
+      rejected: silently accepting an unspecified algorithm lets
+      a malicious sender claim any algorithm we happen to support).
+    - `headers=` list contains `(request-target)`, `host`, `date`,
+      and `digest` (the minimum set for a POST). Without all four,
+      a single captured signature could be replayed against
+      different URLs / hosts / bodies.
     - `Date` header is within `_DATE_SKEW_SECONDS` of now.
-    - The `Signature` header parses with `rsa-sha256` algorithm.
+    - `Digest` header matches SHA-256 of `body` (always verified
+      for POSTs, regardless of whether the signer listed `digest`).
     - The signature verifies against `public_key_pem`.
+    - `(keyId, signature)` has not been seen in `replay_cache`
+      within the skew window (when a cache is supplied).
 
-    Returns False on any failure. No exceptions cross the boundary
-    so the caller can branch on a bool.
+    Returns False on any failure. No exceptions cross the
+    boundary so the caller can branch on a bool.
     """
     sig_header = headers.get("Signature") or headers.get("signature")
     if not sig_header:
         return False
     params = _parse_signature_header(sig_header)
-    if params.get("algorithm", "").lower() not in ("rsa-sha256", ""):
+    # Strict algorithm: empty / missing rejected (was previously
+    # accepted, opening a downgrade path).
+    if params.get("algorithm", "").lower() != "rsa-sha256":
         return False
     header_names = (params.get("headers") or "").split()
     if not header_names:
         return False
+    # All four required pseudo / real headers must be present in
+    # the signer's coverage. A request that signs only `date`
+    # would otherwise authenticate any path / method / body.
+    header_names_lower = {h.lower() for h in header_names}
+    if not _REQUIRED_HEADERS_POST.issubset(header_names_lower):
+        return False
     if not _date_within_skew(headers.get("Date") or headers.get("date")):
         return False
+    # Always verify digest for POSTs: previously this was
+    # conditional on the signer listing `digest`, which let a
+    # signature captured for body A be replayed with body B.
     digest = headers.get("Digest") or headers.get("digest")
-    if "digest" in (h.lower() for h in header_names) and not _digest_matches(digest, body):
+    if not _digest_matches(digest, body):
         return False
     signing_string = _build_signing_string(
         method=method.lower(), path=path, headers=headers, header_names=tuple(header_names)
@@ -120,7 +149,60 @@ def verify_post(
         signature_bytes = base64.b64decode(params.get("signature", ""))
     except (ValueError, TypeError):
         return False
-    return _verify_rsa_sha256(public_key_pem, signing_string, signature_bytes)
+    if not _verify_rsa_sha256(public_key_pem, signing_string, signature_bytes):
+        return False
+    # Replay defence: a captured signed POST is otherwise
+    # re-playable for the full skew window. Reject duplicates
+    # within the window. Caller supplies the cache so the
+    # primitive stays stateless (tests don't need to clear
+    # state; production wires a process-wide cache).
+    if replay_cache is not None:
+        key_id = params.get("keyid", "")
+        signature_b64 = params.get("signature", "")
+        if not replay_cache.add(key_id, signature_b64):
+            return False
+    return True
+
+
+class _ReplayCache:
+    """Bounded TTL set keyed on `(keyId, signature)`.
+
+    Returns False from `add()` when the entry is already present;
+    True when it was new (and now recorded). The TTL matches the
+    signature skew window so an entry sticks around for as long
+    as a fresh signature for the same key could legitimately be
+    presented.
+    """
+
+    __slots__ = ("_entries", "_max_entries", "_ttl_seconds")
+
+    def __init__(self, *, ttl_seconds: int = _DATE_SKEW_SECONDS, max_entries: int = 4096) -> None:
+        self._entries: dict[tuple[str, str], float] = {}
+        self._ttl_seconds = ttl_seconds
+        self._max_entries = max_entries
+
+    def add(self, key_id: str, signature_b64: str) -> bool:
+        import time
+
+        now = time.monotonic()
+        self._evict(now)
+        key = (key_id, signature_b64)
+        if key in self._entries:
+            return False
+        if len(self._entries) >= self._max_entries:
+            # Drop the oldest in a single pass; cheap at 4096
+            # entries and saves a dependency on cachetools.
+            oldest = min(self._entries, key=lambda k: self._entries[k])
+            self._entries.pop(oldest, None)
+        self._entries[key] = now
+        return True
+
+    def _evict(self, now: float) -> None:
+        cutoff = now - self._ttl_seconds
+        # Iterate over a snapshot so we can mutate the dict.
+        for k, ts in list(self._entries.items()):
+            if ts < cutoff:
+                self._entries.pop(k, None)
 
 
 def _build_signing_string(

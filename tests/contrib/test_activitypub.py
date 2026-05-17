@@ -128,6 +128,122 @@ def test_verify_rejects_missing_signature_header() -> None:
     )
 
 
+def test_verify_rejects_missing_required_signed_header() -> None:
+    """A signer that lists only `date` must be rejected.
+
+    Without the required-header check, one captured signature
+    over a stale Date could authenticate any path / method / body.
+    """
+    from bragi.contrib.activitypub.signature import _build_signing_string, _sign_rsa_sha256
+
+    pair = generate_keypair()
+    body = b'{"type":"Follow"}'
+    # Build a signing string covering ONLY `date`.
+    only_date = "Sun, 01 Jan 2099 00:00:00 GMT"
+    signing_string = _build_signing_string(
+        method="post",
+        path="/actor/inbox",
+        headers={"Date": only_date},
+        header_names=("date",),
+    )
+    sig = _sign_rsa_sha256(pair.private_pem, signing_string)
+    sig_header = f'keyId="x",algorithm="rsa-sha256",headers="date",signature="{sig}"'
+    headers = {"Date": only_date, "Signature": sig_header}
+    assert not verify_post(
+        method="POST",
+        path="/actor/inbox",
+        headers=headers,
+        body=body,
+        public_key_pem=pair.public_pem,
+    )
+
+
+def test_verify_rejects_empty_algorithm() -> None:
+    """`algorithm=""` must be refused (was previously accepted)."""
+    from bragi.contrib.activitypub.signature import _build_signing_string, _sign_rsa_sha256
+
+    pair = generate_keypair()
+    body = b""
+    signing_string = _build_signing_string(
+        method="post",
+        path="/actor/inbox",
+        headers={"Date": "Sun, 01 Jan 2099 00:00:00 GMT"},
+        header_names=("(request-target)", "host", "date", "digest"),
+    )
+    sig = _sign_rsa_sha256(pair.private_pem, signing_string)
+    sig_header = (
+        f'keyId="x",algorithm="",headers="(request-target) host date digest",signature="{sig}"'
+    )
+    assert not verify_post(
+        method="POST",
+        path="/actor/inbox",
+        headers={"Date": "Sun, 01 Jan 2099 00:00:00 GMT", "Signature": sig_header},
+        body=body,
+        public_key_pem=pair.public_pem,
+    )
+
+
+def test_verify_always_checks_digest_for_post() -> None:
+    """Body-tamper rejection no longer requires digest to be listed.
+
+    Previously, a signer that omitted `digest` from `headers=`
+    could replay a signature against a different body. The
+    verifier now hashes the body unconditionally for POSTs.
+    """
+    from bragi.contrib.activitypub.signature import sign_post
+
+    pair = generate_keypair()
+    body_a = b'{"type":"Follow"}'
+    body_b = b'{"type":"Mischief"}'
+    signed = sign_post(
+        url="https://blog.example/actor/inbox",
+        body=body_a,
+        key_id="kid",
+        private_key_pem=pair.private_pem,
+    )
+    # Replay against body_b: signature over body_a header set,
+    # but Digest on body_b. Digest mismatch alone rejects.
+    assert not verify_post(
+        method="POST",
+        path="/actor/inbox",
+        headers=signed.headers,
+        body=body_b,
+        public_key_pem=pair.public_pem,
+    )
+
+
+def test_verify_replay_cache_rejects_second_use() -> None:
+    """A captured signature can't be replayed within the skew window."""
+    from bragi.contrib.activitypub.signature import _ReplayCache, sign_post
+
+    pair = generate_keypair()
+    body = b'{"type":"Follow"}'
+    signed = sign_post(
+        url="https://blog.example/actor/inbox",
+        body=body,
+        key_id="kid",
+        private_key_pem=pair.private_pem,
+    )
+    cache = _ReplayCache()
+    assert verify_post(
+        method="POST",
+        path="/actor/inbox",
+        headers=signed.headers,
+        body=body,
+        public_key_pem=pair.public_pem,
+        replay_cache=cache,
+    )
+    # Second presentation: same signature, same cache. Rejected.
+    assert not verify_post(
+        method="POST",
+        path="/actor/inbox",
+        headers=signed.headers,
+        body=body,
+        public_key_pem=pair.public_pem,
+        replay_cache=cache,
+    )
+
+
 # --------------------------- activities ---------------------------
 
 
@@ -337,6 +453,150 @@ def test_inbox_accepts_signed_follow(
     followers = list(db_session.execute(select(ActivityPubFollower)).scalars())
     assert len(followers) == 1
     assert followers[0].actor_url == remote_actor_url
+
+
+def test_inbox_undo_must_match_signing_actor(
+    delivery_app: Flask,
+    client: FlaskClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An Undo Follow with mismatched inner.actor must not delete.
+
+    Without this check, any valid signer could send
+    `Undo { object: Follow { actor: "https://victim/" } }` and
+    delete a different remote's follower row.
+    """
+    remote_pair = generate_keypair()
+    attacker_iri = "https://attacker.example/u/eve"
+    victim_iri = "https://victim.example/u/alice"
+    remote_actor_doc = {
+        "id": attacker_iri,
+        "type": "Person",
+        "inbox": "https://attacker.example/u/eve/inbox",
+        "publicKey": {
+            "id": f"{attacker_iri}#main-key",
+            "owner": attacker_iri,
+            "publicKeyPem": remote_pair.public_pem,
+        },
+    }
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return remote_actor_doc
+
+    monkeypatch.setattr("bragi.contrib.activitypub.views.safe_get", lambda url, **kw: _Resp())
+
+    # Pre-seed a follower row for the victim that the attacker
+    # is trying to remove.
+    site = db_session.execute(select(Site)).scalars().one()
+    db_session.add(
+        ActivityPubFollower(
+            site_id=site.id,
+            actor_url=victim_iri,
+            inbox_url="https://victim.example/u/alice/inbox",
+        )
+    )
+    db_session.commit()
+
+    undo_activity = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{attacker_iri}/undos/1",
+        "type": "Undo",
+        "actor": attacker_iri,
+        "object": {
+            "id": f"{victim_iri}/follows/1",
+            "type": "Follow",
+            "actor": victim_iri,  # mismatch with outer actor
+            "object": "https://blog.example.com/actor",
+        },
+    }
+    body = json.dumps(undo_activity).encode("utf-8")
+    signed = sign_post(
+        url="https://blog.example.com/actor/inbox",
+        body=body,
+        key_id=f"{attacker_iri}#main-key",
+        private_key_pem=remote_pair.private_pem,
+    )
+
+    resp = client.post(
+        "/actor/inbox",
+        data=body,
+        headers={**signed.headers, "Host": "blog.example.com"},
+    )
+    # ACK'd (the signature is valid) but the follower row stays.
+    assert resp.status_code == 202
+    db_session.rollback()
+    rows = list(
+        db_session.execute(
+            select(ActivityPubFollower).where(ActivityPubFollower.actor_url == victim_iri)
+        ).scalars()
+    )
+    assert len(rows) == 1, "victim follower row was deleted by mismatched Undo"
+
+
+def test_inbox_queues_accept_for_cold_follow(
+    delivery_app: Flask,
+    client: FlaskClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cold Follow (cache miss) still queues an Accept.
+
+    Previously, `_queue_accept` looked up the inbox from
+    `_ACTOR_CACHE`, which was empty for fresh Follows. The
+    Accept got silently dropped; Mastodon retried in vain.
+    """
+    remote_pair = generate_keypair()
+    remote_actor_url = "https://remote.example/users/coldfollow"
+    remote_actor_doc = {
+        "id": remote_actor_url,
+        "type": "Person",
+        "inbox": f"{remote_actor_url}/inbox",
+        "publicKey": {
+            "id": f"{remote_actor_url}#main-key",
+            "owner": remote_actor_url,
+            "publicKeyPem": remote_pair.public_pem,
+        },
+    }
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return remote_actor_doc
+
+    monkeypatch.setattr("bragi.contrib.activitypub.views.safe_get", lambda url, **kw: _Resp())
+
+    follow_activity = {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "id": f"{remote_actor_url}/follows/9",
+        "type": "Follow",
+        "actor": remote_actor_url,
+        "object": "https://blog.example.com/actor",
+    }
+    body = json.dumps(follow_activity).encode("utf-8")
+    signed = sign_post(
+        url="https://blog.example.com/actor/inbox",
+        body=body,
+        key_id=f"{remote_actor_url}#main-key",
+        private_key_pem=remote_pair.private_pem,
+    )
+
+    resp = client.post(
+        "/actor/inbox",
+        data=body,
+        headers={**signed.headers, "Host": "blog.example.com"},
+    )
+    assert resp.status_code == 202
+    db_session.rollback()
+    # An Accept-shape outbox row addressed to the remote's inbox
+    # must exist.
+    rows = list(db_session.execute(select(ActivityPubOutbox)).scalars())
+    accepts = [r for r in rows if r.target_inbox == f"{remote_actor_url}/inbox"]
+    assert len(accepts) == 1
 
 
 # --------------------------- sender ---------------------------

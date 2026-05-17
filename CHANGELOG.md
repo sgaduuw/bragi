@@ -7,6 +7,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **HTTP signature verifier hardened against scope downgrade,
+  body tamper, and replay.** The fediverse inbox accepted any
+  signature whose listed `headers=` covered only a subset of the
+  real request: a captured signature over a stale Date header
+  could authenticate any path / method / body. Now requires the
+  full minimum set (`(request-target)`, `host`, `date`, `digest`)
+  in the signed coverage; rejects empty / missing `algorithm`;
+  always verifies `Digest` against the body for POSTs regardless
+  of whether the signer chose to list it; and a new module-level
+  `_ReplayCache` (5-minute TTL, 4096-entry bound) drops
+  duplicate `(keyId, signature)` presentations within the skew
+  window.
 - **SSRF guard on every outbound fetch driven by remote input.**
   The webmention inbox (`POST /webmentions`) and outbox sender
   fetched arbitrary URLs supplied by remote actors, and the
