@@ -143,6 +143,11 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
   `markdown_extras` built-in plugin adds footnotes
   (`text[^id]` + `[^id]: body`); plugins can register more
   extensions via the `register_markdown_extension` hookspec.
+- **Post-page chrome.** Each post renders with an author byline,
+  reading-time estimate (220 WPM, rounded up), and an
+  "Updated YYYY-MM-DD" line that only appears when the edit is
+  meaningfully after first publish. Optional `User.bio` text
+  surfaces as an "About the author" aside below the body.
 - **Plugin-extensible from day one.** Built-ins (Post, Page,
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties
