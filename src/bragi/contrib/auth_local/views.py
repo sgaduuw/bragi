@@ -72,9 +72,14 @@ def login() -> ResponseReturnValue:
             if not password_ok or user is None or cred is None:
                 # Same generic error message for unknown-user and
                 # bad-password to avoid leaking which emails exist.
-                # Audit log records the attempted email; even when
-                # the user doesn't exist the attempt is forensically
-                # useful (brute-force pattern detection later).
+                # Audit log records the attempted email in
+                # `extra["email"]`; even when the user doesn't
+                # exist the attempt is forensically useful (brute-
+                # force pattern detection later). NB: that field
+                # is plaintext, so any audit-log export path that
+                # ships to a less-trusted audience (e.g. a Loki
+                # tenant) should redact `extra.email`. Scrubbing
+                # at write time would lose the forensic value.
                 audit(
                     AuditAction.AUTH_LOGIN_FAILURE,
                     extra={"email": email, "reason": "invalid-credentials"},
