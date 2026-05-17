@@ -40,6 +40,14 @@
     .bragi-embed--youtube-cto .bragi-embed-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 4rem; color: #fff; text-shadow: 0 0 12px rgba(0, 0, 0, 0.7); }
     .bragi-embed--pending { padding: 0.75rem 1rem; background: #f7f7f5; border: 1px solid #e2e2dc; border-radius: 4px; }
     .bragi-embed--pending a { word-break: break-all; }
+    /* markdown-it-footnote: numeric inline ref + collected list at the end. */
+    sup.footnote-ref { font-size: 0.75em; line-height: 0; vertical-align: super; }
+    sup.footnote-ref a { text-decoration: none; }
+    sup.footnote-ref a::before { content: "["; }
+    sup.footnote-ref a::after { content: "]"; }
+    section.footnotes { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; font-size: 0.9em; color: #555; }
+    section.footnotes ol { padding-left: 1.25rem; }
+    section.footnotes a.footnote-backref { text-decoration: none; margin-left: 0.25rem; }
   </style>
 </head>
 <body>

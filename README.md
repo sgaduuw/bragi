@@ -139,7 +139,10 @@ Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
 - **Markdown source of truth.** Post and Page bodies persist as
   markdown text with a cached HTML render alongside. TipTap (with
   its markdown serializer) is the admin editor; the data model is
-  editor-independent.
+  editor-independent. CommonMark + tables out of the box; the
+  `markdown_extras` built-in plugin adds footnotes
+  (`text[^id]` + `[^id]: body`); plugins can register more
+  extensions via the `register_markdown_extension` hookspec.
 - **Plugin-extensible from day one.** Built-ins (Post, Page,
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties
@@ -332,6 +335,7 @@ bragi/
 │       ├── import_wordpress/   # WordPress WXR XML importer
 │       ├── indexnow/           # IndexNow push-crawl on publish/update/delete
 │       ├── internal_links/     # [text](post:42) save-time + delivery-time resolver + admin picker
+│       ├── markdown_extras/    # bundled markdown-it extensions (footnotes, ...)
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301

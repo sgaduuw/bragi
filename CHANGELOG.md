@@ -53,6 +53,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Footnote markdown syntax (#136).** New built-in plugin
+  `bragi.contrib.markdown_extras` wires
+  `mdit-py-plugins`' `footnote_plugin` into the app-bound
+  markdown renderer, so post and page bodies accept the standard
+  `text[^id]` reference + `[^id]: body` definition syntax.
+  Refs render as `<sup class="footnote-ref">` inline; the
+  collected list lands in a `<section class="footnotes">` at
+  the bottom of the document. Default theme picks up matching
+  CSS for the inline brackets and back-references. Comment the
+  `markdown_extras` line in `pyproject.toml`'s
+  `bragi.plugins` block to disable.
 - **Kind toggle and home_page_id changes now insert redirects
   (#130).** Promoting one page to `post_index` while demoting
   another (the swap path) now fires `on_post_updated` for the
