@@ -167,7 +167,7 @@ def _captured_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[dict[str, Any]]:
     """Replace `requests.post` with a recorder. Returns the list
-    of payloads — caller asserts shape after the action."""
+    of payloads; caller asserts shape after the action."""
     calls: list[dict[str, Any]] = []
 
     def fake_post(url: str, json: dict[str, Any] | None = None, timeout: float = 0) -> MagicMock:

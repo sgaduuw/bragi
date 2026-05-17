@@ -79,7 +79,7 @@ def create_delivery_app() -> Flask:
     # Default cache policy for delivery HTML. Views that need a
     # different profile (sitemap, feed, robots, security.txt) set
     # `Cache-Control` themselves; `apply_cache_policy` respects an
-    # existing header. 3xx and 4xx responses skip the header — a
+    # existing header. 3xx and 4xx responses skip the header: a
     # 301 should not be cached as aggressively as a successful
     # GET, and a 404 served by the redirect chain may still mutate.
     @app.after_request

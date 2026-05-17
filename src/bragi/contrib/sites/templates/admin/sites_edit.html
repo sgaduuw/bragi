@@ -54,8 +54,8 @@
     <select name="theme" id="theme">
       {# Empty value persists as NULL on the row; the loader resolves
          NULL to the "default" slug, so this option means "use the
-         in-tree default theme" — which is also why we skip the
-         literal "default" slug in the loop below (it'd be a
+         in-tree default theme" (which is also why we skip the
+         literal "default" slug in the loop below: it'd be a
          duplicate of this option). #}
       <option value=""{% if not form.get('theme') %} selected{% endif %}>Default theme</option>
       {% for t in themes if t.slug != 'default' %}

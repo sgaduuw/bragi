@@ -5,7 +5,7 @@ The sidecar's `docker/scheduler.sh` dispatches
 `flask --app bragi.apps.admin cms <subcommand>` on a cadence to run
 scheduled-publish, embed rerenders, and SQLite maintenance. Flask's
 CLI autodiscovery only looks for factories named `create_app` or
-`make_app` — `create_admin_app` doesn't match, so the bare
+`make_app`; `create_admin_app` doesn't match, so the bare
 `--app bragi.apps.admin` form silently fails:
 
     Error: Failed to find Flask application or factory ...
