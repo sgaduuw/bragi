@@ -6,10 +6,13 @@ auth_local guard, so a valid bearer token has already populated
 `g._cached_user` (and `g.api_token`) by the time the guard
 checks `current_user()`.
 
-CSRF for token-authenticated requests is handled here too: when a
-bearer token is the auth source, `g.api_csrf_exempt = True` is set,
-and the CSRF middleware's exempt-set is augmented in the plugin's
-`on_app_init` to include every endpoint in our API blueprint.
+CSRF for token-authenticated requests is gated solely on the
+`g.api_csrf_exempt` flag set below after a successful `verify()`.
+The CSRF middleware checks that flag in its before_request hook and
+skips the token check when it's truthy. The middleware-registration
+order in `apps/admin.py` (bearer first, CSRF after) is what makes
+this work: bearer's `tryfirst=True` ensures the flag is set before
+the CSRF guard runs.
 """
 
 from __future__ import annotations

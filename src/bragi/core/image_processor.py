@@ -24,6 +24,14 @@ from bragi.api import ImageMetadata, ImageProcessorSpec
 
 LOG = logging.getLogger(__name__)
 
+# Pillow's default `MAX_IMAGE_PIXELS` is ~178 megapixels and the
+# bomb-error threshold is twice that. With a 20 MiB upload cap a
+# craft pixel-stream can comfortably stay below the bomb threshold
+# while still allocating gigabytes when expanded. 50 megapixels
+# covers anything a personal-blog author legitimately uploads
+# (8K is ~33 MP) without leaving headroom for an attacker.
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
 _PILLOW_CONTENT_TYPES = frozenset(
     {
         "image/jpeg",
@@ -45,7 +53,7 @@ def _probe(data: bytes) -> ImageMetadata | None:
     try:
         with Image.open(io.BytesIO(data)) as img:
             return ImageMetadata(width=img.width, height=img.height, format=img.format)
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         # Truncated upload, wrong content-type guess, or a format
         # Pillow can't decode. Return None so the upload still
         # lands; admin can fix the dimensions later.
@@ -86,7 +94,7 @@ def _resize(data: bytes, target_width: int) -> bytes | None:
                 save_kwargs["optimize"] = True
             resized.save(out, format=save_format, **save_kwargs)
             return out.getvalue()
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         LOG.info("Pillow resize to %dw failed: %s", target_width, exc)
         return None
 

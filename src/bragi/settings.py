@@ -8,7 +8,12 @@ settings here with a sensible default; the runtime asks
 
 from __future__ import annotations
 
+import logging
+from typing import ClassVar
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LOG = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -24,8 +29,22 @@ class Settings(BaseSettings):
     # Storage
     database_url: str = "sqlite:///bragi.db"
 
-    # Crypto
+    # Deployment mode. `development` is the laptop / `make dev`
+    # default; `production` is what the container image / compose
+    # file passes. The two differ in safety checks at app init:
+    # in production, the dev `SECRET_KEY` default is fatal; in
+    # development it logs a loud warning but starts.
+    env: str = "development"
+
+    # Crypto. The dev default is a known sentinel; the app init
+    # path refuses to start with it when `env="production"`.
     secret_key: str = "dev-only-change-in-production"
+
+    # The dev `SECRET_KEY` sentinel is shared with the app-init
+    # check; lifting it to a class constant means anyone changing
+    # the default updates the check too. `ClassVar` keeps pydantic
+    # from treating it as a settable field.
+    DEV_SECRET_KEY_SENTINEL: ClassVar[str] = "dev-only-change-in-production"
 
     # Admin app
     admin_host: str = "127.0.0.1"
@@ -99,3 +118,30 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def assert_secret_key_safe(app_name: str) -> None:
+    """Refuse to boot in production with the dev `SECRET_KEY` default.
+
+    Compose ships `BRAGI_SECRET_KEY=${BRAGI_SECRET_KEY:?...}` so any
+    container deploy fails before reaching the app. Anyone running
+    outside compose (bare docker run, Kubernetes, podman) doesn't
+    get that gate; this check is the in-process backstop.
+
+    Always logs a loud warning when the dev sentinel is in use,
+    even in development mode, so a developer can spot a missed
+    override in dev-against-prod scenarios.
+    """
+    if settings.secret_key != Settings.DEV_SECRET_KEY_SENTINEL:
+        return
+    if settings.env == "production":
+        raise RuntimeError(
+            f"{app_name}: refusing to start with the development "
+            "SECRET_KEY in production. Set BRAGI_SECRET_KEY to a "
+            "long random value (e.g. `openssl rand -hex 32`)."
+        )
+    LOG.warning(
+        "%s: running with the development SECRET_KEY sentinel. "
+        "Set BRAGI_SECRET_KEY to a strong value before deploying.",
+        app_name,
+    )

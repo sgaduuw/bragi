@@ -27,9 +27,8 @@ import re
 from html import escape
 from urllib.parse import parse_qs, urlparse
 
-import requests
-
 from bragi.contrib.embeds.providers.base import EmbedError
+from bragi.core.http import SafeHTTPError, safe_get
 from bragi.settings import settings
 
 # Hosts owned by YouTube. Matched case-insensitively.
@@ -88,7 +87,10 @@ def _fetch_title(url: str, *, timeout: float, user_agent: str) -> str | None:
     to a generic aria-label. Never raises `EmbedError`.
     """
     try:
-        resp = requests.get(
+        # `safe_get` re-validates any 3xx returned by the YouTube
+        # endpoint so a misconfigured / compromised provider can't
+        # pivot us into RFC 1918.
+        resp = safe_get(
             _OEMBED_ENDPOINT,
             params={"url": url, "format": "json"},
             headers={"User-Agent": user_agent},
@@ -98,7 +100,7 @@ def _fetch_title(url: str, *, timeout: float, user_agent: str) -> str | None:
             return None
         title = resp.json().get("title")
         return title if isinstance(title, str) and title.strip() else None
-    except (requests.RequestException, ValueError):
+    except (SafeHTTPError, ValueError, Exception):  # noqa: BLE001 - best effort
         return None
 
 

@@ -23,7 +23,7 @@ from bragi.core.render.markdown import install_app_renderer
 from bragi.core.render.transforms import TransformRegistry
 from bragi.core.security import current_user, is_superuser
 from bragi.plugins import create_plugin_manager
-from bragi.settings import settings
+from bragi.settings import assert_secret_key_safe, settings
 
 # Pulled out so the after_request hook stays a one-liner. The
 # admin response should never be cacheable, even on 3xx/4xx.
@@ -47,12 +47,19 @@ def create_admin_app() -> Flask:
         11. register_html_transform(registry=html_transforms)
         12. register_markdown_extension  -> app.extensions["markdown_renderer"]
     """
+    assert_secret_key_safe("bragi-admin")
     app = Flask("bragi-admin")
     app.config["SECRET_KEY"] = settings.secret_key
     # Hard cap so a streaming-body attack can't OOM the worker.
-    # See `Settings.max_request_bytes`; the attachment upload
-    # path enforces its own per-file ceiling on top of this.
-    app.config["MAX_CONTENT_LENGTH"] = settings.max_request_bytes
+    # Admin has to admit attachment uploads, so the floor is the
+    # attachment cap (plus multipart overhead). Delivery sets a
+    # smaller cap because it only receives federation-inbox JSON
+    # bodies. The 64 KiB slack covers multipart boundaries / part
+    # headers for a single-file upload form.
+    app.config["MAX_CONTENT_LENGTH"] = max(
+        settings.max_request_bytes,
+        settings.attachments_max_bytes + 64 * 1024,
+    )
 
     # Server-side sessions back the admin's session storage. Replaces
     # Flask's signed-cookie default; cookie carries only an opaque

@@ -185,6 +185,12 @@ def inbox() -> ResponseReturnValue:
     actor_iri = activity.get("actor")
     if not isinstance(actor_iri, str):
         abort(400, description="activity missing actor")
+    # Pre-validate the IRI shape (scheme + public host) before
+    # handing it to `_fetch_actor`; an unparseable or RFC 1918 IRI
+    # gets a clean 400 rather than crashing through SafeHTTPError
+    # inside the fetch.
+    if not is_public_url(actor_iri):
+        abort(400, description="actor IRI is not a fetchable public URL")
 
     remote_actor = _fetch_actor(actor_iri)
     if remote_actor is None:

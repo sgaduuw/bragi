@@ -23,7 +23,7 @@ from bragi.core.render.markdown import install_app_renderer
 from bragi.core.render.transforms import TransformRegistry
 from bragi.core.themes import ThemeAwareLoader
 from bragi.plugins import create_plugin_manager
-from bragi.settings import settings
+from bragi.settings import assert_secret_key_safe, settings
 
 
 def create_delivery_app() -> Flask:
@@ -43,6 +43,7 @@ def create_delivery_app() -> Flask:
     or the auth-registration hooks. Those plugin surfaces are
     admin-only.
     """
+    assert_secret_key_safe("bragi-delivery")
     app = Flask("bragi-delivery")
     app.config["SECRET_KEY"] = settings.secret_key
     # Hard cap so a streaming-body attack on a public inbox

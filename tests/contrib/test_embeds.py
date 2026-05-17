@@ -108,10 +108,12 @@ def _patch_requests_get(
     response: _StubResponse | None = None,
     raise_exc: Exception | None = None,
 ) -> list[dict[str, Any]]:
-    """Patch `<module>.requests.get` to return a stub or raise.
+    """Patch the SSRF-safe GET helper imported into `<module>`.
 
     Returns a list that captures each call's kwargs, so tests can
-    assert the URL and headers the provider sent.
+    assert the URL and headers the provider sent. Providers now
+    call `bragi.core.http.safe_get`; patching at the import site
+    means each provider module's binding is replaced independently.
     """
     calls: list[dict[str, Any]] = []
 
@@ -122,7 +124,7 @@ def _patch_requests_get(
         assert response is not None
         return response
 
-    monkeypatch.setattr(f"{module}.requests.get", _fake_get)
+    monkeypatch.setattr(f"{module}.safe_get", _fake_get)
     return calls
 
 

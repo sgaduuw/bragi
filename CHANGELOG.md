@@ -68,6 +68,45 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`_ACTOR_CACHE` is bounded.** A fuzzing inbox attacker could
   grow the process-wide cache without limit. Caps at 1024
   entries and evicts the oldest on overflow.
+- **App init refuses to boot in production with the development
+  `SECRET_KEY`.** New `Settings.env` (default `development`) drives
+  a startup check in both `create_admin_app` and
+  `create_delivery_app`: if `env="production"` and `secret_key`
+  is still the bundled dev sentinel, the factory raises. In
+  development mode the same situation logs a loud WARNING and
+  starts so `make dev` is unaffected. `compose.yml` continues to
+  enforce `BRAGI_SECRET_KEY` via the `${VAR:?...}` shape; this
+  check is the in-process backstop for bare `docker run` / k8s /
+  podman deployments outside that gate.
+- **SSRF guard now covers oEmbed / Bluesky / YouTube / IndexNow
+  outbound calls.** The four embed-style providers issued bare
+  `requests.get` / `requests.post` against allowlisted hosts and
+  so bypassed the `_GuardedAdapter` redirect re-validation: a
+  trusted endpoint that 302'd into RFC 1918 was followed
+  silently. All four now route through `bragi.core.http.safe_*`.
+  `safe_get` grew a `params=` kwarg for callers that build
+  query strings against a fixed URL.
+- **Admin `MAX_CONTENT_LENGTH` raised to admit attachment
+  uploads.** The body cap landed at `Settings.max_request_bytes`
+  (1 MiB) for both apps; `attachments_max_bytes` defaults to 20
+  MiB, so any upload above 1 MiB was silently 413'd by Flask
+  before the attachment view ran. Admin now takes
+  `max(max_request_bytes, attachments_max_bytes + 64 KiB)` to
+  cover the documented upload cap plus multipart overhead.
+  Delivery's cap stays at `max_request_bytes` (only handles
+  federation-inbox JSON bodies).
+- **Pillow upload path bounds decompression-bomb risk.** Default
+  `MAX_IMAGE_PIXELS` lowered to 50 megapixels (covers 8K source;
+  rejects > 50 MP synthetic input regardless of file size), and
+  `Image.DecompressionBombError` is now caught alongside
+  `OSError` / `UnidentifiedImageError` so an oversized image
+  produces a clean "could not probe" outcome instead of a 500.
+- **`auth_local` login closes the unknown-user timing leak.**
+  The wrong-password branch runs argon2 verify (~100 ms); the
+  unknown-user branch short-circuited and so leaked email
+  existence to anyone diffing response times. New
+  `dummy_verify()` runs the same cost on the no-user path so
+  both branches are timing-equivalent.
 - **Federation tables now declare `ON DELETE` correctly so
   removing a Site / Post / User no longer leaves orphan rows.**
   `webmentions`, `webmention_outbox`, `site_keypairs`,
