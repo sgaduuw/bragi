@@ -53,6 +53,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posts without a public URL.
 
 ### Added
+- **Post-page chrome: author byline, reading time,
+  updated-date, optional bio (#138).** The post template now
+  carries the meta line a modern blog reader expects: "by Ada
+  Lovelace", "5 min read", and an "Updated YYYY-MM-DD" line that
+  appears only when the edit is meaningfully after the first
+  publish (`updated_at - published_at >= 1 day`, suppressing
+  typo-fix noise). Optional `User.bio` text renders as an "About
+  the author" aside below the post body when set. Reading-time
+  helper lives in `bragi.core.render.reading_time`
+  (220 WPM, rounded up so short posts say "1 min read"). Alembic
+  migration `ad0c0c05ef40` adds `users.bio` (nullable Text). No
+  admin UI for editing `bio` in v1; operators set it via DB
+  direct, account-settings admin tracked as a follow-up.
 - **Open Graph and Twitter Card meta tags (#137).** Post, page,
   and post-index templates now emit `og:title` / `og:type` /
   `og:url` / `og:description` / `og:site_name` / `og:image`

@@ -43,13 +43,28 @@
     <h1>{{ post.title }}</h1>
     {% if post.subtitle %}<p class="subtitle">{{ post.subtitle }}</p>{% endif %}
     <p class="meta">
+      {% if author_name %}<span class="byline">by {{ author_name }}</span>{% endif %}
       {% if post.published_at %}
+        {% if author_name %} &middot; {% endif %}
         Published <time datetime="{{ post.published_at.isoformat() }}">{{ post.published_at.strftime('%Y-%m-%d') }}</time>
+      {% endif %}
+      {% if updated_visible %}
+         &middot; Updated <time datetime="{{ post.updated_at.isoformat() }}">{{ post.updated_at.strftime('%Y-%m-%d') }}</time>
+      {% endif %}
+      {% if reading_time %}
+         &middot; <span class="reading-time">{{ reading_time }} min read</span>
       {% endif %}
     </p>
   </header>
   <div class="body">
     {{ post.body_html | internal_link_rewrite | safe }}
   </div>
+  {% if author_bio %}
+  <aside class="author-bio">
+    <h2>About the author</h2>
+    <p><strong>{{ author_name }}</strong></p>
+    <p>{{ author_bio }}</p>
+  </aside>
+  {% endif %}
 </article>
 {% endblock %}
