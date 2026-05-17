@@ -15,14 +15,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from flask import Blueprint, g, render_template
+from flask import Blueprint, current_app, g, make_response, render_template, request
 from sqlalchemy import or_, select
+from werkzeug.wrappers import Response
 
 from bragi.api import ContentTypeSpec, FieldSpec, InternalLinkResolution, NavItem, hookimpl
 from bragi.contrib.page.admin import bp as page_admin_bp
 from bragi.contrib.page.delivery import bp as page_delivery_bp
+from bragi.core.cache import attach_validators, etag_for, maybe_304
 from bragi.core.db import SessionLocal
-from bragi.core.models.page import Page
+from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.user import User
 
 PAGE_EDIT_FIELDS: list[FieldSpec] = [
@@ -142,6 +144,49 @@ def register_admin_blueprint() -> Blueprint:
 @hookimpl
 def register_delivery_blueprint() -> Blueprint:
     return page_delivery_bp
+
+
+@hookimpl(tryfirst=True)
+def resolve_home(site: Any) -> Response | None:
+    """Static-homepage path: render `Site.home_page_id` at `/`.
+
+    Returns `None` so the post plugin's fallback wins when:
+    - no static homepage is configured (`home_page_id IS NULL`),
+    - the referenced Page no longer exists (FK SET NULL has not
+      yet propagated, or some other inconsistency),
+    - it is not published (drafts and archived pages don't leak
+      to the public landing page just because they were once
+      promoted),
+    - it belongs to a different site (defensive: the FK doesn't
+      enforce same-site, and a cross-site reference would be a
+      content leak).
+
+    Same conditional-GET shape as `show_page`: weak ETag scoped
+    to `(page, updated_at)` so a re-save invalidates naturally.
+    """
+    home_page_id = getattr(site, "home_page_id", None)
+    if home_page_id is None:
+        return None
+    with SessionLocal() as db:
+        page = db.get(Page, home_page_id)
+        if page is None:
+            return None
+        if page.site_id != site.id:
+            return None
+        if page.status != PageStatus.PUBLISHED:
+            return None
+
+        etag = etag_for("page", page.id, page.updated_at)
+        not_modified = maybe_304(request, etag=etag, last_modified=page.updated_at)
+        if not_modified is not None:
+            return not_modified
+
+        registry = current_app.extensions["registry"]
+        spec = registry.content_type("page")
+        body = spec.render(page, request)
+        response = make_response(body)
+        attach_validators(response, etag=etag, last_modified=page.updated_at)
+        return response
 
 
 @hookimpl

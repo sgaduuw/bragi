@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
+from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.models.user import User
@@ -551,3 +552,226 @@ def test_sites_nav_entry_visible_for_superuser(admin_app: Flask) -> None:
     assert resp.status_code == 200
     body = resp.data.decode()
     assert 'href="/admin/sites/"' in body
+
+
+# ============================================================
+# Home page selector (#124)
+# ============================================================
+
+
+def _seed_pages_for_home_tests(
+    db_factory: sessionmaker[Session],
+    site_slug: str,
+) -> tuple[int, int]:
+    """Seed one PUBLISHED + one DRAFT page on `site_slug` and return their ids."""
+    with db_factory() as db:
+        owner = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one()
+        published = Page(
+            site_id=site.id,
+            slug="welcome",
+            title="Welcome",
+            body_markdown="hi",
+            body_html="<p>hi</p>",
+            body_excerpt="hi",
+            author_id=owner.id,
+            status=PageStatus.PUBLISHED,
+        )
+        draft = Page(
+            site_id=site.id,
+            slug="wip",
+            title="Work in progress",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="x",
+            author_id=owner.id,
+            status=PageStatus.DRAFT,
+        )
+        db.add_all([published, draft])
+        db.commit()
+        return published.id, draft.id
+
+
+def test_edit_form_lists_only_published_pages_in_home_select(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    published_id, draft_id = _seed_pages_for_home_tests(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/{site_id}/edit")
+    body = resp.data.decode()
+
+    assert 'name="home_page_id"' in body
+    assert 'value=""' in body  # default "Recent posts" option
+    assert f'value="{published_id}"' in body
+    assert "Welcome" in body
+    # Draft page must not appear in the select
+    assert f'value="{draft_id}"' not in body
+    assert "Work in progress" not in body
+
+
+def test_edit_post_persists_home_page_id(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    published_id, _ = _seed_pages_for_home_tests(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    resp = client.post(
+        f"/admin/sites/{site_id}/edit",
+        data={
+            "slug": "blog",
+            "hostname": "blog.example.com",
+            "title": "Blog",
+            "locale": "en",
+            "timezone": "UTC",
+            "canonical_url": "https://blog.example.com",
+            "theme": "",
+            "home_page_id": str(published_id),
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        site = db.get(Site, site_id)
+        assert site is not None
+        assert site.home_page_id == published_id
+
+
+def test_edit_post_clearing_home_page_id_persists_null(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    published_id, _ = _seed_pages_for_home_tests(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.home_page_id = published_id
+        db.commit()
+        site_id = site.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    resp = client.post(
+        f"/admin/sites/{site_id}/edit",
+        data={
+            "slug": "blog",
+            "hostname": "blog.example.com",
+            "title": "Blog",
+            "locale": "en",
+            "timezone": "UTC",
+            "canonical_url": "https://blog.example.com",
+            "theme": "",
+            "home_page_id": "",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        site = db.get(Site, site_id)
+        assert site is not None
+        assert site.home_page_id is None
+
+
+def test_edit_post_rejects_draft_home_page(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    _, draft_id = _seed_pages_for_home_tests(db_session_factory, "blog")
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    resp = client.post(
+        f"/admin/sites/{site_id}/edit",
+        data={
+            "slug": "blog",
+            "hostname": "blog.example.com",
+            "title": "Blog",
+            "locale": "en",
+            "timezone": "UTC",
+            "canonical_url": "https://blog.example.com",
+            "theme": "",
+            "home_page_id": str(draft_id),
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 200
+    assert b"published page" in resp.data.lower()
+    with db_session_factory() as db:
+        site = db.get(Site, site_id)
+        assert site is not None
+        assert site.home_page_id is None
+
+
+def test_edit_post_rejects_cross_site_home_page(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A POST with a page id belonging to another site must fail."""
+    # Seed a second site with its own published page.
+    with db_session_factory() as db:
+        owner = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        other_site = Site(
+            slug="other",
+            hostname="other.example.com",
+            title="Other",
+            canonical_url="https://other.example.com",
+            owner_user_id=owner.id,
+        )
+        db.add(other_site)
+        db.flush()
+        other_page = Page(
+            site_id=other_site.id,
+            slug="other-home",
+            title="Other Home",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="x",
+            author_id=owner.id,
+            status=PageStatus.PUBLISHED,
+        )
+        db.add(other_page)
+        db.commit()
+        other_page_id = other_page.id
+
+    with db_session_factory() as db:
+        blog_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{blog_id}/edit")
+    resp = client.post(
+        f"/admin/sites/{blog_id}/edit",
+        data={
+            "slug": "blog",
+            "hostname": "blog.example.com",
+            "title": "Blog",
+            "locale": "en",
+            "timezone": "UTC",
+            "canonical_url": "https://blog.example.com",
+            "theme": "",
+            "home_page_id": str(other_page_id),
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 200
+    assert b"belong to this site" in resp.data.lower()
+    with db_session_factory() as db:
+        site = db.get(Site, blog_id)
+        assert site is not None
+        assert site.home_page_id is None
+
+
+def test_new_form_does_not_show_home_page_select(admin_app: Flask) -> None:
+    """The new-site form has no home_page_id field (no pages exist yet)."""
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/new")
+    assert resp.status_code == 200
+    assert b'name="home_page_id"' not in resp.data

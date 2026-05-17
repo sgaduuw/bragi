@@ -23,6 +23,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
+from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
@@ -69,6 +70,7 @@ def _form_from_request() -> dict[str, str]:
         "timezone": (request.form.get("timezone") or "UTC").strip(),
         "canonical_url": (request.form.get("canonical_url") or "").strip(),
         "theme": (request.form.get("theme") or "").strip(),
+        "home_page_id": (request.form.get("home_page_id") or "").strip(),
     }
 
 
@@ -92,6 +94,51 @@ def _theme_or_error(slug: str) -> tuple[str | None, str | None]:
     if registry is None or registry.theme(slug) is None:
         return None, f"Unknown theme {slug!r}; install the theme package or pick another."
     return slug, None
+
+
+def _published_pages_for(db: Any, site_id: int) -> list[Page]:
+    """Pages eligible to be promoted to the homepage of `site_id`.
+
+    Only PUBLISHED pages on the same site qualify; drafts and
+    archived pages can't be the public homepage, and a page on
+    another site would leak across the multisite boundary. Sorted
+    by title so the dropdown is stable.
+    """
+    return list(
+        db.execute(
+            select(Page)
+            .where(Page.site_id == site_id, Page.status == PageStatus.PUBLISHED)
+            .order_by(Page.title)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _home_page_id_or_error(db: Any, raw: str, site_id: int) -> tuple[int | None, str | None]:
+    """Resolve the form's `home_page_id` value.
+
+    Returns `(value, error)`: empty string clears (None, None);
+    a valid id resolves to (int, None); anything that doesn't
+    exist / isn't published / belongs to another site returns
+    (None, message). The same-site check is the load-bearing one:
+    the FK constraint can't enforce it, so without this guard a
+    crafted POST could swap in a page from a different tenant.
+    """
+    if not raw:
+        return None, None
+    try:
+        candidate_id = int(raw)
+    except ValueError:
+        return None, "Home page selection is invalid."
+    page = db.get(Page, candidate_id)
+    if page is None:
+        return None, "Home page not found."
+    if page.site_id != site_id:
+        return None, "Home page must belong to this site."
+    if page.status != PageStatus.PUBLISHED:
+        return None, "Home page must be a published page."
+    return candidate_id, None
 
 
 def _validate(form: dict[str, str]) -> list[str]:
@@ -224,6 +271,7 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 "timezone": site.timezone,
                 "canonical_url": site.canonical_url,
                 "theme": site.theme or "",
+                "home_page_id": str(site.home_page_id) if site.home_page_id else "",
             }
             aliases = (
                 db.execute(
@@ -234,12 +282,14 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 .scalars()
                 .all()
             )
+            home_pages = _published_pages_for(db, site.id)
             return render_template(
                 "admin/sites_edit.html",
                 site=site,
                 form=form,
                 aliases=aliases,
                 themes=themes,
+                home_pages=home_pages,
             )
 
         form = _form_from_request()
@@ -247,10 +297,20 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         theme_value, theme_err = _theme_or_error(form["theme"])
         if theme_err is not None:
             errors.append(theme_err)
+        home_page_value, home_page_err = _home_page_id_or_error(db, form["home_page_id"], site.id)
+        if home_page_err is not None:
+            errors.append(home_page_err)
+        home_pages = _published_pages_for(db, site.id)
         if errors:
             for err in errors:
                 flash(err, "error")
-            return render_template("admin/sites_edit.html", site=site, form=form, themes=themes)
+            return render_template(
+                "admin/sites_edit.html",
+                site=site,
+                form=form,
+                themes=themes,
+                home_pages=home_pages,
+            )
 
         # Uniqueness checks excluding the row being edited.
         for column, value in (("slug", form["slug"]), ("hostname", form["hostname"])):
@@ -259,7 +319,13 @@ def edit_site(site_id: int) -> ResponseReturnValue:
             ).scalar_one_or_none()
             if existing is not None:
                 flash(f"Another site already uses {column} {value!r}.", "error")
-                return render_template("admin/sites_edit.html", site=site, form=form, themes=themes)
+                return render_template(
+                    "admin/sites_edit.html",
+                    site=site,
+                    form=form,
+                    themes=themes,
+                    home_pages=home_pages,
+                )
 
         site.slug = form["slug"]
         site.hostname = form["hostname"]
@@ -268,6 +334,7 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         site.timezone = form["timezone"]
         site.canonical_url = form["canonical_url"] or f"https://{form['hostname']}"
         site.theme = theme_value
+        site.home_page_id = home_page_value
         db.commit()
         flash(f"Site '{form['slug']}' updated.", "success")
 

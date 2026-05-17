@@ -270,7 +270,17 @@ def test_posts_per_page_default_when_setting_absent(delivery_app: Flask) -> None
     assert "Cross-Site Leak Canary" in resp.data.decode()
 
 
-def test_post_plugin_registers_index_blueprint() -> None:
-    """The post plugin contributes the index Blueprint at `/`."""
-    app = create_delivery_app()
-    assert "post_index_delivery" in app.blueprints
+def test_post_plugin_contributes_resolve_home_hookimpl() -> None:
+    """The post plugin's resolve_home is the default landing-page impl.
+
+    The route at `/` is owned by the core delivery dispatcher;
+    this test only confirms the post plugin still participates in
+    the hook so the fallback exists even when the page plugin's
+    tryfirst impl declines (no `home_page_id` set).
+    """
+    from bragi.plugins import create_plugin_manager
+
+    pm = create_plugin_manager()
+    impls = pm.hook.resolve_home.get_hookimpls()
+    plugins = {impl.plugin.__name__ for impl in impls}
+    assert "bragi.contrib.post.plugin" in plugins
