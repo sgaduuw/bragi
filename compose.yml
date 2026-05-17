@@ -21,11 +21,15 @@ services:
   # (touches /data/.migrated once the schema is current), then
   # enters a sleeper loop dispatching
   # `flask --app 'bragi.apps.admin:create_admin_app' cms ...` commands
-  # at configured cadences: scheduled-publish
-  # (flips due drafts to published), db analyze (daily), db vacuum
-  # (weekly). See docker/scheduler.sh for the loop body and the
-  # env-overridable cadence knobs (SCHEDULED_PUBLISH_EVERY,
-  # ANALYZE_EVERY, VACUUM_EVERY, all in seconds).
+  # at configured cadences: scheduled-publish (flips due drafts
+  # to published), embeds rerender-pending (retries failed embed
+  # cards), webmentions send-pending (ships queued outbound
+  # webmentions), activitypub send-pending (delivers signed AP
+  # activities), db analyze (daily), db vacuum (weekly). See
+  # docker/scheduler.sh for the loop body and the env-overridable
+  # cadence knobs (SCHEDULED_PUBLISH_EVERY, EMBEDS_RERENDER_EVERY,
+  # WEBMENTIONS_SEND_EVERY, ACTIVITYPUB_SEND_EVERY, ANALYZE_EVERY,
+  # VACUUM_EVERY, all in seconds).
   #
   # Reuses the bragi-admin image since the `cms` CLI is registered
   # on the admin app. Web containers gate their start on this
@@ -40,6 +44,9 @@ services:
       # Cadence overrides (all in seconds). Leave commented for
       # the defaults defined in docker/scheduler.sh.
       # SCHEDULED_PUBLISH_EVERY: "60"
+      # EMBEDS_RERENDER_EVERY: "600"
+      # WEBMENTIONS_SEND_EVERY: "300"
+      # ACTIVITYPUB_SEND_EVERY: "60"
       # ANALYZE_EVERY: "86400"
       # VACUUM_EVERY: "604800"
     volumes:
@@ -67,10 +74,23 @@ services:
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
       BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
+      # Tells the app it's running in production. With this set,
+      # `create_admin_app` refuses to start if `BRAGI_SECRET_KEY`
+      # is the bundled dev sentinel; without it the dev default
+      # produces a startup WARNING instead. Set to `production`
+      # for any real deploy; leave unset for local dev.
+      BRAGI_ENV: production
       # Optional (uncomment + populate to enable).
       # BRAGI_GITHUB_CLIENT_ID: ...
       # BRAGI_GITHUB_CLIENT_SECRET: ...
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
+      # Hard cap on inbound request body size. Admin defaults to
+      # `max(max_request_bytes, attachments_max_bytes + 64 KiB)`
+      # so attachment uploads up to `attachments_max_bytes` (20
+      # MiB default) work; override here to raise the cap for
+      # both federation inboxes and attachment uploads.
+      # BRAGI_MAX_REQUEST_BYTES: "1048576"
+      # BRAGI_ATTACHMENTS_MAX_BYTES: "20971520"
       # Gunicorn worker count for the admin app. Default 2; admin
       # is low-concurrency (one operator). Dial up if you have
       # multiple authors hitting it concurrently.
@@ -78,6 +98,21 @@ services:
     volumes:
       - bragi-data:/data
     restart: unless-stopped
+    healthcheck:
+      # `/healthz` returns 200 + a `SELECT 1` round-trip so a
+      # wedged worker (or a DB the worker can't read) flips the
+      # container to unhealthy and restart-on-failure kicks in.
+      # Uses python's stdlib `urllib` (in the image already)
+      # rather than depending on curl in the slim runtime.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   delivery:
     image: ghcr.io/sgaduuw/bragi-delivery:${BRAGI_TAG:-latest}
@@ -90,7 +125,13 @@ services:
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
       BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
+      BRAGI_ENV: production
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
+      # Hard cap on inbound request body size; protects federation
+      # inboxes (`/webmentions`, `/actor/inbox`) from streaming-
+      # body OOM. Delivery doesn't accept attachment uploads, so
+      # 1 MiB is appropriate.
+      # BRAGI_MAX_REQUEST_BYTES: "1048576"
       # Gunicorn worker count for the delivery app. Default 4;
       # delivery is read-heavy and SQLite WAL keeps reads parallel.
       # Dial up on high-traffic public sites, down on small VPS.
@@ -98,6 +139,16 @@ services:
     volumes:
       - bragi-data:/data
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/healthz', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   # Shared between all three services: SQLite DB at /data/bragi.db,

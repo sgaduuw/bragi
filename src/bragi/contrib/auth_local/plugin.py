@@ -22,6 +22,11 @@ PUBLIC_ENDPOINTS: frozenset[str] = frozenset(
         "auth_github.login",
         "auth_github.callback",
         "static",
+        # The container healthcheck hits this without a session;
+        # without the exemption the probe would 302 to /auth/login
+        # and an unhealthy worker can't be distinguished from an
+        # authenticated 200 on /auth/login.
+        "_healthz",
     }
 )
 

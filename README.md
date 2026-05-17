@@ -360,14 +360,33 @@ A `bragi-tasks` sidecar owns `alembic upgrade head` on start
 (touching `/data/.migrated` once the schema is current), then
 enters a sleeper loop that dispatches periodic CMS commands:
 `scheduled-publish` (flips drafts whose `scheduled_for` has
-elapsed), `db analyze` (daily), and `db vacuum` (weekly). The
-admin and delivery services gate their start on the sidecar's
-healthcheck, so a fresh deploy and a schema-bump deploy work
-the same way. The shared `bragi-data` volume backs `/data/bragi.db`,
-`/data/uploads/` (attachments), and the `/data/.migrated` sentinel;
-back it up. Ports bind to `127.0.0.1` only; front the apps with
-a reverse proxy (Caddy / nginx / Traefik) for TLS and hostname
-routing.
+elapsed), `embeds rerender-pending`, `webmentions send-pending`,
+`activitypub send-pending`, `db analyze` (daily), and `db vacuum`
+(weekly). The admin and delivery services gate their start on
+the sidecar's healthcheck, so a fresh deploy and a schema-bump
+deploy work the same way. Each web container also exposes its
+own `/healthz` endpoint that does a `SELECT 1` round-trip; the
+compose healthcheck stanza watches both so a wedged worker
+restarts via `restart: unless-stopped`. The shared `bragi-data`
+volume backs `/data/bragi.db`, `/data/uploads/` (attachments),
+and the `/data/.migrated` sentinel; back it up. Ports bind to
+`127.0.0.1` only; front the apps with a reverse proxy
+(Caddy / nginx / Traefik) for TLS and hostname routing.
+
+`BRAGI_ENV=production` (set on both web services in the example
+compose) tells the app it's running in production. When set,
+booting with the bundled dev `SECRET_KEY` is fatal rather than
+just logging a warning, so a misconfigured `BRAGI_SECRET_KEY`
+fails loud instead of running with a predictable signing key.
+Leave unset for local dev.
+
+`BRAGI_MAX_REQUEST_BYTES` (default 1 MiB) caps the request body
+size to protect the federation inboxes from streaming-body OOM.
+On the admin app, this cap is automatically raised to
+`max(max_request_bytes, attachments_max_bytes + 64 KiB)` so
+attachment uploads up to `BRAGI_ATTACHMENTS_MAX_BYTES`
+(default 20 MiB) still go through. Raise both knobs in lockstep
+for larger uploads.
 
 Both apps run under gunicorn inside the container (sync worker
 class; `--access-logfile -` to stdout). Worker counts default to
