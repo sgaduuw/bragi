@@ -47,7 +47,7 @@ class TokenScope:
 class PersonalAccessToken(IdMixin, TimestampsMixin, Base):
     __tablename__ = "personal_access_tokens"
 
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(100))
     # Indexed, unique, narrow lookup key embedded in the displayed
     # token. Hex/base64 of 16 random bytes; 22 url-safe chars.

@@ -52,12 +52,16 @@ class WebmentionType:
 class Webmention(IdMixin, TimestampsMixin, Base):
     __tablename__ = "webmentions"
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     source_url: Mapped[str] = mapped_column(String(2048))
     target_url: Mapped[str] = mapped_column(String(2048))
     # Resolved local post when target maps to one; left NULL for
-    # site-level mentions or unrecognised targets.
-    post_id: Mapped[int | None] = mapped_column(ForeignKey("posts.id"), default=None, index=True)
+    # site-level mentions or unrecognised targets. SET NULL on
+    # post delete: keep the moderation history (admins may want
+    # to see who linked to a post even after it's been removed).
+    post_id: Mapped[int | None] = mapped_column(
+        ForeignKey("posts.id", ondelete="SET NULL"), default=None, index=True
+    )
     status: Mapped[str] = mapped_column(String(16), default=WebmentionStatus.PENDING)
     mention_type: Mapped[str] = mapped_column(String(32), default=WebmentionType.MENTION)
     approved: Mapped[bool] = mapped_column(default=False)
@@ -84,8 +88,8 @@ class WebmentionOutboxStatus:
 class WebmentionOutbox(IdMixin, TimestampsMixin, Base):
     __tablename__ = "webmention_outbox"
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
-    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), index=True)
     target_url: Mapped[str] = mapped_column(String(2048))
     status: Mapped[str] = mapped_column(String(16), default=WebmentionOutboxStatus.PENDING)
     attempt_count: Mapped[int] = mapped_column(default=0)

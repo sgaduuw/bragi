@@ -68,6 +68,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`_ACTOR_CACHE` is bounded.** A fuzzing inbox attacker could
   grow the process-wide cache without limit. Caps at 1024
   entries and evicts the oldest on overflow.
+- **Federation tables now declare `ON DELETE` correctly so
+  removing a Site / Post / User no longer leaves orphan rows.**
+  `webmentions`, `webmention_outbox`, `site_keypairs`,
+  `activitypub_followers`, `activitypub_outbox`, and
+  `personal_access_tokens` shipped without explicit `ondelete`,
+  so deleting an account or retiring a site left behind rows
+  the admin UI could not surface or clean up, including
+  outbound delivery queues that would have kept POSTing to
+  remote inboxes after the site was gone. Cascade rules:
+  `webmentions.site_id`, `webmention_outbox.{site_id,post_id}`,
+  `site_keypairs.site_id`, `activitypub_followers.site_id`,
+  `activitypub_outbox.{site_id,post_id,follower_id}`, and
+  `personal_access_tokens.user_id` all `CASCADE`;
+  `webmentions.post_id` is `SET NULL` to preserve moderation
+  history when a post is removed. Migration
+  `2026_05_18_0900_add_fk_ondelete` rebuilds the six tables in
+  place (SQLite cannot ALTER a foreign-key constraint, so each
+  table is recreated with the new constraints, rows are copied,
+  and the old table is dropped).
 
 ### Changed
 - **Posts now live under a per-site `Page` of kind `post_index`.**

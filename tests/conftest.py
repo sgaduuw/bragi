@@ -15,6 +15,12 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+# Importing `bragi.core.db` registers the `connect` event
+# listener that enables `PRAGMA foreign_keys = ON` on every
+# SQLite connection. Without this, ON DELETE CASCADE on FKs
+# silently doesn't fire and cascade-behaviour tests pass
+# vacuously. The import has no other side effects we care about.
+import bragi.core.db  # noqa: F401
 from bragi.core.models import Base
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.site import Site
