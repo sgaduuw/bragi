@@ -45,6 +45,10 @@ def create_delivery_app() -> Flask:
     """
     app = Flask("bragi-delivery")
     app.config["SECRET_KEY"] = settings.secret_key
+    # Hard cap so a streaming-body attack on a public inbox
+    # (webmentions, ActivityPub /actor/inbox) can't OOM the
+    # worker. See `Settings.max_request_bytes`.
+    app.config["MAX_CONTENT_LENGTH"] = settings.max_request_bytes
 
     # Make `bragi/templates/` reachable via the Jinja loader chain so
     # plugin delivery templates can `{% extends "delivery/base.html" %}`.

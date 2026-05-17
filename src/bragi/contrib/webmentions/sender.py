@@ -10,11 +10,17 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-import requests
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bragi.contrib.webmentions.parse import find_endpoint
+from bragi.core.http import (
+    DEFAULT_TIMEOUT_SECONDS,
+    SafeHTTPError,
+    safe_get,
+    safe_head,
+    safe_post,
+)
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
 from bragi.core.models.webmention import (
@@ -26,7 +32,7 @@ LOG = logging.getLogger(__name__)
 
 # Caps so a sender doesn't hammer indefinitely on a broken target.
 MAX_ATTEMPTS = 5
-HTTP_TIMEOUT_SECONDS = 10.0
+HTTP_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS
 
 
 def discover_endpoint(target_url: str) -> str | None:
@@ -35,19 +41,19 @@ def discover_endpoint(target_url: str) -> str | None:
     Per spec the sender SHOULD prefer HEAD to save bandwidth;
     when the HEAD response carries the `Link` header the GET is
     unnecessary. Falls back to GET to scan the body when HEAD
-    doesn't surface the endpoint.
+    doesn't surface the endpoint. SSRF-guarded on both calls.
     """
     try:
-        head = requests.head(target_url, allow_redirects=True, timeout=HTTP_TIMEOUT_SECONDS)
-    except requests.RequestException as exc:
+        head = safe_head(target_url, timeout=HTTP_TIMEOUT_SECONDS)
+    except (SafeHTTPError, Exception) as exc:  # noqa: BLE001
         LOG.info("webmention discover HEAD failed for %s: %s", target_url, exc)
         return None
     endpoint = find_endpoint(dict(head.headers), "", head.url or target_url)
     if endpoint is not None:
         return endpoint
     try:
-        resp = requests.get(target_url, allow_redirects=True, timeout=HTTP_TIMEOUT_SECONDS)
-    except requests.RequestException as exc:
+        resp = safe_get(target_url, timeout=HTTP_TIMEOUT_SECONDS)
+    except (SafeHTTPError, Exception) as exc:  # noqa: BLE001
         LOG.info("webmention discover GET failed for %s: %s", target_url, exc)
         return None
     return find_endpoint(dict(resp.headers), resp.text, resp.url or target_url)
@@ -86,13 +92,16 @@ def send_one(db: Session, outbox: WebmentionOutbox) -> None:
     outbox.endpoint_url = endpoint
 
     try:
-        resp = requests.post(
+        resp = safe_post(
             endpoint,
             data={"source": source_url, "target": outbox.target_url},
             timeout=HTTP_TIMEOUT_SECONDS,
-            allow_redirects=True,
         )
-    except requests.RequestException as exc:
+    except SafeHTTPError as exc:
+        outbox.last_error = f"endpoint blocked: {exc}"
+        outbox.status = WebmentionOutboxStatus.FAILED
+        return
+    except Exception as exc:  # noqa: BLE001 -- network errors mapped uniformly
         outbox.last_error = f"POST failed: {exc}"
         if outbox.attempt_count >= MAX_ATTEMPTS:
             outbox.status = WebmentionOutboxStatus.FAILED

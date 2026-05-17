@@ -6,6 +6,44 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **SSRF guard on every outbound fetch driven by remote input.**
+  The webmention inbox (`POST /webmentions`) and outbox sender
+  fetched arbitrary URLs supplied by remote actors, and the
+  ActivityPub inbox fetched the signer's actor document and
+  posted to its declared inbox. Without guards, unauthenticated
+  POSTs pivoted the delivery container into RFC 1918, loopback,
+  and 169.254.169.254 (cloud IMDS) targets. New `bragi.core.http`
+  module exposes `safe_get` / `safe_head` / `safe_post` +
+  `is_public_url` that reject non-`http(s)` schemes and any host
+  resolving to a private / loopback / link-local / multicast /
+  reserved address (re-checked on every redirect). Rewired all
+  six callsites (`webmentions/receiver.py:_fetch_source`,
+  `webmentions/sender.py` HEAD/GET/POST,
+  `activitypub/views.py:_fetch_actor`,
+  `activitypub/sender.py:send_one`). The AP Follow handler now
+  validates the remote's `inbox` and `endpoints.sharedInbox`
+  URLs against the same guard before persisting the row, so any
+  row in `activitypub_followers` is one we're willing to POST to.
+- **Hard request-body cap (`MAX_CONTENT_LENGTH`) on both apps.**
+  New `Settings.max_request_bytes` (default 1 MiB) wired into
+  `bragi-admin` and `bragi-delivery`. Prevents a streaming-body
+  attack on the public federation inboxes from OOMing a worker.
+- **ActivityPub Accept now fires for cold Follow requests.**
+  `_queue_accept` previously looked up the remote actor's inbox
+  from `_ACTOR_CACHE`, which could be empty when called from a
+  fresh Follow. The Accept got silently dropped; Mastodon
+  retried to no avail. Now passes the already-fetched
+  `remote_actor` dict directly.
+- **`Undo Follow` requires the inner actor to match the signing
+  actor.** Previously, any signed remote could send
+  `Undo { object: Follow { actor: "https://victim/" } }` and
+  delete a different remote's follower row. Now `inner.actor`
+  must equal `outer.actor`; mismatch is logged and ignored.
+- **`_ACTOR_CACHE` is bounded.** A fuzzing inbox attacker could
+  grow the process-wide cache without limit. Caps at 1024
+  entries and evicts the oldest on overflow.
+
 ### Changed
 - **Posts now live under a per-site `Page` of kind `post_index`.**
   The hardcoded `/posts/` and `/tags/` URL spaces are gone. Each

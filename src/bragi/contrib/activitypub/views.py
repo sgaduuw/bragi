@@ -12,7 +12,6 @@ import json
 import logging
 from datetime import UTC, datetime
 
-import requests
 from flask import Blueprint, abort, g, jsonify, request
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
@@ -25,6 +24,7 @@ from bragi.contrib.activitypub.activities import (
 from bragi.contrib.activitypub.keys import get_or_create_keypair
 from bragi.contrib.activitypub.signature import verify_post
 from bragi.core.db import SessionLocal
+from bragi.core.http import SafeHTTPError, is_public_url, safe_get
 from bragi.core.models.activitypub import (
     ActivityPubFollower,
     ActivityPubOutbox,
@@ -40,8 +40,10 @@ bp = Blueprint("activitypub", __name__)
 
 # Remote actor lookups are cached briefly; the inbox signature
 # check needs the actor's public key, and we don't want every
-# Follow to slow-path through HTTPS.
+# Follow to slow-path through HTTPS. Bounded by a max-entries
+# cap so a fuzzing inbox attacker can't grow it without limit.
 _ACTOR_CACHE_SECONDS = 300
+_ACTOR_CACHE_MAX_ENTRIES = 1024
 _ACTOR_CACHE: dict[str, tuple[float, dict[str, object]]] = {}
 
 
@@ -209,16 +211,25 @@ def _handle_follow(
     activity: dict[str, object],
     remote_actor: dict[str, object],
 ) -> None:
-    """Persist the follower row. Idempotent on UniqueConstraint."""
+    """Persist the follower row. Idempotent on UniqueConstraint.
+
+    Both `inbox_url` and `shared_inbox_url` are validated against
+    the SSRF guard before insertion; a Follow with an internal
+    inbox URL is silently dropped (no row, no Accept). This makes
+    the sender's later "POST to this inbox" call provably safe at
+    the schema level: a row in the table is a row we'd happily
+    POST to.
+    """
     actor_iri = str(activity["actor"])
     inbox_url = str(remote_actor.get("inbox") or "")
-    if not inbox_url:
+    if not inbox_url or not is_public_url(inbox_url):
+        LOG.info("Follow inbox blocked or missing: %r", inbox_url)
         return
     shared_inbox = None
     endpoints = remote_actor.get("endpoints")
     if isinstance(endpoints, dict):
         shared = endpoints.get("sharedInbox")
-        if isinstance(shared, str):
+        if isinstance(shared, str) and is_public_url(shared):
             shared_inbox = shared
     name = remote_actor.get("name") or remote_actor.get("preferredUsername")
     with SessionLocal() as db:
@@ -240,22 +251,41 @@ def _handle_follow(
                 )
             )
         db.commit()
-    _queue_accept(site, activity)
+    # Pass `remote_actor` directly so the Accept can be queued
+    # even when the actor isn't (yet) in `_ACTOR_CACHE`. The
+    # earlier cache-only lookup silently dropped Accepts for
+    # cold Follow requests; Mastodon would retry to no avail.
+    _queue_accept(site, activity, remote_actor)
 
 
 def _handle_undo(site: Site, activity: dict[str, object]) -> None:
-    """Delete the matching follower row, if any."""
+    """Delete the matching follower row, if any.
+
+    Only the actor that signed the outer request may undo their
+    OWN follow: `inner.actor` must equal `outer.actor`. Without
+    that check, any valid signer could send
+    `Undo { object: Follow { actor: "https://victim/" } }` and
+    silently delete a different remote's follower row.
+    """
     inner = activity.get("object")
     if not isinstance(inner, dict) or inner.get("type") != "Follow":
         return
-    actor_iri = inner.get("actor") or activity.get("actor")
-    if not isinstance(actor_iri, str):
+    outer_actor = activity.get("actor")
+    inner_actor = inner.get("actor")
+    if not isinstance(outer_actor, str) or not isinstance(inner_actor, str):
+        return
+    if outer_actor != inner_actor:
+        LOG.warning(
+            "Undo Follow rejected: outer actor %r != inner actor %r",
+            outer_actor,
+            inner_actor,
+        )
         return
     with SessionLocal() as db:
         existing = db.execute(
             select(ActivityPubFollower).where(
                 ActivityPubFollower.site_id == site.id,
-                ActivityPubFollower.actor_url == actor_iri,
+                ActivityPubFollower.actor_url == outer_actor,
             )
         ).scalar_one_or_none()
         if existing is not None:
@@ -263,20 +293,24 @@ def _handle_undo(site: Site, activity: dict[str, object]) -> None:
             db.commit()
 
 
-def _queue_accept(site: Site, follow_activity: dict[str, object]) -> None:
+def _queue_accept(
+    site: Site,
+    follow_activity: dict[str, object],
+    remote_actor: dict[str, object],
+) -> None:
     """Queue an Accept activity acknowledging the Follow.
 
     Mastodon won't surface the follow until the actor returns an
-    Accept; the sender worker handles the actual signed POST.
+    Accept; the sender worker handles the actual signed POST. The
+    caller passes `remote_actor` (already fetched + verified at
+    the inbox entry) so this doesn't depend on `_ACTOR_CACHE`
+    being primed.
     """
-    actor_iri = str(follow_activity["actor"])
-    inbox_url: str | None = None
-    cached_actor = _ACTOR_CACHE.get(actor_iri)
-    if cached_actor is not None:
-        inbox_candidate = cached_actor[1].get("inbox")
-        if isinstance(inbox_candidate, str):
-            inbox_url = inbox_candidate
-    if inbox_url is None:
+    inbox_candidate = remote_actor.get("inbox")
+    if not isinstance(inbox_candidate, str) or not inbox_candidate:
+        return
+    if not is_public_url(inbox_candidate):
+        LOG.info("Accept target inbox blocked: %r", inbox_candidate)
         return
     accept = {
         "@context": "https://www.w3.org/ns/activitystreams",
@@ -291,7 +325,7 @@ def _queue_accept(site: Site, follow_activity: dict[str, object]) -> None:
                 site_id=site.id,
                 follower_id=None,
                 activity_json=json.dumps(accept),
-                target_inbox=inbox_url,
+                target_inbox=inbox_candidate,
                 status=ActivityPubOutboxStatus.PENDING,
             )
         )
@@ -299,7 +333,13 @@ def _queue_accept(site: Site, follow_activity: dict[str, object]) -> None:
 
 
 def _fetch_actor(actor_iri: str) -> dict[str, object] | None:
-    """Cached actor lookup. Returns parsed JSON dict or None."""
+    """Cached actor lookup. Returns parsed JSON dict or None.
+
+    SSRF-guarded; rejects non-http(s) and any host that resolves
+    to a private / loopback / link-local / multicast / reserved
+    address (also re-checks every redirect hop). The cache is a
+    module-level dict bounded by `_ACTOR_CACHE_MAX_ENTRIES`.
+    """
     import time
 
     cached = _ACTOR_CACHE.get(actor_iri)
@@ -307,13 +347,15 @@ def _fetch_actor(actor_iri: str) -> dict[str, object] | None:
     if cached and (now - cached[0]) < _ACTOR_CACHE_SECONDS:
         return cached[1]
     try:
-        resp = requests.get(
+        resp = safe_get(
             actor_iri,
             headers={"Accept": "application/activity+json"},
             timeout=10.0,
-            allow_redirects=True,
         )
-    except requests.RequestException as exc:
+    except SafeHTTPError as exc:
+        LOG.info("actor fetch blocked for %s: %s", actor_iri, exc)
+        return None
+    except Exception as exc:  # noqa: BLE001 -- network errors mapped uniformly
         LOG.info("actor fetch failed for %s: %s", actor_iri, exc)
         return None
     if resp.status_code >= 400:
@@ -324,6 +366,11 @@ def _fetch_actor(actor_iri: str) -> dict[str, object] | None:
         return None
     if not isinstance(doc, dict):
         return None
+    # Bound the cache so a fuzzing attacker can't grow it
+    # without limit. Drop the oldest entry on overflow.
+    if len(_ACTOR_CACHE) >= _ACTOR_CACHE_MAX_ENTRIES:
+        oldest_key = min(_ACTOR_CACHE, key=lambda k: _ACTOR_CACHE[k][0])
+        _ACTOR_CACHE.pop(oldest_key, None)
     _ACTOR_CACHE[actor_iri] = (now, doc)
     return doc
 

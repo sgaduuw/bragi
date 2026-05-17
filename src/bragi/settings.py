@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     attachments_root: str = "var/uploads"
     attachments_max_bytes: int = 20 * 1024 * 1024  # 20 MiB
 
+    # Hard cap on inbound request body size. Bragi never accepts
+    # multi-megabyte requests outside the attachment upload path
+    # (which has its own dedicated cap); the federation inboxes
+    # (webmention / ActivityPub) read JSON or form-encoded bodies
+    # measured in kilobytes. A small global cap prevents OOM from
+    # an attacker streaming gigabytes into /webmentions or
+    # /actor/inbox. Override per-deployment if a future upload
+    # surface needs more.
+    max_request_bytes: int = 1 * 1024 * 1024  # 1 MiB
+
     # Image rendition ladder. Each width below the source produces
     # one `AttachmentRendition` row on upload; widths >= source are
     # skipped (no upscale). The default ladder covers the typical

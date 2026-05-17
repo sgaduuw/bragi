@@ -25,7 +25,6 @@ import logging
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-import requests
 from flask import Blueprint, abort, jsonify, request
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
@@ -37,6 +36,11 @@ from bragi.contrib.webmentions.parse import (
     source_links_to_target,
 )
 from bragi.core.db import SessionLocal
+from bragi.core.http import (
+    DEFAULT_TIMEOUT_SECONDS,
+    SafeHTTPError,
+    safe_get,
+)
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
@@ -46,7 +50,7 @@ from bragi.core.models.webmention import (
 )
 
 LOG = logging.getLogger(__name__)
-HTTP_TIMEOUT_SECONDS = 10.0
+HTTP_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS
 MAX_SOURCE_BYTES = 1_000_000  # 1 MiB cap on the fetched source body
 
 bp = Blueprint("webmentions_receiver", __name__)
@@ -117,26 +121,22 @@ class _FetchError(Exception):
 
 
 def _fetch_source(url: str) -> str:
-    """GET `url`, return body. Caps response size to avoid OOM."""
+    """GET `url`, return body. SSRF-guarded; caps size to avoid OOM.
+
+    Wraps `safe_get`, which rejects non-http(s) schemes and any
+    host that resolves to a private / loopback / link-local /
+    multicast / reserved address (RFC 1918, 169.254.169.254 IMDS,
+    fc00::/7, ::1, ...). Re-validates on every redirect.
+    """
     try:
-        resp = requests.get(
-            url,
-            timeout=HTTP_TIMEOUT_SECONDS,
-            allow_redirects=True,
-            stream=True,
-        )
-    except requests.RequestException as exc:
+        resp = safe_get(url, timeout=HTTP_TIMEOUT_SECONDS, max_bytes=MAX_SOURCE_BYTES)
+    except SafeHTTPError as exc:
+        raise _FetchError(f"blocked: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 -- network errors mapped uniformly
         raise _FetchError(f"fetch failed: {exc}") from exc
     if resp.status_code >= 400:
         raise _FetchError(f"source returned {resp.status_code}")
-    chunks: list[bytes] = []
-    received = 0
-    for chunk in resp.iter_content(8192):
-        chunks.append(chunk)
-        received += len(chunk)
-        if received >= MAX_SOURCE_BYTES:
-            break
-    return b"".join(chunks).decode("utf-8", errors="replace")
+    return resp.content.decode("utf-8", errors="replace")
 
 
 def _is_absolute_http(url: str) -> bool:
