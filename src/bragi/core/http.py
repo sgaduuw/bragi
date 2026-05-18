@@ -162,8 +162,14 @@ def _safe_request(
         session.close()
 
 
-def _validate_url(url: str) -> None:
-    """Scheme + host check (DNS-resolved); raises SafeHTTPError."""
+def _validate_url(url: str) -> frozenset[str]:
+    """Scheme + host check (DNS-resolved); raises SafeHTTPError.
+
+    Returns the set of validated IP strings the host resolved to;
+    the caller (the `_GuardedAdapter.send` re-check) uses this to
+    detect DNS rebinding by comparing against a fresh resolution
+    just before the connection is established.
+    """
     try:
         parsed = urlparse(url)
     except ValueError as exc:
@@ -174,28 +180,32 @@ def _validate_url(url: str) -> None:
     host = parsed.hostname
     if not host:
         raise SafeHTTPError(f"URL missing host: {url!r}")
-    _assert_public_host(host)
+    return _assert_public_host(host)
 
 
-def _assert_public_host(host: str) -> None:
+def _assert_public_host(host: str) -> frozenset[str]:
     """Resolve `host` and reject if any resolved IP is non-public.
 
     Reject when ANY resolved address is non-public (an attacker
     can't poison just one record and rely on the other being
-    chosen).
+    chosen). Returns the set of IPs we accepted, so the adapter
+    can detect DNS rebinding at send time.
     """
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         raise SafeHTTPError(f"DNS resolution failed for {host!r}: {exc}") from exc
+    ips: set[str] = set()
     for info in infos:
-        ip_str = info[4][0]
+        ip_str = str(info[4][0])
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
             raise SafeHTTPError(f"unparseable IP for {host!r}: {ip_str!r}") from None
         if _is_blocked_ip(ip):
             raise SafeHTTPError(f"host {host!r} resolves to non-public IP {ip!s}")
+        ips.add(ip_str)
+    return frozenset(ips)
 
 
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -221,8 +231,43 @@ class _GuardedAdapter(HTTPAdapter):
     `requests` validates only the initial URL. A 302 to
     `http://127.0.0.1/` would otherwise be followed. We hook
     `send` so each call re-runs `_validate_url`.
+
+    **DNS-rebinding mitigation** (#M5 / audit pass 4): an attacker
+    controlling the authoritative DNS for `attacker.example` can
+    serve a public IP at validation time and a private IP at
+    connect time (very short TTL, or interleaved A records). The
+    URL-time `_validate_url` check then succeeds, the `requests` /
+    `urllib3` stack does its own `getaddrinfo` at connect time,
+    and the socket opens against the private IP.
+
+    We mitigate by re-resolving the host one more time inside
+    `send()` and asserting the connect-time IP set is a subset of
+    the validation-time set. A rebinding attacker who flipped the
+    record between the two calls trips this check.
+
+    A residual TOCTOU gap remains between this check and the
+    kernel `getaddrinfo` that urllib3 issues inside the actual
+    socket-connect path (microseconds). Full IP-pin-and-Host-
+    rewrite at the urllib3 connection layer is the next step if
+    telemetry shows the residual matters; tracked as a follow-up.
     """
 
     def send(self, request: Any, **kwargs: Any) -> Any:  # type: ignore[override]
-        _validate_url(request.url)
+        validated_ips = _validate_url(request.url)
+        host = urlparse(request.url).hostname
+        if host is not None:
+            try:
+                infos = socket.getaddrinfo(host, None)
+            except socket.gaierror as exc:
+                raise SafeHTTPError(
+                    f"DNS resolution failed for {host!r} at send time: {exc}"
+                ) from exc
+            connect_ips = {info[4][0] for info in infos}
+            rebound = connect_ips - validated_ips
+            if rebound:
+                raise SafeHTTPError(
+                    f"DNS rebinding detected for {host!r}: "
+                    f"send-time IP(s) {sorted(rebound)} not in validation set "
+                    f"{sorted(validated_ips)}"
+                )
         return super().send(request, **kwargs)

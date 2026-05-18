@@ -136,8 +136,46 @@ def test_validate_url_rejects_any_resolved_address_internal(
 
 def test_validate_url_allows_public(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("8.8.8.8", 0))])
-    # Should not raise.
-    _validate_url("https://good.example/")
+    # Should not raise. Returns the validated IP set for the adapter
+    # to compare against at send-time.
+    validated = _validate_url("https://good.example/")
+    assert validated == frozenset({"8.8.8.8"})
+
+
+def test_guarded_adapter_detects_dns_rebinding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SEC-M5 regression (audit pass 4): if `getaddrinfo` returns a
+    public IP at validation time and a private IP at send-time
+    (DNS rebinding with a TTL-0 record), the adapter must refuse
+    the request rather than silently follow into RFC 1918.
+
+    We simulate the rebinding by swapping the patched
+    `getaddrinfo` between the two calls.
+    """
+    import socket as _socket
+
+    from bragi.core.http import SafeHTTPError, _GuardedAdapter
+
+    # First call (validation) returns a public IP; second call
+    # (send-time re-resolve) returns loopback.
+    call_count = {"n": 0}
+
+    def _addrinfo(*a, **k):  # type: ignore[no-untyped-def]
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return [(0, 0, 0, "", ("8.8.8.8", 0))]
+        return [(0, 0, 0, "", ("127.0.0.1", 0))]
+
+    monkeypatch.setattr(_socket, "getaddrinfo", _addrinfo)
+
+    # Fake `requests`-like request object with .url; the adapter
+    # raises before super().send() ever runs, so we never need a
+    # real request.
+    class _FakeReq:
+        url = "https://rebound.example/path"
+
+    adapter = _GuardedAdapter()
+    with pytest.raises(SafeHTTPError, match="DNS rebinding"):
+        adapter.send(_FakeReq())  # type: ignore[arg-type]
 
 
 def test_validate_url_propagates_dns_failure(

@@ -7,6 +7,63 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Redirects admin rejects absolute and protocol-relative
+  targets.** The admin form's `target` field accepted any string;
+  the redirect resolver follows the chain and serves the raw
+  target as the 301 destination. An editor-rank user could
+  insert `target=https://evil.example/phish` and turn the site's
+  redirect table into a 301 phishing primitive against its
+  readers. The admin validator now requires `target` to start
+  with `/` and rejects `//evil.example/x` (protocol-relative).
+  Importers and slug-change auto-301s always construct relative
+  targets, so the constraint only affects the human-facing
+  admin form.
+- **Page admin validates cross-site `parent_id` on both
+  create and edit.** Pre-fix, an author on site A could POST
+  `parent_id=<id-of-page-on-site-B>` and persist a row with
+  `(site_id=A, parent_id=B)`. Delivery-side resolution filters
+  by site so the corrupted row never serves real content, but
+  the cross-site parent slug leaked into the sitemap and any
+  slug-change auto-redirect derived from the URL chain. A new
+  `_validated_parent_id_or_error` helper mirrors the same-site
+  check the OG-image and default-OG-image resolvers already do.
+- **Bearer middleware caches verify outcomes to bound argon2
+  amplification.** Every bearer request invoked `argon2.verify()`
+  (~100 ms / ~64 MiB) whenever the presented public_id matched a
+  row. An attacker who guessed any valid public_id could
+  saturate a worker by hammering with random secrets, and a
+  legitimate high-QPS integration paid argon2 per request. The
+  middleware now caches `(public_id, sha256(secret))` -> verify
+  outcome for 10 seconds with a 4096-entry bound. Repeat
+  presentations short-circuit argon2; a smart attacker who
+  varies the secret per request still pays full argon2 (keys
+  are unique to them) but they're now bound only by network
+  throughput. The `last_used_at` bump and `User.is_active`
+  re-check still run on every cache-hit request so a disabled
+  user takes effect immediately; only argon2 is short-circuited.
+- **SSRF guard re-resolves the host at send-time and refuses
+  on DNS rebinding.** A DNS-rebinding attacker can serve a
+  public IP at URL-validation time and a private IP at
+  connection time (TTL 0 or interleaved A records). The
+  validation-time `_validate_url` then succeeds, the
+  `requests` / `urllib3` stack does its own `getaddrinfo` at
+  connect time, and the socket opens against the private IP.
+  `_validate_url` now returns the validated IP set;
+  `_GuardedAdapter.send` re-resolves the host one more time
+  and asserts the connect-time IPs are a subset of the
+  validated set. A residual TOCTOU window remains between
+  this check and the kernel's actual `getaddrinfo` at socket-
+  connect time (microseconds); full IP-pin-and-Host-rewrite at
+  the urllib3 connection layer is the next step.
+- **Webmention inbox fetch timeout tightened from 10s to 3s.**
+  The verify-first refactor in v1.12.0 moved DB writes after
+  the source fetch, eliminating the row-per-request DoS surface,
+  but the synchronous fetch still tied up a worker for the
+  full timeout window. With 4 workers and a 10s timeout, 0.4
+  req/s sufficed to pin the inbox. The dedicated
+  `HTTP_TIMEOUT_SECONDS = 3.0` on the receiver still tolerates
+  typical Mastodon-class RTTs while bounding the blast radius
+  of a malicious slow-source URL.
 - **GitHub OAuth callback no longer auto-links a new identity
   to an existing local User by matching email.** Operators
   running v1.x with both local-credential auth (e.g. an

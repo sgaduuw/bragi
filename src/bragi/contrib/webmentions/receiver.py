@@ -46,7 +46,6 @@ from bragi.contrib.webmentions.parse import (
 )
 from bragi.core.db import SessionLocal
 from bragi.core.http import (
-    DEFAULT_TIMEOUT_SECONDS,
     SafeHTTPError,
     safe_get,
 )
@@ -60,7 +59,15 @@ from bragi.core.models.webmention import (
 from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)
-HTTP_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS
+# Tightened from the general `DEFAULT_TIMEOUT_SECONDS` (10s) to
+# 3s for the inbox specifically (#M6 / audit pass 4). The
+# inbox fetch runs synchronously on the request thread, so a
+# slow attacker-controlled source URL ties up a worker for
+# the full timeout window. With 4 workers and a 10s timeout,
+# 0.4 req/s sufficed to pin the inbox. 3s still tolerates
+# typical Mastodon-class round-trips while bounding the
+# blast radius of a malicious slow-source URL.
+HTTP_TIMEOUT_SECONDS = 3.0
 MAX_SOURCE_BYTES = 1_000_000  # 1 MiB cap on the fetched source body
 
 bp = Blueprint("webmentions_receiver", __name__)
