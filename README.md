@@ -6,6 +6,57 @@ citizen.
 
 ## Status
 
+1.13.0 shipped 2026-05-19. Eighth audit-pass rollup plus operator
+ergonomics. Security: webmention receiver gates `source` /
+`target` through the centralised `safe_external_url` (the local
+`_is_absolute_http` helper that accepted Unicode bidi-formatting
+codepoints and C0/DEL control characters is gone, closing a
+moderation-row spoofing surface and a 500-on-redirect surface);
+`safe_external_url` now rejects U+202A-U+202E / U+2066-U+2069
+and C0/DEL control characters at the gate, backstopping any
+future callers (#209); ActivityPub inbox catches `RecursionError`
+on deeply-nested JSON so an unauthenticated attacker can no
+longer flood the inbox with `[[[...]]]` past Python's default
+1000-frame recursion limit and trigger uncaught 500s (#215).
+Added: `cms plugins list` prints every registered plugin with
+its origin (`in-tree` vs distribution + version) and hookimpl
+count, intended for operators triaging "is this plugin even
+loaded?" and for plugin authors auditing what they ship against
+(#190); `bragi.api` carries a top-of-module stability docstring
+codifying what's covered (hookimpl, hookspec signatures, spec
+dataclasses, entry-point group) and what isn't, plus the
+two-step deprecation policy (#190); new
+`tests/contrib/test_plugin_layout.py` walks every in-tree
+`bragi.contrib.*` package and asserts each plugin's `templates/`
+top-level entries are either the plugin's own slug or the
+shared prefixes `admin` / `delivery` (so two plugins shipping
+`templates/detail.html` can't shadow each other unpredictably);
+admin backlinks view ("Backlinks »" link on the post / page
+edit forms) lists every same-site post / page that references
+this target via `data-bragi-link`, backed by a new
+`internal_links` edge table populated by the internal_links
+plugin's `on_post_published` / `on_post_updated` /
+`on_post_deleted` hooks (#116). Fixed: attachment delete cleanup
+moved between `db.flush()` and `db.commit()` so SQLAlchemy's
+writer lock queues other writers under WAL until our cleanup
+commits, closing a narrow refcount race where a concurrent
+upload of the same content-addressed bytes could insert a row
+referencing the storage_key we then unlinked (#171); empty
+`BRAGI_ADMIN_SESSION_COOKIE_SECURE=` no longer crashes boot
+(#226); `pyproject.toml` migrated to PEP 621 `[project]` table
+ahead of Poetry 2.x metadata deprecation (#168, portfolio-wide
+sweep). Plus moderator-facing `[IDN]` badge on the webmention
+moderation list (#225), `cms db vacuum` SQLite-engine gate
+mirroring `cms backup` (#227), admin session cookie defaults to
+`Secure` in production (#199), redirects admin caps
+`source_path` at 256 characters to bound regex backtracking
+worst case (#200), and a denser `compose.yml` admin block with
+per-knob rationale moved to the `Settings` field docstrings
+(#232). Closes #168, #171, #189, #190, #199, #200, #205, #209,
+#212, #215, #217, #224, #225, #226, #227, #229, #230, #231,
+#232 plus the pass-7 / pass-8 finding rollups (PRs #223, #233,
+#234).
+
 1.12.0 shipped 2026-05-18. Hardening release across the v1.11.0
 surface following seven rounds of audit. Security: GitHub OAuth
 no longer auto-links a new identity onto an existing local user
@@ -426,7 +477,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.12.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.13.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
