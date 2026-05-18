@@ -160,7 +160,11 @@ def test_upload_writes_row_and_file(
     _login(client)
     token = csrf_token(client, path="/admin/sites/blog/attachments/new")
 
-    data = b"\x89PNG\r\n\x1a\nfake-png-bytes"
+    # Real PNG bytes: the SEC-H2 hardening requires Pillow to be
+    # able to decode declared `image/*` uploads. Hand-rolled magic
+    # bytes are now rejected (magic-byte vs. body mismatch is the
+    # exact vector the gate catches).
+    data = _make_png(width=11, height=7)
     expected_key = hashlib.sha256(data).hexdigest()
 
     resp = client.post(
@@ -313,6 +317,8 @@ def test_delete_preserves_file_when_other_rows_reference_it(
         blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
         other = db.execute(select(Site).where(Site.slug == "other")).scalar_one()
 
+    # Use text/plain bytes via .txt; `.bin` / octet-stream is
+    # rejected by the SEC-H2 content-type allowlist.
     data = b"shared bytes"
     expected_key = hashlib.sha256(data).hexdigest()
     # Upload to "blog" via admin.
@@ -321,7 +327,7 @@ def test_delete_preserves_file_when_other_rows_reference_it(
         "/admin/sites/blog/attachments/new",
         data={
             "site_id": str(blog.id),
-            "file": (io.BytesIO(data), "shared.bin"),
+            "file": (io.BytesIO(data), "shared.txt"),
             "_csrf_token": token,
         },
         content_type="multipart/form-data",
@@ -337,8 +343,8 @@ def test_delete_preserves_file_when_other_rows_reference_it(
         db.add(
             Attachment(
                 site_id=other.id,
-                filename="shared.bin",
-                content_type="application/octet-stream",
+                filename="shared.txt",
+                content_type="text/plain",
                 size_bytes=len(data),
                 storage_key=expected_key,
             )
@@ -396,6 +402,50 @@ def test_delivery_serves_bytes(
     assert resp.data == data
     assert resp.headers["Content-Type"].startswith("image/svg+xml")
     assert "max-age=31536000" in resp.headers["Cache-Control"]
+    # SEC-H2 hardening: nosniff defeats browser content sniffing
+    # so a stored SVG can't be served as text/html via sniffing.
+    assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+    # SVG is NOT in the inline-safe set (it can embed `<script>`),
+    # so any SVG row that somehow exists in the DB (e.g. planted
+    # directly like this test does, or pre-allowlist data) is
+    # served as a download rather than rendered inline.
+    assert resp.headers["Content-Disposition"].startswith("attachment;")
+
+
+def test_delivery_serves_image_inline_with_nosniff(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """A real PNG (allowlisted inline-safe type) lands as
+    `Content-Disposition: inline` with the nosniff header."""
+    from PIL import Image as _PILImage
+
+    buf = io.BytesIO()
+    _PILImage.new("RGB", (4, 4), color="blue").save(buf, format="PNG")
+    data = buf.getvalue()
+    key = hashlib.sha256(data).hexdigest()
+    on_disk = tmp_attachments_root / "blog" / key[:2] / key
+    on_disk.parent.mkdir(parents=True, exist_ok=True)
+    on_disk.write_bytes(data)
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        db.add(
+            Attachment(
+                site_id=site.id,
+                filename="ok.png",
+                content_type="image/png",
+                size_bytes=len(data),
+                storage_key=key,
+            )
+        )
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get(f"/attachments/{key}", headers={"Host": "blog.example.com"})
+    assert resp.status_code == 200
+    assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+    assert resp.headers["Content-Disposition"].startswith("inline;")
 
 
 def test_delivery_404_for_unknown_key(
@@ -529,11 +579,21 @@ def test_upload_non_image_leaves_dimensions_null(
     assert row.height is None
 
 
-def test_upload_malformed_image_bytes_does_not_break_upload(
+def test_upload_malformed_image_bytes_is_rejected(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
-    """Pillow probe returns None on garbage image bytes; the row still lands."""
+    """SEC-H2 regression: when the declared content-type is image/*
+    but Pillow can't decode the bytes, the upload is rejected.
+
+    Previously the row landed with NULL dimensions because Pillow
+    probe failure was logged + swallowed. That left a hole: any
+    payload could be persisted with a forged `image/png`
+    content-type, and the delivery handler then served the bytes
+    with that content-type (under Content-Disposition: inline and
+    a year-long Cache-Control: immutable). Magic-byte mismatch is
+    the exact vector we now refuse.
+    """
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
@@ -547,13 +607,51 @@ def test_upload_malformed_image_bytes_does_not_break_upload(
         },
         content_type="multipart/form-data",
     )
-    assert resp.status_code == 302
+    # No redirect: the form re-renders with the rejection flash.
+    assert resp.status_code == 200
     with db_session_factory() as db:
-        row = db.execute(select(Attachment)).scalar_one()
-    # No dimensions because Pillow couldn't decode, but the upload landed.
-    assert row.width is None
-    assert row.height is None
-    assert row.size_bytes > 0
+        rows = db.execute(select(Attachment)).scalars().all()
+    assert rows == []
+
+
+def test_upload_rejects_svg_and_html_content_types(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """SEC-H2 regression: SVG (can embed `<script>`) and HTML
+    (obviously) are NOT in the allowlist, so an author cannot
+    upload one of these and have it served from the delivery host
+    with inline Content-Disposition. Pre-fix, the upload landed
+    and the delivery served the bytes with the attacker's chosen
+    content-type, giving stored XSS on the public reader surface.
+    """
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
+
+    for filename, body, mimetype in [
+        (
+            "evil.svg",
+            b'<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
+            "image/svg+xml",
+        ),
+        ("evil.html", b"<html><body><script>1</script></body></html>", "text/html"),
+    ]:
+        resp = client.post(
+            "/admin/sites/blog/attachments/new",
+            data={
+                "site_id": str(site_id),
+                "file": (io.BytesIO(body), filename, mimetype),
+                "_csrf_token": token,
+            },
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200, f"{filename} should reject, got {resp.status_code}"
+
+    with db_session_factory() as db:
+        rows = db.execute(select(Attachment)).scalars().all()
+    assert rows == []
 
 
 # --------------------------- edit metadata ---------------------------

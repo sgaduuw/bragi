@@ -26,6 +26,7 @@ from flask import (
 )
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from bragi.contrib.auth_github.client import build_github_client, fetch_user_info
 from bragi.core.audit import AuditAction, audit
@@ -78,17 +79,48 @@ def callback() -> ResponseReturnValue:
         if identity is not None:
             user = db.get(User, identity.user_id)
 
-        if user is None and external.email:
-            # Email-match fallback: an operator may have seeded
-            # the User via `cms user create` ahead of the first
-            # OAuth login. Linking the identity to that row is
-            # the natural behaviour. Only verified emails get
-            # this treatment; `fetch_user_info` already filters.
-            user = db.execute(
-                select(User).where(User.email == external.email.lower())
-            ).scalar_one_or_none()
-
+        # SECURITY (#H1 / audit pass 4): the previous email-match
+        # fallback ("user is None and external.email" -> pick the
+        # local User row whose `email` matches the OAuth profile)
+        # was a one-step admin-takeover primitive. An attacker
+        # who registered a GitHub account with the operator's
+        # email could click "Sign in with GitHub" and be linked
+        # to the local admin row. Auto-linking by email is the
+        # broader OAuth pitfall: trusting any external IdP's
+        # email-verification check for account *linking* (vs
+        # *creation*) means whoever last verified the address
+        # wins. We now never auto-link across identities; an
+        # operator who wants to bind a second auth method does
+        # so via a future "link my GitHub" admin affordance,
+        # not via the callback. Until then, an OAuth login that
+        # collides on email with an existing local user is
+        # refused with a clear message.
         if user is None:
+            collision = (
+                db.execute(
+                    select(User).where(User.email == external.email.lower())
+                ).scalar_one_or_none()
+                if external.email
+                else None
+            )
+            if collision is not None:
+                audit(
+                    AuditAction.AUTH_LOGIN_FAILURE,
+                    extra={
+                        "method": "github",
+                        "reason": "oauth-email-collides-with-existing-user",
+                        "email": external.email,
+                        "provider_username": external.provider_username,
+                    },
+                )
+                flash(
+                    "That GitHub account's email is already registered. "
+                    "Sign in with your existing credentials, then link GitHub "
+                    "from your account settings.",
+                    "error",
+                )
+                return redirect(url_for("auth_local.login"))
+
             email = external.email or f"{external.provider_user_id}@github.local"
             user = User(
                 email=email.lower(),
@@ -96,7 +128,30 @@ def callback() -> ResponseReturnValue:
                 is_active=True,
             )
             db.add(user)
-            db.flush()
+            try:
+                db.flush()
+            except IntegrityError:
+                # Race window between the collision check above and
+                # the flush: two concurrent first-time OAuth logins
+                # for the same email-collision target could both
+                # pass the SELECT, then one fails UNIQUE on
+                # `users.email`. Treat as a collision (same outcome).
+                db.rollback()
+                audit(
+                    AuditAction.AUTH_LOGIN_FAILURE,
+                    extra={
+                        "method": "github",
+                        "reason": "oauth-email-collides-with-existing-user-race",
+                        "email": external.email,
+                    },
+                )
+                flash(
+                    "That GitHub account's email is already registered. "
+                    "Sign in with your existing credentials, then link GitHub "
+                    "from your account settings.",
+                    "error",
+                )
+                return redirect(url_for("auth_local.login"))
 
         if identity is None:
             identity = UserIdentity(

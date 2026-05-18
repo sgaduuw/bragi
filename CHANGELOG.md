@@ -6,6 +6,47 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **GitHub OAuth callback no longer auto-links a new identity
+  to an existing local User by matching email.** Operators
+  running v1.x with both local-credential auth (e.g. an
+  `admin@example.com` seeded via `cms user create`) and GitHub
+  OAuth could be impersonated: an attacker who registered a
+  GitHub account using the operator's email and clicked "Sign
+  in with GitHub" was logged in as that admin, because the
+  callback's email-match fallback linked the brand-new
+  GitHub identity onto the existing local user row. The
+  fallback is gone. The callback now refuses an OAuth login
+  whose email collides with an existing local user, redirects
+  the user back to the local-auth login form with a clear
+  flash, and audits the attempt as
+  `auth.login.failure` with
+  `reason="oauth-email-collides-with-existing-user"`. Linking
+  a second auth method onto an existing account is a future
+  admin-side affordance (out of scope for the fix); until
+  then, operators who want both methods should pick one or
+  use a different email per identity.
+- **Attachment uploads gate on a content-type allowlist;
+  delivery serves with `X-Content-Type-Options: nosniff`
+  and inline-only-for-safe types.** Before this change, any
+  author-rank user on any site could upload an SVG (which can
+  embed `<script>`) or an HTML payload with a forged
+  `Content-Type`, and the delivery handler served the bytes
+  with the persisted content-type, `Content-Disposition:
+  inline`, and a year-long `Cache-Control: public, max-age,
+  immutable`. The result was a stored XSS on the public
+  reader surface with a year-long edge-cache TTL. New
+  `_ATTACHMENT_ALLOWED_CONTENT_TYPES` in `attachments/admin.py`
+  accepts only the Pillow-handled image types, `application/pdf`,
+  and `text/plain`; everything else is rejected at upload time
+  with a clear error. For declared `image/*` uploads the
+  Pillow probe must succeed (magic-byte verification), so a
+  forged `image/png` content-type carrying HTML is rejected.
+  Delivery now sets `X-Content-Type-Options: nosniff` on every
+  response and only serves `Content-Disposition: inline` for
+  inline-safe types (images / PDF / text); rows that pre-date
+  the allowlist serve as `attachment` instead.
+
 ### Changed
 - **FTS5 search `total` is short-TTL cached (#183).** The PR8
   paged hit fetch already runs as one UNION ALL + LIMIT/OFFSET,
