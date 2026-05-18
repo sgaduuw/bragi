@@ -108,6 +108,36 @@ def _normalized_parent_id(value: str) -> int | None:
         return None
 
 
+def _validated_parent_id_or_error(
+    db: Session,
+    parent_id: int | None,
+    site_id: int,
+    exclude_page_id: int | None = None,
+) -> tuple[int | None, str | None]:
+    """Verify `parent_id` (if non-None) names a Page on `site_id`.
+
+    Returns `(parent_id, None)` on success or `(None, error_msg)`
+    on failure. Mirrors the cross-site validators already on the
+    OG-image and site-default-OG-image resolvers; without it, an
+    author on site A could POST `parent_id=<id-of-a-page-on-site-B>`
+    and land a row with `(site_id=A, parent_id=B)`. Delivery-side
+    resolution filters by site so the cross-site row never serves
+    real content, but the corrupted row leaks the cross-site
+    parent's slug into the sitemap and into any slug-change
+    auto-redirect derived from its URL chain (#M3 / audit pass 4).
+    """
+    if parent_id is None:
+        return None, None
+    parent = db.get(Page, parent_id)
+    if parent is None:
+        return None, f"Parent page #{parent_id} not found."
+    if parent.site_id != site_id:
+        return None, "Parent page must belong to this site."
+    if exclude_page_id is not None and parent.id == exclude_page_id:
+        return None, "A page cannot be its own parent."
+    return parent_id, None
+
+
 def _slug_in_use(
     db: object,
     site_id: int,
@@ -201,6 +231,10 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
 
         parent_id = _normalized_parent_id(form["parent_id"])
+        parent_id, parent_err = _validated_parent_id_or_error(db, parent_id, site_id)
+        if parent_err is not None:
+            flash(parent_err, "error")
+            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
             flash(
@@ -330,8 +364,11 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             flash("Kind must be 'static' or 'post_index'.", "error")
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
         parent_id = _normalized_parent_id(form["parent_id"])
-        if parent_id == page.id:
-            flash("A page cannot be its own parent.", "error")
+        parent_id, parent_err = _validated_parent_id_or_error(
+            db, parent_id, page.site_id, exclude_page_id=page.id
+        )
+        if parent_err is not None:
+            flash(parent_err, "error")
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
         slug = str(form["slug"])
         if _slug_in_use(db, page.site_id, parent_id, slug, exclude_page_id=page.id):

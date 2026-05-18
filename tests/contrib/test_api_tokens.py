@@ -67,13 +67,18 @@ def _reset_token_audit_cache() -> Iterator[None]:
     indistinguishable audit rows. Each test gets a fresh in-memory
     SQLite engine, so token ids restart at 1 every test; without
     this reset, a prior test's cached entry would suppress the
-    next test's first TOKEN_USED row.
+    next test's first TOKEN_USED row. Same shape applies to the
+    SEC-M4 verify-result cache (`_VERIFY_CACHE`); a stale entry
+    from a prior test could authenticate (or refuse) a new test's
+    request without exercising the real `verify()` path.
     """
     from bragi.contrib.api_tokens import auth as auth_mod
 
     auth_mod._TOKEN_AUDIT_LAST.clear()
+    auth_mod._VERIFY_CACHE.clear()
     yield
     auth_mod._TOKEN_AUDIT_LAST.clear()
+    auth_mod._VERIFY_CACHE.clear()
 
 
 @pytest.fixture
@@ -424,6 +429,95 @@ def test_token_used_emits_again_after_window(
         db_session.execute(select(AuditLog).where(AuditLog.action == "token.used")).scalars()
     )
     assert len(rows) == 2
+
+
+# --------------------------- verify-result cache (#M4) ---------------------------
+
+
+def test_verify_cache_short_circuits_argon2_for_repeat_presentation(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """SEC-M4 regression: a second presentation of the same
+    (public_id, secret) reuses the cached verify outcome instead of
+    calling argon2 again. Without the cache, every bearer request
+    paid ~100ms / 64MiB of argon2 cost on the worker, giving any
+    actor who knew a valid public_id a cheap DoS primitive.
+
+    The cache stores `(public_id, sha256(secret)) -> outcome`, so
+    we observe the bypass by monkey-patching `verify` after the
+    first successful call: if the second request still works, we
+    proved the cache short-circuited the path.
+    """
+    from bragi.contrib.api_tokens import auth as auth_mod
+
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    # First request: populates the cache.
+    first = client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert first.status_code == 200
+
+    # Replace verify with a marker that explodes; the cache should
+    # mean we never call it.
+    def _explode(*a, **kw):  # type: ignore[no-untyped-def]
+        raise AssertionError("verify() should not be called on a cache hit")
+
+    auth_mod_orig_verify = auth_mod.verify
+    auth_mod.verify = _explode  # type: ignore[assignment]
+    try:
+        second = client.get(
+            "/admin/api/sites/blog/posts/",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        )
+        assert second.status_code == 200
+    finally:
+        auth_mod.verify = auth_mod_orig_verify  # type: ignore[assignment]
+
+
+def test_verify_cache_negative_hit_short_circuits_too(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """A bad token also caches: a dumb attacker replaying the same
+    wrong secret pays one argon2 call and then short-circuits."""
+    from bragi.contrib.api_tokens import auth as auth_mod
+    from bragi.contrib.api_tokens.tokens import mint_token
+
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    # Mint then craft a token with the right public_id but a wrong
+    # secret so verify() fails the argon2 check (not just shape).
+    minted = mint_token(
+        db_session,
+        user_id=user.id,
+        name="dummy",
+        scopes=[TokenScope.POST_WRITE],
+        expires_at=None,
+    )
+    db_session.commit()
+    bad = f"brg_{minted.model.public_id}_{'x' * 32}"
+    # First request: populates negative cache.
+    r1 = client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {bad}"},
+    )
+    assert r1.status_code == 302  # falls through to session auth -> login redirect
+
+    # Replace verify with an exploding stub: cache hit means the
+    # bearer middleware never re-runs argon2.
+    def _explode(*a, **kw):  # type: ignore[no-untyped-def]
+        raise AssertionError("verify() should not be called on a negative cache hit")
+
+    auth_mod_orig_verify = auth_mod.verify
+    auth_mod.verify = _explode  # type: ignore[assignment]
+    try:
+        r2 = client.get(
+            "/admin/api/sites/blog/posts/",
+            headers={"Authorization": f"Bearer {bad}"},
+        )
+        assert r2.status_code == 302
+    finally:
+        auth_mod.verify = auth_mod_orig_verify  # type: ignore[assignment]
 
 
 # --------------------------- post is owned by API caller ---------------------------

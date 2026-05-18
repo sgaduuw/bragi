@@ -67,15 +67,36 @@ def _form_from_request() -> dict[str, object]:
 
 
 def _validate(form: dict[str, object]) -> list[str]:
-    """Return a list of human-readable validation errors."""
+    """Return a list of human-readable validation errors.
+
+    Targets must be relative paths (start with '/'). Absolute URLs
+    are rejected (#M1 / audit pass 4): an editor-rank user could
+    otherwise insert `target=https://evil.example/phish` and turn
+    the site's redirect table into a 301 phishing primitive
+    against its readers. Auto-301 callsites (importers,
+    slug-change hooks) always construct relative targets so this
+    constraint only affects the human-facing admin form.
+    """
     errors: list[str] = []
     source_path = form["source_path"]
     if not isinstance(source_path, str) or not source_path:
         errors.append("Source path is required.")
     elif not source_path.startswith("/"):
         errors.append("Source path must start with '/'.")
-    if not form["target"]:
+    target = form["target"]
+    if not target:
         errors.append("Target is required.")
+    elif isinstance(target, str):
+        if not target.startswith("/"):
+            errors.append(
+                "Target must be a relative path starting with '/'. "
+                "Absolute URLs are not allowed (would turn the redirect "
+                "table into an open-redirect surface)."
+            )
+        elif target.startswith("//"):
+            # Protocol-relative URL (`//evil.example/x`): browsers
+            # treat this as an absolute URL with inherited scheme.
+            errors.append("Target must not start with '//' (protocol-relative URL).")
     if form["status_code"] not in VALID_STATUS_CODES:
         errors.append(f"Status code must be one of {sorted(VALID_STATUS_CODES)}.")
     if form["match_type"] not in VALID_MATCH_TYPES:
