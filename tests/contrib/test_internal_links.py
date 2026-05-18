@@ -667,3 +667,295 @@ def test_picker_404_on_unknown_site_slug(picker_admin_app: Flask) -> None:
     _login_picker(client)
     resp = client.get("/admin/sites/nonexistent/internal-links/picker")
     assert resp.status_code == 404
+
+
+# ============================================================
+# #116 — InternalLink edge table + admin backlinks view
+# ============================================================
+
+
+def test_reindex_source_populates_edges_from_body_html(
+    db_session: Session,
+    seeded: tuple[Site, User],
+) -> None:
+    """`reindex_source(post)` inserts one InternalLink per
+    distinct `data-bragi-link="prefix:int"` in body_html."""
+    from bragi.contrib.internal_links.index import reindex_source
+    from bragi.core.models.internal_link import InternalLink
+
+    site, _ = seeded
+    target_a, target_b = (
+        db_session.execute(select(Post).where(Post.site_id == site.id)).scalars().all()
+    )
+    source = Post(
+        site_id=site.id,
+        author_id=target_a.author_id,
+        slug="source-1",
+        title="Source",
+        body_markdown="ignored",
+        body_html=(
+            f'<p>See <a data-bragi-link="post:{target_a.id}">a</a> '
+            f'and <a data-bragi-link="post:{target_b.id}">b</a> '
+            # Duplicate marker (same target id) should collapse to
+            # one edge — the admin view only cares about edges, not
+            # occurrences.
+            f'plus <a data-bragi-link="post:{target_a.id}">a-again</a>.</p>'
+        ),
+        status=PostStatus.PUBLISHED,
+        published_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    reindex_source(source, db_session)
+    db_session.flush()
+
+    edges = list(
+        db_session.execute(
+            select(InternalLink).where(
+                InternalLink.site_id == site.id,
+                InternalLink.source_type == "post",
+                InternalLink.source_id == source.id,
+            )
+        ).scalars()
+    )
+    assert {(e.target_type, e.target_id) for e in edges} == {
+        ("post", target_a.id),
+        ("post", target_b.id),
+    }
+
+
+def test_reindex_source_replaces_prior_edges(
+    db_session: Session,
+    seeded: tuple[Site, User],
+) -> None:
+    """A second reindex on a body_html that dropped a link removes
+    the corresponding edge — the index reflects the current
+    body, not the union of every body the source has ever had."""
+    from bragi.contrib.internal_links.index import reindex_source
+    from bragi.core.models.internal_link import InternalLink
+
+    site, _ = seeded
+    target_a, target_b = (
+        db_session.execute(select(Post).where(Post.site_id == site.id)).scalars().all()
+    )
+    source = Post(
+        site_id=site.id,
+        author_id=target_a.author_id,
+        slug="source-2",
+        title="Source",
+        body_markdown="x",
+        body_html=(
+            f'<p><a data-bragi-link="post:{target_a.id}">a</a> '
+            f'<a data-bragi-link="post:{target_b.id}">b</a></p>'
+        ),
+        status=PostStatus.PUBLISHED,
+        published_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(source)
+    db_session.flush()
+    reindex_source(source, db_session)
+    db_session.flush()
+
+    # Edit body: drop the link to target_b.
+    source.body_html = f'<p><a data-bragi-link="post:{target_a.id}">a only</a></p>'
+    reindex_source(source, db_session)
+    db_session.flush()
+
+    edges = list(
+        db_session.execute(
+            select(InternalLink).where(InternalLink.source_id == source.id)
+        ).scalars()
+    )
+    assert {(e.target_type, e.target_id) for e in edges} == {("post", target_a.id)}
+
+
+def test_reindex_source_ignores_slug_form_markers(
+    db_session: Session,
+    seeded: tuple[Site, User],
+) -> None:
+    """Slug-form markers (`post:my-slug`) are ignored at
+    index-time. The delivery rewriter hardens them into int form
+    on first render; the next save re-indexes against the int
+    form. Keeps the indexer pure regex with no slug→id lookup."""
+    from bragi.contrib.internal_links.index import reindex_source
+    from bragi.core.models.internal_link import InternalLink
+
+    site, _ = seeded
+    source = Post(
+        site_id=site.id,
+        author_id=db_session.execute(select(User)).scalar_one().id,
+        slug="source-3",
+        title="Source",
+        body_markdown="x",
+        body_html='<p><a data-bragi-link="post:some-slug">x</a></p>',
+        status=PostStatus.PUBLISHED,
+        published_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(source)
+    db_session.flush()
+    reindex_source(source, db_session)
+    db_session.flush()
+
+    edges = list(
+        db_session.execute(
+            select(InternalLink).where(InternalLink.source_id == source.id)
+        ).scalars()
+    )
+    assert edges == []
+
+
+def test_reindex_source_skips_self_link(
+    db_session: Session,
+    seeded: tuple[Site, User],
+) -> None:
+    """A source linking to itself is technically a backlink but
+    noise in the admin; the indexer drops it."""
+    from bragi.contrib.internal_links.index import reindex_source
+    from bragi.core.models.internal_link import InternalLink
+
+    site, _ = seeded
+    source = Post(
+        site_id=site.id,
+        author_id=db_session.execute(select(User)).scalar_one().id,
+        slug="source-self",
+        title="Self",
+        body_markdown="x",
+        body_html="<p>placeholder</p>",
+        status=PostStatus.PUBLISHED,
+        published_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(source)
+    db_session.flush()
+    source.body_html = f'<p><a data-bragi-link="post:{source.id}">self</a></p>'
+    reindex_source(source, db_session)
+    db_session.flush()
+
+    edges = list(
+        db_session.execute(
+            select(InternalLink).where(InternalLink.source_id == source.id)
+        ).scalars()
+    )
+    assert edges == []
+
+
+def test_drop_for_deleted_removes_both_source_and_target_rows(
+    db_session: Session,
+    seeded: tuple[Site, User],
+) -> None:
+    """Deleting a Post drops edges where it appears as source AND
+    as target."""
+    from bragi.contrib.internal_links.index import drop_for_deleted, reindex_source
+    from bragi.core.models.internal_link import InternalLink
+
+    site, _ = seeded
+    target_a, target_b = (
+        db_session.execute(select(Post).where(Post.site_id == site.id)).scalars().all()
+    )
+    # target_a is BOTH a target (linked to from target_b) AND a
+    # source (linking to target_b).
+    target_a.body_html = f'<p><a data-bragi-link="post:{target_b.id}">b</a></p>'
+    target_b.body_html = f'<p><a data-bragi-link="post:{target_a.id}">a</a></p>'
+    reindex_source(target_a, db_session)
+    reindex_source(target_b, db_session)
+    db_session.flush()
+    assert (
+        db_session.execute(select(InternalLink)).scalars().all()
+    ), "preconditions failed: no edges seeded"
+
+    drop_for_deleted(target_a, db_session)
+    db_session.flush()
+
+    remaining = list(db_session.execute(select(InternalLink)).scalars())
+    # Edges where target_a is source or target are both gone.
+    assert not any(e.source_id == target_a.id or e.target_id == target_a.id for e in remaining)
+
+
+def test_backlinks_admin_view_lists_inbound_sources(
+    admin_app: Flask,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    seeded: tuple[Site, User],
+) -> None:
+    """The admin backlinks page lists every source whose
+    body_html references the target via data-bragi-link."""
+    from bragi.contrib.internal_links.index import reindex_source
+
+    site, user = seeded
+    target = db_session.execute(
+        select(Post).where(Post.slug == "ultimaate-linux-guide")
+    ).scalar_one()
+    source = Post(
+        site_id=site.id,
+        author_id=user.id,
+        slug="my-source",
+        title="My Source Post",
+        body_markdown="x",
+        body_html=f'<p><a data-bragi-link="post:{target.id}">to the guide</a></p>',
+        status=PostStatus.PUBLISHED,
+        published_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db_session.add(source)
+    db_session.flush()
+    reindex_source(source, db_session)
+    db_session.commit()
+
+    # Authenticate the admin app's test client.
+    creds = LocalCredential(user_id=user.id, password_hash=hash_password("hunter2"))
+    db_session.add(creds)
+    db_session.commit()
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": "ada@example.com", "password": "hunter2", "_csrf_token": token},
+    )
+
+    resp = client.get(
+        f"/admin/sites/blog/internal-links/post/{target.id}/backlinks",
+    )
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "My Source Post" in body
+    assert "Ultimate Linux Guide" in body  # the target title is in the heading
+
+
+def test_backlinks_admin_view_404_on_unknown_target(
+    admin_app: Flask,
+    db_session: Session,
+    seeded: tuple[Site, User],
+) -> None:
+    site, user = seeded
+    creds = LocalCredential(user_id=user.id, password_hash=hash_password("hunter2"))
+    db_session.add(creds)
+    db_session.commit()
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": "ada@example.com", "password": "hunter2", "_csrf_token": token},
+    )
+    resp = client.get("/admin/sites/blog/internal-links/post/99999/backlinks")
+    assert resp.status_code == 404
+
+
+def test_backlinks_admin_view_rejects_bad_target_type(
+    admin_app: Flask,
+    db_session: Session,
+    seeded: tuple[Site, User],
+) -> None:
+    """Only the registered link prefixes (post, page) are accepted
+    in the URL. An arbitrary `target_type` returns 404 rather than
+    a 500 or an unexpected query."""
+    site, user = seeded
+    creds = LocalCredential(user_id=user.id, password_hash=hash_password("hunter2"))
+    db_session.add(creds)
+    db_session.commit()
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": "ada@example.com", "password": "hunter2", "_csrf_token": token},
+    )
+    resp = client.get("/admin/sites/blog/internal-links/widget/1/backlinks")
+    assert resp.status_code == 404
