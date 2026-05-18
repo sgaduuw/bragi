@@ -67,6 +67,14 @@ def test_is_external_strips_own_host() -> None:
     assert not is_external("/relative", "blog.example")
 
 
+def test_is_external_compares_on_hostname_not_netloc() -> None:
+    """`urlparse(url).netloc` includes the port; `Site.hostname`
+    never carries one. Comparing on `netloc` would mis-flag a
+    same-site URL that includes its port as external."""
+    assert not is_external("https://blog.example:443/x", "blog.example")
+    assert is_external("https://other.example:443/x", "blog.example")
+
+
 def test_find_endpoint_prefers_link_header() -> None:
     endpoint = find_endpoint(
         {"Link": '<https://target.example/wm>; rel="webmention"'},

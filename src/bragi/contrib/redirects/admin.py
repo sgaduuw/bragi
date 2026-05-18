@@ -8,9 +8,9 @@ imported / manual rows survive the route change unchanged (the
 rows carry `site_id`, the URL just made the selection explicit).
 
 Hit counts are maintained by the resolver in
-`bragi.contrib.redirects.plugin`. Match type `exact` is the only
-resolver-enforced value today; `prefix` and `regex` can be stored
-but won't fire until #13 lands.
+`bragi.contrib.redirects.plugin`. All three match types (`exact`,
+`prefix`, `regex`) are wired through the resolver and the admin
+form accepts any of them.
 """
 
 from __future__ import annotations
