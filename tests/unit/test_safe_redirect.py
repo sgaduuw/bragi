@@ -1,10 +1,12 @@
 """Unit tests for `bragi.core.safe_redirect`.
 
-The helper backs three open-redirect-gating callsites:
+Two helpers, each backing one URL-gating contract:
 
-- `bragi.contrib.auth_local.views._safe_next` (login `?next=`)
-- `bragi.contrib.auth_github.views._safe_next` (OAuth post-login `next`)
-- `bragi.contrib.redirects.admin._validate` (redirects admin form)
+- `safe_relative_path` — same-host relative paths (login `?next=`,
+  redirects admin `target=`).
+- `safe_external_url` — `http(s)://...` URLs from attacker-controlled
+  HTML (webmention h-card author URL / photo, future OG-image and
+  internal-link callsites).
 
 The browser-normalisation case (`\\` -> `/` in special-scheme URLs)
 is the v1.12.0 pass-5 finding; the absolute / protocol-relative
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from bragi.core.safe_redirect import safe_relative_path
+from bragi.core.safe_redirect import safe_external_url, safe_relative_path
 
 
 @pytest.mark.parametrize(
@@ -64,3 +66,60 @@ def test_allows_same_host_relative_paths(candidate: str) -> None:
 )
 def test_rejects_unsafe_shapes(candidate: str | None) -> None:
     assert safe_relative_path(candidate) is None
+
+
+# --------------------------- safe_external_url ---------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.com/x",
+        "https://example.com/x",
+        "https://example.com:8443/x?y=1",
+        "https://example.com/",
+        "HTTPS://EXAMPLE.COM/x",  # case-insensitive scheme accepted
+    ],
+)
+def test_safe_external_url_allows_http_and_https(url: str) -> None:
+    assert safe_external_url(url) == url
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        None,
+        "",
+        "javascript:alert(1)",
+        "data:text/html,xyz",
+        "file:///etc/passwd",
+        "gopher://example.com/",
+        "ftp://example.com/x",
+        # no scheme, just a path
+        "/relative/path",
+        # bare host with no scheme parses to scheme=""
+        "example.com/x",
+        # scheme present but no host
+        "https:///x",
+    ],
+)
+def test_safe_external_url_rejects_unsafe_shapes(url: str | None) -> None:
+    assert safe_external_url(url) is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Unicode bidi-formatting codepoints in the URL: a stored
+        # `‮` (RTL override) renders the URL flipped in admin
+        # surfaces, so a moderator can be fooled into approving a
+        # row whose real destination is malicious. The same chars
+        # have no legitimate place in a URL.
+        "https://example.com/‮",
+        "https://‮example.com/x",
+        "https://example.com/⁦/path",
+        "https://example.com/⁩",
+    ],
+)
+def test_safe_external_url_rejects_unicode_bidi(url: str) -> None:
+    assert safe_external_url(url) is None

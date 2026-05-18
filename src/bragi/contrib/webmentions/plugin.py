@@ -69,7 +69,15 @@ def _queue_outbox_for_post(post: Post, session: Any) -> None:
     body_html = post.body_html or ""
     canonical = (site.canonical_url or "").rstrip("/")
     base = canonical or f"https://{site.hostname}"
-    our_host = (site.hostname or urlparse(base).netloc).lower()
+    # `urlparse(...).hostname` (not `.netloc`): `netloc` includes
+    # port + userinfo, but `is_external` (and the consuming side
+    # generally) compares against bare hostnames. With an explicit
+    # port on `canonical_url` like `https://example.com:8443` the
+    # `.netloc` form would yield `example.com:8443` and misclassify
+    # every same-site link as external. `Site.hostname` is NOT NULL
+    # so the fallback is mostly dead, but the inconsistency with
+    # the just-fixed `is_external` is worth one character.
+    our_host = (site.hostname or (urlparse(base).hostname or "")).lower()
 
     existing_targets = {
         row.target_url

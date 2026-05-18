@@ -732,6 +732,55 @@ def test_fanout_for_post_skips_followers_with_existing_non_failed_row(
     assert fanout_for_post(db_session, post, post_path="/posts/hi/") == 3
 
 
+def test_on_post_updated_drops_pending_activitypub_outbox_when_unpublishing(
+    db_session: Session,
+) -> None:
+    """v1.13.0 coverage parity with the webmention-side test: when
+    a post leaves the published state, PENDING AP outbox rows must
+    be abandoned. The sender otherwise flushes a fresh Create+Note
+    to followers pointing at a now-404 URL."""
+    from bragi.contrib.activitypub.plugin import on_post_updated
+
+    site, author_id = _make_site(db_session)
+    post = Post(
+        site_id=site.id,
+        slug="hi",
+        title="Hi",
+        body_markdown="",
+        body_html="<p>hi</p>",
+        body_excerpt="hi",
+        author_id=author_id,
+        status=PostStatus.PUBLISHED,
+        published_at=datetime(2026, 5, 14, tzinfo=UTC),
+    )
+    db_session.add(post)
+    db_session.flush()
+    db_session.add(
+        ActivityPubFollower(
+            site_id=site.id,
+            actor_url="https://r.example/u/a",
+            inbox_url="https://r.example/u/a/inbox",
+        )
+    )
+    db_session.flush()
+    fanout_for_post(db_session, post, post_path="/posts/hi/")
+    db_session.commit()
+    assert (
+        db_session.execute(select(ActivityPubOutbox)).scalars().one().status
+        == ActivityPubOutboxStatus.PENDING
+    )
+
+    # Simulate the unpublish transition.
+    on_post_updated(
+        post,
+        before={"status": "published"},
+        after={"status": "draft"},
+        session=db_session,
+    )
+    db_session.commit()
+    assert list(db_session.execute(select(ActivityPubOutbox)).scalars()) == []
+
+
 def test_send_pending_marks_sent_on_2xx(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
