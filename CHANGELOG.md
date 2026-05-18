@@ -7,6 +7,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Cookie-session path treats inactive users as anonymous.**
+  An admin who flips `User.is_active=False` expected access to
+  stop immediately. The bearer middleware already re-checks
+  `is_active` per request, but `current_user()` (the cookie-
+  session path used by every admin route gate) returned the
+  inactive User row unchanged. A disabled user kept their
+  privileges until they logged out or the session row expired.
+  `current_user()` now returns None when `User.is_active=False`,
+  closing the asymmetry. `auth_local`'s login already enforces
+  `is_active=True` at sign-in, so a fresh login still works as
+  soon as the admin re-enables the user.
+- **Bearer cache re-checks `PersonalAccessToken.expires_at` on
+  every request.** The verify-result cache (#M4 / pass-4) stores
+  `(token_id, user_id, scopes_tuple)` with no timestamp, so a
+  token verified just before its `expires_at` kept authenticating
+  for up to TTL (10 s) past the declared end. The cache-hit path
+  already re-reads the token row to bump `last_used_at`; it now
+  also reads `expires_at` and treats a past value as no-auth.
 - **Page revision restore re-runs the cross-site `parent_id`
   check.** Pass-4 closed cross-site `parent_id` on the page
   create / edit paths via `_validated_parent_id_or_error`, but
@@ -210,6 +228,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the bearer API, not a CSRF bypass.
 
 ### Fixed
+- **ActivityPub fanout is idempotent across restore-as-republish.**
+  PR-D's `_drop_pending_outbox_for_post` deletes PENDING outbox
+  rows on unpublish but keeps SENT / FAILED rows as audit, and
+  PR-E added `on_post_published` firing on restore-as-publish.
+  Without dedup, a publish -> unpublish -> restore-as-republish
+  cycle queued a SECOND Create+Note per follower (followers
+  received a duplicate). `fanout_for_post` now skips followers
+  that already have a non-FAILED `ActivityPubOutbox` row for
+  `(post_id, follower_id)`. FAILED rows are NOT skipped so an
+  operator who wants to retry a previously-failed delivery via
+  republish can. The webmention plugin already did this shape
+  via `existing_targets`; the AP version now mirrors it.
 - **Outbox sender no longer rolls back the whole batch when an
   unpublish race deletes a row mid-flight.** The webmention and
   ActivityPub outbox senders SELECT every PENDING row, mutate

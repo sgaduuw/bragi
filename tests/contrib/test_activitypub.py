@@ -677,6 +677,61 @@ def test_fanout_for_post_queues_per_follower(db_session: Session) -> None:
     assert all(r.status == ActivityPubOutboxStatus.PENDING for r in rows)
 
 
+def test_fanout_for_post_skips_followers_with_existing_non_failed_row(
+    db_session: Session,
+) -> None:
+    """Pass-7 CQ regression: a publish->unpublish->restore-as-publish
+    cycle re-runs `fanout_for_post`. Without dedup the second call
+    queues a SECOND Create+Note per follower (the unpublish-cleanup
+    deleted PENDING rows but kept SENT/FAILED as audit, and a
+    restore that already shipped to followers shouldn't fan out
+    again). Webmention plugin already filters by existing targets;
+    AP must mirror that shape."""
+    site, author_id = _make_site(db_session)
+    post = Post(
+        site_id=site.id,
+        slug="hi",
+        title="Hi",
+        body_markdown="",
+        body_html="<p>hi</p>",
+        body_excerpt="hi",
+        author_id=author_id,
+        status=PostStatus.PUBLISHED,
+        published_at=datetime(2026, 5, 14, tzinfo=UTC),
+    )
+    db_session.add(post)
+    db_session.flush()
+    db_session.add_all(
+        [
+            ActivityPubFollower(
+                site_id=site.id,
+                actor_url=f"https://r.example/u/{i}",
+                inbox_url=f"https://r.example/u/{i}/inbox",
+            )
+            for i in range(3)
+        ]
+    )
+    db_session.commit()
+
+    # First fanout queues 3 rows.
+    assert fanout_for_post(db_session, post, post_path="/posts/hi/") == 3
+    db_session.commit()
+
+    # Mark them as SENT (simulating the sender having flushed) to
+    # represent the "publish already happened" state. Then run
+    # `fanout_for_post` again — it must not duplicate.
+    for row in db_session.execute(select(ActivityPubOutbox)).scalars():
+        row.status = ActivityPubOutboxStatus.SENT
+    db_session.commit()
+    assert fanout_for_post(db_session, post, post_path="/posts/hi/") == 0
+
+    # FAILED rows ARE skipped from dedup so a republish can retry.
+    for row in db_session.execute(select(ActivityPubOutbox)).scalars():
+        row.status = ActivityPubOutboxStatus.FAILED
+    db_session.commit()
+    assert fanout_for_post(db_session, post, post_path="/posts/hi/") == 3
+
+
 def test_send_pending_marks_sent_on_2xx(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
