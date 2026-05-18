@@ -8,6 +8,60 @@ The spec types are plain dataclasses with callable fields where
 behaviour is required. This keeps plugin authoring concrete (build
 a value, return it) and avoids forcing every plugin to define a
 class.
+
+## Stability boundary (#190)
+
+What's covered:
+
+- The `hookimpl` marker and the hook signatures documented in
+  `bragi/hookspecs.py`. Hook names, parameter names, and
+  parameter types are stable. Internal call-ordering and
+  bracketing helpers are not.
+- The spec dataclasses defined below: `FieldSpec`,
+  `ContentTypeSpec`, `ImporterSpec`, `NavItem`,
+  `OAuthProviderSpec`, `AuthMethodSpec`, `RedirectTarget`,
+  `TransformRegistry`, `SearchBackendSpec`, `ThemeSpec`,
+  `StorageBackendSpec`, `ImageProcessorSpec`,
+  `InternalLinkResolution`.
+- The `bragi.plugins` entry-point group as the plugin-discovery
+  contract (see `bragi/plugins.py`).
+
+What's NOT covered:
+
+- `bragi.hookspecs` (internal; structure may change between
+  patch versions as hooks are added).
+- `bragi.core.*` (DB, models, render, middleware, registry —
+  every internal helper). Plugins that reach in here are
+  pinned to a bragi version.
+- `bragi.contrib.*` (in-tree plugins exist as reference
+  implementations; their internal layout may shift). Plugin
+  authors must not import from a sibling contrib package; the
+  boundary is enforced architecturally (CLAUDE.md "Contrib
+  plugin boundary").
+
+## Deprecation policy
+
+Best-effort: hook signatures and spec fields will not be
+removed within a minor version. Additions are always safe (new
+optional fields, new hookspecs, new spec types). When a removal
+becomes necessary it lands across two minor versions:
+
+1. The field / hook is marked deprecated in the docstring with
+   the target removal version, and a runtime warning logged on
+   use if the deprecation surface is reachable.
+2. Removal in the named release, with the CHANGELOG entry
+   pointing back at the deprecation notice.
+
+No automated tooling enforces this today; the rule is
+discipline-on-author plus the `cms plugins list` introspection
+surface so operators can grep what's installed before bumping
+bragi.
+
+Future tightening (capability-discovery API, per-field
+stability attributes) is premature without a third-party
+plugin to test against. The shape stays open to amend once a
+real consumer surfaces. See CONTEXT.md "Plugin architecture
+and 'built-ins are plugins'" for the broader rationale.
 """
 
 from __future__ import annotations
