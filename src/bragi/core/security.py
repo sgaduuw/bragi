@@ -16,7 +16,19 @@ from bragi.core.models.user import User
 
 
 def current_user() -> User | None:
-    """Return the active `User` for the logged-in session, or None."""
+    """Return the active `User` for the logged-in session, or None.
+
+    Treats `User.is_active=False` as anonymous (returns None). An
+    admin who flips `is_active` to False expects access to stop
+    immediately; the bearer middleware already re-checks
+    `is_active` per request, but the cookie-session path used to
+    return the inactive User row unchanged, so a disabled user
+    kept their privileges until they logged out or the session
+    row expired. Treating the inactive case as anonymous closes
+    that asymmetry. `auth_local`'s login enforces `is_active=True`
+    on the row at sign-in, so a fresh login still works as soon
+    as the admin re-enables the user.
+    """
     if "_cached_user" in g:
         return g._cached_user  # type: ignore[no-any-return]
 
@@ -27,6 +39,8 @@ def current_user() -> User | None:
 
     with SessionLocal() as db:
         user = db.get(User, user_id)
+        if user is not None and not user.is_active:
+            user = None
         # Detach from the session so the caller can still read
         # attributes after the `with` block closes the session.
         if user is not None:

@@ -25,7 +25,6 @@ from typing import Any
 
 from flask import Flask, g, request
 from flask.typing import ResponseReturnValue
-from sqlalchemy import update
 
 from bragi.contrib.api_tokens.tokens import parse_token, verify
 from bragi.core.audit import AuditAction, audit
@@ -221,17 +220,27 @@ def _bearer_before_request() -> ResponseReturnValue | None:
     token_id, token_user_id, scopes_tuple = outcome
     scopes = list(scopes_tuple)
 
-    # On every request (cache hit OR miss), still bump last_used_at
-    # and re-check the user is active. The cache only short-circuits
-    # the expensive argon2 verify; the "is this user still allowed
-    # to act" check stays per-request so disabling a user takes
-    # effect immediately.
+    # On every request (cache hit OR miss), still bump last_used_at,
+    # re-check the user is active, AND re-check the token hasn't
+    # expired. The cache only short-circuits the expensive argon2
+    # verify; the "is this user still allowed to act + is this token
+    # still valid" check stays per-request so disabling a user or
+    # crossing `expires_at` takes effect immediately rather than
+    # waiting up to TTL (10s) for the cache to expire.
     with SessionLocal() as db:
-        db.execute(
-            update(PersonalAccessToken)
-            .where(PersonalAccessToken.id == token_id)
-            .values(last_used_at=naive_utcnow())
-        )
+        token_row = db.get(PersonalAccessToken, token_id)
+        if token_row is None:
+            # Row deleted out-of-band between cache write and now.
+            # `revoke_token` calls `invalidate_verify_cache_for_public_id`
+            # to bound this window, but a parallel admin-server can
+            # still race; treat as no-auth.
+            return None
+        if token_row.expires_at is not None and token_row.expires_at <= naive_utcnow():
+            # Token expired since the cached verify. Stop authenticating
+            # immediately; the next call will re-verify (and `verify()`
+            # at `tokens.py:149` will return None for the expired row).
+            return None
+        token_row.last_used_at = naive_utcnow()
         db.commit()
         user = db.get(User, token_user_id)
         if user is None or not user.is_active:

@@ -476,6 +476,51 @@ def test_verify_cache_short_circuits_argon2_for_repeat_presentation(
         auth_mod.verify = auth_mod_orig_verify  # type: ignore[assignment]
 
 
+def test_bearer_cache_re_checks_expires_at(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """Pass-7 regression: the verify-result cache (#M4) caches the
+    positive outcome `(token_id, user_id, scopes_tuple)` with no
+    `expires_at`. The cache-hit path re-checks `User.is_active` but
+    previously did NOT re-check `PersonalAccessToken.expires_at`, so
+    a token verified just before its expiry kept authenticating for
+    up to TTL (10 s) past its declared end. Fix re-loads the row on
+    every request and returns None when `expires_at <= now`."""
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    # Mint with a future expiry so the first request succeeds + caches.
+    minted = mint_token(
+        db_session,
+        user_id=user.id,
+        name="will-expire",
+        scopes=[TokenScope.POST_WRITE],
+        expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=5),
+    )
+    db_session.commit()
+    plaintext = minted.plaintext
+
+    first = client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert first.status_code == 200
+
+    # Move the token's expires_at into the past. The cache still
+    # holds the positive outcome; without the per-request expiry
+    # re-check the bearer middleware would happily re-authenticate.
+    db_session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.id == minted.model.id)
+    ).scalar_one().expires_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
+    db_session.commit()
+
+    second = client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    # Token expired; bearer middleware returns None and the request
+    # falls through to session auth -> login redirect.
+    assert second.status_code in (302, 303)
+
+
 def test_revoke_token_invalidates_verify_cache(
     admin_app: Flask, client: FlaskClient, db_session: Session
 ) -> None:
