@@ -130,3 +130,29 @@ def safe_external_url(url: str | None) -> str | None:
     if not parsed.hostname:
         return None
     return url
+
+
+def is_idn_host(url: str | None) -> bool:
+    """True iff `url`'s hostname contains any non-ASCII codepoint.
+
+    Backs the moderator-facing IDN badge in webmention / future
+    federation admin lists. The bidi-codepoint rejection in
+    `safe_external_url` covers RTL-override spoofs, but Cyrillic /
+    Greek glyphs that mimic Latin (`раураl.com`,
+    `аpple.com`) parse as valid IDN hostnames and pass the gate.
+    Rejecting them outright would break legitimate non-ASCII
+    domains (`пример.рф`, `例え.jp`); badging in the moderation
+    template gives the human reviewer the signal they need
+    without locking out real-world non-Latin TLDs.
+
+    Returns False for None / empty / un-parseable URLs and for
+    any URL whose hostname is pure ASCII. The check is purely
+    on hostname, so a path component like `/café` doesn't
+    trigger the badge.
+    """
+    if not url:
+        return False
+    host = urlparse(url).hostname
+    if not host:
+        return False
+    return any(ord(c) > 0x7F for c in host)

@@ -52,6 +52,23 @@ def test_strong_secret_key_is_silent(
     )
 
 
+def test_empty_admin_session_cookie_secure_env_is_treated_as_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`BRAGI_ADMIN_SESSION_COOKIE_SECURE=` (exported but empty) should not crash.
+
+    Pydantic's bool parser rejects `""` with a `bool_parsing` error.
+    Operators who delete the value from `.env` but leave the key, or
+    write `KEY=` in shell sourcing, would otherwise hit a fatal
+    boot-time validation error instead of the documented "unset means
+    derive from env" behaviour. A `BeforeValidator` coerces `""` to
+    `None`.
+    """
+    monkeypatch.setenv("BRAGI_ADMIN_SESSION_COOKIE_SECURE", "")
+    s = Settings()
+    assert s.admin_session_cookie_secure is None
+
+
 def test_admin_max_content_length_admits_attachment_uploads() -> None:
     """The 1 MiB body cap must not silently 413 attachment uploads.
 
