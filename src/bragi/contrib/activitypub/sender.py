@@ -50,6 +50,19 @@ def fanout_for_post(db: Session, post: Post, *, post_path: str) -> int:
     FAILED rows are NOT skipped: the operator may want to retry
     a previously-failed delivery by republishing. The webmention
     plugin already does the same shape via `existing_targets`.
+
+    Edge: an unfollow/refollow cycle does NOT preserve this
+    invariant. `follower_id` is `ondelete=CASCADE`, so the Undo
+    Follow path deletes the follower row and all its outbox rows
+    (SENT included) with it. A subsequent refollow creates a new
+    follower row with a new PK, and a republish queues a fresh
+    Note for the new PK. Mastodon (and AP receivers in general)
+    dedup inbound Creates by `activity.id`, which is stable
+    across re-fanout, so the visible effect is a single Note in
+    the receiver's timeline regardless. Switching the FK to
+    `SET NULL` and deduping on `actor_url` would close this at
+    the sender side but is a schema migration with no benefit on
+    the wire; not done.
     """
     site = db.get(Site, post.site_id)
     if site is None:
