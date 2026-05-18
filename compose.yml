@@ -86,40 +86,31 @@ services:
     # AP delivery) has time to return before SIGKILL fires.
     stop_grace_period: 30s
     environment:
-      # Required.
+      # Required deploy posture. `BRAGI_ENV=production` makes the
+      # dev SECRET_KEY sentinel fatal; `BRAGI_TRUSTED_PROXY_HOPS=1`
+      # tells ProxyFix to trust one hop of X-Forwarded-* headers
+      # from the TLS-terminating reverse proxy. See README
+      # "Container runtime hardening" and `bragi/settings.py`
+      # field comments for the full rationale.
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
       BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
-      # Tells the app it's running in production. With this set,
-      # `create_admin_app` refuses to start if `BRAGI_SECRET_KEY`
-      # is the bundled dev sentinel; without it the dev default
-      # produces a startup WARNING instead. Set to `production`
-      # for any real deploy; leave unset for local dev.
       BRAGI_ENV: production
-      # Trusted reverse-proxy hops in front of this app. Set to 1
-      # when running behind exactly one TLS-terminating proxy (the
-      # documented deploy posture). `ProxyFix` then rewrites
-      # `request.scheme`/`remote_addr`/`host` from `X-Forwarded-*`
-      # so the OAuth callback URL builds as `https://...` and the
-      # audit log / session rows record the real client IP rather
-      # than the proxy's. NEVER set higher than the actual hop
-      # count: each unit of trust extends spoofability one hop
-      # outward.
       BRAGI_TRUSTED_PROXY_HOPS: "1"
-      # Optional (uncomment + populate to enable).
+      # Optional knobs (uncomment to enable). Each maps to a
+      # `Settings` field documented in `src/bragi/settings.py`.
       # BRAGI_GITHUB_CLIENT_ID: ...
       # BRAGI_GITHUB_CLIENT_SECRET: ...
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
-      # Hard cap on inbound request body size. Admin defaults to
-      # `max(max_request_bytes, attachments_max_bytes + 64 KiB)`
-      # so attachment uploads up to `attachments_max_bytes` (20
-      # MiB default) work; override here to raise the cap for
-      # both federation inboxes and attachment uploads.
+      # BRAGI_SECURITY_EXPIRES_DAYS: "365"
       # BRAGI_MAX_REQUEST_BYTES: "1048576"
       # BRAGI_ATTACHMENTS_MAX_BYTES: "20971520"
-      # Gunicorn worker count for the admin app. Default 2; admin
-      # is low-concurrency (one operator). Dial up if you have
-      # multiple authors hitting it concurrently.
+      # BRAGI_ATTACHMENT_RENDITION_WIDTHS: "[320,800,1600]"
+      # BRAGI_EMBED_YOUTUBE_MODE: "click-to-load"
+      # BRAGI_EMBED_OEMBED_TIMEOUT_PER: "2.0"
+      # BRAGI_EMBED_OEMBED_TIMEOUT_AGGREGATE: "5.0"
+      # BRAGI_EMBED_RERENDER_TIMEOUT_PER: "15.0"
+      # BRAGI_INDEXNOW_ENDPOINT: "https://api.indexnow.org/indexnow"
       # ADMIN_WORKERS: "2"
     volumes:
       - bragi-data:/data
@@ -154,15 +145,9 @@ services:
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
       BRAGI_ENV: production
       BRAGI_TRUSTED_PROXY_HOPS: "1"
+      # Optional knobs (see `src/bragi/settings.py` for field docs).
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
-      # Hard cap on inbound request body size; protects federation
-      # inboxes (`/webmentions`, `/actor/inbox`) from streaming-
-      # body OOM. Delivery doesn't accept attachment uploads, so
-      # 1 MiB is appropriate.
       # BRAGI_MAX_REQUEST_BYTES: "1048576"
-      # Gunicorn worker count for the delivery app. Default 4;
-      # delivery is read-heavy and SQLite WAL keeps reads parallel.
-      # Dial up on high-traffic public sites, down on small VPS.
       # DELIVERY_WORKERS: "4"
     volumes:
       - bragi-data:/data

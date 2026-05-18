@@ -141,3 +141,30 @@ def test_backup_skips_missing_attachments_root(
     assert "bragi.db" in names
     # No attachments/ tree because the root didn't exist.
     assert not any(n.startswith("attachments") for n in names)
+
+
+def test_backup_refuses_non_sqlite_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cms backup` exits 2 with a usable message under a Postgres engine.
+
+    `VACUUM INTO` is SQLite-specific; without the gate an operator
+    on `BRAGI_DATABASE_URL=postgresql://...` would hit an opaque
+    SQL error. The gate's user-facing exit-2 path needs explicit
+    coverage so a future "just-in-case" refactor doesn't silently
+    drop the message.
+    """
+
+    class _Dialect:
+        name = "postgresql"
+
+    class _FakeEngine:
+        dialect = _Dialect()
+
+    monkeypatch.setattr("bragi.cli.engine", _FakeEngine())
+    runner = CliRunner()
+    result = runner.invoke(cms, ["backup", "--output", str(tmp_path / "out.tar.gz")])
+    assert result.exit_code == 2
+    assert "requires SQLite" in (result.stderr or result.output)
+    assert "pg_dump" in (result.stderr or result.output)

@@ -42,11 +42,18 @@ log() { echo "[scheduler $(date -Iseconds)] $*"; }
 
 # Track the active child PID so SIGTERM/SIGINT can forward to it
 # before exiting the loop. Without this, `docker compose stop`
-# sends SIGTERM and the outer `sleep` runs to completion (10s
-# default), then SIGKILL fires; a multi-minute `cms db vacuum` or
-# AP-send-pending run mid-tick loses work. The trap forwards the
-# signal to the child and exits the loop.
+# sends SIGTERM and the outer `sleep` runs to completion, then
+# SIGKILL fires; a multi-minute `cms db vacuum` or AP-send-pending
+# run mid-tick loses work. The trap forwards the signal to the
+# child and exits the loop. `SLEEP_PID` covers the cadence-spacing
+# `sleep` too: POSIX `/bin/sh` (dash) does NOT interrupt a
+# foreground `sleep` for a trapped signal, so without backgrounding
+# the sleep, SIGTERM during a sleep waits up to the full sleep
+# duration before the trap fires. We background the sleep, store
+# its PID, and `wait` on it; the trap can then kill the sleep PID
+# directly.
 CHILD_PID=
+SLEEP_PID=
 shutting_down=0
 
 forward_signal() {
@@ -55,6 +62,10 @@ forward_signal() {
         log "shutdown: forwarding signal to child pid=$CHILD_PID"
         kill -TERM "$CHILD_PID" 2>/dev/null || true
         wait "$CHILD_PID" 2>/dev/null || true
+    fi
+    if [ -n "$SLEEP_PID" ]; then
+        kill -TERM "$SLEEP_PID" 2>/dev/null || true
+        wait "$SLEEP_PID" 2>/dev/null || true
     fi
     log "shutdown: exiting"
     exit 0
@@ -72,6 +83,26 @@ run() {
     if [ $rc -ne 0 ] && [ $shutting_down -eq 0 ]; then
         log "$label: failed rc=$rc"
     fi
+}
+
+# Interruptible sleep helper: backgrounds the sleep so the SIGTERM
+# trap can fire promptly instead of waiting up to the full sleep
+# duration. Reentrancy guard: if a prior call left $SLEEP_PID set
+# (caller bug or a future maintainer wraps this in a retry), kill
+# the previous background sleep before starting a new one. Without
+# the guard, $SLEEP_PID is overwritten and the trap's
+# `kill "$SLEEP_PID"` only reaches the most recent — the leaked
+# earlier sleeper holds the script open past the trap. Cheap to
+# defend; one branch.
+sleep_interruptible() {
+    if [ -n "${SLEEP_PID:-}" ]; then
+        kill -TERM "$SLEEP_PID" 2>/dev/null || true
+        wait "$SLEEP_PID" 2>/dev/null || true
+    fi
+    sleep "$1" &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID" 2>/dev/null || true
+    SLEEP_PID=
 }
 
 # Cap alembic restart-loop on a persistently-failing migration.
@@ -102,7 +133,7 @@ while true; do
         exit 0
     fi
     log "alembic: attempt $attempt failed (rc=$rc); retrying in ${ALEMBIC_RETRY_DELAY}s"
-    sleep "$ALEMBIC_RETRY_DELAY"
+    sleep_interruptible "$ALEMBIC_RETRY_DELAY"
     attempt=$((attempt + 1))
 done
 
@@ -147,5 +178,5 @@ while true; do
         last_vacuum=$(date +%s)
     fi
 
-    sleep 10
+    sleep_interruptible 10
 done

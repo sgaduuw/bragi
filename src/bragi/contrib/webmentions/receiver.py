@@ -56,6 +56,7 @@ from bragi.core.models.webmention import (
     Webmention,
     WebmentionStatus,
 )
+from bragi.core.safe_urls import safe_external_url
 from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)
@@ -86,7 +87,20 @@ def receive() -> ResponseReturnValue:
     target = (request.form.get("target") or "").strip()
     if not source or not target:
         abort(400, description="source and target required")
-    if not _is_absolute_http(source) or not _is_absolute_http(target):
+    # Gate both URLs through `safe_external_url` (not the older
+    # `_is_absolute_http` check, removed in v1.13.0 pass-8). That
+    # earlier check only verified scheme + non-empty netloc; it let
+    # through Unicode bidi-formatting codepoints (RTL override
+    # flips the rendered URL in the moderation list and the public
+    # post page's `<a href>` so a moderator can be fooled into
+    # approving a row whose visible destination differs from its
+    # real destination) and C0 / DEL control characters (a stored
+    # `\r`/`\n` in source_url 500s werkzeug's header-value writer
+    # the moment the value flows into a response header or a
+    # `redirect(...)`, turning a single malicious POST into a
+    # persistent per-row DoS). `safe_external_url` rejects both
+    # shapes alongside non-http(s) schemes.
+    if safe_external_url(source) is None or safe_external_url(target) is None:
         abort(400, description="source and target must be absolute http(s) URLs")
     if source == target:
         abort(400, description="source and target may not be identical")
@@ -189,15 +203,6 @@ def _fetch_source(url: str) -> str:
     if resp.status_code >= 400:
         raise _FetchError(f"source returned {resp.status_code}")
     return resp.content.decode("utf-8", errors="replace")
-
-
-def _is_absolute_http(url: str) -> bool:
-    """Sanity check: URL must be absolute and use http/https."""
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
 def _resolve_site_for(db: Session, target_url: str) -> Site | None:

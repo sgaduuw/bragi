@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 import click
+from flask.cli import with_appcontext
 from sqlalchemy import select, text
 
 from bragi.core.db import SessionLocal, engine
@@ -28,6 +29,67 @@ from bragi.settings import settings
 @click.group()
 def cms() -> None:
     """bragi management commands."""
+
+
+@cms.group("plugins")
+def plugins_group() -> None:
+    """Plugin platform introspection (#190)."""
+
+
+@plugins_group.command("list")
+@with_appcontext
+def plugins_list() -> None:
+    """Print every registered plugin, its origin, and its hookimpl count.
+
+    Reads the live plugin manager attached to the admin app
+    (`app.extensions["plugin_manager"]`). Useful when triaging a
+    plugin that isn't taking effect ("is it even registered?")
+    and as a quick capability survey for third-party plugin
+    authors.
+
+    Columns:
+
+    - plugin name (the `bragi.plugins` entry-point name)
+    - distribution / origin: "in-tree" for plugins shipping
+      under `bragi.contrib.*`, else the distribution name +
+      version reported by `importlib.metadata`.
+    - hookimpl count: number of hookspecs this plugin
+      participates in.
+    """
+    from flask import current_app
+
+    pm = current_app.extensions.get("plugin_manager")
+    if pm is None:
+        click.echo("no plugin_manager bound on current_app", err=True)
+        sys.exit(2)
+
+    # Build a per-plugin distribution lookup once. `list_plugin_distinfo`
+    # only includes plugins discovered via entry points (the way bragi
+    # loads them), so the lookup covers everything we expect.
+    dist_by_plugin = {id(plugin): dist for plugin, dist in pm.list_plugin_distinfo()}
+
+    rows: list[tuple[str, str, int]] = []
+    for name, plugin in pm.list_name_plugin():
+        hookimpls = pm.get_hookcallers(plugin) or []
+        count = len(hookimpls)
+        module_name = getattr(plugin, "__name__", "") or ""
+        if module_name.startswith("bragi.contrib."):
+            origin = "in-tree"
+        else:
+            dist = dist_by_plugin.get(id(plugin))
+            if dist is not None:
+                origin = f"{dist.project_name} {dist.version}"
+            else:
+                origin = module_name or "?"
+        rows.append((name, origin, count))
+
+    rows.sort(key=lambda r: r[0])
+    name_w = max((len(r[0]) for r in rows), default=4)
+    origin_w = max((len(r[1]) for r in rows), default=6)
+    click.echo(f"{'plugin'.ljust(name_w)}  {'origin'.ljust(origin_w)}  hooks")
+    click.echo(f"{'-' * name_w}  {'-' * origin_w}  -----")
+    for name, origin, count in rows:
+        click.echo(f"{name.ljust(name_w)}  {origin.ljust(origin_w)}  {count}")
 
 
 @cms.group("session")
@@ -75,8 +137,22 @@ def db_vacuum() -> None:
     """Compact the DB file and truncate the WAL.
 
     Heavier than ANALYZE; weekly cadence is typical. VACUUM cannot
-    run inside a transaction.
+    run inside a transaction. SQLite-only: the `PRAGMA
+    wal_checkpoint(TRUNCATE)` finaliser is SQLite-specific and
+    would 500 on Postgres. Without the gate the scheduler sidecar
+    would log `failed rc=*` lines on its weekly tick under a
+    Postgres `BRAGI_DATABASE_URL` until ops notice; same shape
+    as the `cms backup` gate.
     """
+    if engine.dialect.name != "sqlite":
+        click.echo(
+            f"cms db vacuum requires SQLite; current engine is "
+            f"`{engine.dialect.name}`. Use the engine's native "
+            "maintenance command instead (e.g. `VACUUM (FULL)` "
+            "for Postgres).",
+            err=True,
+        )
+        sys.exit(2)
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.execute(text("VACUUM"))
         # PRAGMA wal_checkpoint(TRUNCATE) finalises the WAL collapse;
@@ -111,6 +187,17 @@ def backup(output_path: Path | None) -> None:
     `restore` subcommand on purpose: a CLI that overwrites live
     state is a big risk for not much help.
     """
+    if engine.dialect.name != "sqlite":
+        # `VACUUM INTO` is SQLite-specific. An operator who pointed
+        # `BRAGI_DATABASE_URL` at Postgres would otherwise hit an
+        # opaque SQL error here instead of a usable message.
+        click.echo(
+            f"cms backup requires SQLite; current engine is "
+            f"`{engine.dialect.name}`. For Postgres use pg_dump; for "
+            "other engines use the engine's native snapshot tool.",
+            err=True,
+        )
+        sys.exit(2)
     if output_path is None:
         stamp = aware_utcnow().strftime("%Y%m%d-%H%M%S")
         output_path = Path.cwd() / f"bragi-backup-{stamp}.tar.gz"

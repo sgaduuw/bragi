@@ -22,6 +22,7 @@ from bragi.core.models.analytics_event import AnalyticsEvent
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.audit_log import AuditLog
+from bragi.core.models.internal_link import InternalLink
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.page_revision import PageRevision
@@ -53,6 +54,7 @@ __all__ = [
     "AttachmentRendition",
     "AuditLog",
     "Base",
+    "InternalLink",
     "LocalCredential",
     "MatchType",
     "Page",

@@ -11,6 +11,15 @@ services:
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
       BRAGI_SECRET_KEY: dev-only-change-in-production
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
+      # `BRAGI_ENV` deliberately unset in this dev compose file:
+      # the SECRET_KEY above is the bundled dev sentinel and
+      # production-mode boot would refuse to start. The web
+      # services below mirror this. The production compose.yml
+      # (../compose.yml) sets BRAGI_ENV=production on all three
+      # services.
+      # `BRAGI_TRUSTED_PROXY_HOPS` deliberately unset (defaults to
+      # 0): the dev stack has no reverse proxy. The production
+      # compose.yml sets it to 1.
     volumes:
       - bragi-data:/data
     healthcheck:

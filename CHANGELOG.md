@@ -6,6 +6,250 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-05-19
+
+### Security
+- **Webmention receiver gates `source` / `target` through
+  `safe_external_url`.** Pre-v1.13.0 the inbox accepted both URLs
+  through a local `_is_absolute_http` helper that only verified
+  scheme + non-empty netloc. That let through (a) Unicode
+  bidi-formatting codepoints in `source_url`, which render flipped
+  in the admin moderation list AND in the public post page's
+  "Mentioned by" `<a href>`, so a moderator can be fooled into
+  approving a row whose visible destination differs from its real
+  destination, and (b) C0 / DEL control characters, which 500
+  werkzeug's header-value writer the moment the stored value
+  flows through a response header or `redirect(...)`. Both
+  classes are now rejected at the inbox via the centralised
+  `safe_external_url` gate; the unused `_is_absolute_http`
+  helper is gone.
+- **`safe_external_url` rejects C0 / DEL control characters.**
+  Mirrors the gate `safe_relative_path` already had. Backstops
+  the webmention receiver hardening above for any future caller
+  (OG-image source-page extraction, internal-links destinations)
+  so the same shape can't slip back in.
+- **AP inbox catches `RecursionError` on deeply-nested JSON
+  (#215).** `json.loads` recurses; an unauthenticated attacker
+  could flood the inbox with `[[[...]]]` / `{"a":{"a":...}}` past
+  Python's default 1000 recursion limit and trigger uncaught 500s
+  (the except clause previously matched only `ValueError` /
+  `UnicodeDecodeError`). Signature verification happens after
+  JSON parse, so no auth was needed to trigger; the now-broader
+  except returns a clean 400.
+- **`safe_external_url` rejects Unicode bidi-formatting
+  codepoints (#209).** A stored `Webmention.author_url` with a
+  `‮` (RTL override) renders flipped in the admin
+  moderation list and can fool a moderator into approving a row
+  whose real destination is malicious. The h-card extractor
+  (and any future caller of the now-centralised
+  `bragi.core.safe_urls.safe_external_url`) now rejects
+  `U+202A`-`U+202E` and `U+2066`-`U+2069`.
+
+### Added
+- **`cms plugins list` CLI for plugin discoverability (#190).**
+  Prints every registered plugin, its origin (`in-tree` for
+  `bragi.contrib.*` packages, otherwise the distribution name +
+  version), and the count of hookspecs it participates in. Reads
+  the live plugin manager bound on the admin app at boot. Useful
+  when triaging "is this plugin actually registered?" and as a
+  quick capability survey for third-party plugin authors. Run
+  via `flask --app 'bragi.apps.admin:create_admin_app' cms
+  plugins list`.
+- **`bragi.api` stability boundary documented (#190).** New
+  top-of-module docstring in `src/bragi/api.py` codifies what's
+  covered by the public plugin API (hookimpl marker, hookspec
+  signatures, spec dataclasses, entry-point group) and what's
+  not (`bragi.hookspecs`, `bragi.core.*`, `bragi.contrib.*`
+  internals). Documents the two-step best-effort deprecation
+  policy: deprecation warning across one minor version, then
+  removal in the named release with a back-link from the
+  CHANGELOG entry.
+- **Plugin template-namespacing test (#189).** New
+  `tests/contrib/test_plugin_layout.py` walks every in-tree
+  `bragi.contrib.*` package and asserts that each plugin's
+  `templates/` directory only carries top-level entries that
+  are either the plugin's own slug or one of the shared
+  prefixes `admin` / `delivery`. Two plugins shipping
+  `templates/detail.html` would otherwise shadow each other
+  unpredictably (Flask's Jinja loader resolves by blueprint
+  registration order, which depends on pluggy discovery order).
+  Theme-over-plugin shadowing stays intentional and documented.
+  `bragi.contrib.auth_local`'s `login.html` /
+  `change_password.html` move under `templates/auth_local/`
+  to satisfy the rule; eight `render_template` callsites in
+  `auth_local/views.py` updated in lockstep. No user-visible
+  change to the rendered templates themselves.
+- **Admin backlinks view (#116).** From a post or page edit
+  form, the new "Backlinks »" link reaches a list of every
+  same-site post / page whose `body_html` references this
+  target via `data-bragi-link`. Useful for impact analysis
+  before renaming or unpublishing a target. Backed by a new
+  `internal_links` edge table (composite PK on `(site_id,
+  source_type, source_id, target_type, target_id)`, indexed
+  on the inbound query); the table is populated by the
+  internal_links plugin's `on_post_published` /
+  `on_post_updated` hooks on every save, and `on_post_deleted`
+  drops edges referencing the deleted item from either side.
+  New `cms internal-links rebuild-backlinks [--site <slug>]`
+  command rebuilds the table from existing content on upgrade.
+  Schema migration `2e99f2f0e525` creates the table; the
+  table ships empty so the migration is fast on any DB size.
+  Slug-form markers (`post:my-slug`) are ignored by the
+  indexer; the delivery-time rewriter hardens them into
+  integer form on first render, and the next save re-indexes.
+
+### Changed
+- **Moderator-facing IDN badge on the webmention moderation
+  list (#225).** `safe_external_url` accepts Cyrillic / Greek
+  homograph hostnames (`раураl.com`, `аpple.com`) because they
+  parse as legitimate IDN, and rejecting them outright would
+  break real-world non-Latin domains (`пример.рф`, `例え.jp`).
+  New `is_idn_host(url)` helper renders an `[IDN]` badge next
+  to source / author URLs in the admin moderation list so a
+  reviewer has the signal without losing IDN traffic. Adjacent
+  to the bidi rejection in #209 but distinct: bidi has no
+  legitimate use, IDN does.
+- **`cms db vacuum` gates on the SQLite engine (#227).** Mirror
+  of the `cms backup` gate; the `PRAGMA wal_checkpoint(TRUNCATE)`
+  finaliser is SQLite-specific and would 500 on Postgres.
+  Without the gate the scheduler sidecar's weekly tick would log
+  `failed rc=*` lines under `BRAGI_DATABASE_URL=postgresql://...`
+  until ops notice. Same shape applied to
+  `bragi.contrib.search.SQLiteFTS5SearchBackend`: registration
+  returns None under a non-SQLite engine, so `/search` returns
+  "no backend registered" instead of a per-request SQL 500.
+- **Admin session cookie defaults to `Secure` in production
+  (#199).** New `Settings.admin_session_cookie_secure` knob
+  (default `None` = derive from `env`); `create_admin_app` sets
+  `SESSION_COOKIE_SECURE`, `SESSION_COOKIE_SAMESITE = "Lax"`,
+  and `SESSION_COOKIE_HTTPONLY` explicitly. The default closes
+  the case where a misconfigured reverse proxy or a curl probe
+  against `:80` could leak `bragi_sid` over plain HTTP without
+  the operator opting in. `make dev` over `http://localhost`
+  still works because `env != "production"` defaults to
+  `Secure=False`.
+- **Redirects admin caps `source_path` at 256 characters (#200).**
+  A REGEX-mode row goes through `re.compile(...).fullmatch(...)`
+  at delivery time; without a length cap an editor-rank user
+  could persist a catastrophic-backtracking pattern (`^(a+)+$`
+  shape) and tie up a worker per matching 404. Capping the
+  length bounds the worst-case input.
+- **`cms backup` gates on the SQLite engine (#204).** When
+  `BRAGI_DATABASE_URL` points at Postgres (or any non-SQLite
+  engine), the command now exits 2 with a clear "use pg_dump"
+  message rather than crashing through an opaque
+  `VACUUM INTO`-not-supported SQL error.
+- **Container `bragi` UID pinned to 1000 in both Dockerfiles
+  (#212).** Pinned identically so a base-image bump can't shift
+  the system uid range and break /data volume sharing across
+  the admin and delivery images.
+- **scheduler.sh sleep is interruptible (#217, #228).** New
+  `sleep_interruptible` helper backgrounds the sleep so the
+  SIGTERM trap fires immediately. POSIX `/bin/sh` (dash) doesn't
+  interrupt a foreground `sleep` for a trapped signal, so a
+  `docker compose stop` mid-tick used to wait up to the full
+  sleep duration (10s main-loop / 15s alembic retry) before the
+  trap could forward. Applied to both the alembic-retry sleep
+  and the main-loop sleep. Reentrancy guard kills any previously
+  set `$SLEEP_PID` before backgrounding a new sleeper, so a
+  caller bug or future retry-wrap can't leak the prior PID past
+  the trap's reach.
+- **`Procfile.dev` adds a `tasks:` line (#206).** New
+  `scripts/dev-tasks.sh` mirrors `docker/scheduler.sh` but
+  invokes the cms commands against the local SQLite DB on a 60s
+  loop, so `make dev` exercises the same code paths the
+  production sidecar does.
+- **compose.yml documents embed / rendition / IndexNow knobs
+  (#207).** `BRAGI_EMBED_YOUTUBE_MODE`,
+  `BRAGI_EMBED_OEMBED_TIMEOUT_PER` / `_AGGREGATE` /
+  `_RERENDER_TIMEOUT_PER`, `BRAGI_ATTACHMENT_RENDITION_WIDTHS`,
+  `BRAGI_INDEXNOW_ENDPOINT`, and `BRAGI_SECURITY_EXPIRES_DAYS`
+  now appear as commented `# OPTIONAL` lines with defaults.
+- **compose.yml admin block is denser (#232).** The admin
+  service env block had 60 comment lines vs 5 active vars
+  (12:1); operators scanning to confirm `BRAGI_ENV` /
+  `BRAGI_TRUSTED_PROXY_HOPS` had to skip past 12 multi-line
+  optional-knob explanations. Each optional knob is now a
+  one-line commented assignment; the per-knob rationale lives
+  in `src/bragi/settings.py` field docstrings (pointed at from
+  the new header comment). Same shape on the delivery block.
+- **README backups section spells out the SQLite-only gate
+  (#230).** Postgres operators now learn from the README that
+  `cms backup` exits 2 and pointed at `pg_dump`, rather than
+  discovering by running it.
+- **`bragi.core.safe_redirect` renamed to `bragi.core.safe_urls`
+  (#231).** The module houses both `safe_relative_path` (for
+  redirect targets) and `safe_external_url` (for URLs that
+  never feed a redirect: webmention author URLs render as
+  `<a href>`, not 302 destinations). Module name now matches
+  the docstring's "user / attacker-supplied URLs" scope. Five
+  callers updated; `git mv` preserves history.
+
+### Fixed
+- **Attachment delete cleanup now happens inside the cascade-delete
+  transaction (#171).** Pre-v1.13.0 the delete route committed the
+  cascade-delete first and then refcounted + unlinked the on-disk
+  file post-commit, leaving a narrow window during which a
+  concurrent upload of the same content-addressed bytes could
+  insert a new row referencing the storage_key we then unlinked.
+  The refcount check and `backend.remove` call now run between
+  `db.flush()` and `db.commit()` so SQLAlchemy's writer lock
+  (SQLite RESERVED, acquired on the cascade DELETE) queues other
+  writers under WAL until our cleanup commits. Regression test
+  pins the ordering invariant: every `backend.remove` call must
+  precede the delete-view's commit.
+- **`pyproject.toml` migrated to PEP 621 `[project]` table
+  (#168).** Poetry 2.x deprecated `[tool.poetry]` for metadata
+  (name / version / description / authors / dependencies /
+  scripts / readme / license / requires-python); on 2.x `poetry
+  check` emitted one warning per field. All metadata now lives
+  under `[project]`; the `bragi.plugins` entry-point group moves
+  to `[project.entry-points."bragi.plugins"]`; the
+  `bragi-admin` / `bragi-delivery` console scripts move to
+  `[project.scripts]`. `[tool.poetry]` retains only the
+  src-layout `packages` declaration (no portable PEP 621
+  equivalent). Caret constraints translated to PEP 508 explicit
+  bounds; runtime behaviour unchanged. Portfolio-wide sweep also
+  applied to mimir + johnny in parallel PRs.
+- **Empty `BRAGI_ADMIN_SESSION_COOKIE_SECURE=` no longer crashes
+  boot (#226).** Pydantic-settings parses an exported-but-empty
+  env value as `""`, which pydantic's bool validator rejects with
+  `bool_parsing`. Operators who delete a value from `.env` and
+  leave the key (or write `KEY=` in shell sourcing) hit a fatal
+  boot-time error instead of the documented "unset = derive from
+  env" path. A `BeforeValidator` on the field coerces `""` to
+  `None`.
+- **`fanout_for_post` docstring spells out the unfollow/refollow
+  edge case (#224).** Pass-8 audit flagged the dedup as missing
+  the cycle, but inspecting the schema shows `follower_id` is
+  `ondelete=CASCADE`: the Undo Follow handler deletes all outbox
+  rows referencing the follower (SENT included). The dedup
+  invariant holds for surviving rows; the unfollow/refollow case
+  re-queues a fresh Create+Note that the receiver dedups by
+  `activity.id`. No code change; docstring now matches reality
+  and notes why the SET NULL alternative wasn't pursued.
+- **`cms backup` Postgres-engine path now has test coverage
+  (#229).** Mocked dialect, asserted `exit_code == 2` and the
+  user-facing "requires SQLite" / "pg_dump" message; a future
+  refactor can't silently drop the gate.
+- **CI workflow has explicit minimum permissions (#205).**
+  `permissions: contents: read` at the top level so the
+  workflow token never carries repo-write by default when CI
+  runs untrusted PR code from forks.
+- Miscellaneous internal refactors (closing #201, #202, #203,
+  #211, #213, #216, #218): `_safe_external_url` lifted from
+  `webmentions/parse.py` into `bragi.core.safe_urls` for
+  reuse; webmention `_queue_outbox_for_post` fallback uses
+  `urlparse(...).hostname` not `.netloc`; redirects admin flash
+  enumerates "no control characters" alongside the existing
+  rejections; activitypub views / signature `import time` /
+  `threading` moved to module level; search `_is_published`
+  drops the dead `or status == "published"` clause; new test
+  for AP unpublish-cleanup parity with the webmention side;
+  compose.dev.yml carries inline comments explaining why
+  `BRAGI_ENV` and `BRAGI_TRUSTED_PROXY_HOPS` are deliberately
+  unset.
+
 ## [1.12.0] - 2026-05-18
 
 ### Security

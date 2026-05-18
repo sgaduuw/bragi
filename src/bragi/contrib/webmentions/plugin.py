@@ -35,6 +35,7 @@ from bragi.core.models.webmention import (
     WebmentionOutboxStatus,
     WebmentionStatus,
 )
+from bragi.core.safe_urls import is_idn_host
 
 LOG = logging.getLogger(__name__)
 
@@ -69,7 +70,15 @@ def _queue_outbox_for_post(post: Post, session: Any) -> None:
     body_html = post.body_html or ""
     canonical = (site.canonical_url or "").rstrip("/")
     base = canonical or f"https://{site.hostname}"
-    our_host = (site.hostname or urlparse(base).netloc).lower()
+    # `urlparse(...).hostname` (not `.netloc`): `netloc` includes
+    # port + userinfo, but `is_external` (and the consuming side
+    # generally) compares against bare hostnames. With an explicit
+    # port on `canonical_url` like `https://example.com:8443` the
+    # `.netloc` form would yield `example.com:8443` and misclassify
+    # every same-site link as external. `Site.hostname` is NOT NULL
+    # so the fallback is mostly dead, but the inconsistency with
+    # the just-fixed `is_external` is worth one character.
+    our_host = (site.hostname or (urlparse(base).hostname or "")).lower()
 
     existing_targets = {
         row.target_url
@@ -206,12 +215,19 @@ def register_cli_command(group: click.Group) -> None:
 
 @hookimpl
 def register_template_globals(env: jinja2.Environment) -> None:
-    """Expose helpers to delivery templates.
+    """Expose helpers to delivery and admin templates.
 
     - `webmention_endpoint_url()` for the `<link rel="webmention">`
-      injected into `<head>`.
+      injected into `<head>` (delivery).
     - `webmentions_for_post(post)` returns approved rows for the
-      post template's "Mentioned by" block.
+      post template's "Mentioned by" block (delivery).
+    - `is_idn_host(url)` for the moderation list's IDN badge
+      (admin). Catches Cyrillic / Greek homograph hostnames
+      (`раураl.com`, `аpple.com`) that pass `safe_external_url`
+      because they parse as legitimate IDN — rejecting outright
+      would break real non-Latin domains (`пример.рф`,
+      `例え.jp`), so we surface a moderator-facing badge.
     """
     env.globals["webmention_endpoint_url"] = _webmention_endpoint_url
     env.globals["webmentions_for_post"] = _approved_webmentions_for_post
+    env.globals["is_idn_host"] = is_idn_host

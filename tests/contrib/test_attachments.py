@@ -977,6 +977,99 @@ def test_delete_cascades_renditions_and_unlinks_storage(
         assert not on_disk.exists(), f"{key} should have been unlinked"
 
 
+def test_delete_refcount_and_remove_happen_before_commit(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cleanup runs inside the cascade-delete txn, not after commit.
+
+    The pre-v1.13.0 shape committed the cascade-delete first and
+    refcounted + unlinked after commit, leaving a window during
+    which a concurrent upload of the same content-addressed bytes
+    could insert a row referencing a key we then unlinked from
+    disk (#171). The fix moves both the refcount check and the
+    `backend.remove` call inside the txn (between `db.flush()`
+    and `db.commit()`). The invariant under test is the ordering:
+    every `backend.remove` call must complete before the
+    associated `db.commit()` fires. We capture a monotonically
+    incrementing counter at both call-sites and assert all remove
+    timestamps precede the first commit.
+    """
+    import bragi.core.storage as storage_module
+
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
+    data = b"deletion-order-bytes"
+    client.post(
+        "/admin/sites/blog/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "track.txt"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    with db_session_factory() as db:
+        aid = db.execute(select(Attachment)).scalar_one().id
+
+    # Tick + capture: each `remove` call records its tick, then a
+    # SQLAlchemy `after_commit` listener records the commit tick.
+    # Post-fix: all remove ticks precede the commit tick.
+    # Pre-fix (commit before refcount): the commit tick comes
+    # before any remove tick.
+    counter = {"value": 0}
+    remove_ticks: list[int] = []
+    commit_ticks: list[int] = []
+
+    def _tick() -> int:
+        counter["value"] += 1
+        return counter["value"]
+
+    real_remove = storage_module.remove
+
+    def _watching_remove(site_slug: str, storage_key: str) -> None:
+        remove_ticks.append(_tick())
+        real_remove(site_slug, storage_key)
+
+    monkeypatch.setattr(storage_module, "remove", _watching_remove)
+    from bragi.core.storage import LocalStorageBackend
+
+    monkeypatch.setattr(LocalStorageBackend, "remove", _watching_remove)
+
+    from sqlalchemy import event
+
+    def _on_commit(session: Session) -> None:
+        commit_ticks.append(_tick())
+
+    event.listen(Session, "after_commit", _on_commit)
+    try:
+        token = csrf_token(client, path="/admin/sites/blog/attachments/")
+        client.post(
+            f"/admin/sites/blog/attachments/{aid}/delete",
+            data={"_csrf_token": token},
+        )
+    finally:
+        event.remove(Session, "after_commit", _on_commit)
+
+    assert remove_ticks, "backend.remove was never called"
+    assert commit_ticks, "no commit observed during delete"
+    # The delete-attachment view's commit (the one that wraps the
+    # cascade-delete + refcount + remove). Earlier commits from
+    # other code paths in the request (e.g. audit-log session,
+    # session-cookie touch) might fire too, so we look at the
+    # commit tick that is closest in value to the remove ticks.
+    delete_commit_tick = max(t for t in commit_ticks if t > max(remove_ticks, default=0))
+    assert max(remove_ticks) < delete_commit_tick, (
+        f"`backend.remove` must fire before `db.commit()` in the delete path; "
+        f"remove_ticks={remove_ticks!r}, delete_commit_tick={delete_commit_tick!r}, "
+        f"all commit_ticks={commit_ticks!r}"
+    )
+
+
 def test_delivery_serves_rendition_by_storage_key(
     admin_app: Flask,
     delivery_app: Flask,

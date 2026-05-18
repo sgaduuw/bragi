@@ -21,7 +21,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.middleware.sessions import rotate_sid
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user import User
-from bragi.core.safe_redirect import safe_relative_path
+from bragi.core.safe_urls import safe_relative_path
 
 bp = Blueprint(
     "auth_local",
@@ -34,7 +34,7 @@ bp = Blueprint(
 def _safe_next(candidate: str | None) -> str:
     """Restrict `next` to same-host relative paths to prevent open redirects.
 
-    See `bragi.core.safe_redirect.safe_relative_path` for the rejected
+    See `bragi.core.safe_urls.safe_relative_path` for the rejected
     shapes (incl. backslash-normalisation by the browser URL parser).
     """
     return safe_relative_path(candidate) or "/"
@@ -50,7 +50,7 @@ def login() -> ResponseReturnValue:
 
         if not email or not password:
             flash("Email and password are required.", "error")
-            return render_template("login.html", email=email, next=next_url)
+            return render_template("auth_local/login.html", email=email, next=next_url)
 
         with SessionLocal() as db:
             user = db.execute(
@@ -86,7 +86,7 @@ def login() -> ResponseReturnValue:
                     extra={"email": email, "reason": "invalid-credentials"},
                 )
                 flash("Invalid email or password.", "error")
-                return render_template("login.html", email=email, next=next_url)
+                return render_template("auth_local/login.html", email=email, next=next_url)
 
             # Rotate the session id at the privilege transition so
             # any pre-auth sid an attacker may have planted on the
@@ -132,7 +132,7 @@ def login() -> ResponseReturnValue:
             return redirect(url_for("auth_local.change_password"))
         return redirect(next_url)
 
-    return render_template("login.html", email="", next=next_url)
+    return render_template("auth_local/login.html", email="", next=next_url)
 
 
 @bp.route("/change-password", methods=["GET", "POST"])
@@ -154,13 +154,13 @@ def change_password() -> ResponseReturnValue:
 
         if not current or not new or not confirm:
             flash("All three fields are required.", "error")
-            return render_template("change_password.html")
+            return render_template("auth_local/change_password.html")
         if new != confirm:
             flash("New password and confirmation do not match.", "error")
-            return render_template("change_password.html")
+            return render_template("auth_local/change_password.html")
         if len(new) < 12:
             flash("New password must be at least 12 characters.", "error")
-            return render_template("change_password.html")
+            return render_template("auth_local/change_password.html")
 
         with SessionLocal() as db:
             cred = db.get(LocalCredential, user_id)
@@ -172,7 +172,7 @@ def change_password() -> ResponseReturnValue:
                     extra={"method": "local", "reason": "bad-current-password"},
                 )
                 flash("Current password is incorrect.", "error")
-                return render_template("change_password.html")
+                return render_template("auth_local/change_password.html")
             cred.password_hash = hash_password(new)
             cred.must_change = False
             db.commit()
@@ -190,7 +190,7 @@ def change_password() -> ResponseReturnValue:
         flash("Password updated.", "success")
         return redirect(next_url)
 
-    return render_template("change_password.html")
+    return render_template("auth_local/change_password.html")
 
 
 @bp.route("/logout", methods=["POST"])

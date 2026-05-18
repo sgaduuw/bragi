@@ -9,9 +9,30 @@ settings here with a sensible default; the runtime asks
 from __future__ import annotations
 
 import logging
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
+from pydantic import BeforeValidator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _empty_str_to_none(value: object) -> object:
+    """Treat an empty env-var value as 'unset'.
+
+    Pydantic-settings reads the literal string from the environment;
+    an exported but empty key (`BRAGI_FOO=` in `.env`, or `export
+    BRAGI_FOO=""` in a shell) reaches the validator as `""`, not as
+    a missing key. For optional bool fields whose default of `None`
+    means "derive from `env`", an empty string is fatal: pydantic's
+    bool parser rejects it with `bool_parsing` and the app crashes
+    at import. Operators who delete a value from `.env` and leave
+    the key (or use `KEY=` in shell sourcing) get a non-obvious
+    boot failure. Coerce `""` to `None` so the documented "unset =
+    derive from env" path applies.
+    """
+    if isinstance(value, str) and value == "":
+        return None
+    return value
+
 
 LOG = logging.getLogger(__name__)
 
@@ -53,6 +74,15 @@ class Settings(BaseSettings):
     # Delivery app
     delivery_host: str = "0.0.0.0"
     delivery_port: int = 8002
+
+    # Admin session cookie `Secure` flag. When None (default), the
+    # admin app derives it from `env`: True in production, False in
+    # development (otherwise `make dev` over plain http would never
+    # receive the cookie back). Override to True for a production
+    # deploy that's behind a TLS-terminating proxy but happens to
+    # not set `BRAGI_ENV=production`, or to False for a deliberate
+    # plain-http production scenario (don't).
+    admin_session_cookie_secure: Annotated[bool | None, BeforeValidator(_empty_str_to_none)] = None
 
     # Trusted reverse-proxy hops in front of the WSGI apps. Set to
     # 1 when running behind exactly one TLS-terminating reverse

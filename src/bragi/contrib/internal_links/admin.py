@@ -29,11 +29,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, abort, render_template, request
 from flask.typing import ResponseReturnValue
 from sqlalchemy import or_, select
 
 from bragi.core.db import SessionLocal
+from bragi.core.models.internal_link import InternalLink
 from bragi.core.models.page import Page
 from bragi.core.models.post import Post
 from bragi.core.permissions import resolve_site_or_abort
@@ -144,6 +145,118 @@ def _rows_for_type(type_filter: str | None, site_id: int, q: str) -> list[Picker
         combined,
         key=lambda r: r.updated_at or datetime.min,
         reverse=True,
+    )
+
+
+@dataclass
+class BacklinkRow:
+    """One row of the backlinks list.
+
+    Mirrors `PickerRow`'s cross-type contract but for the inbound
+    direction: each row describes a same-site post / page whose
+    `body_html` references the target via the `data-bragi-link`
+    marker. The display fields piggyback off the source row's
+    own columns; the route resolves them in one bulk SELECT per
+    content type after the InternalLink edge query.
+    """
+
+    source_type: str
+    source_id: int
+    title: str
+    slug: str
+    status: str
+    updated_at: datetime | None
+    edit_url: str
+
+
+def _backlinks_for(
+    target_type: str, target_id: int, site_id: int, site_slug: str
+) -> list[BacklinkRow]:
+    """Return the inbound edge set for `(target_type, target_id)`.
+
+    Two-phase lookup: SELECT the edge rows for the target, group
+    by source_type, then bulk-fetch the source rows from each
+    content-type table to get title/slug/status/updated_at for
+    display. Total query count is bounded by content-type count
+    (today: two), independent of the inbound link count.
+    """
+    with SessionLocal() as db:
+        edges = list(
+            db.execute(
+                select(InternalLink.source_type, InternalLink.source_id).where(
+                    InternalLink.site_id == site_id,
+                    InternalLink.target_type == target_type,
+                    InternalLink.target_id == target_id,
+                )
+            )
+        )
+        if not edges:
+            return []
+        post_ids = [sid for stype, sid in edges if stype == "post"]
+        page_ids = [sid for stype, sid in edges if stype == "page"]
+        out: list[BacklinkRow] = []
+        if post_ids:
+            for post_row in db.execute(select(Post).where(Post.id.in_(post_ids))).scalars():
+                out.append(
+                    BacklinkRow(
+                        source_type="post",
+                        source_id=post_row.id,
+                        title=post_row.title or "",
+                        slug=post_row.slug or "",
+                        status=str(post_row.status) if post_row.status is not None else "",
+                        updated_at=post_row.updated_at,
+                        edit_url=f"/admin/sites/{site_slug}/posts/{post_row.id}/edit",
+                    )
+                )
+        if page_ids:
+            for page_row in db.execute(select(Page).where(Page.id.in_(page_ids))).scalars():
+                out.append(
+                    BacklinkRow(
+                        source_type="page",
+                        source_id=page_row.id,
+                        title=page_row.title or "",
+                        slug=page_row.slug or "",
+                        status=str(page_row.status) if page_row.status is not None else "",
+                        updated_at=page_row.updated_at,
+                        edit_url=f"/admin/sites/{site_slug}/pages/{page_row.id}/edit",
+                    )
+                )
+    return sorted(out, key=lambda r: r.updated_at or datetime.min, reverse=True)
+
+
+@bp.route("/<string:target_type>/<int:target_id>/backlinks", methods=["GET"])
+def backlinks(site_slug: str, target_type: str, target_id: int) -> ResponseReturnValue:
+    """List same-site sources whose body_html links to `(target_type, target_id)`.
+
+    Renders the backlinks page for one post or page (#116). The
+    target itself must exist and belong to `site_slug` (404 if
+    not, mirroring the existing post / page admin views' scope
+    enforcement). Source rows are fetched from each content-type
+    table after the edge SELECT so the displayed
+    title / status / updated_at reflect the source's current
+    state, not the moment the edge was indexed.
+    """
+    if target_type not in {"post", "page"}:
+        abort(404)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        target: Post | Page | None = (
+            db.get(Post, target_id) if target_type == "post" else db.get(Page, target_id)
+        )
+        if target is None or target.site_id != site.id:
+            abort(404)
+        target_title = target.title or ""
+        target_slug = target.slug or ""
+
+    rows = _backlinks_for(target_type, target_id, site.id, site_slug)
+    return render_template(
+        "admin/backlinks.html",
+        target_type=target_type,
+        target_id=target_id,
+        target_title=target_title,
+        target_slug=target_slug,
+        rows=rows,
+        site=site,
     )
 
 
