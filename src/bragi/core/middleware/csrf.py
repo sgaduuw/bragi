@@ -52,7 +52,35 @@ def get_csrf_token() -> str:
 
 
 def register_csrf(app: Flask) -> None:
-    """Install the CSRF guard and the `csrf_token` Jinja global."""
+    """Install the CSRF guard and the `csrf_token` Jinja global.
+
+    Boot-time ordering assertion (#187): plugin-provided
+    before_request middleware (notably the bearer middleware in
+    `bragi.contrib.api_tokens` that sets `g.api_csrf_exempt`)
+    must register BEFORE the CSRF guard so it runs first at
+    request time, otherwise a valid bearer-token POST without a
+    session CSRF token would be 400'd by the CSRF guard. The
+    admin app factory enforces this by calling `register_csrf`
+    AFTER `pm.hook.on_app_init(...)` and setting a marker on
+    `app.extensions` between the two calls; this function raises
+    if the marker is absent. The check is skipped when no plugin
+    manager is wired (bare-Flask unit tests that exercise the
+    CSRF guard in isolation).
+    """
+    if app.extensions.get("plugin_manager") is not None and not app.extensions.get(
+        "_bragi_on_app_init_completed"
+    ):
+        raise RuntimeError(
+            "register_csrf called before pm.hook.on_app_init "
+            "completed. Plugin-provided before_request middleware "
+            "(notably the bearer middleware in "
+            "bragi.contrib.api_tokens, which sets the "
+            "g.api_csrf_exempt flag) must register BEFORE the CSRF "
+            "guard so it runs first at request time. Check the "
+            "call order in src/bragi/apps/admin.py: register_csrf "
+            "must come after pm.hook.on_app_init."
+        )
+
     app.config.setdefault("CSRF_EXEMPT_ENDPOINTS", set())
 
     @app.before_request

@@ -19,6 +19,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   document published mid-window appears in the next page of
   results immediately, but the "X results" counter may be one
   short for up to 30s.
+- **Admin app asserts boot ordering of CSRF and plugin
+  middleware (#187).** Plugin-provided before_request middleware
+  (notably the bearer middleware in `bragi.contrib.api_tokens`
+  that sets `g.api_csrf_exempt`) must register BEFORE the CSRF
+  guard so it runs first at request time, otherwise valid
+  bearer-token POSTs without a session CSRF token would be 400'd
+  by the CSRF guard. `register_csrf` now raises a `RuntimeError`
+  at boot if `pm.hook.on_app_init` hasn't run yet, naming
+  `apps/admin.py` as the fix location. CSRF itself was already
+  fail-closed (`g.api_csrf_exempt` defaults falsy, exemption
+  fires only when truthy and only after verified-bearer auth);
+  the assertion catches an ordering regression that would break
+  the bearer API, not a CSRF bypass.
 
 ### Fixed
 - **Webmention receiver verifies before persisting (#181).**
