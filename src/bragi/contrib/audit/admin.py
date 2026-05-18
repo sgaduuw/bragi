@@ -44,8 +44,12 @@ def list_audit() -> ResponseReturnValue:
         query = select(AuditLog).order_by(AuditLog.occurred_at.desc(), AuditLog.id.desc())
         if action_filter:
             # Substring match on the action so 'auth' covers all
-            # 'auth.login.*' and 'auth.logout' rows.
-            query = query.where(AuditLog.action.like(f"%{action_filter}%"))
+            # 'auth.login.*' and 'auth.logout' rows. Escape SQL LIKE
+            # metacharacters in the user-supplied filter so a stray
+            # `%`/`_`/`\\` matches literally (not as wildcards) and
+            # doesn't degenerate the filter into a full-table scan.
+            escaped = action_filter.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.where(AuditLog.action.like(f"%{escaped}%", escape="\\"))
         if actor_filter:
             # Ignore bad input rather than 500 on a malformed query string.
             with contextlib.suppress(ValueError):

@@ -103,35 +103,6 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   response and only serves `Content-Disposition: inline` for
   inline-safe types (images / PDF / text); rows that pre-date
   the allowlist serve as `attachment` instead.
-
-### Changed
-- **FTS5 search `total` is short-TTL cached (#183).** The PR8
-  paged hit fetch already runs as one UNION ALL + LIMIT/OFFSET,
-  but `total` still required two MATCH-evaluating `COUNT(*)`
-  queries on every search page. The total now passes through a
-  per-process `(site_id, safe_query) -> (count, written_at)`
-  cache with a 30-second TTL and a 4096-entry bound. The hit
-  list stays fresh because the LIMIT/OFFSET query runs every
-  request; only the count can lag by up to one TTL window.
-  Trade-off matches what an admin actually sees in the UI: a
-  document published mid-window appears in the next page of
-  results immediately, but the "X results" counter may be one
-  short for up to 30s.
-- **Admin app asserts boot ordering of CSRF and plugin
-  middleware (#187).** Plugin-provided before_request middleware
-  (notably the bearer middleware in `bragi.contrib.api_tokens`
-  that sets `g.api_csrf_exempt`) must register BEFORE the CSRF
-  guard so it runs first at request time, otherwise valid
-  bearer-token POSTs without a session CSRF token would be 400'd
-  by the CSRF guard. `register_csrf` now raises a `RuntimeError`
-  at boot if `pm.hook.on_app_init` hasn't run yet, naming
-  `apps/admin.py` as the fix location. CSRF itself was already
-  fail-closed (`g.api_csrf_exempt` defaults falsy, exemption
-  fires only when truthy and only after verified-bearer auth);
-  the assertion catches an ordering regression that would break
-  the bearer API, not a CSRF bypass.
-
-### Fixed
 - **Webmention receiver verifies before persisting (#181).**
   The inbox used to insert a `PENDING` row immediately on
   receipt, then flip it to `REJECTED` or `FAILED` when the
@@ -153,21 +124,102 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   end-to-end), but matters as soon as a signer library adopts an
   extension that embeds commas. Bare unquoted values continue to
   parse for spec-permissive senders.
+
+### Changed
+- **FTS5 search `total` is short-TTL cached (#183).** The single
+  UNION ALL + LIMIT/OFFSET paged hit fetch is cheap, but `total`
+  still required two MATCH-evaluating `COUNT(*)` queries on
+  every search page. The total now passes through a per-process
+  `(site_id, safe_query) -> (count, written_at)` cache with a
+  30-second TTL and a 4096-entry bound, and is invalidated on
+  every post / page publish, update, and delete event so newly
+  indexed rows surface in the count immediately. The hit list
+  stays fresh because the LIMIT/OFFSET query runs every request;
+  only the count can lag by up to one TTL window when no write
+  intervenes. Cache keys also case-fold and sort tokens, so
+  equivalent queries (`Hello World` vs `world hello`) share a
+  cache slot.
+- **Admin app asserts boot ordering of CSRF and plugin
+  middleware (#187).** Plugin-provided before_request middleware
+  (notably the bearer middleware in `bragi.contrib.api_tokens`
+  that sets `g.api_csrf_exempt`) must register BEFORE the CSRF
+  guard so it runs first at request time, otherwise valid
+  bearer-token POSTs without a session CSRF token would be 400'd
+  by the CSRF guard. `register_csrf` now raises a `RuntimeError`
+  at boot if `pm.hook.on_app_init` hasn't run yet, naming
+  `apps/admin.py` as the fix location. CSRF itself was already
+  fail-closed (`g.api_csrf_exempt` defaults falsy, exemption
+  fires only when truthy and only after verified-bearer auth);
+  the assertion catches an ordering regression that would break
+  the bearer API, not a CSRF bypass.
+
+### Fixed
+- **FTS5 search `total` cache invalidates on lifecycle events.**
+  Post / page publish, update, and delete now flush
+  `_SEARCH_TOTAL_CACHE` via the lifecycle hookimpls in
+  `bragi.contrib.search.plugin`, so a newly published document
+  appears in the "X results" counter immediately rather than
+  after the next TTL window. Equivalent queries (`Hello World`
+  vs `world hello`) also collapse to one cache slot: `_safe_query`
+  now case-folds and sorts tokens, which is safe because FTS5
+  is case-insensitive by default and AND is commutative.
+- **Page / post revision restore fires `on_post_updated`.**
+  Restoring a prior revision mutates the live row (slug, title,
+  status, body, ...) but never fired the same lifecycle hook a
+  normal save does. Plugin subscribers (search index reindex,
+  redirects auto-301 on slug change, AP outbox fanout on a
+  status->published transition) silently missed every restore.
+  Both `post_admin.restore_revision` and
+  `page_admin.restore_page_revision` now capture before/after
+  snapshots, fire `pm.hook.on_post_updated`, and dispatch
+  `on_cache_purge` so the restore is observable end-to-end.
+- **Audit log `action` filter escapes SQL LIKE metacharacters.**
+  An admin filter value containing `%` or `_` was interpreted as
+  a wildcard, so `auth%` matched every row whose action started
+  with `auth` and `_` matched any single character. The filter
+  now SQL-escapes both characters (plus `\`) before interpolation
+  and passes `escape='\\'` to `like()`, so the input matches
+  literally and the planner can use the action index.
+- **Actor cache reads happen under the lock; post-fetch recheck.**
+  `_fetch_actor` previously read the cache without holding
+  `_ACTOR_CACHE_LOCK`, so the read could race a concurrent
+  overflow eviction. The lock now also brackets the read and a
+  post-fetch recheck: a concurrent inbox POST for the same IRI
+  that won the fetch race writes its result first, and we use
+  that fresher copy instead of overwriting it. Full single-flight
+  (per-IRI condition variables) is still deferred.
+- **`is_external` compares on hostname, not netloc.**
+  `urlparse(url).netloc` includes the port and userinfo, so a
+  remote URL carrying an explicit `:443` would never match a
+  `Site.hostname` (no port). Affected the webmention outbound
+  link-scan: same-site links could be misclassified and a
+  spurious mention sent to a sibling site. Now compares on
+  `hostname`.
+- **`cms backup` / `cms export` route timestamps through
+  `bragi.core.time.aware_utcnow`** for parity with the rest of
+  the codebase. `VACUUM INTO` now SQL-escapes single quotes in
+  the destination path; the path comes from a freshly-created
+  `TemporaryDirectory`, so this is defence-in-depth against a
+  pathological `$TMPDIR` rather than a real bug.
+- **`docker/compose.dev.yml` parity with production `compose.yml`.**
+  The local-build compose file was missing `BRAGI_ATTACHMENTS_ROOT`
+  on every service and `/healthz` healthchecks on `admin` /
+  `delivery`. A `compose -f docker/compose.dev.yml up` run now
+  matches the production shape so smoke tests don't drift from
+  what the published images get. Production `bragi-tasks` also
+  gains `BRAGI_ENV: production` (and `BRAGI_ATTACHMENTS_ROOT`) so
+  a mis-set `BRAGI_SECRET_KEY` fails the sidecar's first
+  migration tick rather than silently running with the dev key.
 - **`redirects.source_path` enforces `length(...) > 0` (#184).**
   Defence-in-depth: the admin form already rejects empty input
   and every programmatic writer constructs non-empty strings,
-  but PR8's SQL-side PREFIX resolver
+  but the SQL-side PREFIX resolver
   (`substr(:path, 1, length(source_path)) = source_path`) would
   collapse to `'' == ''` for any incoming path if an empty row
   ever landed (importer bug, manual SQL fix-up, future code
   path). The new `ck_redirects_source_path_nonempty` constraint
   rejects empty rows at the DB level. Alembic migration
   `a1b2c3d4e5f6` adds the check via `batch_alter_table`.
-- **`activitypub/signature.py` uses centralised `aware_utcnow()`
-  (#185).** Two `datetime.now(UTC)` callsites
-  (HTTP `Date` header and signature-skew arithmetic) now route
-  through `bragi.core.time.aware_utcnow()` for parity with the
-  rest of the federation code. Style nit; no observable change.
 
 ## [1.11.0] - 2026-05-18
 

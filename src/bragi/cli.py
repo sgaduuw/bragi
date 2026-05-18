@@ -12,7 +12,6 @@ from __future__ import annotations
 import sys
 import tarfile
 import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -22,6 +21,7 @@ from bragi.core.db import SessionLocal, engine
 from bragi.core.export import ExportResult, export_site
 from bragi.core.middleware.sessions import purge_expired_sessions
 from bragi.core.models.site import Site
+from bragi.core.time import aware_utcnow
 from bragi.settings import settings
 
 
@@ -112,7 +112,7 @@ def backup(output_path: Path | None) -> None:
     state is a big risk for not much help.
     """
     if output_path is None:
-        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        stamp = aware_utcnow().strftime("%Y%m%d-%H%M%S")
         output_path = Path.cwd() / f"bragi-backup-{stamp}.tar.gz"
     output_path = output_path.resolve()
 
@@ -122,9 +122,15 @@ def backup(output_path: Path | None) -> None:
         # everything currently in the WAL; the result is a fully
         # restorable DB file with no companion -wal / -shm to
         # ship. AUTOCOMMIT because VACUUM (any form) refuses to
-        # run inside a transaction.
+        # run inside a transaction. The destination path comes from
+        # a freshly-created `tempfile.TemporaryDirectory()` so no
+        # user-controlled bytes reach the SQL; we still SQL-escape
+        # any single quote (POSIX permits `'` in path components,
+        # however unusual on a host with a stock /tmp) by doubling
+        # it, matching SQLite literal-string syntax.
+        snapshot_lit = str(snapshot).replace("'", "''")
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            conn.execute(text(f"VACUUM INTO '{snapshot}'"))
+            conn.execute(text(f"VACUUM INTO '{snapshot_lit}'"))
 
         attachments_root = Path(settings.attachments_root)
         with tarfile.open(output_path, "w:gz") as tar:
@@ -171,7 +177,7 @@ def export_command(site_slug: str | None, output_dir: Path | None) -> None:
     `cms import hugo` per post.
     """
     if output_dir is None:
-        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        stamp = aware_utcnow().strftime("%Y%m%d-%H%M%S")
         output_dir = Path.cwd() / f"bragi-export-{stamp}"
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)

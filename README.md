@@ -56,51 +56,6 @@ Bluesky, allowlisted oEmbed), and a task-runner sidecar container
 that owns alembic plus periodic scheduled-publish, pending-embed
 rerender, and SQLite maintenance ticks.
 
-1.5.0 wrapped the four-phase IA refactor (#77, #78, #79, #80):
-admin content URLs moved under `/admin/sites/<slug>/...`, analytics
-scoped to the site you've entered, owners get a UI to invite
-collaborators. Public delivery URLs are unchanged; plugin hookspecs
-are unchanged.
-
-1.6.0 cleans up the production deploy posture: containers run
-gunicorn against the WSGI factory (sync workers, access log on
-stdout) instead of Werkzeug's dev server. Worker counts default
-to 2 / 4 (admin / delivery), tunable via `ADMIN_WORKERS` /
-`DELIVERY_WORKERS`. No code, schema, or interface changes; the
-old image silently ran the dev server, the new image doesn't.
-
-1.6.1 fixes a Ghost-importer detection regression on Ghost 6.x
-exports (#95): the earlier head-scan heuristic looked for
-`"posts"` in the first 4 KB, but modern exports lead `db[0].data`
-with `benefits` / `custom_theme_settings`, pushing `posts` past
-the cutoff and causing valid exports to be rejected. Detection
-now does a full parse; no schema or interface change.
-
-1.7.0 reorders the admin post list by `COALESCE(published_at,
-updated_at) DESC` instead of `created_at DESC`. Published posts
-sort by publication date, drafts by last edit, and imported posts
-land in their original Ghost / WordPress / Hugo publish order
-rather than reflecting the importer's iteration order. Editing
-an old draft also bubbles it back up. No schema or hookspec
-change; admin URLs and delivery output are unchanged.
-
-1.10.0 adds slug-rename-safe internal links and an admin picker
-for inserting them. Authors write `[text](post:my-slug)` or
-`[text](post:42)` in markdown; the new
-`bragi.contrib.internal_links` plugin resolves the typed-prefix
-shape at save time, stamps the anchor with a stable
-`data-bragi-link="post:<id>"` attribute, and a Jinja filter on
-the post / page delivery templates rewrites the `href` to the
-target's current slug on every render. Renaming a post no longer
-strands every inbound link in the corpus, and there is no
-backlinks table or fanout because the existing slug-change
-auto-301 catches CDN-cached stale renders during the
-`Cache-Control` window. The TipTap admin editor gains an
-"Internal link" toolbar button that opens a search dialog over
-the active site's posts and pages; selecting a target inserts
-the typed-prefix form so authors don't have to type the
-`post:<id>` syntax by hand. Closes #117, #115.
-
 1.9.1 fixes a quietly broken task-runner sidecar: the
 `flask --app bragi.apps.admin cms ...` invocation in
 `docker/scheduler.sh` had been silently exiting rc=2 since
@@ -138,6 +93,34 @@ owns `alembic upgrade head` on start, and dispatches periodic
 intervals. The `register_markdown_extension` plugin hook is now
 wired end-to-end on both admin and delivery factories; no
 schema change.
+
+1.7.0 reorders the admin post list by `COALESCE(published_at,
+updated_at) DESC` instead of `created_at DESC`. Published posts
+sort by publication date, drafts by last edit, and imported posts
+land in their original Ghost / WordPress / Hugo publish order
+rather than reflecting the importer's iteration order. Editing
+an old draft also bubbles it back up. No schema or hookspec
+change; admin URLs and delivery output are unchanged.
+
+1.6.1 fixes a Ghost-importer detection regression on Ghost 6.x
+exports (#95): the earlier head-scan heuristic looked for
+`"posts"` in the first 4 KB, but modern exports lead `db[0].data`
+with `benefits` / `custom_theme_settings`, pushing `posts` past
+the cutoff and causing valid exports to be rejected. Detection
+now does a full parse; no schema or interface change.
+
+1.6.0 cleans up the production deploy posture: containers run
+gunicorn against the WSGI factory (sync workers, access log on
+stdout) instead of Werkzeug's dev server. Worker counts default
+to 2 / 4 (admin / delivery), tunable via `ADMIN_WORKERS` /
+`DELIVERY_WORKERS`. No code, schema, or interface changes; the
+old image silently ran the dev server, the new image doesn't.
+
+1.5.0 wrapped the four-phase IA refactor (#77, #78, #79, #80):
+admin content URLs moved under `/admin/sites/<slug>/...`, analytics
+scoped to the site you've entered, owners get a UI to invite
+collaborators. Public delivery URLs are unchanged; plugin hookspecs
+are unchanged.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and

@@ -27,6 +27,7 @@ from bragi.contrib.search.backend import (
     _remove,
     index_page,
     index_post,
+    invalidate_search_total_cache,
 )
 from bragi.contrib.search.cli import search_group
 from bragi.contrib.search.delivery import bp as search_bp
@@ -102,18 +103,21 @@ def _safe(callable_: Any, item: Any) -> None:
 def on_post_published(item: Any, session: Any) -> None:
     del session
     _safe(_index_or_remove, item)
+    invalidate_search_total_cache()
 
 
 @hookimpl
 def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], session: Any) -> None:
     del before, after, session
     _safe(_index_or_remove, item)
+    invalidate_search_total_cache()
 
 
 @hookimpl
 def on_post_deleted(item: Any, session: Any) -> None:
     del session
     _safe(_remove_item, item)
+    invalidate_search_total_cache()
 
 
 __all__ = [

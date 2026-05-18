@@ -87,15 +87,19 @@ def is_external(url: str, our_host: str) -> bool:
     """True when `url` points to a host other than `our_host`.
 
     Same-host links don't generate webmentions (a site doesn't
-    mention itself). Comparison is case-insensitive on host.
+    mention itself). Comparison is on `hostname`, not `netloc`:
+    `netloc` includes port and userinfo, so an explicit port on
+    one side (`example.com:443`) would never match a hostname
+    derived from `Site.hostname` (no port). Comparison is
+    case-insensitive.
     """
     try:
         parsed = urlparse(url)
     except ValueError:
         return False
-    if not parsed.scheme or not parsed.netloc:
+    if not parsed.scheme or not parsed.hostname:
         return False
-    return parsed.netloc.lower() != (our_host or "").lower()
+    return parsed.hostname.lower() != (our_host or "").lower()
 
 
 def find_endpoint(

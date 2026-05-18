@@ -604,6 +604,18 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
             return redirect(url_for("page_admin.list_page_revisions", page_id=page.id))
         editor_user_id = int(session["user_id"])
         _snapshot_page(db, page, editor_user_id=editor_user_id)
+        # Capture `before` BEFORE the mutation, mirroring the
+        # normal edit flow. Restoring a revision can change slug,
+        # title, status, and parent; plugin subscribers (search
+        # index, redirects auto-301, AP outbox fanout on a
+        # status->published transition) should see the same
+        # `on_post_updated` they'd see for a hand edit.
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "kind": page.kind,
+        }
         page.title = revision.title
         page.slug = revision.slug
         page.status = revision.status
@@ -615,7 +627,14 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
         db.commit()
         restored_id = page.id
         site_id_for_audit = page.site_id
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "kind": page.kind,
+        }
         pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
         pm.hook.on_cache_purge(scope="page", key=str(restored_id))
 
     audit(

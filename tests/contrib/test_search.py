@@ -598,6 +598,46 @@ def test_on_post_deleted_removes(
     assert SQLiteFTS5SearchBackend.search(blog.id, "goes-away", 1, 10).total == 0
 
 
+def test_lifecycle_hookimpls_invalidate_total_cache(
+    fts_tables_present: None,
+    seeded_site: tuple[Site, Site, User],
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A publish event must drop the cached total so a freshly
+    indexed row appears in the next search's count immediately,
+    not after a 30s TTL window. Regression for the pass-4 finding
+    that the total cache was never invalidated."""
+    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
+    from bragi.contrib.search import backend as backend_mod
+    from bragi.contrib.search.plugin import on_post_published
+
+    blog, _, user = seeded_site
+    # Prime the cache with a known query.
+    post_a = _published_post(db_session, blog, user, slug="a", title="A", body="cache-me")
+    index_post(post_a)
+    assert SQLiteFTS5SearchBackend.search(blog.id, "cache-me", 1, 10).total == 1
+    assert len(backend_mod._SEARCH_TOTAL_CACHE) == 1
+    # Publish a second post via the lifecycle hook; the cache
+    # MUST be flushed so the next search counts both rows.
+    post_b = _published_post(db_session, blog, user, slug="b", title="B", body="cache-me")
+    on_post_published(post_b, None)
+    assert backend_mod._SEARCH_TOTAL_CACHE == {}
+    assert SQLiteFTS5SearchBackend.search(blog.id, "cache-me", 1, 10).total == 2
+
+
+def test_safe_query_normalizes_case_and_token_order() -> None:
+    """Equivalent queries (`Hello World` vs `world hello`) must
+    collapse to the same MATCH string so they share a cache key.
+    FTS5 is case-insensitive and AND is commutative, so this
+    doesn't change the result set."""
+    from bragi.contrib.search.backend import _safe_query
+
+    assert _safe_query("Hello World") == _safe_query("world hello")
+    assert _safe_query("HELLO") == _safe_query("hello")
+
+
 # ============================================================
 # delivery /search
 # ============================================================

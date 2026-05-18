@@ -111,7 +111,7 @@ def receive() -> ResponseReturnValue:
 
         if not source_links_to_target(html, source, target):
             LOG.warning(
-                "webmention rejected: source HTML does not link to target;" " source=%s target=%s",
+                "webmention rejected: source HTML does not link to target; source=%s target=%s",
                 source,
                 target,
             )

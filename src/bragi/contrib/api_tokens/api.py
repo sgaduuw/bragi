@@ -198,7 +198,10 @@ def create_post(site_slug: str) -> ResponseReturnValue:
     published_at = _parse_dt(payload.get("published_at"))
 
     user = current_user()
-    assert user is not None  # _resolve_site guarantees membership
+    # `current_user()` is populated by the bearer middleware before
+    # any route handler runs; an unauthenticated request would have
+    # short-circuited at the middleware with 401.
+    assert user is not None
     with SessionLocal() as db:
         site = _resolve_site(db, site_slug)
         existing: Post | None = db.execute(

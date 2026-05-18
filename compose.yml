@@ -41,6 +41,13 @@ services:
     environment:
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
       BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
+      BRAGI_ATTACHMENTS_ROOT: /data/uploads
+      # The scheduler boots through `create_admin_app`, which
+      # refuses to start with the bundled dev `SECRET_KEY` sentinel
+      # when `BRAGI_ENV=production`. Match the gunicorn services so
+      # a mis-set secret fails the sidecar's first migration tick
+      # rather than silently running with a dev key.
+      BRAGI_ENV: production
       # Cadence overrides (all in seconds). Leave commented for
       # the defaults defined in docker/scheduler.sh.
       # SCHEDULED_PUBLISH_EVERY: "60"

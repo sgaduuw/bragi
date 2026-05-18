@@ -33,10 +33,10 @@ from bragi.core.models._mixins import IdMixin, TimestampsMixin
 class WebmentionStatus:
     """Lifecycle states for `Webmention.status`."""
 
-    PENDING = "pending"  # received, not yet verified
-    VERIFIED = "verified"  # source fetched + contains link to target
+    PENDING = "pending"  # verified, awaiting admin approval
+    VERIFIED = "verified"  # admin-approved; renders on the public post
     REJECTED = "rejected"  # admin or system rejected
-    FAILED = "failed"  # verification failed (network, missing link)
+    FAILED = "failed"  # historical: pre-v1.12 unverified rows; receiver no longer creates these
 
 
 class WebmentionType:

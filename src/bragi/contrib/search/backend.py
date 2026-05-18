@@ -42,21 +42,38 @@ _FTS_TABLES = {
 _BAD_QUERY_RE = re.compile(r"[^\w\s\-]")
 
 # Per-process cache for `(site_id, safe_query) -> total` over a
-# short TTL. The PR8 pagination move pushed the paged hit fetch
-# to a single UNION ALL + LIMIT/OFFSET, but `total` still required
-# two MATCH-evaluating `COUNT(*)` queries on every page request.
-# At personal-blog scale that's cheap; on a multi-million-row
-# corpus the two extra MATCH passes (no snippet expansion, no
-# row hydration) still cost meaningful CPU and disk reads. This
-# cache trades up to `_SEARCH_TOTAL_CACHE_TTL_S` seconds of
-# staleness for one COUNT-pair per query per TTL window. A
-# document landing mid-window can take up to that long to appear
-# in `total`; the hit list itself is fresh because the LIMIT/OFFSET
-# query runs every request.
+# short TTL. The single UNION ALL + LIMIT/OFFSET paged hit fetch
+# is cheap, but `total` still required two MATCH-evaluating
+# `COUNT(*)` queries on every page request. At personal-blog scale
+# that's cheap; on a multi-million-row corpus the two extra MATCH
+# passes (no snippet expansion, no row hydration) still cost
+# meaningful CPU and disk reads. This cache trades up to
+# `_SEARCH_TOTAL_CACHE_TTL_S` seconds of staleness for one
+# COUNT-pair per query per TTL window. A document landing
+# mid-window can take up to that long to appear in `total`; the
+# hit list itself is fresh because the LIMIT/OFFSET query runs
+# every request. The lifecycle hookimpls in `plugin.py` also call
+# `invalidate_search_total_cache()` on every post/page publish,
+# update, and delete event so the count refreshes immediately when
+# the corpus actually changed.
 _SEARCH_TOTAL_CACHE_TTL_S = 30.0
 _SEARCH_TOTAL_CACHE_MAX = 4096
 _SEARCH_TOTAL_CACHE: dict[tuple[int, str], tuple[int, float]] = {}
 _SEARCH_TOTAL_CACHE_LOCK = threading.Lock()
+
+
+def invalidate_search_total_cache() -> None:
+    """Drop every cached total. Called by the lifecycle hookimpls.
+
+    The cache spans queries, not entities, so there's no cheap way
+    to invalidate just the entries a single publish/update touches;
+    flushing the lot is the simplest correct shape and the rebuild
+    cost (one COUNT-pair on the next request per query) is small
+    compared to the alternative of serving a stale `total` for up
+    to 30 s.
+    """
+    with _SEARCH_TOTAL_CACHE_LOCK:
+        _SEARCH_TOTAL_CACHE.clear()
 
 
 def _cached_total_or_none(site_id: int, safe_query: str) -> int | None:
@@ -100,8 +117,12 @@ def _safe_query(raw: str) -> str | None:
     two-token AND search `"title" AND "hello"` instead of one
     concatenated token. Each surviving token is wrapped in double
     quotes (phrase syntax) so FTS5 sees it as a literal, not an
-    operator keyword. Returns None for the empty case so the
-    caller can short-circuit to "no results".
+    operator keyword. Tokens are case-folded and sorted so
+    equivalent queries (`Hello World` vs `world hello`) collapse
+    to the same MATCH string and share a cache key; FTS5 is
+    case-insensitive by default and AND is commutative, so this
+    doesn't change the result set. Returns None for the empty case
+    so the caller can short-circuit to "no results".
     """
     if not raw:
         return None
@@ -110,10 +131,12 @@ def _safe_query(raw: str) -> str | None:
     for token in cleaned.split():
         # A token that's entirely dashes after stripping carries no
         # signal and would confuse FTS5's NEAR operator parsing.
-        if token.strip("-"):
-            tokens.append(f'"{token}"')
+        normalized = token.lower()
+        if normalized.strip("-"):
+            tokens.append(f'"{normalized}"')
     if not tokens:
         return None
+    tokens.sort()
     return " AND ".join(tokens)
 
 
