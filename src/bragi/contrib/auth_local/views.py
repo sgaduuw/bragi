@@ -15,7 +15,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
-from bragi.contrib.auth_local.passwords import hash_password, verify_password
+from bragi.contrib.auth_local.passwords import dummy_verify, hash_password, verify_password
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.middleware.sessions import rotate_sid
@@ -57,12 +57,29 @@ def login() -> ResponseReturnValue:
             ).scalar_one_or_none()
             cred = db.get(LocalCredential, user.id) if user else None
 
-            if user is None or cred is None or not verify_password(cred.password_hash, password):
+            # On the unknown-user / no-credential branch the
+            # `verify_password` short-circuit would skip argon2's
+            # ~100 ms cost, making the response measurably faster
+            # than a wrong-password attempt and leaking email
+            # existence by timing. `dummy_verify()` runs the same
+            # cost on the no-user path so the two are timing-equivalent.
+            if user is None or cred is None:
+                dummy_verify()
+                password_ok = False
+            else:
+                password_ok = verify_password(cred.password_hash, password)
+
+            if not password_ok or user is None or cred is None:
                 # Same generic error message for unknown-user and
                 # bad-password to avoid leaking which emails exist.
-                # Audit log records the attempted email; even when
-                # the user doesn't exist the attempt is forensically
-                # useful (brute-force pattern detection later).
+                # Audit log records the attempted email in
+                # `extra["email"]`; even when the user doesn't
+                # exist the attempt is forensically useful (brute-
+                # force pattern detection later). NB: that field
+                # is plaintext, so any audit-log export path that
+                # ships to a less-trusted audience (e.g. a Loki
+                # tenant) should redact `extra.email`. Scrubbing
+                # at write time would lose the forensic value.
                 audit(
                     AuditAction.AUTH_LOGIN_FAILURE,
                     extra={"email": email, "reason": "invalid-credentials"},

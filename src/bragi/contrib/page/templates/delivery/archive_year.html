@@ -1,0 +1,15 @@
+{% extends "delivery/base.html" %}
+{% block title %}Archive {{ year }} &middot; {{ site.title }}{% endblock %}
+{% set month_names = ['January','February','March','April','May','June','July','August','September','October','November','December'] %}
+{% block content %}
+<h1>Archive {{ year }}</h1>
+<p><a href="../">&larr; All years</a></p>
+<ul class="archive-months">
+  {% for month, count in months %}
+  <li>
+    <a href="{{ '%02d' % month }}/">{{ month_names[month - 1] }}</a>
+    <span class="meta">{{ count }} post{{ '' if count == 1 else 's' }}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

@@ -17,9 +17,8 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-import requests
-
 from bragi.contrib.embeds.providers.base import EmbedError
+from bragi.core.http import SafeHTTPError, safe_get
 
 _OEMBED_ENDPOINT = "https://embed.bsky.app/oembed"
 
@@ -35,13 +34,18 @@ class BlueskyProvider:
 
     def render(self, url: str, *, timeout: float, user_agent: str) -> str:
         try:
-            resp = requests.get(
+            # Route through `safe_get` so any 3xx the bsky endpoint
+            # returns is re-validated against the public-IP guard
+            # before we follow it.
+            resp = safe_get(
                 _OEMBED_ENDPOINT,
                 params={"url": url, "format": "json"},
                 headers={"User-Agent": user_agent},
                 timeout=timeout,
             )
-        except requests.RequestException as exc:
+        except SafeHTTPError as exc:
+            raise EmbedError(f"bluesky oembed blocked by SSRF guard for {url!r}: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 - render fallbacks downstream
             raise EmbedError(f"bluesky oembed network error for {url!r}: {exc}") from exc
 
         if resp.status_code != 200:

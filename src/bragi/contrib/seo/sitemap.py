@@ -68,6 +68,11 @@ def sitemap_xml() -> ResponseReturnValue:
                     # A misbehaving content-type plugin shouldn't
                     # take the whole sitemap out; skip and move on.
                     continue
+                if path is None:
+                    # Item has no public URL on this site (e.g. a
+                    # post when the site lacks a POST_INDEX page).
+                    # Skip rather than emit a malformed entry.
+                    continue
                 entries.append((row.updated_at, path, row))
 
     # Sort newest-first across all content types so the

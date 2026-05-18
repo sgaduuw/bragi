@@ -15,8 +15,6 @@ URL, so these views assume an authenticated user.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from flask import (
     Blueprint,
     abort,
@@ -35,6 +33,7 @@ from sqlalchemy.orm import Session
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
+from bragi.core.models.attachment import Attachment
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
 from bragi.core.models.tag import Tag
@@ -46,6 +45,7 @@ from bragi.core.permissions import (
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.security import current_user
 from bragi.core.text import slugify
+from bragi.core.time import naive_utcnow
 
 bp = Blueprint(
     "post_admin",
@@ -63,7 +63,32 @@ def _form_from_request() -> dict[str, str]:
         "body_markdown": request.form.get("body_markdown") or "",
         "status": request.form.get("status") or PostStatus.DRAFT,
         "tags": (request.form.get("tags") or "").strip(),
+        "og_image_id": (request.form.get("og_image_id") or "").strip(),
     }
+
+
+def _resolve_og_image_id(db: Session, raw: str, site_id: int) -> tuple[int | None, str | None]:
+    """Validate a form-supplied attachment id.
+
+    Returns `(value, error)`: empty string clears (None, None); a
+    valid same-site attachment id resolves to (int, None); anything
+    that doesn't exist or belongs to another site returns
+    (None, message). The same-site check is the load-bearing one:
+    without it a crafted POST could surface a different tenant's
+    attachment in this site's social preview.
+    """
+    if not raw:
+        return None, None
+    try:
+        candidate_id = int(raw)
+    except ValueError:
+        return None, "OG image id must be an integer."
+    attachment = db.get(Attachment, candidate_id)
+    if attachment is None:
+        return None, "OG image attachment not found."
+    if attachment.site_id != site_id:
+        return None, "OG image must belong to this site."
+    return candidate_id, None
 
 
 def _parse_tag_csv(raw: str) -> list[tuple[str, str]]:
@@ -182,6 +207,10 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return render_template("admin/edit.html", post=None, form=form)
+        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], site_id)
+        if og_image_err is not None:
+            flash(og_image_err, "error")
+            return render_template("admin/edit.html", post=None, form=form)
 
         body_markdown = form["body_markdown"]
         new_status = form["status"]
@@ -194,7 +223,8 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             body_excerpt=make_excerpt(body_markdown),
             author_id=int(session["user_id"]),
             status=new_status,
-            published_at=(datetime.now(UTC) if new_status == PostStatus.PUBLISHED else None),
+            published_at=(naive_utcnow() if new_status == PostStatus.PUBLISHED else None),
+            og_image_id=og_image_id,
         )
         db.add(new_post_row)
         db.flush()
@@ -247,12 +277,17 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                 "body_markdown": post.body_markdown,
                 "status": post.status,
                 "tags": ", ".join(t.label for t in post.tags),
+                "og_image_id": str(post.og_image_id) if post.og_image_id else "",
             }
             return render_template("admin/edit.html", post=post, form=form)
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
+            return render_template("admin/edit.html", post=post, form=form)
+        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], post.site_id)
+        if og_image_err is not None:
+            flash(og_image_err, "error")
             return render_template("admin/edit.html", post=post, form=form)
 
         before = {"slug": post.slug, "title": post.title, "status": post.status}
@@ -266,6 +301,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post.body_markdown = form["body_markdown"]
         post.body_html = render_markdown(form["body_markdown"])
         post.body_excerpt = make_excerpt(form["body_markdown"])
+        post.og_image_id = og_image_id
 
         # Transition to published sets published_at the first time
         # the status flips. Re-publishing doesn't reset the timestamp.
@@ -273,7 +309,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             post.status != PostStatus.PUBLISHED and form["status"] == PostStatus.PUBLISHED
         )
         if is_first_publish:
-            post.published_at = datetime.now(UTC)
+            post.published_at = naive_utcnow()
         post.status = form["status"]
 
         _sync_post_tags(db, post, form["tags"], post.site_id)

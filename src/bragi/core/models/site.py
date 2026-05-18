@@ -51,3 +51,25 @@ class Site(IdMixin, TimestampsMixin, Base):
     extra_settings: Mapped[dict[str, Any]] = mapped_column(
         MutableDict.as_mutable(JSON), default=dict
     )
+    # Optional static homepage. When NULL (default), `/` falls
+    # through to the post-index landing page (the post plugin's
+    # resolve_home fallback). When set, `/` renders the referenced
+    # Page via the page plugin's resolve_home tryfirst impl.
+    # ON DELETE SET NULL so deleting the target Page cleanly
+    # reverts the site to the default landing page instead of
+    # leaving a dangling FK.
+    home_page_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pages.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        index=True,
+    )
+    # Default OG / Twitter Card image for posts and pages that
+    # don't specify one of their own. NULL leaves the meta tag
+    # omitted entirely. ON DELETE SET NULL so removing the
+    # attachment cleanly reverts the site to no default OG image.
+    default_og_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attachments.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+    )

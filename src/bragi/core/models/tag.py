@@ -25,7 +25,7 @@ class Tag(IdMixin, TimestampsMixin, Base):
     __tablename__ = "tags"
     __table_args__ = (UniqueConstraint("site_id", "slug", name="uq_tags_site_slug"),)
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     slug: Mapped[str] = mapped_column(String(64))
     label: Mapped[str] = mapped_column(String(128))
 

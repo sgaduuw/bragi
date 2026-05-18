@@ -21,7 +21,7 @@ factory. Idempotent within a single app instance.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any, cast
 from uuid import uuid4
 
@@ -32,9 +32,19 @@ from sqlalchemy import delete
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.session import Session as SessionRow
+from bragi.core.time import naive_utcnow
 
 COOKIE_NAME = "bragi_sid"
 DEFAULT_LIFETIME = timedelta(days=14)
+# Don't rewrite `last_seen_at` on every request when the existing
+# value is within this window. Every page render of the admin UI
+# fires N htmx subrequests, each of which would otherwise commit a
+# UPDATE sessions SET last_seen_at = ... on a single row. The
+# downsample lets the row settle into a write rate that matches
+# what the "last seen" column is actually for (operator visibility,
+# not per-request precision). 60s also keeps the SQLite write
+# pressure off the WAL during burst editing.
+LAST_SEEN_BUMP_INTERVAL = timedelta(seconds=60)
 
 
 class BragiServerSession(dict[str, Any], SessionMixin):
@@ -122,20 +132,23 @@ class BragiSessionInterface(SessionInterface):
         if not sid:
             return BragiServerSession(sid=None, new=True)
 
-        now = datetime.now(UTC)
+        now = naive_utcnow()
         with SessionLocal() as db:
             row = db.get(SessionRow, sid)
             if row is None:
                 return BragiServerSession(sid=None, new=True)
-            # Compare naive vs naive: SQLite stores datetimes naive
-            # (UTC-implied). Drop tz from `now` for the compare.
-            if row.expires_at < now.replace(tzinfo=None):
+            if row.expires_at < now:
                 db.delete(row)
                 db.commit()
                 return BragiServerSession(sid=None, new=True)
-            row.last_seen_at = now.replace(tzinfo=None)
             data = dict(row.data or {})
-            db.commit()
+            # Throttle `last_seen_at` bumps: see LAST_SEEN_BUMP_INTERVAL.
+            # Skipping the commit when no other state changed also
+            # avoids the WAL write entirely on read-only requests
+            # against a warm session.
+            if row.last_seen_at is None or (now - row.last_seen_at) >= LAST_SEEN_BUMP_INTERVAL:
+                row.last_seen_at = now
+                db.commit()
         return BragiServerSession(sid=sid, initial=data, new=False)
 
     def save_session(
@@ -174,7 +187,7 @@ class BragiSessionInterface(SessionInterface):
             return
 
         sid = sess.sid or uuid4().hex
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = naive_utcnow()
         expires_at = now + DEFAULT_LIFETIME
         from flask import request  # local import: only valid in request scope
 
@@ -243,7 +256,7 @@ def purge_expired_sessions() -> int:
     Returns the number of rows deleted. Intended for a cron job or
     one-off cleanup (`flask cms session purge`).
     """
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = naive_utcnow()
     with SessionLocal() as db:
         result = db.execute(delete(SessionRow).where(SessionRow.expires_at < now))
         db.commit()

@@ -23,10 +23,14 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
+from bragi.core.models.attachment import Attachment
+from bragi.core.models.page import Page, PageKind, PageStatus
+from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
 from bragi.core.security import current_user, is_superuser
+from bragi.core.url import page_url_for
 
 bp = Blueprint(
     "site_admin",
@@ -69,6 +73,8 @@ def _form_from_request() -> dict[str, str]:
         "timezone": (request.form.get("timezone") or "UTC").strip(),
         "canonical_url": (request.form.get("canonical_url") or "").strip(),
         "theme": (request.form.get("theme") or "").strip(),
+        "home_page_id": (request.form.get("home_page_id") or "").strip(),
+        "default_og_image_id": (request.form.get("default_og_image_id") or "").strip(),
     }
 
 
@@ -94,6 +100,75 @@ def _theme_or_error(slug: str) -> tuple[str | None, str | None]:
     return slug, None
 
 
+def _published_pages_for(db: Any, site_id: int) -> list[Page]:
+    """Pages eligible to be promoted to the homepage of `site_id`.
+
+    Only PUBLISHED pages on the same site qualify; drafts and
+    archived pages can't be the public homepage, and a page on
+    another site would leak across the multisite boundary. Sorted
+    by title so the dropdown is stable.
+    """
+    return list(
+        db.execute(
+            select(Page)
+            .where(Page.site_id == site_id, Page.status == PageStatus.PUBLISHED)
+            .order_by(Page.title)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _default_og_image_id_or_error(db: Any, raw: str, site_id: int) -> tuple[int | None, str | None]:
+    """Resolve the form's `default_og_image_id` value.
+
+    Empty clears (None, None); a valid same-site attachment id
+    resolves to (int, None); anything that doesn't exist or
+    belongs to another site returns (None, message). Same-site
+    is the load-bearing check: without it a crafted POST could
+    point this site's default OG image at another tenant's
+    attachment.
+    """
+    if not raw:
+        return None, None
+    try:
+        candidate_id = int(raw)
+    except ValueError:
+        return None, "Default OG image id must be an integer."
+    attachment = db.get(Attachment, candidate_id)
+    if attachment is None:
+        return None, "Default OG image attachment not found."
+    if attachment.site_id != site_id:
+        return None, "Default OG image must belong to this site."
+    return candidate_id, None
+
+
+def _home_page_id_or_error(db: Any, raw: str, site_id: int) -> tuple[int | None, str | None]:
+    """Resolve the form's `home_page_id` value.
+
+    Returns `(value, error)`: empty string clears (None, None);
+    a valid id resolves to (int, None); anything that doesn't
+    exist / isn't published / belongs to another site returns
+    (None, message). The same-site check is the load-bearing one:
+    the FK constraint can't enforce it, so without this guard a
+    crafted POST could swap in a page from a different tenant.
+    """
+    if not raw:
+        return None, None
+    try:
+        candidate_id = int(raw)
+    except ValueError:
+        return None, "Home page selection is invalid."
+    page = db.get(Page, candidate_id)
+    if page is None:
+        return None, "Home page not found."
+    if page.site_id != site_id:
+        return None, "Home page must belong to this site."
+    if page.status != PageStatus.PUBLISHED:
+        return None, "Home page must be a published page."
+    return candidate_id, None
+
+
 def _validate(form: dict[str, str]) -> list[str]:
     """Return a list of human-readable validation errors, empty on OK."""
     errors: list[str] = []
@@ -104,6 +179,83 @@ def _validate(form: dict[str, str]) -> list[str]:
     if not form["title"]:
         errors.append("Title is required.")
     return errors
+
+
+def _sync_home_page_redirect(
+    db: Any,
+    site_id: int,
+    old_home_page_id: int | None,
+    new_home_page_id: int | None,
+) -> None:
+    """Add / remove the page-slug → / redirect when home_page_id changes.
+
+    A page set as the site home is reachable at `/`; the
+    slug-derived URL should 301 there so a single canonical URL
+    is in play. For a STATIC home page the redirect is EXACT
+    (only the page URL itself); for a POST_INDEX home, PREFIX
+    so all post and tag URLs underneath also fold onto `/`.
+
+    Called before commit so the redirect change lands in the same
+    transaction as the site update. Idempotent on repeat saves
+    that don't actually change home_page_id (no-op early-out).
+
+    Per #130 option (b): the manipulation is inline here rather
+    than going through a hookspec. Promote to `on_site_updated`
+    when a second consumer materialises.
+    """
+    if old_home_page_id == new_home_page_id:
+        return
+    if old_home_page_id is not None:
+        old_page = db.get(Page, old_home_page_id)
+        if old_page is not None:
+            old_url = page_url_for(old_page, db=db)
+            # The previous home redirect could be either EXACT
+            # (STATIC) or PREFIX (POST_INDEX); deactivate any row
+            # we ourselves would have written. Restricting to
+            # target="/" avoids touching unrelated manual rows on
+            # the same source path.
+            for mt in (MatchType.EXACT, MatchType.PREFIX):
+                row = db.execute(
+                    select(Redirect).where(
+                        Redirect.site_id == site_id,
+                        Redirect.source_path == old_url,
+                        Redirect.match_type == mt,
+                        Redirect.target == "/",
+                    )
+                ).scalar_one_or_none()
+                if row is not None:
+                    row.active = False
+    if new_home_page_id is not None:
+        new_page = db.get(Page, new_home_page_id)
+        if new_page is not None:
+            new_url = page_url_for(new_page, db=db)
+            match_type = (
+                MatchType.PREFIX if new_page.kind == PageKind.POST_INDEX else MatchType.EXACT
+            )
+            existing = db.execute(
+                select(Redirect).where(
+                    Redirect.site_id == site_id,
+                    Redirect.source_path == new_url,
+                    Redirect.match_type == match_type,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                existing.target = "/"
+                existing.status_code = 301
+                existing.active = True
+                existing.source = RedirectSource.HOME_PAGE_CHANGE
+            else:
+                db.add(
+                    Redirect(
+                        site_id=site_id,
+                        source_path=new_url,
+                        target="/",
+                        status_code=301,
+                        match_type=match_type,
+                        source=RedirectSource.HOME_PAGE_CHANGE,
+                        active=True,
+                    )
+                )
 
 
 @bp.route("/", methods=["GET"])
@@ -147,9 +299,30 @@ def site_dashboard(site_slug: str) -> ResponseReturnValue:
     """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
-    # `resolve_site_or_abort` already expunged the row so the
-    # chrome can read it post-render; no further detach needed.
-    return render_template("admin/site_dashboard.html", site=site, is_superuser=is_superuser())
+        # The "/" handler check is config-quality info for the
+        # admin: if no home_page_id is set and the site has no
+        # POST_INDEX page, visitors see theme_default's welcome
+        # stub. A banner on the dashboard surfaces that fact so
+        # the operator notices.
+        has_post_index = (
+            db.execute(
+                select(Page.id).where(
+                    Page.site_id == site.id,
+                    Page.kind == PageKind.POST_INDEX,
+                    Page.status == PageStatus.PUBLISHED,
+                )
+            ).first()
+            is not None
+        )
+        home_status = (
+            "welcome_fallback" if site.home_page_id is None and not has_post_index else "configured"
+        )
+    return render_template(
+        "admin/site_dashboard.html",
+        site=site,
+        is_superuser=is_superuser(),
+        home_status=home_status,
+    )
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -187,19 +360,38 @@ def new_site() -> ResponseReturnValue:
         # request, so `current_user()` is not None here.
         creator = current_user()
         assert creator is not None  # gated by _gate / superuser check
-        db.add(
-            Site(
-                slug=form["slug"],
-                hostname=form["hostname"],
-                title=form["title"],
-                locale=form["locale"],
-                timezone=form["timezone"],
-                canonical_url=canonical,
-                active=True,
-                theme=theme_value,
-                owner_user_id=creator.id,
-            )
+        new_site_row = Site(
+            slug=form["slug"],
+            hostname=form["hostname"],
+            title=form["title"],
+            locale=form["locale"],
+            timezone=form["timezone"],
+            canonical_url=canonical,
+            active=True,
+            theme=theme_value,
+            owner_user_id=creator.id,
         )
+        db.add(new_site_row)
+        db.flush()
+
+        # Optional scaffold: a POST_INDEX page at /blog/ so post
+        # URLs immediately have a home. Checkbox defaults to on
+        # in the template; operators uncheck for sites without a
+        # blog (a docs-only site, a landing-page-only site, etc.).
+        if request.form.get("create_blog") == "1":
+            db.add(
+                Page(
+                    site_id=new_site_row.id,
+                    slug="blog",
+                    title="Blog",
+                    body_markdown="",
+                    body_html="",
+                    body_excerpt="",
+                    author_id=creator.id,
+                    status=PageStatus.PUBLISHED,
+                    kind=PageKind.POST_INDEX,
+                )
+            )
         db.commit()
         flash(f"Site '{form['slug']}' created.", "success")
 
@@ -224,6 +416,10 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 "timezone": site.timezone,
                 "canonical_url": site.canonical_url,
                 "theme": site.theme or "",
+                "home_page_id": str(site.home_page_id) if site.home_page_id else "",
+                "default_og_image_id": (
+                    str(site.default_og_image_id) if site.default_og_image_id else ""
+                ),
             }
             aliases = (
                 db.execute(
@@ -234,12 +430,14 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 .scalars()
                 .all()
             )
+            home_pages = _published_pages_for(db, site.id)
             return render_template(
                 "admin/sites_edit.html",
                 site=site,
                 form=form,
                 aliases=aliases,
                 themes=themes,
+                home_pages=home_pages,
             )
 
         form = _form_from_request()
@@ -247,10 +445,25 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         theme_value, theme_err = _theme_or_error(form["theme"])
         if theme_err is not None:
             errors.append(theme_err)
+        home_page_value, home_page_err = _home_page_id_or_error(db, form["home_page_id"], site.id)
+        if home_page_err is not None:
+            errors.append(home_page_err)
+        default_og_image_value, default_og_image_err = _default_og_image_id_or_error(
+            db, form["default_og_image_id"], site.id
+        )
+        if default_og_image_err is not None:
+            errors.append(default_og_image_err)
+        home_pages = _published_pages_for(db, site.id)
         if errors:
             for err in errors:
                 flash(err, "error")
-            return render_template("admin/sites_edit.html", site=site, form=form, themes=themes)
+            return render_template(
+                "admin/sites_edit.html",
+                site=site,
+                form=form,
+                themes=themes,
+                home_pages=home_pages,
+            )
 
         # Uniqueness checks excluding the row being edited.
         for column, value in (("slug", form["slug"]), ("hostname", form["hostname"])):
@@ -259,8 +472,15 @@ def edit_site(site_id: int) -> ResponseReturnValue:
             ).scalar_one_or_none()
             if existing is not None:
                 flash(f"Another site already uses {column} {value!r}.", "error")
-                return render_template("admin/sites_edit.html", site=site, form=form, themes=themes)
+                return render_template(
+                    "admin/sites_edit.html",
+                    site=site,
+                    form=form,
+                    themes=themes,
+                    home_pages=home_pages,
+                )
 
+        old_home_page_id = site.home_page_id
         site.slug = form["slug"]
         site.hostname = form["hostname"]
         site.title = form["title"]
@@ -268,6 +488,12 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         site.timezone = form["timezone"]
         site.canonical_url = form["canonical_url"] or f"https://{form['hostname']}"
         site.theme = theme_value
+        site.home_page_id = home_page_value
+        site.default_og_image_id = default_og_image_value
+        # Sync the page-slug → / redirect inside the same
+        # transaction so a half-applied state (site updated but
+        # redirect stale) can never be observed.
+        _sync_home_page_redirect(db, site.id, old_home_page_id, home_page_value)
         db.commit()
         flash(f"Site '{form['slug']}' updated.", "success")
 

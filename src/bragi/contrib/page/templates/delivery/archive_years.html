@@ -1,0 +1,17 @@
+{% extends "delivery/base.html" %}
+{% block title %}Archive &middot; {{ site.title }}{% endblock %}
+{% block content %}
+<h1>Archive</h1>
+{% if years %}
+<ul class="archive-years">
+  {% for year, count in years %}
+  <li>
+    <a href="{{ request.path }}{{ year }}/">{{ year }}</a>
+    <span class="meta">{{ count }} post{{ '' if count == 1 else 's' }}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>No published posts yet.</p>
+{% endif %}
+{% endblock %}

@@ -18,6 +18,7 @@ from bragi.apps.delivery import create_delivery_app
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from tests.conftest import seed_blog_index
 
 
 @pytest.fixture
@@ -50,6 +51,11 @@ def delivery_app(
     )
     db_session.add_all([site, other_site])
     db_session.flush()
+
+    # Posts derive their public URL from each site's POST_INDEX
+    # page; without one, `/posts/<slug>/` is unreachable.
+    seed_blog_index(db_session, site, commit=False)
+    seed_blog_index(db_session, other_site, commit=False)
 
     db_session.add(
         Post(
@@ -181,7 +187,13 @@ def test_noindex_meta_when_post_noindex(
     assert '<meta name="robots" content="noindex">' in body
 
 
-def test_post_plugin_registers_delivery_blueprint() -> None:
-    """The post plugin contributes a delivery Blueprint."""
+def test_post_plugin_registers_templates_blueprint() -> None:
+    """Post plugin contributes the templates-only Blueprint.
+
+    Posts no longer own URL routes; the page plugin's dispatcher
+    handles `<post_index>/<post-slug>/`. This Blueprint exists
+    only so the post plugin's `delivery/post.html` template
+    folder is reachable through the app's Jinja loader.
+    """
     app = create_delivery_app()
-    assert "post_delivery" in app.blueprints
+    assert "post_templates" in app.blueprints

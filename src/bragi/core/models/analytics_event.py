@@ -25,11 +25,15 @@ from bragi.core.models._mixins import IdMixin
 class AnalyticsEvent(IdMixin, Base):
     __tablename__ = "analytics_events"
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     event_type: Mapped[str] = mapped_column(String(32), index=True)
     path: Mapped[str | None] = mapped_column(String(1024), default=None)
     referrer: Mapped[str | None] = mapped_column(String(1024), default=None)
     user_agent_class: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
+    # Anonymise pageviews when the user row goes; we keep the
+    # rollups (the analytics admin doesn't show identities anyway).
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
     occurred_at: Mapped[datetime] = mapped_column(index=True)
     extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

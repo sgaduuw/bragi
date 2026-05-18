@@ -381,6 +381,77 @@ def test_reindex_all_site_filter(
     assert SQLiteFTS5SearchBackend.search(other.id, "alpha", 1, 10).total == 0
 
 
+def test_search_paginates_at_sql_level(
+    fts_tables_present: None,
+    seeded_site: tuple[Site, Site, User],
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """page=1 / page=2 with page_size=2 across 5 matching posts.
+
+    Total stays constant; the hit slices are disjoint and ordered
+    by bm25 ASC (lower is better, by convention). Hardens the SQL
+    LIMIT/OFFSET path that replaced the in-memory slice.
+    """
+    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
+    blog, _, user = seeded_site
+    for i in range(5):
+        post = _published_post(
+            db_session, blog, user, slug=f"p{i}", title=f"P{i}", body="unique-token-zzz"
+        )
+        index_post(post)
+
+    page1 = SQLiteFTS5SearchBackend.search(blog.id, "unique-token-zzz", page=1, page_size=2)
+    page2 = SQLiteFTS5SearchBackend.search(blog.id, "unique-token-zzz", page=2, page_size=2)
+    page3 = SQLiteFTS5SearchBackend.search(blog.id, "unique-token-zzz", page=3, page_size=2)
+
+    assert page1.total == 5
+    assert page2.total == 5
+    assert page3.total == 5
+    assert len(page1.hits) == 2
+    assert len(page2.hits) == 2
+    assert len(page3.hits) == 1
+    ids_p1 = {h.entity_id for h in page1.hits}
+    ids_p2 = {h.entity_id for h in page2.hits}
+    ids_p3 = {h.entity_id for h in page3.hits}
+    assert not (ids_p1 & ids_p2)
+    assert not (ids_p1 & ids_p3)
+    assert not (ids_p2 & ids_p3)
+    # Sort invariant inside each page: bm25 ASC.
+    for hits in (page1.hits, page2.hits, page3.hits):
+        scores = [h.score for h in hits]
+        assert scores == sorted(scores)
+
+
+def test_search_mixes_posts_and_pages_under_sql_pagination(
+    fts_tables_present: None,
+    seeded_site: tuple[Site, Site, User],
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`total` sums both scopes; a paged hit list can include both."""
+    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
+    blog, _, user = seeded_site
+    for i in range(3):
+        post = _published_post(
+            db_session, blog, user, slug=f"po{i}", title=f"PO{i}", body="rare-mixed-yyy"
+        )
+        index_post(post)
+    for i in range(3):
+        page = _published_page(
+            db_session, blog, user, slug=f"pa{i}", title=f"PA{i}", body="rare-mixed-yyy"
+        )
+        index_page(page)
+
+    results = SQLiteFTS5SearchBackend.search(blog.id, "rare-mixed-yyy", page=1, page_size=10)
+    assert results.total == 6
+    assert len(results.hits) == 6
+    scopes = {h.scope for h in results.hits}
+    assert scopes == {"post", "page"}
+
+
 # ============================================================
 # lifecycle hookimpls
 # ============================================================

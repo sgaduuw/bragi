@@ -41,7 +41,7 @@ from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.render.markdown import render_markdown
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, seed_blog_index
 
 # ============================================================
 # Fixtures
@@ -79,6 +79,7 @@ def seeded(db_session: Session) -> tuple[Site, User]:
     )
     db_session.add(site)
     db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
     db_session.add_all(
         [
             Post(
@@ -365,6 +366,7 @@ def test_end_to_end_target_rename_reflected_without_source_rerender(
         )
         db.add(site)
         db.flush()
+        seed_blog_index(db, site, commit=False)
         target = Post(
             site_id=site.id,
             author_id=user.id,
@@ -429,6 +431,7 @@ def test_end_to_end_target_deletion_marks_broken_without_500(
         )
         db.add(site)
         db.flush()
+        seed_blog_index(db, site, commit=False)
         target = Post(
             site_id=site.id,
             author_id=user.id,

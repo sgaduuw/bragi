@@ -190,15 +190,48 @@ def resolve_redirect(site: Any, path: str) -> RedirectTarget | None:
 
 
 # ============================================================
+# Home page dispatch
+# ============================================================
+
+
+@hookspec(firstresult=True)
+def resolve_home(site: Any) -> Any:
+    """Resolve the response for the site's `/` landing page.
+
+    Returns a fully-formed Flask `Response` (with cache validators
+    already attached), or `None` to defer to the next impl. First
+    non-None result wins.
+
+    The `bragi.contrib.page` plugin's tryfirst impl returns a
+    rendered static homepage when `Site.home_page_id` is set; the
+    `bragi.contrib.post` plugin's default-priority impl returns
+    the paginated recent-posts index as the fallback. A site
+    operator switches between the two by setting or clearing
+    `home_page_id` on the site, no code change needed.
+
+    Impls that don't apply (mismatched site, unpublished target,
+    plugin not in scope) must return `None` so the next impl gets
+    its turn.
+    """
+    ...
+
+
+# ============================================================
 # Admin UI
 # ============================================================
 
 
 @hookspec
-def register_admin_blueprint() -> Blueprint:
-    """Return a Flask Blueprint to mount under the admin app.
-    Only fires on the admin app; the delivery app does not call
-    this hook.
+def register_admin_blueprint() -> Blueprint | list[Blueprint]:
+    """Return a Flask Blueprint (or a list of them) to mount under
+    the admin app. Only fires on the admin app; the delivery app
+    does not call this hook.
+
+    Most plugins return a single Blueprint. A plugin contributing
+    multiple URL spaces with different prefixes (e.g.
+    `bragi.contrib.api_tokens` exposing both a token-management
+    UI and a JSON REST surface) may return a list, which the
+    loader flattens.
     """
     ...
 

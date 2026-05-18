@@ -4,9 +4,48 @@
 {% block content %}
 <h1>{{ 'Edit page' if is_edit else 'New page' }}</h1>
 
+{% if swap_pending %}
+<div class="banner banner--warning">
+  <p><strong>Confirm post_index swap</strong></p>
+  <p>
+    Saving will demote <code>{{ swap_target.title }}</code>
+    (slug <code>{{ swap_target.slug }}</code>) from post_index
+    to static. Post URLs on this site will move from that page's
+    path to this page's path; a prefix 301 will be inserted to
+    cover the change.
+  </p>
+  <p>Cancel by going back; confirm by saving again below.</p>
+</div>
+{% endif %}
+
+{% if demotion_pending %}
+<div class="banner banner--warning">
+  <p><strong>Confirm post_index demotion</strong></p>
+  <p>
+    This is the only post_index page on the site. Demoting it to
+    static removes the public post URLs from this site:
+    {% if demotion_post_count %}
+      {{ demotion_post_count }} published post{% if demotion_post_count != 1 %}s{% endif %}
+      will become unreachable until another page is promoted to
+      post_index.
+    {% else %}
+      no posts are published yet, but any posts created later will
+      have no public URL until another page is promoted to
+      post_index.
+    {% endif %}
+  </p>
+  <p>
+    Cancel by going back, or promote another page to post_index
+    first; confirm by saving again below.
+  </p>
+</div>
+{% endif %}
+
 <form method="post"
       action="{{ url_for('page_admin.edit_page', page_id=page.id) if is_edit else url_for('page_admin.new_page') }}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  {% if swap_pending %}<input type="hidden" name="acknowledge_swap" value="1">{% endif %}
+  {% if demotion_pending %}<input type="hidden" name="acknowledge_demotion" value="1">{% endif %}
 
   <fieldset>
     <label for="title">Title</label>
@@ -48,6 +87,29 @@
       <option value="published" {% if current_status == 'published' %}selected{% endif %}>Published</option>
       <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archived</option>
     </select>
+  </fieldset>
+
+  <fieldset>
+    <label for="kind">Kind</label>
+    <select name="kind" id="kind">
+      {% set current_kind = form.get('kind', 'static') %}
+      <option value="static" {% if current_kind == 'static' %}selected{% endif %}>Static page</option>
+      <option value="post_index" {% if current_kind == 'post_index' %}selected{% endif %}>Post index (hosts blog listing)</option>
+    </select>
+    <small>
+      A site can have at most one post_index page. Promoting another
+      page to post_index will demote the existing one back to static
+      and you'll be asked to confirm before the change is saved.
+    </small>
+  </fieldset>
+
+  <fieldset>
+    <label for="og_image_id">Social-share image (attachment id)</label>
+    <input type="number" name="og_image_id" id="og_image_id" min="1"
+           value="{{ form.get('og_image_id', '') }}">
+    <small>Optional. Renders as og:image / twitter:image. Look up
+      the attachment id in the attachments admin; falls back to
+      the site's default OG image when blank.</small>
   </fieldset>
 
   {% if is_edit %}

@@ -6,6 +6,606 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-05-18
+
+### Added
+- **ActivityPub federation: one actor per site (#148).** New
+  `bragi.contrib.activitypub` plugin turns each Site into a
+  follow-able fediverse actor addressed as
+  `@<site-slug>@<hostname>`. Mastodon users follow the actor;
+  published posts arrive as Create+Note activities with a link
+  back to the canonical post URL. New tables: `site_keypairs`
+  (per-site RSA 2048, generated on first /actor hit or via
+  `cms activitypub keygen --site SLUG`), `activitypub_followers`
+  (one row per remote actor), `activitypub_outbox` (per-recipient
+  delivery queue). Endpoints on the delivery app:
+  `/.well-known/webfinger`, `/actor`, `/actor/inbox`,
+  `/actor/outbox`, `/actor/followers`. HTTP signatures
+  (draft-cavage-http-signatures-12, RSA-SHA256) on outbound
+  POSTs; inbound POSTs verified against the sender's published
+  `publicKeyPem`. `Follow` and `Undo Follow` activities are
+  handled; other types ACK silently. On post publish, a fanout
+  queues one row per follower, and `cms activitypub send-pending`
+  ships them. Out of v1: receiving replies as comments (bragi
+  has no comment system), outbound Like / Boost / Reply, DM-
+  style ActivityPub, multi-actor per author. New `cryptography`
+  dep (was already transitively present via authlib).
+- **Webmentions: send + receive + moderate (#147).** New
+  `bragi.contrib.webmentions` plugin closes the indieweb loop on
+  both sides. On `on_post_published` / `on_post_updated` (when
+  the post lands published), every external `<a href>` in the
+  rendered body is queued in `webmention_outbox`; the new
+  `cms webmentions send-pending` CLI walks the queue, performs
+  endpoint discovery per W3C §3.1.2 (Link header first, then
+  `<link rel="webmention">` in `<head>`), and POSTs the mention.
+  Idempotent on already-sent rows; bounded by `--limit` for
+  cron-friendly runs. On the inbox side, `POST /webmentions` on
+  the delivery app validates the source URL fetches and links to
+  the target (per W3C §3.2.1), extracts an h-card author shape
+  (regex subset; full mf2py is out of v1 per the issue), and
+  inserts a row with `status=verified, approved=false`. Admin
+  moderation at `/admin/sites/<slug>/webmentions/` approves /
+  rejects; the post template renders an "Mentioned by" aside
+  listing approved verified rows. Discovery
+  `<link rel="webmention">` is injected into the delivery
+  `<head>` automatically.
+- **API tokens for programmatic posting (#146).** New
+  `personal_access_tokens` table backs long-lived bearer
+  credentials in the format
+  `brg_<public_id>_<secret>` (public_id is a 22-char urlsafe
+  base64 of a uuid4; secret is 32 url-safe chars argon2id-hashed
+  at rest). The new `bragi.contrib.api_tokens` plugin installs a
+  `before_request` (with `tryfirst=True` so it runs ahead of the
+  session auth guard) that accepts
+  `Authorization: Bearer ...`, populates `g._cached_user` from
+  the token's owner, bumps `last_used_at`, and writes a
+  `token.used` audit row. CSRF middleware steps aside when an
+  `Authorization: Bearer` header is present (a CORS-restricted
+  header that cross-origin browser scripts can't add). Admin
+  pages at `/admin/account/tokens/` list / create / revoke
+  tokens (plaintext shown ONCE on create); a JSON REST surface at
+  `/admin/api/sites/<slug>/posts/` covers GET list, POST create
+  (201), PATCH update, and POST publish, scope-gated by
+  `post:write` on bearer requests. Token scopes are a JSON list;
+  `page:write` is reserved for a follow-up page REST surface.
+  Audit rows: `token.created`, `token.revoked`, `token.used`.
+- **`cms export` CLI: per-site Hugo-shaped corpus dump (#145).**
+  `flask --app bragi.apps.admin cms export [--site SLUG] [--output DIR]`
+  writes a Hugo content tree for each site: posts as
+  `content/posts/<slug>.md` with YAML frontmatter (title, date,
+  draft, description, tags, aliases, og_image); pages under
+  `content/pages/` with extra `kind` + `parent_slug` keys;
+  attachment bytes as `static/attachments/<storage_key>` alongside
+  an `attachments.csv` metadata manifest (filename, content_type,
+  alt_text, dimensions, focal point); the full redirect table as
+  `redirects.csv`. Output is deterministic so re-running against
+  an unchanged DB yields a byte-identical tree, and posts
+  round-trip through `cms import hugo` per source_id: import to
+  export to re-import creates no new rows. Closes the
+  "static-site rebuild" trigger noted in MEMORY.md against the
+  deferred JSON API thread.
+- **Chronological archive at `<post_index>/archive/` (#144).** Three
+  levels, each rendering a flat list of the next level's counts:
+  the archive index shows years (descending) with post counts; a
+  year page shows months (January through December) with counts;
+  a month page shows the posts published in that bucket in
+  chronological order (oldest first, journal-style). Drafts are
+  excluded from counts and listings. Out-of-range months
+  (`13`/`00`), non-integer segments, and empty buckets all 404.
+  Each level attaches the standard `ETag` + `Last-Modified`
+  validators (the per-row `updated_at` folds into `Last-Modified`;
+  a sentinel `ARCHIVE_ETAG_VERSION` lets a future markup change
+  bust caches without waiting for content edits). Routes are
+  peeled by the page plugin's catch-all dispatcher, so the URL
+  prefix follows whatever `post_index` page the site has
+  configured. Lives in `bragi.contrib.page.archive` next to the
+  other post-index renderers.
+- **`cms backup` CLI: one-file DB + attachments tarball (#143).**
+  `flask --app bragi.apps.admin cms backup [--output PATH]`
+  runs `VACUUM INTO` against the SQLite DB (a consistent
+  snapshot that includes the WAL state with no -wal / -shm
+  companion files), then tars the snapshot plus the contents of
+  `Settings.attachments_root` into a `.tar.gz`. Default output
+  is `bragi-backup-YYYYMMDD-HHMMSS.tar.gz` in the CWD. No paired
+  `restore` subcommand on purpose: the documented restore step
+  is "extract the tarball, drop into a fresh deployment,
+  restart"; a CLI that overwrites live state is a big risk for
+  not much help.
+- **Auto-generated table of contents on multi-section posts
+  (#142).** Posts whose rendered HTML carries two or more
+  qualifying headings (h2 / h3 by default) now render an
+  `<aside class="toc-wrapper">` above the body with a nested
+  `<ol class="toc">` linking to each heading's anchor. Single-
+  section posts render no TOC at all; the "multiple headings =
+  wants a TOC" rule is the author's natural signal of intent.
+  Builder lives in `bragi.core.render.toc` (regex on the already
+  -anchored HTML, no BeautifulSoup dep). Default theme styles
+  the aside as a contained card.
+- **KaTeX-compatible math syntax + Mermaid code fences (#141).**
+  `markdown_extras` now bundles two more parser additions:
+  `mdit-py-plugins.dollarmath` for `$...$` (inline) and
+  `$$...$$` (block) math, and a fence-rule override that
+  preserves ` ```mermaid ` blocks under
+  `<pre class="mermaid">`. Math wrappers use the standard
+  `<span class="math inline">` / `<span class="math block">`
+  shapes that KaTeX's auto-render extension finds out of the box.
+  Operators add KaTeX / Mermaid `<script>` tags to their theme's
+  `base.html` to enable rendering (no JS bundles shipped in v1;
+  CDN dependency or theme-controlled inclusion is left to the
+  operator). `allow_digits=False` on dollarmath so `$5` in
+  prose still renders as text rather than turning into math.
+- **Per-tag Atom feeds (#140).** New endpoint
+  `<post_index>/<tag_segment>/<tag-slug>/feed.xml` lets focused
+  subscribers track a single topic. Same Atom 1.0 envelope as the
+  site-wide `/feed.xml`, filtered to posts carrying the tag.
+  Tag-listing template surfaces both the site-wide and per-tag
+  feeds via `<link rel="alternate" type="application/atom+xml">`
+  for browser / reader auto-discovery. Site-wide feed discovery
+  is also added to the default theme's `base.html` so every page
+  now exposes it. Atom-builder logic moved to `bragi.core.feed`
+  so the seo plugin's site-wide feed and the page plugin's
+  per-tag feed share one entry-XML helper (no plugin-to-plugin
+  imports).
+- **Related posts at end of article (#139).** Each post page now
+  renders a "You may also like" aside below the body listing up
+  to N same-site published posts ranked by tag-overlap count
+  (more shared tags wins), tie-broken by `published_at` desc.
+  Posts with no tags or no overlapping siblings render no aside
+  at all. Default `N` is 3; per-site override via
+  `Site.extra_settings["related_posts_count"]`. The query is a
+  single GROUP BY against the `post_tags` junction, so the
+  feature costs one extra SELECT per post render.
+- **Post-page chrome: author byline, reading time,
+  updated-date, optional bio (#138).** The post template now
+  carries the meta line a modern blog reader expects: "by Ada
+  Lovelace", "5 min read", and an "Updated YYYY-MM-DD" line that
+  appears only when the edit is meaningfully after the first
+  publish (`updated_at - published_at >= 1 day`, suppressing
+  typo-fix noise). Optional `User.bio` text renders as an "About
+  the author" aside below the post body when set. Reading-time
+  helper lives in `bragi.core.render.reading_time`
+  (220 WPM, rounded up so short posts say "1 min read"). Alembic
+  migration `ad0c0c05ef40` adds `users.bio` (nullable Text). No
+  admin UI for editing `bio` in v1; operators set it via DB
+  direct, account-settings admin tracked as a follow-up.
+- **Open Graph and Twitter Card meta tags (#137).** Post, page,
+  and post-index templates now emit `og:title` / `og:type` /
+  `og:url` / `og:description` / `og:site_name` / `og:image`
+  plus the matching `twitter:card` / `twitter:title` /
+  `twitter:description` / `twitter:image` so social shares
+  render rich previews instead of bare links. Image source
+  resolves through the chain `post.og_image_id` (or
+  `page.og_image_id`) -> `Site.default_og_image_id` -> omitted;
+  when no image is present the twitter card falls back to
+  `summary` from `summary_large_image`. New `core.seo.og_image_url_for`
+  helper builds the absolute URL from `site.canonical_url` +
+  `attachment.storage_key`. Admin edit forms on Post, Page, and
+  Site grew a numeric `og_image_id` (and `default_og_image_id`)
+  input gated by a same-site attachment check; cross-site ids
+  are rejected with an error message. Alembic migration
+  `22e5570ca7f5` adds `pages.og_image_id` and
+  `sites.default_og_image_id` (both FK to `attachments` with
+  `ON DELETE SET NULL`); `Post.og_image_id` was already on the
+  schema from an earlier migration.
+- **Footnote markdown syntax (#136).** New built-in plugin
+  `bragi.contrib.markdown_extras` wires
+  `mdit-py-plugins`' `footnote_plugin` into the app-bound
+  markdown renderer, so post and page bodies accept the standard
+  `text[^id]` reference + `[^id]: body` definition syntax.
+  Refs render as `<sup class="footnote-ref">` inline; the
+  collected list lands in a `<section class="footnotes">` at
+  the bottom of the document. Default theme picks up matching
+  CSS for the inline brackets and back-references. Comment the
+  `markdown_extras` line in `pyproject.toml`'s
+  `bragi.plugins` block to disable.
+- **Kind toggle and home_page_id changes now insert redirects
+  (#130).** Promoting one page to `post_index` while demoting
+  another (the swap path) now fires `on_post_updated` for the
+  demoted page too; the redirects plugin reads the
+  before/after `kind` and inserts a PREFIX 301 from the old
+  index URL to the new. Setting / clearing / changing a site's
+  `home_page_id` is handled inline in the sites admin save
+  handler: an EXACT 301 (STATIC home) or PREFIX 301 (POST_INDEX
+  home) is inserted alongside the site update, and the previous
+  redirect is deactivated atomically. New `RedirectSource` labels
+  `kind-change` and `home-change` distinguish these rows from
+  slug-renames in the redirects admin. Demotion with no
+  replacement `post_index` still leaves posts orphaned (410-per
+  -post deferred).
+- **Demotion-confirmation banner for the only POST_INDEX page
+  (#131).** Demoting a site's only `post_index` page to `static`
+  now re-renders the edit form with a warning that quantifies
+  the impact (number of published posts that will lose their
+  public URL). The form ships an implicit `acknowledge_demotion`
+  field on the retry that lets the demotion through. Parallels
+  the existing promotion-swap confirmation (`acknowledge_swap`).
+  The check is skipped when another `post_index` exists for the
+  site (which can only happen as a defensive corner today) so
+  cleanup saves don't loop on the banner.
+- **Configurable tag-segment word per site (#132).** Sites can
+  override the URL segment used for tag listings via
+  `Site.extra_settings["tag_segment"]` (same shape as
+  `posts_per_page`). Default `"tag"`; setting it to e.g.
+  `"category"` makes the dispatcher accept
+  `<post_index_url>/category/<slug>/` and `tag_url_for()` emit
+  the same. Non-string, empty, or non-slug values fall back to
+  `"tag"` defensively. No admin UI in v1; operators edit via
+  CLI / DB, matching `posts_per_page`.
+- **Static homepage per site (#124).** Each Site grew a new
+  `home_page_id` column (nullable FK to `pages`, `ON DELETE SET
+  NULL`). When set on the site edit form, `/` renders the
+  referenced Page instead of the recent-posts index; clearing
+  the selection reverts to the index without any code change.
+  The new `resolve_home(site)` hookspec (`firstresult=True`)
+  arbitrates this: the page plugin ships a `tryfirst` impl that
+  serves the configured static page, and the post plugin ships
+  the default-priority impl that returns the paginated index as
+  the fallback. The `/` route itself is owned by the core
+  delivery dispatcher; the post plugin no longer registers a
+  Blueprint for it. Note: when a static homepage is configured
+  the recent-posts list is no longer addressable; track that as
+  a follow-up if a real site needs both.
+- **Per-site landing page at `/`.** The delivery app's `/` is no
+  longer a scaffold stub: each site now serves a paginated list
+  of its recent published posts, newest first. Page size is
+  configurable per site via `Site.extra_settings.posts_per_page`
+  (default 10); navigation uses `?page=N`. Drafts, scheduled, and
+  archived posts never appear, and posts are strictly scoped to
+  the resolved site. The route ships from `bragi.contrib.post`
+  (Blueprint `post_index_delivery`), so disabling the post plugin
+  removes the landing page along with the per-post views.
+  Configurable static homepages (Page-as-home), featured / pinned
+  posts, and additional themes remain out of scope; tracked in
+  follow-up issues.
+- **`/healthz` liveness endpoint on both apps.** GET returns
+  200 + `ok` after a `SELECT 1` round-trip; 503 + a logged
+  exception when the DB ping fails. The example
+  `compose.yml` healthcheck stanza on `admin` / `delivery`
+  watches it via stdlib `urllib` (no extra image dep) so a
+  wedged worker (process up, DB unreachable) flips to
+  unhealthy and the `restart: unless-stopped` policy kicks
+  in. Admin's auth guard now exempts `_healthz` so a probe
+  doesn't bounce through `/auth/login`. Delivery's
+  site-resolver tolerates the unknown `Host: 127.0.0.1` so
+  the probe answers regardless of site state.
+- **`compose.yml` documents `BRAGI_ENV`, `BRAGI_MAX_REQUEST_BYTES`,
+  `BRAGI_ATTACHMENTS_MAX_BYTES`, plus the three new scheduler
+  cadences** (`EMBEDS_RERENDER_EVERY`, `WEBMENTIONS_SEND_EVERY`,
+  `ACTIVITYPUB_SEND_EVERY`). The example sets `BRAGI_ENV=production`
+  on the web services so the dev-`SECRET_KEY` boot check fires
+  when an operator forgets to set `BRAGI_SECRET_KEY` outside
+  the compose-enforced `${VAR:?...}` shape.
+
+### Changed
+- **Posts now live under a per-site `Page` of kind `post_index`.**
+  The hardcoded `/posts/` and `/tags/` URL spaces are gone. Each
+  site has at most one `post_index` page (enforced by a partial
+  unique index); post URLs become `<post_index_url>/<post-slug>/`
+  and tag URLs become `<post_index_url>/tag/<tag-slug>/`. The
+  alembic migration auto-creates a `slug="posts"` post_index
+  page on every existing site, so legacy `/posts/<slug>/` URLs
+  keep resolving without operator intervention. The new-site
+  admin form ships with a "Create default /blog/ page" checkbox
+  (default on) so greenfield sites get a post index without
+  extra steps. Pages, the post listing, and individual posts now
+  all flow through the page plugin's catch-all dispatcher; the
+  post plugin no longer owns a delivery Blueprint or a
+  `resolve_home` impl. Sites with no post_index page have no
+  public post URLs (admin can still write/edit posts; they're
+  not reachable until a `post_index` page exists).
+- **Slug-rename redirects extend to pages.**
+  `bragi.contrib.redirects` now discriminates Post vs Page on
+  `on_post_updated`. Renaming a static page inserts an EXACT
+  301 from old slug-path to new; renaming a `post_index` page
+  inserts a PREFIX 301 that covers the index, every post URL,
+  and the tag listings in one rule. (#130 follow-up extends the
+  same hook to cover kind toggles and home_page_id changes; see
+  the "Added" section.)
+- **#124 update.** The post plugin's `resolve_home` fallback
+  (the recent-posts list at `/`) has been removed. The page
+  plugin's `tryfirst` impl still handles `home_page_id`; new:
+  `bragi.contrib.theme_default` ships a `trylast` welcome-stub
+  impl that guarantees a Response at `/` even when nothing else
+  claims it. Visitors see "Welcome to <site>" with
+  `Cache-Control: no-store` and a noindex robots meta until the
+  admin sets a real home; the per-site dashboard surfaces a
+  banner pointing at the fix.
+- **Page admin: Kind selector with swap confirmation.** The page
+  edit form gets a "Kind" dropdown (Static / Post index).
+  Promoting a page to `post_index` while another exists on the
+  site shows an intermediate confirmation; saving again with
+  the implicit `acknowledge_swap` field demotes the previous
+  post_index back to static in the same transaction.
+- **`ContentTypeSpec.url_for` may return `None`.** Reflects the
+  reality that posts have no public URL when the site has no
+  post_index page. Sitemap and feed filter `None` entries; the
+  internal-link rewriter renders the broken-link class for
+  posts without a public URL.
+- **JSON API now fires post lifecycle hooks.** `POST /admin/api/sites/<slug>/posts/`,
+  `PATCH /admin/api/sites/<slug>/posts/<id>/`, and
+  `POST /admin/api/sites/<slug>/posts/<id>/publish` previously
+  skipped `on_post_updated` / `on_post_published` /
+  `on_cache_purge`. The redirects plugin's slug-change auto-301,
+  ActivityPub fanout, outbound webmention send, sitemap rebuild,
+  search index, and post-cache invalidation all listen on those
+  hooks. The API now dispatches them in the same shape the admin
+  view does (snapshot before/after, `on_post_published` only on
+  the actual draft -> published transition, `on_cache_purge`
+  always). API-driven workflows now reach every subscriber an
+  admin-UI edit reaches.
+- **API list endpoint paginates.** `GET /admin/api/sites/<slug>/posts/`
+  now accepts `limit` (default 50, max 100) and `offset` (default
+  0) query params; response carries `total`. Previously returned
+  the full post set in one payload, which would be slow + heavy
+  on a site with thousands of posts.
+- **FTS5 search pushes pagination to SQL.** The mixed post + page
+  search previously loaded every matching row from both FTS
+  tables, sorted in Python by bm25, then sliced to the requested
+  page. On a paginated UI that only ever renders 10 to 20 hits,
+  the matching set growing into the thousands was a steady-state
+  waste. The two SELECTs are now a single UNION ALL with
+  `ORDER BY rank ASC LIMIT :limit OFFSET :offset`; `total` comes
+  from two MATCH-only `COUNT(*)` queries that skip the snippet()
+  expansion and per-row hydration.
+- **Search reindex commits once, not per row.** `_reindex_all`
+  walked every published post and page and called the per-row
+  `_index` helper, which opened its own `SessionLocal` and
+  committed each upsert. On a corpus of N rows that meant 1
+  DELETE pass + N transactions (so N fsyncs of the WAL and N
+  busy-timeout windows for any concurrent reader). All FTS
+  writes for the reindex now stage in one session with a single
+  trailing commit; the per-row API stays single-transaction for
+  the lifecycle-hook path.
+- **Redirect PREFIX resolution pushes the match to SQL.** The
+  resolver previously loaded every active PREFIX rule for the
+  site into memory, then walked them longest-first looking for a
+  startswith match. The predicate is now
+  `substr(:path, 1, length(source_path)) = source_path` with
+  `ORDER BY length(source_path) DESC LIMIT 1`, so SQLite returns
+  the single winning row directly. `substr` was picked over LIKE
+  so source_path strings containing `%` or `_` do not need
+  escaping.
+- **Session `last_seen_at` writes are throttled to one per
+  minute per session.** Every admin page render fires N htmx
+  subrequests; without the throttle each one wrote
+  `UPDATE sessions SET last_seen_at = ...` on the same row. The
+  new threshold (`LAST_SEEN_BUMP_INTERVAL = 60s`) matches what
+  the "Last seen" column is actually for (operator visibility,
+  not per-request precision) and keeps SQLite WAL pressure off
+  during burst editing.
+- **`AuditAction.TOKEN_USED` is downsampled to at most one row
+  per token per 60s per worker.** A high-QPS bearer integration
+  (a poller hitting the JSON API every few seconds) previously
+  wrote one indistinguishable audit row per request. The new
+  per-process map keys on token id with a 60s window; the first
+  use in any window writes, subsequent uses are silent. Map is
+  bounded at 4096 entries so a fuzzer presenting many distinct
+  ids cannot grow it without limit. Per-request provenance still
+  lives in the access log; the audit row's signal is "this
+  token was active around time T".
+
+### Fixed
+- **Post admin's `published_at` stamps route through
+  `naive_utcnow()`.** Two write sites in `post/admin.py`
+  (`create_post`, `edit_post` first-publish transition) still
+  used `datetime.now(UTC)` after the PR2 datetime-convention
+  sweep, persisting a tz-aware value into a naive `Mapped[datetime]`
+  column. SQLAlchemy + SQLite silently drop the tz on the way
+  in, but reads-back-after-write across cached attribute access
+  saw inconsistent shapes. Both sites now go through the
+  centralised helper alongside every other timestamp emitter.
+- **`ON DELETE` actions extended across the rest of the model
+  graph.** The first FK-ondelete migration only touched the
+  federation tables (#162-#166). This migration covers the other
+  14 tables that hard-FK into `users` / `sites` / `posts` /
+  `pages` / `attachments`. Cascade rules:
+  - **CASCADE on user delete**: `user_identities.user_id`,
+    `local_credentials.user_id`, `sessions.user_id`,
+    `user_site_roles.user_id`. A future `cms user delete`
+    sweeps the dependent rows in one statement.
+  - **CASCADE on site delete**: `user_site_roles.site_id`,
+    `redirects.site_id`, `site_aliases.site_id`, `tags.site_id`,
+    `attachments.site_id`, `analytics_events.site_id`,
+    `posts.site_id`, `pages.site_id`. Removing a site no longer
+    leaves orphan tags / redirects / analytics rows behind.
+  - **SET NULL on user delete** (history preservation):
+    `audit_log.actor_user_id`, `audit_log.site_id`,
+    `analytics_events.user_id`, `attachments.uploaded_by`,
+    `page_revisions.editor_user_id`,
+    `post_revisions.editor_user_id`. The forensic value of an
+    audit row or page revision outlasts the user; nullable FKs
+    drop attribution rather than the row.
+  - **SET NULL on attachment delete**:
+    `posts.featured_image_id`, `posts.og_image_id`,
+    `pages.og_image_id`, `sites.default_og_image_id`. Removing
+    an image leaves the post / page / site row in place with no
+    media; the delivery template falls back to the site default.
+  - **SET NULL on parent page delete (self-ref)**:
+    `pages.parent_id`. Removing a parent page promotes children
+    to root rather than cascading the delete subtree.
+  Deliberately UNCHANGED (RESTRICT default): `posts.author_id`,
+  `pages.author_id`, `sites.owner_user_id`. Deleting a user who
+  still authors posts / owns sites must be blocked until the
+  operator reassigns them; this is a policy decision, not a
+  technical one.
+- **Webmention moderation requires Editor role**, not just site
+  membership. An "author" can write their own posts but shouldn't
+  decide what other authors' posts surface as mentions
+  (publication-surface decision, not authoring). Mirrors the
+  post / page admin's editor-role gate.
+- **SQLite `busy_timeout = 5000` now set on every connection.**
+  The sidecar + admin + delivery workers all write to one
+  SQLite file under WAL; without a busy_timeout, a write
+  contention raised `database is locked` immediately. Five
+  seconds matches the typical request timeout budget so a
+  brief contention waits rather than 500's.
+- **`scheduled-publish` no longer abandons the queue on a single
+  failing post.** A hook failure on post N stopped commits for
+  posts N+1..N; operators only noticed when a follow-up tick
+  accidentally re-picked the same row. Each iteration now
+  rolls back on failure and the loop continues; the summary
+  reports `M published, K failed`.
+- **`_ACTOR_CACHE` and `_ReplayCache` overflow eviction now hold
+  a `threading.Lock`.** Under gunicorn threaded workers two
+  concurrent overflows could race the `min(...)` + `pop`
+  sequence (the looser worst-case is a KeyError; the lock
+  removes the branch entirely).
+- **Importers target the site's actual post URL, not hardcoded
+  `/posts/<slug>/`.** Hugo / Ghost / WordPress importers built
+  every redirect target as `/posts/<slug>/`. On a migrated v1.10.x
+  site whose alembic auto-create kept the legacy "posts" slug the
+  output happened to resolve; on a brand-new site (where the
+  admin form's default seeds `slug="blog"`) every imported alias
+  pointed at a URL the delivery app would 404. Importers now
+  resolve through `post_url_for(site, slug, db=...)` (and
+  `page_url_for(page, db=...)` for WordPress pages); when the
+  target site has no POST_INDEX page yet the redirect emission is
+  skipped entirely (post URLs are unreachable until one exists
+  anyway). `post_url_for` and `post_index_page_for` grew an
+  optional `db=` so importers can reuse their open session
+  without the nested SessionLocal under SQLite's
+  SingletonThreadPool rolling back pending writes.
+- **Hugo aliases tolerate query / fragment suffixes.** `_normalise_alias`
+  in the Hugo importer now strips a trailing `?...` and `#...`
+  before normalising slashes, so an alias of
+  `/old/?ref=tw#section` matches the redirect resolver's
+  path-only compare.
+
+### Security
+- **JSON API enforces the admin's author-or-editor gate.**
+  `PATCH /admin/api/sites/<slug>/posts/<id>/` and
+  `POST /admin/api/sites/<slug>/posts/<id>/publish` previously
+  only checked site membership: any token holder with `author`
+  role + `post:write` scope could mutate another author's post,
+  retract their published content, or trigger ActivityPub fanout
+  / auto-301s on their behalf. The admin UI's `edit_post` gate
+  (`(is_own and author) or editor+`) is now applied to the API
+  surface via a new `_require_post_write_access(post)` helper.
+  `GET /admin/api/sites/<slug>/posts/` similarly scopes the list
+  to the caller's own posts when they hold only `author` rank;
+  editor+ continues to see every author's posts. Multi-author
+  deployments running v1.10.x with a minted token in `author`
+  hands should treat this as a privilege-escalation fix.
+- **CSRF exemption now requires a verified bearer token, not
+  just an `Authorization` header.** The previous logic skipped
+  CSRF whenever `Authorization: bearer …` appeared, on the
+  theory that the header is CORS-restricted. That holds for
+  cross-origin browsers, but a logged-in session POST with a
+  smuggled junk Authorization header (via a misconfigured CORS
+  proxy or any future middleware bug) would have bypassed CSRF
+  while still authenticating via the cookie. `csrf.py` now
+  gates exclusively on `g.api_csrf_exempt`, which
+  `bragi.contrib.api_tokens.auth` sets only after a successful
+  `verify()`. `register_csrf` moved to run after plugin
+  `on_app_init` so the bearer middleware's `before_request`
+  fires first.
+- **HTTP signature verifier hardened against scope downgrade,
+  body tamper, and replay.** The fediverse inbox accepted any
+  signature whose listed `headers=` covered only a subset of the
+  real request: a captured signature over a stale Date header
+  could authenticate any path / method / body. Now requires the
+  full minimum set (`(request-target)`, `host`, `date`, `digest`)
+  in the signed coverage; rejects empty / missing `algorithm`;
+  always verifies `Digest` against the body for POSTs regardless
+  of whether the signer chose to list it; and a new module-level
+  `_ReplayCache` (5-minute TTL, 4096-entry bound) drops
+  duplicate `(keyId, signature)` presentations within the skew
+  window.
+- **SSRF guard on every outbound fetch driven by remote input.**
+  The webmention inbox (`POST /webmentions`) and outbox sender
+  fetched arbitrary URLs supplied by remote actors, and the
+  ActivityPub inbox fetched the signer's actor document and
+  posted to its declared inbox. Without guards, unauthenticated
+  POSTs pivoted the delivery container into RFC 1918, loopback,
+  and 169.254.169.254 (cloud IMDS) targets. New `bragi.core.http`
+  module exposes `safe_get` / `safe_head` / `safe_post` +
+  `is_public_url` that reject non-`http(s)` schemes and any host
+  resolving to a private / loopback / link-local / multicast /
+  reserved address (re-checked on every redirect). Rewired all
+  six callsites (`webmentions/receiver.py:_fetch_source`,
+  `webmentions/sender.py` HEAD/GET/POST,
+  `activitypub/views.py:_fetch_actor`,
+  `activitypub/sender.py:send_one`). The AP Follow handler now
+  validates the remote's `inbox` and `endpoints.sharedInbox`
+  URLs against the same guard before persisting the row, so any
+  row in `activitypub_followers` is one we're willing to POST to.
+- **Hard request-body cap (`MAX_CONTENT_LENGTH`) on both apps.**
+  New `Settings.max_request_bytes` (default 1 MiB) wired into
+  `bragi-admin` and `bragi-delivery`. Prevents a streaming-body
+  attack on the public federation inboxes from OOMing a worker.
+- **ActivityPub Accept now fires for cold Follow requests.**
+  `_queue_accept` previously looked up the remote actor's inbox
+  from `_ACTOR_CACHE`, which could be empty when called from a
+  fresh Follow. The Accept got silently dropped; Mastodon
+  retried to no avail. Now passes the already-fetched
+  `remote_actor` dict directly.
+- **`Undo Follow` requires the inner actor to match the signing
+  actor.** Previously, any signed remote could send
+  `Undo { object: Follow { actor: "https://victim/" } }` and
+  delete a different remote's follower row. Now `inner.actor`
+  must equal `outer.actor`; mismatch is logged and ignored.
+- **`_ACTOR_CACHE` is bounded.** A fuzzing inbox attacker could
+  grow the process-wide cache without limit. Caps at 1024
+  entries and evicts the oldest on overflow.
+- **App init refuses to boot in production with the development
+  `SECRET_KEY`.** New `Settings.env` (default `development`) drives
+  a startup check in both `create_admin_app` and
+  `create_delivery_app`: if `env="production"` and `secret_key`
+  is still the bundled dev sentinel, the factory raises. In
+  development mode the same situation logs a loud WARNING and
+  starts so `make dev` is unaffected. `compose.yml` continues to
+  enforce `BRAGI_SECRET_KEY` via the `${VAR:?...}` shape; this
+  check is the in-process backstop for bare `docker run` / k8s /
+  podman deployments outside that gate.
+- **SSRF guard now covers oEmbed / Bluesky / YouTube / IndexNow
+  outbound calls.** The four embed-style providers issued bare
+  `requests.get` / `requests.post` against allowlisted hosts and
+  so bypassed the `_GuardedAdapter` redirect re-validation: a
+  trusted endpoint that 302'd into RFC 1918 was followed
+  silently. All four now route through `bragi.core.http.safe_*`.
+  `safe_get` grew a `params=` kwarg for callers that build
+  query strings against a fixed URL.
+- **Admin `MAX_CONTENT_LENGTH` raised to admit attachment
+  uploads.** The body cap landed at `Settings.max_request_bytes`
+  (1 MiB) for both apps; `attachments_max_bytes` defaults to 20
+  MiB, so any upload above 1 MiB was silently 413'd by Flask
+  before the attachment view ran. Admin now takes
+  `max(max_request_bytes, attachments_max_bytes + 64 KiB)` to
+  cover the documented upload cap plus multipart overhead.
+  Delivery's cap stays at `max_request_bytes` (only handles
+  federation-inbox JSON bodies).
+- **Pillow upload path bounds decompression-bomb risk.** Default
+  `MAX_IMAGE_PIXELS` lowered to 50 megapixels (covers 8K source;
+  rejects > 50 MP synthetic input regardless of file size), and
+  `Image.DecompressionBombError` is now caught alongside
+  `OSError` / `UnidentifiedImageError` so an oversized image
+  produces a clean "could not probe" outcome instead of a 500.
+- **`auth_local` login closes the unknown-user timing leak.**
+  The wrong-password branch runs argon2 verify (~100 ms); the
+  unknown-user branch short-circuited and so leaked email
+  existence to anyone diffing response times. New
+  `dummy_verify()` runs the same cost on the no-user path so
+  both branches are timing-equivalent.
+- **Federation tables now declare `ON DELETE` correctly so
+  removing a Site / Post / User no longer leaves orphan rows.**
+  `webmentions`, `webmention_outbox`, `site_keypairs`,
+  `activitypub_followers`, `activitypub_outbox`, and
+  `personal_access_tokens` shipped without explicit `ondelete`,
+  so deleting an account or retiring a site left behind rows
+  the admin UI could not surface or clean up, including
+  outbound delivery queues that would have kept POSTing to
+  remote inboxes after the site was gone. Cascade rules:
+  `webmentions.site_id`, `webmention_outbox.{site_id,post_id}`,
+  `site_keypairs.site_id`, `activitypub_followers.site_id`,
+  `activitypub_outbox.{site_id,post_id,follower_id}`, and
+  `personal_access_tokens.user_id` all `CASCADE`;
+  `webmentions.post_id` is `SET NULL` to preserve moderation
+  history when a post is removed. Migration
+  `2026_05_18_0900_add_fk_ondelete` rebuilds the six tables in
+  place (SQLite cannot ALTER a foreign-key constraint, so each
+  table is recreated with the new constraints, rows are copied,
+  and the old table is dropped).
+
 ## [1.10.0] - 2026-05-16
 
 ### Added

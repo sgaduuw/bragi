@@ -27,14 +27,16 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
-from bragi.core.models.page import Page, PageStatus
+from bragi.core.models.attachment import Attachment
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
+from bragi.core.models.post import Post, PostStatus
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.render.markdown import make_excerpt, render_markdown
 
@@ -58,8 +60,43 @@ def _form_from_request() -> dict[str, str]:
         "slug": (request.form.get("slug") or "").strip(),
         "body_markdown": request.form.get("body_markdown") or "",
         "status": request.form.get("status") or PageStatus.DRAFT,
+        "kind": (request.form.get("kind") or PageKind.STATIC).strip(),
         "parent_id": (request.form.get("parent_id") or "").strip(),
+        "og_image_id": (request.form.get("og_image_id") or "").strip(),
     }
+
+
+def _resolve_og_image_id(db: Session, raw: str, site_id: int) -> tuple[int | None, str | None]:
+    """Validate a form-supplied attachment id; same shape as the
+    post admin's helper. The same-site check prevents a crafted
+    POST from surfacing another tenant's attachment."""
+    if not raw:
+        return None, None
+    try:
+        candidate_id = int(raw)
+    except ValueError:
+        return None, "OG image id must be an integer."
+    attachment = db.get(Attachment, candidate_id)
+    if attachment is None:
+        return None, "OG image attachment not found."
+    if attachment.site_id != site_id:
+        return None, "OG image must belong to this site."
+    return candidate_id, None
+
+
+def _existing_post_index(
+    db: Session, site_id: int, exclude_page_id: int | None = None
+) -> Page | None:
+    """Return the current POST_INDEX page on `site_id`, or None.
+
+    Used to detect the swap case on save: if a different page is
+    being promoted to POST_INDEX, the existing one needs to be
+    demoted (with confirmation).
+    """
+    stmt = select(Page).where(Page.site_id == site_id, Page.kind == PageKind.POST_INDEX)
+    if exclude_page_id is not None:
+        stmt = stmt.where(Page.id != exclude_page_id)
+    return db.execute(stmt).scalar_one_or_none()
 
 
 def _normalized_parent_id(value: str) -> int | None:
@@ -158,6 +195,11 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             flash("Title and slug are required.", "error")
             return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
 
+        new_kind = str(form["kind"])
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
+            flash("Kind must be 'static' or 'post_index'.", "error")
+            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+
         parent_id = _normalized_parent_id(form["parent_id"])
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
@@ -166,9 +208,36 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 "error",
             )
             return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], site_id)
+        if og_image_err is not None:
+            flash(og_image_err, "error")
+            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+
+        # Promotion to POST_INDEX swaps any existing POST_INDEX page
+        # back to STATIC. Require explicit confirmation so the
+        # operator sees the consequence before redirects are inserted.
+        existing_index = (
+            _existing_post_index(db, site_id) if new_kind == PageKind.POST_INDEX else None
+        )
+        acknowledge_swap = request.form.get("acknowledge_swap") == "1"
+        if existing_index is not None and not acknowledge_swap:
+            return render_template(
+                "admin/page_edit.html",
+                page=None,
+                form=form,
+                parents=parents,
+                swap_pending=True,
+                swap_target=existing_index,
+            )
 
         body_markdown = str(form["body_markdown"])
         new_status = str(form["status"])
+        if existing_index is not None:
+            # Demote in the same transaction so the partial unique
+            # index doesn't fire on the INSERT of the new POST_INDEX
+            # row. The demoted page stays published; only its kind
+            # changes.
+            existing_index.kind = PageKind.STATIC
         page_row = Page(
             site_id=site_id,
             parent_id=parent_id,
@@ -179,12 +248,36 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             body_excerpt=make_excerpt(body_markdown),
             author_id=int(session["user_id"]),
             status=new_status,
+            kind=new_kind,
+            og_image_id=og_image_id,
         )
         db.add(page_row)
         db.commit()
         new_id = page_row.id
         new_slug = page_row.slug
         pm = current_app.extensions["plugin_manager"]
+        # Swap-on-create: when this new page demoted an existing
+        # POST_INDEX in the same transaction, fire on_post_updated
+        # for the demoted page so the redirects plugin inserts the
+        # subtree 301 (see issue #130). The newly-created page
+        # itself has no prior state to redirect from.
+        if existing_index is not None:
+            pm.hook.on_post_updated(
+                item=existing_index,
+                before={
+                    "slug": existing_index.slug,
+                    "title": existing_index.title,
+                    "status": existing_index.status,
+                    "kind": PageKind.POST_INDEX,
+                },
+                after={
+                    "slug": existing_index.slug,
+                    "title": existing_index.title,
+                    "status": existing_index.status,
+                    "kind": existing_index.kind,
+                },
+                session=db,
+            )
         if new_status == PageStatus.PUBLISHED:
             # Mirror the post admin's first-publish path: subscribers
             # (search index, sitemap rebuild, indexnow ping, webhook
@@ -222,13 +315,19 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "slug": page.slug,
                 "body_markdown": page.body_markdown,
                 "status": page.status,
+                "kind": page.kind,
                 "parent_id": str(page.parent_id) if page.parent_id else "",
+                "og_image_id": str(page.og_image_id) if page.og_image_id else "",
             }
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
+            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+        new_kind = str(form["kind"])
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
+            flash("Kind must be 'static' or 'post_index'.", "error")
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
         parent_id = _normalized_parent_id(form["parent_id"])
         if parent_id == page.id:
@@ -241,6 +340,57 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "error",
             )
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], page.site_id)
+        if og_image_err is not None:
+            flash(og_image_err, "error")
+            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+
+        # Promotion-to-POST_INDEX swap requires explicit confirmation.
+        # Excludes self so editing an already-POST_INDEX page doesn't
+        # trip the check on every save.
+        existing_index = (
+            _existing_post_index(db, page.site_id, exclude_page_id=page.id)
+            if new_kind == PageKind.POST_INDEX
+            else None
+        )
+        acknowledge_swap = request.form.get("acknowledge_swap") == "1"
+        if existing_index is not None and not acknowledge_swap:
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                swap_pending=True,
+                swap_target=existing_index,
+            )
+
+        # Demoting the only POST_INDEX on a site strips the public
+        # post URL space entirely; warn so the operator sees the
+        # consequence (orphaned post URLs) before saving. Skipped
+        # when another POST_INDEX page already exists (impossible
+        # under the partial unique index, but defensive) so a
+        # cleanup save can't loop on the banner.
+        is_demotion = page.kind == PageKind.POST_INDEX and new_kind != PageKind.POST_INDEX
+        acknowledge_demotion = request.form.get("acknowledge_demotion") == "1"
+        if is_demotion and not acknowledge_demotion:
+            other_index = _existing_post_index(db, page.site_id, exclude_page_id=page.id)
+            if other_index is None:
+                published_count = db.execute(
+                    select(func.count())
+                    .select_from(Post)
+                    .where(
+                        Post.site_id == page.site_id,
+                        Post.status == PostStatus.PUBLISHED,
+                    )
+                ).scalar_one()
+                return render_template(
+                    "admin/page_edit.html",
+                    page=page,
+                    form=form,
+                    parents=parents,
+                    demotion_pending=True,
+                    demotion_post_count=published_count,
+                )
 
         # Capture pre-edit state before mutating; mirrors the
         # post admin's snapshot semantics so a rollback returns
@@ -250,8 +400,16 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         # `before` snapshot for the on_post_updated hook (slug
         # changes drive auto-301 redirects via the redirects
         # plugin's subscriber). Capture BEFORE mutating.
-        before = {"slug": page.slug, "title": page.title, "status": page.status}
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "kind": page.kind,
+        }
         was_published = page.status == PageStatus.PUBLISHED
+
+        if existing_index is not None:
+            existing_index.kind = PageKind.STATIC
 
         page.title = str(form["title"])
         page.slug = slug
@@ -260,11 +418,18 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page.body_html = render_markdown(str(form["body_markdown"]))
         page.body_excerpt = make_excerpt(str(form["body_markdown"]))
         page.status = str(form["status"])
+        page.kind = new_kind
+        page.og_image_id = og_image_id
 
         db.commit()
         updated_id = page.id
         updated_site_id = page.site_id
-        after = {"slug": page.slug, "title": page.title, "status": page.status}
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "kind": page.kind,
+        }
         skip_redirect = request.form.get("skip_redirect") == "1"
 
         pm = current_app.extensions["plugin_manager"]
@@ -272,6 +437,28 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         # fix-in-draft renames don't need a stale-URL 301).
         if not skip_redirect:
             pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+            # When a swap demoted an existing POST_INDEX page in
+            # the same transaction, that page's URL prefix is no
+            # longer where posts live; fire on_post_updated for it
+            # too so the redirects plugin can insert the subtree
+            # 301 (see issue #130).
+            if existing_index is not None:
+                pm.hook.on_post_updated(
+                    item=existing_index,
+                    before={
+                        "slug": existing_index.slug,
+                        "title": existing_index.title,
+                        "status": existing_index.status,
+                        "kind": PageKind.POST_INDEX,
+                    },
+                    after={
+                        "slug": existing_index.slug,
+                        "title": existing_index.title,
+                        "status": existing_index.status,
+                        "kind": existing_index.kind,
+                    },
+                    session=db,
+                )
         # First-publish transition fires on_post_published so
         # subscribers see the same lifecycle as posts.
         if page.status == PageStatus.PUBLISHED and not was_published:

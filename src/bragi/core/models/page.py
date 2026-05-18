@@ -18,13 +18,21 @@ share a slug if they sit under different parents. The
 admin / view layer adds an explicit pre-flight check that also
 covers the root case (SQLite treats two `parent_id=NULL` rows
 as distinct under UNIQUE).
+
+`kind` distinguishes a regular content page from the special
+post_index page that hosts the site's blog. A site has at most
+one post_index page; posts derive their public URL from that
+page's effective path. The "at most one" invariant is enforced
+by a partial unique index defined in `__table_args__`. When no
+post_index page exists, posts have no public URLs and the blog
+listing isn't reachable.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
@@ -40,14 +48,44 @@ class PageStatus:
     ARCHIVED = "archived"
 
 
+class PageKind:
+    """Kind constants for Page.kind.
+
+    STATIC: regular content page; body_markdown renders.
+    POST_INDEX: special page hosting the blog listing. Body fields
+        are still honoured (used as intro copy above the listing),
+        but the listing is what makes the page useful. At most one
+        per site, enforced by a partial unique index.
+    """
+
+    STATIC = "static"
+    POST_INDEX = "post_index"
+
+
 class Page(IdMixin, TimestampsMixin, Base):
     __tablename__ = "pages"
     __table_args__ = (
         UniqueConstraint("site_id", "parent_id", "slug", name="uq_pages_site_parent_slug"),
+        # One post_index page per site. SQLite supports partial
+        # indexes via the WHERE clause; Postgres does too. STATIC
+        # pages are excluded from the uniqueness check by the
+        # predicate.
+        Index(
+            "uq_pages_site_post_index",
+            "site_id",
+            unique=True,
+            sqlite_where=text("kind = 'post_index'"),
+            postgresql_where=text("kind = 'post_index'"),
+        ),
     )
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
-    parent_id: Mapped[int | None] = mapped_column(ForeignKey("pages.id"), default=None, index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    # Self-ref: parent delete promotes children to root rather than
+    # cascading the delete (operator's most-likely intent is to
+    # rearrange, not to remove the subtree).
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pages.id", ondelete="SET NULL"), default=None, index=True
+    )
     slug: Mapped[str] = mapped_column(String(255))
     title: Mapped[str] = mapped_column(String(255))
 
@@ -57,11 +95,20 @@ class Page(IdMixin, TimestampsMixin, Base):
 
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(16), default=PageStatus.DRAFT)
+    kind: Mapped[str] = mapped_column(String(16), default=PageKind.STATIC)
 
     meta_title: Mapped[str | None] = mapped_column(String(255), default=None)
     meta_description: Mapped[str | None] = mapped_column(Text, default=None)
     canonical_url: Mapped[str | None] = mapped_column(String(255), default=None)
     noindex: Mapped[bool] = mapped_column(default=False)
+
+    # OG / Twitter Card image. Nullable; falls back through the
+    # site's default_og_image, then omitted entirely. ON DELETE
+    # SET NULL so removing the underlying attachment reverts to
+    # fallback rather than dangling the column.
+    og_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attachments.id", ondelete="SET NULL"), default=None
+    )
 
     # Import provenance: `(site_id, source_id)` is the idempotency
     # key for re-imports (a second run updates in place rather than

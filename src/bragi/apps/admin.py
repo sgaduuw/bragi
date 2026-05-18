@@ -15,6 +15,7 @@ from flask import Flask, g, render_template, session
 from bragi import __version__
 from bragi.cli import cms
 from bragi.core.cache import CACHE_POLICIES
+from bragi.core.healthz import register_healthz
 from bragi.core.middleware.csrf import register_csrf
 from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
@@ -23,7 +24,7 @@ from bragi.core.render.markdown import install_app_renderer
 from bragi.core.render.transforms import TransformRegistry
 from bragi.core.security import current_user, is_superuser
 from bragi.plugins import create_plugin_manager
-from bragi.settings import settings
+from bragi.settings import assert_secret_key_safe, settings
 
 # Pulled out so the after_request hook stays a one-liner. The
 # admin response should never be cacheable, even on 3xx/4xx.
@@ -47,8 +48,19 @@ def create_admin_app() -> Flask:
         11. register_html_transform(registry=html_transforms)
         12. register_markdown_extension  -> app.extensions["markdown_renderer"]
     """
+    assert_secret_key_safe("bragi-admin")
     app = Flask("bragi-admin")
     app.config["SECRET_KEY"] = settings.secret_key
+    # Hard cap so a streaming-body attack can't OOM the worker.
+    # Admin has to admit attachment uploads, so the floor is the
+    # attachment cap (plus multipart overhead). Delivery sets a
+    # smaller cap because it only receives federation-inbox JSON
+    # bodies. The 64 KiB slack covers multipart boundaries / part
+    # headers for a single-file upload form.
+    app.config["MAX_CONTENT_LENGTH"] = max(
+        settings.max_request_bytes,
+        settings.attachments_max_bytes + 64 * 1024,
+    )
 
     # Server-side sessions back the admin's session storage. Replaces
     # Flask's signed-cookie default; cookie carries only an opaque
@@ -73,13 +85,20 @@ def create_admin_app() -> Flask:
     app.extensions["md_transforms"] = md_transforms
     app.extensions["html_transforms"] = html_transforms
 
-    # Core middleware: resolve Host -> Site, then enforce CSRF on
-    # unsafe methods. Both fire as before_request hooks; ordering
-    # follows registration order, so site_resolver runs first and
-    # the CSRF check sees the resolved site (not that it needs it,
-    # but the request shape is predictable downstream).
+    # Core middleware: resolve Host -> Site first. CSRF is
+    # registered AFTER plugin `on_app_init` (below) so the bearer
+    # middleware in `bragi.contrib.api_tokens` gets to set
+    # `g.api_csrf_exempt` before CSRF reads it. Flask runs
+    # before_request hooks in registration order; tying the
+    # exemption flag to verified-bearer-only means a request with
+    # `Authorization: bearer junk` can't bypass CSRF on a session-
+    # cookie POST. The bearer plugin uses `tryfirst=True` so its
+    # own `on_app_init` registers its hook ahead of others.
     register_site_resolver(app)
-    register_csrf(app)
+    # `/healthz` is the container healthcheck target. Register
+    # before the site-prefixed admin scaffolding so the route is
+    # available regardless of how site_resolver leaves `g.site`.
+    register_healthz(app)
 
     # Site-prefixed admin routes (`/admin/sites/<site_slug>/...`)
     # capture the slug as a URL converter. Stash it on `g` so the
@@ -120,6 +139,12 @@ def create_admin_app() -> Flask:
 
     pm.hook.on_app_init(app=app, registry=registry)
 
+    # CSRF guard: registered AFTER plugin on_app_init so the
+    # bearer middleware's before_request fires first and can set
+    # `g.api_csrf_exempt` on verified API requests. See the note
+    # above register_site_resolver.
+    register_csrf(app)
+
     # Collect plugin-contributed specs into the registry.
     for spec in pm.hook.register_content_type():
         registry.add_content_type(spec)
@@ -140,9 +165,16 @@ def create_admin_app() -> Flask:
     for spec in pm.hook.register_theme():
         registry.add_theme(spec)
 
-    # Mount plugin-contributed Blueprints on the admin app.
-    for bp in pm.hook.register_admin_blueprint():
-        app.register_blueprint(bp)
+    # Mount plugin-contributed Blueprints on the admin app. A
+    # plugin may return either a single Blueprint or a list (some
+    # plugins, e.g. api_tokens, contribute multiple URL spaces
+    # with different prefixes).
+    for entry in pm.hook.register_admin_blueprint():
+        if isinstance(entry, list):
+            for bp in entry:
+                app.register_blueprint(bp)
+        else:
+            app.register_blueprint(entry)
 
     # Plumb CLI, Jinja, and transform registries through.
     pm.hook.register_cli_command(group=cms)

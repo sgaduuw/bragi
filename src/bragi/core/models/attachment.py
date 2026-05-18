@@ -38,12 +38,16 @@ class Attachment(IdMixin, TimestampsMixin, Base):
         UniqueConstraint("site_id", "storage_key", name="uq_attachments_site_key"),
     )
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(127))
     size_bytes: Mapped[int] = mapped_column(Integer)
     storage_key: Mapped[str] = mapped_column(String(128))  # sha256 hex
-    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
+    # Keep the attachment when the uploading user is removed; the
+    # row stays useful even if attribution is lost.
+    uploaded_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
     # Image-only fields; NULL for non-image uploads.
     width: Mapped[int | None] = mapped_column(Integer, default=None)

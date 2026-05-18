@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import secrets
 
-from flask import Flask, abort, request, session
+from flask import Flask, abort, g, request, session
 
 UNSAFE_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 SESSION_KEY = "_csrf_token"
@@ -65,6 +65,19 @@ def register_csrf(app: Flask) -> None:
         if request.method not in UNSAFE_METHODS:
             return
         if request.endpoint in app.config["CSRF_EXEMPT_ENDPOINTS"]:
+            return
+        # Bearer-token requests are CSRF-exempt by construction:
+        # an Authorization header doesn't ride cookies, and a
+        # cross-origin browser can't add it without a preflight
+        # the attacker page can't satisfy. BUT we only honour the
+        # exemption when the bearer middleware has VERIFIED the
+        # token (and set `g.api_csrf_exempt` in
+        # `bragi.contrib.api_tokens.auth`). Honouring it on raw
+        # header presence would let an attacker on a session-
+        # cookie request smuggle a junk `Authorization: bearer x`
+        # and bypass CSRF while still authenticating via the
+        # cookie.
+        if g.get("api_csrf_exempt"):
             return
 
         submitted = request.form.get(FORM_FIELD) or request.headers.get(HEADER_NAME) or ""

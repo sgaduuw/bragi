@@ -13,15 +13,15 @@ than passing free-form strings so typos surface at import time.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from flask import g, has_request_context, request, session
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.audit_log import AuditLog
+from bragi.core.time import naive_utcnow
 
-log = logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 class AuditAction:
@@ -44,6 +44,11 @@ class AuditAction:
     TEAM_GRANTED = "team.granted"
     TEAM_ROLE_CHANGED = "team.role_changed"
     TEAM_REVOKED = "team.revoked"
+
+    # Personal access tokens (#146)
+    TOKEN_CREATED = "token.created"
+    TOKEN_REVOKED = "token.revoked"
+    TOKEN_USED = "token.used"
 
 
 def audit(
@@ -90,7 +95,7 @@ def audit(
                     target_type=target_type,
                     target_id=target_id,
                     site_id=site_id,
-                    occurred_at=datetime.now(UTC).replace(tzinfo=None),
+                    occurred_at=naive_utcnow(),
                     ip=ip,
                     user_agent=user_agent,
                     extra=extra or {},
@@ -100,4 +105,4 @@ def audit(
     except Exception:
         # The audit row is forensic; failing it must never break
         # the operation that triggered it. Log and swallow.
-        log.exception("Failed to write audit row for action=%s", action)
+        LOG.exception("Failed to write audit row for action=%s", action)

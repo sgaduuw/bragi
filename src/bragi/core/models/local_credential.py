@@ -24,6 +24,8 @@ from bragi.core.models._mixins import TimestampsMixin
 class LocalCredential(TimestampsMixin, Base):
     __tablename__ = "local_credentials"
 
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     password_hash: Mapped[str] = mapped_column(String(255))
     must_change: Mapped[bool] = mapped_column(default=False)

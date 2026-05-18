@@ -6,7 +6,10 @@ upserted from `data.tags` and attached through the existing
 `post_tags` junction.
 
 Permalink preservation: Ghost's default permalink shape is
-`/<slug>/`, which differs from bragi's `/posts/<slug>/`. The
+`/<slug>/`. Bragi's post URLs are prefixed by the site's
+post_index page, so the canonical target is
+`post_url_for(site, slug)`: `/blog/<slug>/` on a default new
+site, `/posts/<slug>/` on a migrated v1.10.x site, etc. The
 importer inserts a 301 Redirect for every such mismatch, so a
 legacy bookmark to `/old-post/` survives the migration.
 """
@@ -29,6 +32,7 @@ from bragi.core.models.redirect import Redirect, RedirectSource
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
 from bragi.core.render.markdown import make_excerpt, render_markdown
+from bragi.core.url import post_url_for
 
 
 def detect(path: Any) -> bool:
@@ -40,7 +44,7 @@ def _parsed_iso(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        # Ghost timestamps come as `2024-05-14T12:00:00.000Z` —
+        # Ghost timestamps come as `2024-05-14T12:00:00.000Z`.
         # `fromisoformat` accepts that in 3.11+, but the trailing
         # `Z` needs swapping to `+00:00` for older parsers. Keep
         # the explicit replace for portability.
@@ -234,11 +238,15 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             post.tags = post_tag_map.get(ghost_id, [])
 
             # Permalink redirect: Ghost serves `/<slug>/`, bragi
-            # serves `/posts/<slug>/`. Only emit when the post is
-            # actually reachable in Ghost (published).
-            if status == PostStatus.PUBLISHED:
+            # serves whatever the site's post_index prefixes
+            # (`/blog/<slug>/`, `/posts/<slug>/`, ...). Hardcoding
+            # `/posts/<slug>/` would 404 on any site whose
+            # post_index isn't named "posts". Skip when no
+            # post_index exists yet (post URLs are unreachable
+            # until one does).
+            target = post_url_for(site, slug, db=db)
+            if status == PostStatus.PUBLISHED and target is not None:
                 source_path = f"/{slug}/"
-                target = f"/posts/{slug}/"
                 if source_path != target:
                     clash = db.execute(
                         select(Redirect).where(

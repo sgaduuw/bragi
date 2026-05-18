@@ -38,6 +38,8 @@ class RedirectSource:
 
     MANUAL = "manual"
     SLUG_CHANGE = "slug-change"
+    KIND_CHANGE = "kind-change"
+    HOME_PAGE_CHANGE = "home-change"
     IMPORT_HUGO = "import:hugo"
     IMPORT_GHOST = "import:ghost"
     IMPORT_WORDPRESS = "import:wordpress"
@@ -55,7 +57,7 @@ class Redirect(IdMixin, TimestampsMixin, Base):
         ),
     )
 
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"))
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
     source_path: Mapped[str] = mapped_column(String(1024))
     target: Mapped[str] = mapped_column(String(1024))  # path or absolute URL
     status_code: Mapped[int] = mapped_column(default=301)  # 301/302/307/308/410

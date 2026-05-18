@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 
 from flask import Blueprint, Flask, current_app, g, request
 from flask.wrappers import Response
@@ -14,9 +13,10 @@ from bragi.core.db import SessionLocal
 from bragi.core.models.analytics_event import (
     AnalyticsEvent as AnalyticsEventRow,
 )
+from bragi.core.time import naive_utcnow, to_naive_utc
 from bragi.core.useragent import classify
 
-log = logging.getLogger(__name__)
+LOG = logging.getLogger(__name__)
 
 
 @hookimpl
@@ -27,7 +27,11 @@ def record_analytics_event(event: AnalyticsEvent) -> None:
     backpressure never blocks the request that triggered it.
     `occurred_at` defaults to "now" if the caller didn't set it.
     """
-    occurred = event.occurred_at or datetime.now(UTC)
+    # `event.occurred_at` may be aware (callers building events on
+    # the request path), naive (a backfill script), or None
+    # (default to "now"). `to_naive_utc` normalises any aware
+    # value to the naive-UTC storage shape.
+    occurred = to_naive_utc(event.occurred_at) if event.occurred_at else naive_utcnow()
     try:
         with SessionLocal() as db:
             db.add(
@@ -38,13 +42,13 @@ def record_analytics_event(event: AnalyticsEvent) -> None:
                     referrer=event.referrer,
                     user_agent_class=event.user_agent_class,
                     user_id=event.user_id,
-                    occurred_at=occurred.replace(tzinfo=None),
+                    occurred_at=occurred,
                     extra=event.extra or {},
                 )
             )
             db.commit()
     except Exception:
-        log.exception("Failed to record analytics event %r", event.event_type)
+        LOG.exception("Failed to record analytics event %r", event.event_type)
 
 
 @hookimpl
@@ -90,11 +94,11 @@ def on_app_init(app: Flask, registry: object) -> None:
                     path=request.path,
                     referrer=request.referrer,
                     user_agent_class=ua_class,
-                    occurred_at=datetime.now(UTC),
+                    occurred_at=naive_utcnow(),
                 )
             )
         except Exception:
-            log.exception("Failed to emit pageview")
+            LOG.exception("Failed to emit pageview")
         return response
 
 

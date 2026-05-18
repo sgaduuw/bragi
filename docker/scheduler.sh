@@ -15,6 +15,8 @@
 # Cadences (env-overridable, all in seconds):
 #   SCHEDULED_PUBLISH_EVERY  default 60      ; flip due drafts to published
 #   EMBEDS_RERENDER_EVERY    default 600     ; retry pending embed cards
+#   WEBMENTIONS_SEND_EVERY   default 300     ; ship pending outbound webmentions
+#   ACTIVITYPUB_SEND_EVERY   default 60      ; sign + deliver pending AP outbox rows
 #   ANALYZE_EVERY            default 86400   ; refresh sqlite_stat1 (daily)
 #   VACUUM_EVERY             default 604800  ; compact DB + collapse WAL (weekly)
 #
@@ -31,6 +33,8 @@ set -u
 
 SCHEDULED_PUBLISH_EVERY=${SCHEDULED_PUBLISH_EVERY:-60}
 EMBEDS_RERENDER_EVERY=${EMBEDS_RERENDER_EVERY:-600}
+WEBMENTIONS_SEND_EVERY=${WEBMENTIONS_SEND_EVERY:-300}
+ACTIVITYPUB_SEND_EVERY=${ACTIVITYPUB_SEND_EVERY:-60}
 ANALYZE_EVERY=${ANALYZE_EVERY:-86400}
 VACUUM_EVERY=${VACUUM_EVERY:-604800}
 
@@ -61,6 +65,8 @@ fi
 now=$(date +%s)
 last_scheduled_publish=$now
 last_embeds_rerender=$now
+last_webmentions_send=$now
+last_activitypub_send=$now
 last_analyze=$now
 last_vacuum=$now
 
@@ -75,6 +81,16 @@ while true; do
     if [ $((now - last_embeds_rerender)) -ge "$EMBEDS_RERENDER_EVERY" ]; then
         run "embeds-rerender" flask --app 'bragi.apps.admin:create_admin_app' cms embeds rerender-pending
         last_embeds_rerender=$(date +%s)
+    fi
+
+    if [ $((now - last_webmentions_send)) -ge "$WEBMENTIONS_SEND_EVERY" ]; then
+        run "webmentions-send" flask --app 'bragi.apps.admin:create_admin_app' cms webmentions send-pending
+        last_webmentions_send=$(date +%s)
+    fi
+
+    if [ $((now - last_activitypub_send)) -ge "$ACTIVITYPUB_SEND_EVERY" ]; then
+        run "activitypub-send" flask --app 'bragi.apps.admin:create_admin_app' cms activitypub send-pending
+        last_activitypub_send=$(date +%s)
     fi
 
     if [ $((now - last_analyze)) -ge "$ANALYZE_EVERY" ]; then

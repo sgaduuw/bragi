@@ -28,7 +28,7 @@ class UserIdentity(IdMixin, TimestampsMixin, Base):
         UniqueConstraint("provider", "provider_user_id", name="uq_user_identities_provider_pk"),
     )
 
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     provider: Mapped[str] = mapped_column(String(32), index=True)
     provider_user_id: Mapped[str] = mapped_column(String(255))
     provider_username: Mapped[str | None] = mapped_column(String(255), default=None)

@@ -17,6 +17,7 @@ from bragi.core.models.redirect import Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
+from tests.conftest import seed_blog_index
 
 # ============================================================
 # Frontmatter parser
@@ -165,7 +166,11 @@ def test_plan_skips_section_index(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def site_and_author(db_session: Session) -> Iterator[tuple[int, int]]:
+def site_and_author(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[tuple[int, int]]:
     user = User(email="ada@example.com", display_name="Ada", is_active=True)
     db_session.add(user)
     db_session.flush()
@@ -178,6 +183,15 @@ def site_and_author(db_session: Session) -> Iterator[tuple[int, int]]:
     )
     db_session.add(site)
     db_session.commit()
+    # Post URLs require a POST_INDEX page on the site; the
+    # importer's redirect emission now resolves through
+    # `post_url_for` and so silently skips redirects when there's
+    # no post_index. Seed `slug="posts"` to keep the existing
+    # `/posts/<slug>/` test assertions valid. Also patch
+    # `bragi.core.url.SessionLocal` so the url helper hits the
+    # same in-memory DB the test session writes to.
+    seed_blog_index(db_session, site, slug="posts")
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id, user.id
 
 
@@ -267,6 +281,55 @@ def test_apply_is_idempotent_via_source_id(
         rows = db.execute(select(Post)).scalars().all()
     assert len(rows) == 1
     assert rows[0].title == "Edited"
+
+
+def test_alias_redirect_targets_site_post_index_slug(
+    tmp_path: Path,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: alias targets must match the site's post_index slug.
+
+    The earlier hardcoded `/posts/<slug>/` would 404 on any site
+    whose POST_INDEX page isn't named "posts". This test seeds a
+    site with `slug="blog"` (the new-site default) and imports a
+    Hugo post; the alias target must come out as `/blog/<slug>/`.
+    """
+    monkeypatch.setattr("bragi.contrib.import_hugo.importer.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
+    user = User(email="b@example.com", display_name="B", is_active=True)
+    db_session.add(user)
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="b.example.com",
+        title="B",
+        canonical_url="https://b.example.com",
+        owner_user_id=user.id,
+    )
+    db_session.add(site)
+    db_session.commit()
+    seed_blog_index(db_session, site, slug="blog")
+
+    root = _make_hugo_tree(tmp_path)
+    (root / "content" / "hi.md").write_text(
+        "---\ntitle: Hi\ndate: 2026-01-01\naliases: ['/old-hi/?ref=tw#frag']\n---\nx\n"
+    )
+    with db_session_factory() as db:
+        s = db.get(Site, site.id)
+        assert s is not None
+        db.expunge(s)
+    apply(root, s, {})
+
+    with db_session_factory() as db:
+        rows = db.execute(select(Redirect)).scalars().all()
+    assert len(rows) == 1
+    # The alias `/old-hi/?ref=tw#frag` normalises to `/old-hi/`
+    # (query + fragment stripped); target uses the site's
+    # post_index slug, not hardcoded `/posts/`.
+    assert rows[0].source_path == "/old-hi/"
+    assert rows[0].target == "/blog/hi/"
 
 
 def test_apply_skips_draft_status_for_drafts(

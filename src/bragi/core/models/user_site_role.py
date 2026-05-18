@@ -31,6 +31,6 @@ class UserSiteRole(IdMixin, TimestampsMixin, Base):
     __tablename__ = "user_site_roles"
     __table_args__ = (UniqueConstraint("user_id", "site_id", name="uq_user_site_role_user_site"),)
 
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(16))

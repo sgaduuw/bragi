@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import requests
+from bragi.core.http import SafeHTTPError, safe_post
 
 LOG = logging.getLogger(__name__)
 
@@ -39,8 +39,16 @@ def submit(
         "urlList": urls,
     }
     try:
-        resp = requests.post(endpoint, json=body, timeout=_TIMEOUT_SECONDS)
-    except requests.RequestException as exc:
+        # Route through `safe_post` so the operator-supplied IndexNow
+        # endpoint URL is scheme-checked and any 3xx it returns is
+        # re-validated against the public-IP guard. The endpoint is
+        # nominally trusted, but a misconfigured / compromised search
+        # engine that 302s into RFC 1918 would otherwise pivot us.
+        resp = safe_post(endpoint, json=body, timeout=_TIMEOUT_SECONDS)
+    except SafeHTTPError as exc:
+        LOG.warning("IndexNow POST to %s rejected by SSRF guard: %s", endpoint, exc)
+        return None
+    except Exception as exc:  # noqa: BLE001 - best-effort, never break publish
         LOG.warning("IndexNow POST to %s failed: %s", endpoint, exc)
         return None
     if resp.status_code >= 400:

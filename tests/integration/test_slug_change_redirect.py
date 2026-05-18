@@ -25,7 +25,7 @@ from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, seed_blog_index
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -56,6 +56,7 @@ def admin_and_delivery(
     )
     db_session.add(site)
     db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
     db_session.add(LocalCredential(user_id=user.id, password_hash=hash_password(PASSWORD)))
     post = Post(
         site_id=site.id,

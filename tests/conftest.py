@@ -15,7 +15,14 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+# Importing `bragi.core.db` registers the `connect` event
+# listener that enables `PRAGMA foreign_keys = ON` on every
+# SQLite connection. Without this, ON DELETE CASCADE on FKs
+# silently doesn't fire and cascade-behaviour tests pass
+# vacuously. The import has no other side effects we care about.
+import bragi.core.db  # noqa: F401
 from bragi.core.models import Base
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 
@@ -64,6 +71,42 @@ def make_test_site(db_session: Session, **kwargs: Any) -> Site:
     else:
         db_session.flush()
     return site
+
+
+def seed_blog_index(
+    db_session: Session,
+    site: Site,
+    *,
+    slug: str = "posts",
+    title: str = "Blog",
+    author_id: int | None = None,
+    commit: bool = True,
+) -> Page:
+    """Add a POST_INDEX page to `site` so posts have public URLs.
+
+    Mirrors the alembic migration's per-site scaffold: a fresh
+    test that uses ORM `Site(...)` skips migrations, so post URLs
+    are unreachable until this helper runs. Defaults to `slug="posts"`
+    so `/posts/<post-slug>/` URLs continue to resolve, matching what
+    the migration auto-creates on upgrade.
+    """
+    page = Page(
+        site_id=site.id,
+        slug=slug,
+        title=title,
+        body_markdown="",
+        body_html="",
+        body_excerpt="",
+        author_id=author_id or site.owner_user_id,
+        status=PageStatus.PUBLISHED,
+        kind=PageKind.POST_INDEX,
+    )
+    db_session.add(page)
+    if commit:
+        db_session.commit()
+    else:
+        db_session.flush()
+    return page
 
 
 def csrf_token(client: FlaskClient, *, path: str = "/auth/login") -> str:
@@ -132,11 +175,21 @@ def db_session(db_session_factory: sessionmaker[Session]) -> Iterator[Session]:
 _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.contrib.analytics.admin.SessionLocal",
     "bragi.contrib.analytics.plugin.SessionLocal",
+    "bragi.contrib.api_tokens.admin.SessionLocal",
+    "bragi.contrib.api_tokens.api.SessionLocal",
+    "bragi.contrib.api_tokens.auth.SessionLocal",
+    "bragi.contrib.webmentions.admin.SessionLocal",
+    "bragi.contrib.webmentions.cli.SessionLocal",
+    "bragi.contrib.webmentions.plugin.SessionLocal",
+    "bragi.contrib.webmentions.receiver.SessionLocal",
+    "bragi.contrib.activitypub.cli.SessionLocal",
+    "bragi.contrib.activitypub.views.SessionLocal",
     "bragi.contrib.attachments.admin.SessionLocal",
     "bragi.contrib.attachments.cli.SessionLocal",
     "bragi.contrib.attachments.delivery.SessionLocal",
     "bragi.contrib.attachments.plugin.SessionLocal",
     "bragi.contrib.attachments.transforms.SessionLocal",
+    "bragi.cli.SessionLocal",
     "bragi.contrib.embeds.rerender.SessionLocal",
     "bragi.contrib.audit.admin.SessionLocal",
     "bragi.contrib.auth_github.views.SessionLocal",
@@ -146,9 +199,12 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.contrib.import_ghost.importer.SessionLocal",
     "bragi.contrib.import_hugo.cli.SessionLocal",
     "bragi.contrib.import_hugo.importer.SessionLocal",
+    "bragi.contrib.import_wordpress.cli.SessionLocal",
+    "bragi.contrib.import_wordpress.importer.SessionLocal",
     "bragi.contrib.indexnow.cli.SessionLocal",
     "bragi.contrib.internal_links.admin.SessionLocal",
     "bragi.contrib.page.admin.SessionLocal",
+    "bragi.contrib.page.archive.SessionLocal",
     "bragi.contrib.page.delivery.SessionLocal",
     "bragi.contrib.page.plugin.SessionLocal",
     "bragi.contrib.post.admin.SessionLocal",
@@ -166,11 +222,33 @@ _SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
     "bragi.contrib.search.cli.SessionLocal",
     "bragi.contrib.sites.cli.SessionLocal",
     "bragi.core.audit.SessionLocal",
+    "bragi.core.healthz.SessionLocal",
     "bragi.core.middleware.sessions.SessionLocal",
     "bragi.core.middleware.site_resolver.SessionLocal",
     "bragi.core.permissions.SessionLocal",
     "bragi.core.security.SessionLocal",
+    "bragi.core.seo.SessionLocal",
+    "bragi.core.url.SessionLocal",
 )
+
+
+@pytest.fixture(autouse=True)
+def _bypass_ssrf_dns_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip `bragi.core.http`'s DNS / private-IP guard in tests.
+
+    The federation plugins now call SSRF-guarded helpers that
+    resolve every host against `socket.getaddrinfo` and reject
+    non-public IPs. Test fixtures use synthetic domains
+    (`*.example`, `*.test`, ...) that either don't resolve or
+    resolve to NXDOMAIN; either case raises `SafeHTTPError`
+    before the test's `safe_get` / `safe_post` mock can run.
+
+    For most tests we want the mock to take over; for the
+    dedicated SSRF tests the bypass is undone case by case via
+    `monkeypatch.undo()` or by re-patching `_assert_public_host`
+    back to the real function.
+    """
+    monkeypatch.setattr("bragi.core.http._assert_public_host", lambda host: None)
 
 
 @pytest.fixture

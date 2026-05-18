@@ -350,6 +350,61 @@ def test_audit_list_filters_by_action_substring(
     assert "auth.login.success" not in body
 
 
+def test_audit_list_filters_by_actor_user_id(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The `actor=<id>` query param scopes to one user's rows."""
+    with db_session_factory() as db:
+        u = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        u.is_superuser = True
+        my_id = u.id
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/audit/?actor={my_id}")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    # Login by Ada produced an `auth.login.success` row attributed
+    # to her; filter should keep it.
+    assert "auth.login.success" in body
+
+    # Filter to a different user id returns no rows.
+    resp = client.get(f"/admin/audit/?actor={my_id + 999}")
+    assert resp.status_code == 200
+    assert "auth.login.success" not in resp.data.decode()
+
+
+def test_audit_list_bad_pagination_falls_back_to_first_page(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A non-integer `page` value defaults to 1 instead of 500'ing."""
+    with db_session_factory() as db:
+        u = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        u.is_superuser = True
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/audit/?page=not-a-number")
+    assert resp.status_code == 200
+
+
+def test_audit_list_bad_actor_filter_is_ignored(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A non-integer `actor` value is dropped without 500'ing."""
+    with db_session_factory() as db:
+        u = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        u.is_superuser = True
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/audit/?actor=not-a-number")
+    assert resp.status_code == 200
+
+
 def test_audit_nav_entry_only_for_superuser(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)  # not superuser

@@ -7,12 +7,16 @@ event sink are wired in this app as the corresponding plugins ship.
 
 from __future__ import annotations
 
+from typing import cast
+
 import click
 import jinja2
-from flask import Flask
+from flask import Flask, abort, g
+from flask.typing import ResponseReturnValue
+from werkzeug.wrappers import Response
 
-from bragi import __version__
 from bragi.core.cache import apply_cache_policy
+from bragi.core.healthz import register_healthz
 from bragi.core.middleware.redirects import register_redirect_handler
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
@@ -20,7 +24,7 @@ from bragi.core.render.markdown import install_app_renderer
 from bragi.core.render.transforms import TransformRegistry
 from bragi.core.themes import ThemeAwareLoader
 from bragi.plugins import create_plugin_manager
-from bragi.settings import settings
+from bragi.settings import assert_secret_key_safe, settings
 
 
 def create_delivery_app() -> Flask:
@@ -40,8 +44,13 @@ def create_delivery_app() -> Flask:
     or the auth-registration hooks. Those plugin surfaces are
     admin-only.
     """
+    assert_secret_key_safe("bragi-delivery")
     app = Flask("bragi-delivery")
     app.config["SECRET_KEY"] = settings.secret_key
+    # Hard cap so a streaming-body attack on a public inbox
+    # (webmentions, ActivityPub /actor/inbox) can't OOM the
+    # worker. See `Settings.max_request_bytes`.
+    app.config["MAX_CONTENT_LENGTH"] = settings.max_request_bytes
 
     # Make `bragi/templates/` reachable via the Jinja loader chain so
     # plugin delivery templates can `{% extends "delivery/base.html" %}`.
@@ -68,11 +77,16 @@ def create_delivery_app() -> Flask:
     # chain on every 404 before falling through to a real Not Found.
     register_site_resolver(app)
     register_redirect_handler(app)
+    # `/healthz` is the container healthcheck target; register
+    # before the 404 redirect handler so a probe against an
+    # unknown Host header still answers 200 rather than tripping
+    # the redirect chain or a real 404.
+    register_healthz(app)
 
     # Default cache policy for delivery HTML. Views that need a
     # different profile (sitemap, feed, robots, security.txt) set
     # `Cache-Control` themselves; `apply_cache_policy` respects an
-    # existing header. 3xx and 4xx responses skip the header — a
+    # existing header. 3xx and 4xx responses skip the header: a
     # 301 should not be cached as aggressively as a successful
     # GET, and a 404 served by the redirect chain may still mutate.
     @app.after_request
@@ -109,15 +123,20 @@ def create_delivery_app() -> Flask:
     # on app.extensions so `render_markdown()` picks it up.
     install_app_renderer(app, pm.hook.register_markdown_extension())
 
-    # Index sanity route. A real per-site landing page (post list,
-    # featured content, etc.) lands when a site needs more than a
-    # version stamp on `/`.
+    # Per-site `/` dispatcher. The route is owned by core; the
+    # *content* of `/` comes from `resolve_home` hookimpls. The
+    # page plugin's `tryfirst` impl handles `Site.home_page_id`
+    # (covering both static pages and a promoted post_index page);
+    # `theme_default` ships a `trylast` welcome stub so the hook
+    # is guaranteed to return a Response (no 404 path needed here).
+    # Other plugins can register their own resolve_home at default
+    # priority to slot between the two.
     @app.route("/")
-    def index() -> str:
-        return (
-            f"<h1>bragi delivery</h1>"
-            f"<p>v{__version__}. Scaffold only, no rendered content yet.</p>"
-        )
+    def home() -> ResponseReturnValue:
+        site = g.get("site")
+        if site is None:
+            abort(404)
+        return cast(Response, pm.hook.resolve_home(site=site))
 
     return app
 

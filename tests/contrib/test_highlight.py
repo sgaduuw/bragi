@@ -29,6 +29,7 @@ from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.render.markdown import render_markdown
+from tests.conftest import seed_blog_index
 
 # --------------------------- pure transform ---------------------------
 
@@ -142,6 +143,7 @@ def delivery_app_with_post(
     )
     db_session.add(site)
     db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
     # The body_html is what gets served. Render here using the same
     # render_markdown call the admin would have used at save time;
     # the test app context drives the transforms.

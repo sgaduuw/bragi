@@ -12,6 +12,12 @@ walks for autogenerate diffs.
 from __future__ import annotations
 
 from bragi.core.models._base import Base
+from bragi.core.models.activitypub import (
+    ActivityPubFollower,
+    ActivityPubOutbox,
+    ActivityPubOutboxStatus,
+    SiteKeypair,
+)
 from bragi.core.models.analytics_event import AnalyticsEvent
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -19,6 +25,7 @@ from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.page_revision import PageRevision
+from bragi.core.models.personal_access_token import PersonalAccessToken, TokenScope
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
@@ -29,8 +36,18 @@ from bragi.core.models.tag import Tag, post_tags
 from bragi.core.models.user import User
 from bragi.core.models.user_identity import UserIdentity
 from bragi.core.models.user_site_role import Role, UserSiteRole
+from bragi.core.models.webmention import (
+    Webmention,
+    WebmentionOutbox,
+    WebmentionOutboxStatus,
+    WebmentionStatus,
+    WebmentionType,
+)
 
 __all__ = [
+    "ActivityPubFollower",
+    "ActivityPubOutbox",
+    "ActivityPubOutboxStatus",
     "AnalyticsEvent",
     "Attachment",
     "AttachmentRendition",
@@ -41,6 +58,7 @@ __all__ = [
     "Page",
     "PageRevision",
     "PageStatus",
+    "PersonalAccessToken",
     "Post",
     "PostRevision",
     "PostStatus",
@@ -50,9 +68,16 @@ __all__ = [
     "Session",
     "Site",
     "SiteAlias",
+    "SiteKeypair",
     "Tag",
+    "TokenScope",
     "User",
     "UserIdentity",
     "UserSiteRole",
+    "Webmention",
+    "WebmentionOutbox",
+    "WebmentionOutboxStatus",
+    "WebmentionStatus",
+    "WebmentionType",
     "post_tags",
 ]

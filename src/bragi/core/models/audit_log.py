@@ -27,13 +27,18 @@ from bragi.core.models._mixins import IdMixin
 class AuditLog(IdMixin, Base):
     __tablename__ = "audit_log"
 
+    # Audit history is worth preserving even after the actor or
+    # the site row is removed; SET NULL keeps the row visible in
+    # the audit log without retaining a dangling FK.
     actor_user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"), default=None, index=True
+        ForeignKey("users.id", ondelete="SET NULL"), default=None, index=True
     )
     action: Mapped[str] = mapped_column(String(64), index=True)
     target_type: Mapped[str | None] = mapped_column(String(32), default=None)
     target_id: Mapped[int | None] = mapped_column(default=None)
-    site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), default=None)
+    site_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sites.id", ondelete="SET NULL"), default=None
+    )
     occurred_at: Mapped[datetime] = mapped_column(index=True)
     ip: Mapped[str | None] = mapped_column(String(64), default=None)
     user_agent: Mapped[str | None] = mapped_column(String(512), default=None)

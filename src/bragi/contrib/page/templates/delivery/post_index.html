@@ -1,0 +1,59 @@
+{% extends "delivery/base.html" %}
+{% block title %}{{ page.meta_title or page.title }} &middot; {{ site.title }}{% endblock %}
+{% block social_meta %}
+  {%- set _title = page.meta_title or page.title -%}
+  <meta property="og:title" content="{{ _title }}">
+  <meta property="og:type" content="website">
+  {% if canonical_url %}<meta property="og:url" content="{{ canonical_url }}">{% endif %}
+  {% if meta_description %}<meta property="og:description" content="{{ meta_description }}">{% endif %}
+  {% if site %}<meta property="og:site_name" content="{{ site.title }}">{% endif %}
+  {% if og_image_url %}<meta property="og:image" content="{{ og_image_url }}">{% endif %}
+  <meta name="twitter:card" content="{{ 'summary_large_image' if og_image_url else 'summary' }}">
+  <meta name="twitter:title" content="{{ _title }}">
+  {% if meta_description %}<meta name="twitter:description" content="{{ meta_description }}">{% endif %}
+  {% if og_image_url %}<meta name="twitter:image" content="{{ og_image_url }}">{% endif %}
+{% endblock %}
+{% block content %}
+<header>
+  <h1>{{ page.title }}</h1>
+</header>
+{% if page.body_html %}
+<div class="intro">
+  {{ page.body_html | internal_link_rewrite | safe }}
+</div>
+{% endif %}
+{% if posts %}
+<ul class="post-list">
+  {% for post in posts %}
+  <li>
+    <h2><a href="{{ url_for_post(post) }}">{{ post.title }}</a></h2>
+    {% if post.published_at %}
+      <time datetime="{{ post.published_at.isoformat() }}" class="meta">
+        {{ post.published_at.strftime('%Y-%m-%d') }}
+      </time>
+    {% endif %}
+    {% if post.body_excerpt %}
+      <p class="excerpt">{{ post.body_excerpt }}</p>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% if total_pages > 1 %}
+<nav class="pagination" aria-label="Pagination">
+  {% if has_prev %}
+    {% if page_n == 2 %}
+      <a rel="prev" href="{{ url_for_page(page) }}">&larr; Newer</a>
+    {% else %}
+      <a rel="prev" href="{{ url_for_page(page) }}?page={{ page_n - 1 }}">&larr; Newer</a>
+    {% endif %}
+  {% endif %}
+  <span class="page-of">Page {{ page_n }} of {{ total_pages }}</span>
+  {% if has_next %}
+    <a rel="next" href="{{ url_for_page(page) }}?page={{ page_n + 1 }}">Older &rarr;</a>
+  {% endif %}
+</nav>
+{% endif %}
+{% else %}
+<p>No posts yet.</p>
+{% endif %}
+{% endblock %}
