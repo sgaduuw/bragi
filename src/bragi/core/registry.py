@@ -6,6 +6,18 @@ importers, OAuth providers, auth methods, admin nav entries.
 
 App code (views, middleware) reads from the registry via
 `current_app.extensions["registry"]`.
+
+## Duplicate registrations (#188)
+
+Each `add_*` method dedups on the canonical unique field
+(`.name` for most specs, `.slug` for themes, `.endpoint` for
+NavItem). A second plugin trying to claim the same key surfaces
+as `DuplicateRegistration` at boot rather than the bare
+list-append's silent-shadowing-first-wins behaviour. Without
+per-spec ownership tracking (a follow-up; see #188) the error
+quotes the colliding key but not the owning plugins; operators
+who hit one can run `cms plugins list` to identify which
+installed plugins ship the surface in question.
 """
 
 from __future__ import annotations
@@ -25,6 +37,25 @@ from bragi.api import (
 )
 
 
+class DuplicateRegistration(RuntimeError):
+    """Two plugins tried to register the same spec key.
+
+    Raised by `Registry.add_*` methods when the unique field of a
+    new spec collides with one already registered. Surfaces at
+    app boot as a hard fail rather than the bare list-append's
+    silently-shadowed first-wins behaviour.
+    """
+
+    def __init__(self, kind: str, key: str) -> None:
+        super().__init__(
+            f"duplicate {kind} registration for key {key!r}; two "
+            f"plugins cannot claim the same {kind} key. Run "
+            f"`cms plugins list` to see which plugins are loaded."
+        )
+        self.kind = kind
+        self.key = key
+
+
 @dataclass
 class Registry:
     """Things plugins contribute at boot."""
@@ -40,24 +71,54 @@ class Registry:
     themes: list[ThemeSpec] = field(default_factory=list)
 
     def add_content_type(self, spec: ContentTypeSpec) -> None:
+        for existing in self.content_types:
+            if existing.name == spec.name:
+                raise DuplicateRegistration("content_type", spec.name)
         self.content_types.append(spec)
 
     def add_importer(self, spec: ImporterSpec) -> None:
+        for existing in self.importers:
+            if existing.name == spec.name:
+                raise DuplicateRegistration("importer", spec.name)
         self.importers.append(spec)
 
     def add_oauth_provider(self, spec: OAuthProviderSpec) -> None:
+        for existing in self.oauth_providers:
+            if existing.name == spec.name:
+                raise DuplicateRegistration("oauth_provider", spec.name)
         self.oauth_providers.append(spec)
 
     def add_auth_method(self, spec: AuthMethodSpec) -> None:
+        for existing in self.auth_methods:
+            if existing.name == spec.name:
+                raise DuplicateRegistration("auth_method", spec.name)
         self.auth_methods.append(spec)
 
     def add_admin_nav(self, items: list[NavItem]) -> None:
-        self.admin_nav.extend(items)
+        # NavItem uniqueness is on `endpoint`. Flask endpoint
+        # names are globally unique across the app's registered
+        # views; two NavItems pointing at the same endpoint
+        # render as duplicate "go here" links and are always a
+        # bug, even when the labels differ. Each item is checked
+        # against both the pre-existing nav and the partial batch
+        # added so far in this call, so a hookimpl that returns
+        # `[a, a]` is caught too.
+        for item in items:
+            for existing in self.admin_nav:
+                if existing.endpoint == item.endpoint:
+                    raise DuplicateRegistration("admin_nav", item.endpoint)
+            self.admin_nav.append(item)
 
     def add_storage_backend(self, spec: StorageBackendSpec) -> None:
+        for existing in self.storage_backends:
+            if existing.name == spec.name:
+                raise DuplicateRegistration("storage_backend", spec.name)
         self.storage_backends.append(spec)
 
     def add_image_processor(self, spec: ImageProcessorSpec) -> None:
+        for existing in self.image_processors:
+            if existing.name == spec.name:
+                raise DuplicateRegistration("image_processor", spec.name)
         self.image_processors.append(spec)
 
     def add_search_backend(self, spec: SearchBackendSpec | None) -> None:
@@ -70,9 +131,15 @@ class Registry:
         # the app-init loop doesn't need a per-hook filter.
         if spec is None:
             return
+        for existing in self.search_backends:
+            if existing.name == spec.name:
+                raise DuplicateRegistration("search_backend", spec.name)
         self.search_backends.append(spec)
 
     def add_theme(self, spec: ThemeSpec) -> None:
+        for existing in self.themes:
+            if existing.slug == spec.slug:
+                raise DuplicateRegistration("theme", spec.slug)
         self.themes.append(spec)
 
     def content_type(self, name: str) -> ContentTypeSpec | None:
