@@ -117,9 +117,35 @@ def receive() -> ResponseReturnValue:
             )
             return jsonify({"status": "rejected", "reason": "no link"}), 400
 
-        # Verified: now build the row. Status lands as VERIFIED
-        # (still requires admin approval before public display).
+        # Verified: now upsert. Status lands as VERIFIED on a fresh
+        # row (still requires admin approval before public display).
+        # Pre-insert dedup: a well-behaved Mastodon retry presents
+        # the same (source, target) tuple multiple times; without
+        # this check the admin moderation queue accumulates
+        # duplicates and approving one of them doesn't dedupe the
+        # rest. On a repeat we refresh the parsed h-card / content
+        # snippet (the source page may have changed) and bump
+        # `verified_at`, but leave moderation state (`status`,
+        # `approved`) alone so a previously-rejected mention can't
+        # be re-presented into the queue.
         name, url, photo = extract_hcard(html, source)
+        existing = db.execute(
+            select(Webmention).where(
+                Webmention.site_id == site.id,
+                Webmention.source_url == source,
+                Webmention.target_url == target,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.author_name = name
+            existing.author_url = url
+            existing.author_photo = photo
+            existing.content_text = _content_snippet(html)
+            existing.mention_type = classify_mention(html)
+            existing.verified_at = naive_utcnow()
+            db.commit()
+            return jsonify({"status": "accepted"}), 202
+
         row = Webmention(
             site_id=site.id,
             source_url=source,

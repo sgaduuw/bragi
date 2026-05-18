@@ -34,11 +34,22 @@ COPY pyproject.toml README.md ./
 
 RUN pip install --no-deps -e .
 
+# Drop root for the runtime (same as admin). Even though delivery
+# is read-only at the schema level, a worker RCE under uid 0 still
+# escapes into the bind-mounted /data volume with root privileges.
+RUN useradd --system --create-home --shell /usr/sbin/nologin bragi \
+    && mkdir -p /data \
+    && chown -R bragi:bragi /app /data
+USER bragi
+
 EXPOSE 8002
 # `bragi-delivery` (the click script) calls `app.run(...)` and is
 # the local-dev entrypoint. In the container, run gunicorn against
 # the WSGI factory. Delivery is read-heavy; 4 workers default fine
 # under SQLite WAL. `DELIVERY_WORKERS` env var lets ops dial it up
 # or down. See the admin Dockerfile for the rationale on
-# `sync` worker class and `--access-logfile -`.
-CMD ["sh", "-c", "exec gunicorn -w ${DELIVERY_WORKERS:-4} -b 0.0.0.0:8002 --timeout 30 --access-logfile - 'bragi.apps.delivery:create_delivery_app()'"]
+# `sync` worker class and `--access-logfile -`. `--graceful-timeout
+# 25` ensures in-flight requests get up to 25s to complete on
+# SIGTERM before workers are killed; pair with compose.yml's
+# `stop_grace_period: 30s`.
+CMD ["sh", "-c", "exec gunicorn -w ${DELIVERY_WORKERS:-4} -b 0.0.0.0:8002 --timeout 30 --graceful-timeout 25 --access-logfile - 'bragi.apps.delivery:create_delivery_app()'"]

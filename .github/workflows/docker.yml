@@ -35,12 +35,22 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}-${{ matrix.image }}
+          # `flavor: latest=auto` only adds `:latest` for non-
+          # prerelease semver tags (e.g. `v1.12.0` -> latest, but
+          # `v1.12.0-rc1` does NOT). Caveat: a hotfix cut off an
+          # older lineage (say, `v1.10.5` after `v1.11.0` already
+          # shipped) would still claim `:latest` here because the
+          # action compares the tag pattern, not the tag ordering
+          # against the registry. Operators cutting hotfixes off
+          # older majors must manually re-tag `:latest` afterwards
+          # if needed.
+          flavor: |
+            latest=auto
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest
 
       - name: Build and push
         uses: docker/build-push-action@v6

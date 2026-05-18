@@ -13,6 +13,7 @@ import click
 import jinja2
 from flask import Flask, abort, g
 from flask.typing import ResponseReturnValue
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.wrappers import Response
 
 from bragi.core.cache import apply_cache_policy
@@ -51,6 +52,21 @@ def create_delivery_app() -> Flask:
     # (webmentions, ActivityPub /actor/inbox) can't OOM the
     # worker. See `Settings.max_request_bytes`.
     app.config["MAX_CONTENT_LENGTH"] = settings.max_request_bytes
+
+    # ProxyFix rewrites the WSGI environ from `X-Forwarded-*`
+    # headers when the operator declared trusted hops. Without it,
+    # `request.scheme` stays `http` (so `<link rel="canonical">`
+    # and outbound webmention/ActivityPub URLs build with the wrong
+    # scheme), and per-IP analytics buckets every visit under the
+    # reverse proxy's IP. See `Settings.trusted_proxy_hops` for the
+    # "never trust more hops than you really have" warning.
+    if settings.trusted_proxy_hops > 0:
+        app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
+            app.wsgi_app,
+            x_for=settings.trusted_proxy_hops,
+            x_proto=settings.trusted_proxy_hops,
+            x_host=settings.trusted_proxy_hops,
+        )
 
     # Make `bragi/templates/` reachable via the Jinja loader chain so
     # plugin delivery templates can `{% extends "delivery/base.html" %}`.

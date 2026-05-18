@@ -304,11 +304,18 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post.og_image_id = og_image_id
 
         # Transition to published sets published_at the first time
-        # the status flips. Re-publishing doesn't reset the timestamp.
-        is_first_publish = (
-            post.status != PostStatus.PUBLISHED and form["status"] == PostStatus.PUBLISHED
-        )
-        if is_first_publish:
+        # the column is empty (i.e. the post has never been
+        # published). A draft -> published -> draft -> published
+        # cycle keeps the original `published_at` so archive order,
+        # feed `<published>` semantics, and "newest first" lists
+        # don't silently float old posts to the top on a second
+        # publish. Gating on `is_first_publish` (status transition)
+        # alone would re-stamp every republish; the api_tokens
+        # write path mirrors this `is None` guard.
+        was_unpublished = post.status != PostStatus.PUBLISHED
+        becoming_published = form["status"] == PostStatus.PUBLISHED
+        is_first_publish = was_unpublished and becoming_published
+        if is_first_publish and post.published_at is None:
             post.published_at = naive_utcnow()
         post.status = form["status"]
 
@@ -461,6 +468,7 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         # status->published transition) should see the same
         # `on_post_updated` they'd see for a hand edit.
         before = {"slug": post.slug, "title": post.title, "status": post.status}
+        was_unpublished = post.status != PostStatus.PUBLISHED
         post.title = revision.title
         post.slug = revision.slug
         post.status = revision.status
@@ -468,12 +476,23 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         post.body_html = revision.body_html
         post.body_excerpt = revision.body_excerpt
         post.meta_description = revision.meta_description
+        # If the restore crosses the draft->published boundary,
+        # mirror the normal edit flow: stamp `published_at` only if
+        # it hasn't been set before, and fire `on_post_published`
+        # so the AP outbox / search index / sitemap / etc see the
+        # transition. Without this, a restored draft that becomes
+        # published silently misses federation fan-out.
+        is_first_publish = was_unpublished and post.status == PostStatus.PUBLISHED
+        if is_first_publish and post.published_at is None:
+            post.published_at = naive_utcnow()
         db.commit()
         restored_id = post.id
         site_id_for_audit = post.site_id
         after = {"slug": post.slug, "title": post.title, "status": post.status}
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        if is_first_publish:
+            pm.hook.on_post_published(item=post, session=db)
         pm.hook.on_cache_purge(scope="post", key=str(restored_id))
 
     audit(

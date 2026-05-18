@@ -616,6 +616,7 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
             "status": page.status,
             "kind": page.kind,
         }
+        was_unpublished = page.status != PageStatus.PUBLISHED
         page.title = revision.title
         page.slug = revision.slug
         page.status = revision.status
@@ -633,8 +634,16 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
             "status": page.status,
             "kind": page.kind,
         }
+        is_first_publish = was_unpublished and page.status == PageStatus.PUBLISHED
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        if is_first_publish:
+            # AP / sitemap / search subscribers listen to
+            # `on_post_published`; a restore that crosses
+            # draft->published must fire it so the transition is
+            # observable like a hand edit. (Page has no
+            # `published_at` field, so no timestamp to stamp.)
+            pm.hook.on_post_published(item=page, session=db)
         pm.hook.on_cache_purge(scope="page", key=str(restored_id))
 
     audit(
