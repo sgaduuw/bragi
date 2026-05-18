@@ -40,7 +40,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   moderation list and can fool a moderator into approving a row
   whose real destination is malicious. The h-card extractor
   (and any future caller of the now-centralised
-  `bragi.core.safe_redirect.safe_external_url`) now rejects
+  `bragi.core.safe_urls.safe_external_url`) now rejects
   `U+202A`-`U+202E` and `U+2066`-`U+2069`.
 
 ### Changed
@@ -96,7 +96,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runs untrusted PR code from forks.
 - Miscellaneous internal refactors (closing #201, #202, #203,
   #211, #213, #216, #218): `_safe_external_url` lifted from
-  `webmentions/parse.py` into `bragi.core.safe_redirect` for
+  `webmentions/parse.py` into `bragi.core.safe_urls` for
   reuse; webmention `_queue_outbox_for_post` fallback uses
   `urlparse(...).hostname` not `.netloc`; redirects admin flash
   enumerates "no control characters" alongside the existing

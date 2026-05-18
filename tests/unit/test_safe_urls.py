@@ -1,4 +1,4 @@
-"""Unit tests for `bragi.core.safe_redirect`.
+"""Unit tests for `bragi.core.safe_urls`.
 
 Two helpers, each backing one URL-gating contract:
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from bragi.core.safe_redirect import safe_external_url, safe_relative_path
+from bragi.core.safe_urls import safe_external_url, safe_relative_path
 
 
 @pytest.mark.parametrize(

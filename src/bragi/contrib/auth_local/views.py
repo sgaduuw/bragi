@@ -21,7 +21,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.middleware.sessions import rotate_sid
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user import User
-from bragi.core.safe_redirect import safe_relative_path
+from bragi.core.safe_urls import safe_relative_path
 
 bp = Blueprint(
     "auth_local",
@@ -34,7 +34,7 @@ bp = Blueprint(
 def _safe_next(candidate: str | None) -> str:
     """Restrict `next` to same-host relative paths to prevent open redirects.
 
-    See `bragi.core.safe_redirect.safe_relative_path` for the rejected
+    See `bragi.core.safe_urls.safe_relative_path` for the rejected
     shapes (incl. backslash-normalisation by the browser URL parser).
     """
     return safe_relative_path(candidate) or "/"
