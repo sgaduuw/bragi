@@ -6,6 +6,55 @@ citizen.
 
 ## Status
 
+1.12.0 shipped 2026-05-18. Hardening release across the v1.11.0
+surface following seven rounds of audit. Security: GitHub OAuth
+no longer auto-links a new identity onto an existing local user
+by matching email (an account-takeover primitive against
+operators with both auth methods enabled); attachment uploads
+gate on a content-type allowlist plus Pillow magic-byte
+verification, delivery serves with `X-Content-Type-Options:
+nosniff` and inline-disposition only for safe types
+(closes a stored-XSS surface via SVG / HTML / forged content-type);
+redirects admin rejects absolute URLs, protocol-relative `//`,
+backslash-escaped (`/\evil.example/x`), and C0/DEL control
+characters in `target=` (open-redirect + persistent per-URL
+500 DoS); page-admin validates cross-site `parent_id` on both
+create and edit and on revision restore; webmention receiver
+verifies source HTML before persisting (closes a per-request DoS
+surface), dedupes repeat `(source, target)` presentations, gates
+h-card URLs to http(s)-only (stored-XSS via `javascript:` URL),
+and tightens the source-fetch timeout to 3 s; the SSRF guard
+re-resolves the host at send-time to refuse DNS rebinding; the
+bearer middleware caches verify outcomes to bound argon2 DoS
+amplification, invalidates the cache on token revoke, and
+re-checks `expires_at` per request; `current_user()` treats
+`is_active=False` users as anonymous; ActivityPub Signature
+parsing is quote-aware. Ops: containers run as a non-root
+`bragi` user, gunicorn has a 25 s graceful-shutdown window,
+`compose.yml` sets `stop_grace_period: 30 s` and
+`BRAGI_TRUSTED_PROXY_HOPS=1` (apps wrap in
+`werkzeug.middleware.proxy_fix.ProxyFix` when the knob is > 0
+so OAuth callbacks build as `https://...` and audit / session
+rows record real client IPs rather than the proxy), the task
+sidecar retries `alembic upgrade head` with backoff and exits 0
+after exhausting attempts (no more livelock on broken
+migrations), the GHCR `:latest` tag is gated to non-prerelease
+semver tags via `flavor: latest=auto`, and the webmention +
+ActivityPub outboxes abandon PENDING rows on post-unpublish so
+followers don't receive Notes pointing at a 404. CQ: FTS5
+search `total` is short-TTL cached and invalidated on lifecycle
+events with case-folded sorted token keys; page / post revision
+restore fires `on_post_updated` and `on_post_published` so
+plugin subscribers see the same lifecycle a hand edit produces;
+the actor cache reads under its lock and rechecks after fetch;
+the AP fanout is idempotent across restore-as-republish so
+followers don't receive duplicate Notes; `cms backup` /
+`cms export` route timestamps through `aware_utcnow()`; the
+audit-log `action` filter escapes SQL `LIKE` metacharacters.
+Closes #181, #182, #183, #184, #186, #187, #195 plus the
+audit-pass-1-through-7 finding rollups (PRs #194, #196, #197,
+#198, #208, #214, #220).
+
 1.11.0 shipped 2026-05-18. Three publishing surfaces land in this
 release: ActivityPub federation (one follow-able actor per site,
 RSA-SHA256 HTTP signatures, Mastodon-compatible Follow / Undo,
@@ -369,7 +418,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.11.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.12.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -395,6 +444,21 @@ booting with the bundled dev `SECRET_KEY` is fatal rather than
 just logging a warning, so a misconfigured `BRAGI_SECRET_KEY`
 fails loud instead of running with a predictable signing key.
 Leave unset for local dev.
+
+`BRAGI_TRUSTED_PROXY_HOPS` (default 0; the example compose sets
+it to 1) tells the apps how many trusted reverse-proxy hops sit
+in front of them. When > 0, both `create_admin_app` and
+`create_delivery_app` wrap the WSGI callable in
+`werkzeug.middleware.proxy_fix.ProxyFix(x_for, x_proto, x_host)`
+with that hop count. Without it, three breakages manifest on a
+fresh prod deploy: (a) `url_for(..., _external=True)` for the
+GitHub OAuth `redirect_uri` emits `http://...` and GitHub
+rejects the callback; (b) every `AuditLog.ip` and `Session.ip`
+row records the reverse proxy's IP, hiding real client IPs;
+(c) per-IP analytics groups every visit under the proxy.
+**Never set this higher than the actual reverse-proxy depth**:
+each unit of trust extends the `X-Forwarded-*` spoofability
+boundary one hop outward.
 
 `BRAGI_MAX_REQUEST_BYTES` (default 1 MiB) caps the request body
 size to protect the federation inboxes from streaming-body OOM.
