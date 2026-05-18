@@ -1,50 +1,45 @@
-[tool.poetry]
+[project]
 name = "bragi"
 version = "1.12.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
-authors = ["Eelco Wesemann <6771014+sgaduuw@users.noreply.github.com>"]
+authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/sgaduuw/bragi"
-repository = "https://github.com/sgaduuw/bragi"
-packages = [{include = "bragi", from = "src"}]
+requires-python = ">=3.12,<4"
 # Not published to PyPI; ship via Docker on GHCR. The `bragi`
 # distribution name is held by an unrelated project.
+dependencies = [
+    "flask (>=3.0,<4.0)",
+    "sqlalchemy (>=2.0,<3.0)",
+    "alembic (>=1.13,<2.0)",
+    "pluggy (>=1.5,<2.0)",
+    "pydantic-settings (>=2.2,<3.0)",
+    "authlib (>=1.3,<2.0)",
+    "argon2-cffi (>=23.1,<24.0)",
+    "markdown-it-py (>=3.0,<4.0)",
+    "mdit-py-plugins (>=0.4,<0.5)",
+    "pygments (>=2.18,<3.0)",
+    "markdownify (>=0.13,<0.14)",
+    "click (>=8.1,<9.0)",
+    "requests (>=2.34.1,<3.0.0)",
+    "pyyaml (>=6.0.3,<7.0.0)",
+    "pillow (>=12.2.0,<13.0.0)",
+    "gunicorn (>=23.0,<24.0)",
+    "cryptography (>=48.0,<49.0)",
+]
 
-[tool.poetry.dependencies]
-python = "^3.12"
-flask = "^3.0"
-sqlalchemy = "^2.0"
-alembic = "^1.13"
-pluggy = "^1.5"
-pydantic-settings = "^2.2"
-authlib = "^1.3"
-argon2-cffi = "^23.1"
-markdown-it-py = "^3.0"
-mdit-py-plugins = "^0.4"
-pygments = "^2.18"
-markdownify = "^0.13"
-click = "^8.1"
-requests = "^2.34.1"
-pyyaml = "^6.0.3"
-pillow = "^12.2.0"
-gunicorn = "^23.0"
-cryptography = "^48.0"
+[project.urls]
+homepage = "https://github.com/sgaduuw/bragi"
+repository = "https://github.com/sgaduuw/bragi"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0"
-ruff = "^0.5"
-mypy = "^1.10"
-honcho = "^1.1"
-
-[tool.poetry.scripts]
+[project.scripts]
 bragi-admin    = "bragi.apps.admin:run"
 bragi-delivery = "bragi.apps.delivery:run"
 
 # Plugin entry-point group: built-ins are activated here. Comment
 # a line to disable a built-in (it stays on disk; just doesn't
 # register on app boot).
-[tool.poetry.plugins."bragi.plugins"]
+[project.entry-points."bragi.plugins"]
 post = "bragi.contrib.post.plugin"
 page = "bragi.contrib.page.plugin"
 redirects = "bragi.contrib.redirects.plugin"
@@ -73,8 +68,19 @@ api_tokens = "bragi.contrib.api_tokens.plugin"
 webmentions = "bragi.contrib.webmentions.plugin"
 activitypub = "bragi.contrib.activitypub.plugin"
 
+# Poetry-specific build layout: src-layout package discovery. PEP
+# 621 has no portable equivalent for this; stays in `[tool.poetry]`.
+[tool.poetry]
+packages = [{include = "bragi", from = "src"}]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+ruff = "^0.5"
+mypy = "^1.10"
+honcho = "^1.1"
+
 [build-system]
-requires = ["poetry-core>=1.8.0"]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
