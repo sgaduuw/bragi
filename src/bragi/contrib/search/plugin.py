@@ -31,6 +31,7 @@ from bragi.contrib.search.backend import (
 )
 from bragi.contrib.search.cli import search_group
 from bragi.contrib.search.delivery import bp as search_bp
+from bragi.core.db import engine
 from bragi.core.models.page import Page
 from bragi.core.models.post import Post, PostStatus
 
@@ -38,8 +39,27 @@ LOG = logging.getLogger(__name__)
 
 
 @hookimpl
-def register_search_backend() -> SearchBackendSpec:
-    """Register the SQLite FTS5 backend as the day-one default."""
+def register_search_backend() -> SearchBackendSpec | None:
+    """Register the SQLite FTS5 backend as the day-one default.
+
+    SQLite-only: the backend's `MATCH posts_fts MATCH :q` predicate
+    is a SQLite virtual-table syntax that 500s on any other engine.
+    Under a non-SQLite `BRAGI_DATABASE_URL` every `/search` request
+    would 500 silently — return None so the registry treats the
+    plugin as having no backend and the operator gets a clear "no
+    backend registered" failure mode rather than a per-request SQL
+    error. Operators on Postgres should either disable the plugin
+    in `pyproject.toml` or ship a Postgres-compatible backend via
+    their own `register_search_backend`.
+    """
+    if engine.dialect.name != "sqlite":
+        LOG.warning(
+            "bragi.contrib.search: SQLiteFTS5SearchBackend not registered; "
+            "current engine is `%s`. Disable this plugin in pyproject.toml "
+            "or register a Postgres-compatible backend.",
+            engine.dialect.name,
+        )
+        return None
     return SQLiteFTS5SearchBackend
 
 
