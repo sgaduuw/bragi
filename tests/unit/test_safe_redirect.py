@@ -123,3 +123,28 @@ def test_safe_external_url_rejects_unsafe_shapes(url: str | None) -> None:
 )
 def test_safe_external_url_rejects_unicode_bidi(url: str) -> None:
     assert safe_external_url(url) is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # C0 control characters in an http(s) URL: a stored
+        # `source_url` carrying `\r` / `\n` 500s werkzeug's
+        # header-value writer the moment it flows through a
+        # response header or `redirect(...)`, turning one
+        # malicious webmention POST into a persistent per-row
+        # DoS in the moderation list. Pass-8 MEDIUM SEC-2: this
+        # gate mirrors the one `safe_relative_path` already had.
+        "https://example.com/\rfoo",
+        "https://example.com/\nfoo",
+        "https://example.com/\r\nfoo",
+        "https://example.com/\x00foo",
+        "https://example.com/\x01foo",
+        "https://example.com/\x1ffoo",
+        "https://example.com/\x7ffoo",
+        "https://example.com/foo\nbar",
+        "https://\nexample.com/x",  # control char inside hostname slot too
+    ],
+)
+def test_safe_external_url_rejects_control_chars(url: str) -> None:
+    assert safe_external_url(url) is None
