@@ -58,7 +58,12 @@ services:
       # VACUUM_EVERY: "604800"
     volumes:
       - bragi-data:/data
-    restart: unless-stopped
+    # `on-failure` (not `unless-stopped`) so a deliberate exit 0
+    # from scheduler.sh (after `ALEMBIC_MAX_ATTEMPTS` failed
+    # migration attempts) terminates the restart loop rather than
+    # bouncing forever. Without this, a broken migration deploys
+    # as a livelocked "half-up" state with no clear failure signal.
+    restart: on-failure
     healthcheck:
       # Sentinel touched by scheduler.sh after a successful
       # `alembic upgrade head`. Web containers gate on this via

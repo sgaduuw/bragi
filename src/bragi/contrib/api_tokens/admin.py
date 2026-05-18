@@ -131,15 +131,27 @@ def create_token() -> ResponseReturnValue:
 
 @bp.route("/<int:token_id>/revoke", methods=["POST"])
 def revoke_token(token_id: int) -> ResponseReturnValue:
-    """Delete a token. Subsequent uses return 401."""
+    """Delete a token. Subsequent uses return 401.
+
+    Also invalidates the bearer verify cache for this token's
+    public_id so a request hitting a worker that still has a cached
+    positive outcome doesn't continue authenticating for up to
+    `_VERIFY_CACHE_TTL_S` (10 s). The cache's user-level
+    `is_active` re-check doesn't catch this case because the user
+    stays active; only the token row was deleted.
+    """
+    from bragi.contrib.api_tokens.auth import invalidate_verify_cache_for_public_id
+
     user_id = _require_user()
     with SessionLocal() as db:
         row = db.get(PersonalAccessToken, token_id)
         if row is None or row.user_id != user_id:
             abort(404)
         token_name = row.name
+        token_public_id = row.public_id
         db.delete(row)
         db.commit()
+    invalidate_verify_cache_for_public_id(token_public_id)
 
     audit(
         AuditAction.TOKEN_REVOKED,

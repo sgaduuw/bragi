@@ -49,6 +49,17 @@ def test_allows_same_host_relative_paths(candidate: str) -> None:
         "/\\evil.example/x",
         "/path\\with\\backslash",
         "\\\\evil.example/x",  # double backslash -> // -> protocol-relative
+        # Pass-6 regression: control characters break werkzeug's
+        # header-value writer, so a persisted Redirect.target
+        # containing `\n` would 500 every matching delivery
+        # request (persistent per-URL DoS).
+        "/\nfoo",
+        "/\rfoo",
+        "/\r\nfoo",
+        "/\x00foo",
+        "/\x01foo",
+        "/\x7ffoo",
+        "/foo\nbar",
     ],
 )
 def test_rejects_unsafe_shapes(candidate: str | None) -> None:

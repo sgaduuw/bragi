@@ -20,9 +20,23 @@ Rejected shapes:
   `//evil.example/x` and lands off-domain. Catching this at the
   application layer is required because the value is consumed by
   the browser's own URL parser, not Python's `urllib.parse`.
+- Anything containing C0 / DEL control characters (`\\x00`-`\\x1f`,
+  `\\x7f`). Werkzeug's HTTP header-value writer raises on `\\r`/`\\n`,
+  so a value like `?next=/\\nfoo` 500s the auth-view's
+  `redirect(...)` call. The redirects admin form is a worse
+  failure mode: an editor-rank user persists `target="/\\nfoo"` and
+  every subsequent matching delivery request 500s on the response
+  builder. Rejecting at the application gate keeps the failure on
+  the input side rather than turning a stored bad value into a
+  persistent per-URL DoS.
 """
 
 from __future__ import annotations
+
+# C0 control characters (0x00-0x1F) plus DEL (0x7F). Werkzeug's
+# header-value writer rejects `\r`/`\n` outright; the rest are
+# defence-in-depth and have no business in a same-host relative path.
+_CONTROL_CHAR_CODEPOINTS = set(range(0x00, 0x20)) | {0x7F}
 
 
 def safe_relative_path(candidate: str | None) -> str | None:
@@ -39,5 +53,7 @@ def safe_relative_path(candidate: str | None) -> str | None:
     if candidate.startswith("//"):
         return None
     if "\\" in candidate:
+        return None
+    if any(ord(c) in _CONTROL_CHAR_CODEPOINTS for c in candidate):
         return None
     return candidate
