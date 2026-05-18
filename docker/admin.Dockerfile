@@ -38,6 +38,17 @@ RUN chmod +x /app/scheduler.sh
 
 RUN pip install --no-deps -e .
 
+# Drop root for the runtime. Adds a non-login system user, gives
+# it ownership of /app (the source tree) and /data (the bind-mount
+# point used by the compose volume); the entrypoints inherit this
+# UID via `USER bragi` below. Worker-RCE blast radius is then
+# limited to the container fs and the bind-mount, not uid 0
+# escapes into the volume host.
+RUN useradd --system --create-home --shell /usr/sbin/nologin bragi \
+    && mkdir -p /data \
+    && chown -R bragi:bragi /app /data
+USER bragi
+
 EXPOSE 8001
 # `bragi-admin` (the click script) calls `app.run(...)` and is the
 # local-dev entrypoint where Werkzeug's auto-reload is useful. In
@@ -47,6 +58,10 @@ EXPOSE 8001
 # matches Flask + SQLAlchemy ORM; async would need monkey-patching
 # or ASGI. `--access-logfile -` sends combined-log-format access
 # lines to stdout so they land in the container log.
+# `--graceful-timeout 25` gives an in-flight request up to 25s to
+# return before the worker is force-killed on SIGTERM; this matters
+# for outbound webmention POSTs (3s timeout each) and federation
+# fetches. Pair with `compose.yml`'s `stop_grace_period: 30s`.
 # Wrapped in `sh -c` so $ADMIN_WORKERS interpolates at start time;
 # the bare exec form does no variable expansion.
-CMD ["sh", "-c", "exec gunicorn -w ${ADMIN_WORKERS:-2} -b 0.0.0.0:8001 --timeout 30 --access-logfile - 'bragi.apps.admin:create_admin_app()'"]
+CMD ["sh", "-c", "exec gunicorn -w ${ADMIN_WORKERS:-2} -b 0.0.0.0:8001 --timeout 30 --graceful-timeout 25 --access-logfile - 'bragi.apps.admin:create_admin_app()'"]

@@ -7,6 +7,31 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Login `?next=` / redirects `target=` reject backslash-escaped
+  off-domain URLs.** Browsers normalise `\` to `/` in special-
+  scheme (http / https) URLs before parsing per the WHATWG URL
+  spec, so a `next=/\evil.example/x` lands the user on
+  `evil.example` after the 302 even though the path looked like
+  a same-host redirect. Pass-4 closed the `//` protocol-relative
+  case but missed the WHATWG-equivalent `\` form; the admin
+  domain (where the user just typed credentials) is a credible
+  launchpad for phishing. A new shared
+  `bragi.core.safe_redirect.safe_relative_path` helper backs
+  three callsites: `auth_local._safe_next`, `auth_github._safe_next`,
+  and the redirects admin `_validate`. Inputs with `\` (single
+  or repeated) are now rejected at form/query-arg time.
+- **Webmention h-card extractor drops `javascript:` / `data:` URLs
+  before persistence.** An attacker hosting a page like
+  `<a class="h-card" href="javascript:fetch('/'+document.cookie)">`
+  could send a webmention pointing at it; `extract_hcard` previously
+  ran `urljoin` and stored the string verbatim as
+  `Webmention.author_url`. The admin moderation list shows the
+  URL as truncated plain text, so a moderator couldn't easily
+  preview the trap; once Approved, the URL rendered as a
+  clickable `<a href>` on the public post and a reader's click
+  executed attacker JS in the delivery origin. `extract_hcard`
+  now gates `author_url` and `author_photo` through a new
+  `_safe_external_url` that requires an http(s) scheme.
 - **Redirects admin rejects absolute and protocol-relative
   targets.** The admin form's `target` field accepted any string;
   the redirect resolver follows the chain and serves the raw
@@ -154,6 +179,85 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the bearer API, not a CSRF bypass.
 
 ### Fixed
+- **Apps wire `ProxyFix` when behind a trusted reverse proxy.**
+  New `Settings.trusted_proxy_hops` (default 0; the production
+  `compose.yml` sets it to 1). When > 0, both `create_admin_app`
+  and `create_delivery_app` wrap the WSGI callable in
+  `werkzeug.middleware.proxy_fix.ProxyFix(x_for, x_proto, x_host)`
+  with that hop count. Three breakages on a fresh prod deploy
+  used to manifest as: (a) the GitHub OAuth `redirect_uri` built
+  via `url_for(_external=True)` emitted `http://...` because
+  `request.scheme` was the proxy's tell-the-app value; (b) every
+  `AuditLog.ip` and `Session.ip` row recorded the reverse proxy's
+  IP, hiding the real user; (c) per-IP analytics grouped every
+  visit under the proxy. ProxyFix rewrites all three from the
+  `X-Forwarded-*` headers. NEVER set the hop count higher than
+  the actual reverse-proxy depth: each unit extends spoofability
+  one hop outward.
+- **Post `published_at` is preserved across republish.** The
+  admin update path read "draft -> published" as a first-publish
+  transition unconditionally and stamped `published_at =
+  naive_utcnow()`, so a draft -> published -> draft -> published
+  cycle re-stamped the column and silently floated old posts to
+  the top of "newest first" lists. The api_tokens write path
+  already gated on `published_at is None`; the admin path now
+  mirrors that. The comment "Re-publishing doesn't reset the
+  timestamp" finally describes what the code does.
+- **Revision restore fires `on_post_published` on a
+  draft->published transition.** PR-C added `on_post_updated`
+  firing on restore; the publish event was missed. A restored
+  draft that crosses the published boundary now fires
+  `on_post_published` so the ActivityPub plugin's Create+Note
+  fanout, the sitemap rebuild trigger, and any other
+  `on_post_published` subscriber see the transition. The post
+  restore also stamps `published_at` on the first publish via
+  restore (`post.published_at is None` -> set), matching the
+  normal-edit path.
+- **Webmention + ActivityPub outbox PENDING rows are abandoned
+  on post unpublish.** Both senders processed every PENDING row
+  without checking the source post's current status, so a post
+  unpublished after `on_post_published` queued the fan-out
+  delivered a Note/webmention pointing at a URL that now
+  404s/410s. `webmentions.plugin.on_post_updated` and a new
+  `activitypub.plugin.on_post_updated` now detect the
+  `published -> not-published` transition and delete the
+  PENDING rows for the post; SENT / FAILED rows stay as audit.
+  Issuing a fediverse `Delete` activity for already-sent Notes
+  is the richer fix and is deferred.
+- **Webmention inbox dedupes repeat presentations of the same
+  `(source, target)` pair.** A well-behaved Mastodon retry would
+  previously accumulate one row per send in the moderation
+  queue, and approving one of them didn't dedupe the rest. The
+  receiver now queries for an existing row matching
+  `(site_id, source_url, target_url)` before insert; on a hit,
+  it refreshes the parsed h-card / content snippet / mention
+  type / `verified_at` but leaves moderation state (`status`,
+  `approved`) untouched so a previously-rejected mention can't
+  be re-presented into the queue.
+- **Containers run as non-root `bragi` user; gunicorn has a
+  graceful-shutdown window.** `docker/admin.Dockerfile` and
+  `docker/delivery.Dockerfile` add a `USER bragi` directive
+  (and `chown` /app + /data) so a worker RCE escapes to a
+  uid != 0 process rather than uid 0 with write access to the
+  bind-mounted /data volume. Both gunicorn `CMD`s gain
+  `--graceful-timeout 25` and `compose.yml` services set
+  `stop_grace_period: 30s` so an in-flight outbound POST
+  (webmention sender, AP delivery) has up to 25s to return
+  before SIGKILL fires. `docker/scheduler.sh` traps SIGTERM /
+  SIGINT and forwards to the active child PID so a
+  `docker compose stop` mid-vacuum lets the vacuum finish
+  cleanly rather than getting SIGKILLed after the loop's
+  `sleep 10`.
+- **`docker.yml`: `:latest` is gated to non-prerelease semver tags.**
+  The `type=raw,value=latest` line emitted `:latest` on every tag
+  push, including `v1.12.0-rc1` and any hotfix off an older
+  lineage. Switched to `flavor: latest=auto` so `:latest` only
+  follows non-prerelease tags. Caveat: a hotfix cut off an
+  older major (e.g. `v1.10.5` after `v1.11.0` shipped) still
+  claims `:latest` because the action compares the tag pattern
+  rather than the tag ordering against the registry. Operators
+  cutting hotfixes off older majors must manually re-tag
+  `:latest` afterwards if needed.
 - **FTS5 search `total` cache invalidates on lifecycle events.**
   Post / page publish, update, and delete now flush
   `_SEARCH_TOTAL_CACHE` via the lifecycle hookimpls in

@@ -11,6 +11,7 @@ from __future__ import annotations
 import click
 import jinja2
 from flask import Flask, g, render_template, session
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from bragi import __version__
 from bragi.cli import cms
@@ -61,6 +62,22 @@ def create_admin_app() -> Flask:
         settings.max_request_bytes,
         settings.attachments_max_bytes + 64 * 1024,
     )
+
+    # ProxyFix rewrites the WSGI environ from `X-Forwarded-*`
+    # headers when the operator declared trusted hops. Without it,
+    # `request.scheme` stays `http`, `url_for(..., _external=True)`
+    # emits `http://...` (breaking the GitHub OAuth callback URL
+    # match), audit-log / session rows record the proxy's IP for
+    # every request, and analytics group by the proxy. See
+    # `Settings.trusted_proxy_hops` for the "never trust more hops
+    # than you really have" warning.
+    if settings.trusted_proxy_hops > 0:
+        app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
+            app.wsgi_app,
+            x_for=settings.trusted_proxy_hops,
+            x_proto=settings.trusted_proxy_hops,
+            x_host=settings.trusted_proxy_hops,
+        )
 
     # Server-side sessions back the admin's session storage. Replaces
     # Flask's signed-cookie default; cookie carries only an opaque

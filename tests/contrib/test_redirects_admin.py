@@ -200,6 +200,14 @@ def test_new_rejects_absolute_url_target(admin_app: Flask) -> None:
         "https://evil.example/phish",
         "http://evil.example/phish",
         "//evil.example/phish",  # protocol-relative
+        # Pass-5 regression: WHATWG URL parser normalises `\` to `/`
+        # in special-scheme URLs before parsing, so `/\evil.example/x`
+        # becomes `//evil.example/x` in the browser and lands
+        # off-domain. The startswith('//') gate misses this; the
+        # `safe_relative_path` helper rejects the backslash directly.
+        "/\\evil.example/phish",
+        "\\evil.example/phish",
+        "/path\\with\\backslashes",
     ):
         token = csrf_token(client, path="/admin/sites/blog/redirects/new")
         resp = client.post(

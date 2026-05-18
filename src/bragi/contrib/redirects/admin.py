@@ -32,6 +32,7 @@ from sqlalchemy import select
 from bragi.core.db import SessionLocal
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.permissions import require_role, resolve_site_or_abort
+from bragi.core.safe_redirect import safe_relative_path
 
 bp = Blueprint(
     "redirect_admin",
@@ -86,17 +87,17 @@ def _validate(form: dict[str, object]) -> list[str]:
     target = form["target"]
     if not target:
         errors.append("Target is required.")
-    elif isinstance(target, str):
-        if not target.startswith("/"):
-            errors.append(
-                "Target must be a relative path starting with '/'. "
-                "Absolute URLs are not allowed (would turn the redirect "
-                "table into an open-redirect surface)."
-            )
-        elif target.startswith("//"):
-            # Protocol-relative URL (`//evil.example/x`): browsers
-            # treat this as an absolute URL with inherited scheme.
-            errors.append("Target must not start with '//' (protocol-relative URL).")
+    elif isinstance(target, str) and safe_relative_path(target) is None:
+        # `safe_relative_path` rejects absolute URLs, protocol-relative
+        # `//evil.example/x`, and any value containing `\` (browsers
+        # normalise backslash to `/` in special-scheme URLs before
+        # parsing, so `/\evil.example/x` lands off-domain). All three
+        # would let an editor-rank user turn the redirect table into a
+        # 301 phishing primitive against the site's readers.
+        errors.append(
+            "Target must be a relative path starting with '/' (no "
+            "absolute URLs, no protocol-relative `//`, no backslashes)."
+        )
     if form["status_code"] not in VALID_STATUS_CODES:
         errors.append(f"Status code must be one of {sorted(VALID_STATUS_CODES)}.")
     if form["match_type"] not in VALID_MATCH_TYPES:

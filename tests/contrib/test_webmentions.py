@@ -109,6 +109,30 @@ def test_extract_hcard_picks_name_url_photo() -> None:
     assert photo == "https://author.example/me.jpg"
 
 
+def test_extract_hcard_drops_javascript_url() -> None:
+    """Pass-5 regression: a `javascript:` URL in the h-card `href`
+    must NOT be persisted as `Webmention.author_url`. The h-card
+    is parsed from attacker-controlled HTML; once a moderator
+    approves the row, the URL is rendered as an `<a href>` on the
+    public post and a click executes attacker JS in the delivery
+    origin. The extractor drops any non-http(s) scheme."""
+    html = (
+        '<a class="h-card" href="javascript:alert(1)">Friendly</a>'
+        '<img class="u-photo" src="javascript:void(0)">'
+    )
+    name, url, photo = extract_hcard(html, "https://victim.example/")
+    assert name == "Friendly"
+    assert url is None
+    assert photo is None
+
+
+def test_extract_hcard_drops_data_url() -> None:
+    """Same gate covers `data:`, `file:`, `gopher:`, etc."""
+    html = '<a class="h-card" href="data:text/html,xyz">x</a>'
+    _name, url, _photo = extract_hcard(html, "https://victim.example/")
+    assert url is None
+
+
 def test_classify_mention_picks_specific_class() -> None:
     assert classify_mention('<a class="u-in-reply-to" href="x">') == "in-reply-to"
     assert classify_mention('<a class="u-like-of" href="x">') == "like-of"
@@ -167,6 +191,34 @@ def test_queue_outbox_is_idempotent(db_session: Session) -> None:
     db_session.commit()
     rows = list(db_session.execute(select(WebmentionOutbox)).scalars())
     assert len(rows) == 1
+
+
+def test_on_post_updated_drops_pending_outbox_when_unpublishing(
+    db_session: Session,
+) -> None:
+    """Pass-5 regression: when a post leaves the published state,
+    PENDING outbox rows must be abandoned. The sender otherwise
+    flushes a fresh webmention against a now-404/410 URL after
+    the post has already been pulled."""
+    from bragi.contrib.webmentions.plugin import on_post_updated
+
+    _, _, post = _seed_blog(db_session)
+    _queue_outbox_for_post(post, db_session)
+    db_session.commit()
+    assert (
+        db_session.execute(select(WebmentionOutbox)).scalars().one().status
+        == WebmentionOutboxStatus.PENDING
+    )
+
+    # Simulate the unpublish transition.
+    on_post_updated(
+        post,
+        before={"status": "published"},
+        after={"status": "draft"},
+        session=db_session,
+    )
+    db_session.commit()
+    assert list(db_session.execute(select(WebmentionOutbox)).scalars()) == []
 
 
 # --------------------------- sender ---------------------------
@@ -283,6 +335,64 @@ def test_inbox_accepts_valid_mention(
     assert row.status == WebmentionStatus.VERIFIED
     assert row.author_name == "Ada"
     assert row.post_id is not None
+
+
+def test_inbox_dedupes_repeat_presentation_of_same_source_target(
+    delivery_app: Flask,
+    client: FlaskClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pass-5 regression: a well-behaved Mastodon retry that
+    presents the same (source, target) twice must NOT accumulate
+    two rows in the admin moderation queue. The second call
+    refreshes the parsed fields (h-card / content snippet may
+    have changed) and bumps `verified_at`, but moderation state
+    (status, approved) is preserved so a rejected mention can't
+    be re-presented into the queue."""
+
+    class _RespV1:
+        status_code = 200
+        content = (
+            b'<a class="h-card" href="https://author.example">Ada</a>'
+            b'<a href="https://blog.example.com/posts/hello/">link</a>'
+        )
+
+    class _RespV2:
+        status_code = 200
+        content = (
+            b'<a class="h-card" href="https://author.example">Ada (renamed)</a>'
+            b'<a href="https://blog.example.com/posts/hello/">link</a>'
+        )
+
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", lambda *a, **kw: _RespV1())
+    resp = client.post(
+        "/webmentions",
+        data={
+            "source": "https://other.example/note",
+            "target": "https://blog.example.com/posts/hello/",
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 202
+
+    # Second presentation, same (source, target), updated source page.
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", lambda *a, **kw: _RespV2())
+    resp = client.post(
+        "/webmentions",
+        data={
+            "source": "https://other.example/note",
+            "target": "https://blog.example.com/posts/hello/",
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 202
+
+    db_session.rollback()
+    rows = db_session.execute(select(Webmention)).scalars().all()
+    assert len(rows) == 1
+    # h-card refresh observable on the same row.
+    assert rows[0].author_name == "Ada (renamed)"
 
 
 def test_inbox_rejects_when_source_does_not_link_to_target(

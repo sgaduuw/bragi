@@ -40,12 +40,36 @@ VACUUM_EVERY=${VACUUM_EVERY:-604800}
 
 log() { echo "[scheduler $(date -Iseconds)] $*"; }
 
+# Track the active child PID so SIGTERM/SIGINT can forward to it
+# before exiting the loop. Without this, `docker compose stop`
+# sends SIGTERM and the outer `sleep` runs to completion (10s
+# default), then SIGKILL fires; a multi-minute `cms db vacuum` or
+# AP-send-pending run mid-tick loses work. The trap forwards the
+# signal to the child and exits the loop.
+CHILD_PID=
+shutting_down=0
+
+forward_signal() {
+    shutting_down=1
+    if [ -n "$CHILD_PID" ]; then
+        log "shutdown: forwarding signal to child pid=$CHILD_PID"
+        kill -TERM "$CHILD_PID" 2>/dev/null || true
+        wait "$CHILD_PID" 2>/dev/null || true
+    fi
+    log "shutdown: exiting"
+    exit 0
+}
+
+trap forward_signal TERM INT
+
 run() {
     label=$1; shift
-    if "$@"; then
-        :
-    else
-        rc=$?
+    "$@" &
+    CHILD_PID=$!
+    wait "$CHILD_PID"
+    rc=$?
+    CHILD_PID=
+    if [ $rc -ne 0 ] && [ $shutting_down -eq 0 ]; then
         log "$label: failed rc=$rc"
     fi
 }
