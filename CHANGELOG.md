@@ -44,6 +44,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `U+202A`-`U+202E` and `U+2066`-`U+2069`.
 
 ### Added
+- **`cms plugins list` CLI for plugin discoverability (#190).**
+  Prints every registered plugin, its origin (`in-tree` for
+  `bragi.contrib.*` packages, otherwise the distribution name +
+  version), and the count of hookspecs it participates in. Reads
+  the live plugin manager bound on the admin app at boot. Useful
+  when triaging "is this plugin actually registered?" and as a
+  quick capability survey for third-party plugin authors. Run
+  via `flask --app 'bragi.apps.admin:create_admin_app' cms
+  plugins list`.
+- **`bragi.api` stability boundary documented (#190).** New
+  top-of-module docstring in `src/bragi/api.py` codifies what's
+  covered by the public plugin API (hookimpl marker, hookspec
+  signatures, spec dataclasses, entry-point group) and what's
+  not (`bragi.hookspecs`, `bragi.core.*`, `bragi.contrib.*`
+  internals). Documents the two-step best-effort deprecation
+  policy: deprecation warning across one minor version, then
+  removal in the named release with a back-link from the
+  CHANGELOG entry.
 - **Plugin template-namespacing test (#189).** New
   `tests/contrib/test_plugin_layout.py` walks every in-tree
   `bragi.contrib.*` package and asserts that each plugin's
