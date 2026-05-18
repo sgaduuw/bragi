@@ -460,6 +460,19 @@ row records the reverse proxy's IP, hiding real client IPs;
 each unit of trust extends the `X-Forwarded-*` spoofability
 boundary one hop outward.
 
+Container runtime hardening already in the published images:
+both `admin` and `delivery` run as a non-root `bragi` user
+(`--uid 1000`, pinned identically across the two so the shared
+`/data` volume is writable from both); gunicorn ships with
+`--graceful-timeout 25` paired with `stop_grace_period: 30s`
+on the compose services so an in-flight outbound POST
+(webmention sender, AP delivery) has up to 25 s to return on
+`docker compose stop` before SIGKILL fires; the `bragi-tasks`
+sidecar retries `alembic upgrade head` with backoff
+(`ALEMBIC_MAX_ATTEMPTS=5`, `ALEMBIC_RETRY_DELAY=15s`) and exits
+0 after exhausting attempts so a broken migration shows as a
+clean `Exited (0)` rather than livelocking the deploy.
+
 `BRAGI_MAX_REQUEST_BYTES` (default 1 MiB) caps the request body
 size to protect the federation inboxes from streaming-body OOM.
 On the admin app, this cap is automatically raised to
