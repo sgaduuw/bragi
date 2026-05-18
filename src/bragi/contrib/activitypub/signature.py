@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from datetime import UTC, datetime
+import re
+from datetime import UTC
 from email.utils import format_datetime, parsedate_to_datetime
 from typing import NamedTuple
 from urllib.parse import urlparse
@@ -22,6 +23,8 @@ from urllib.parse import urlparse
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+from bragi.core.time import aware_utcnow
 
 # Outbound POSTs are signed over this header set. The receiver
 # reconstructs the same signing string and verifies. (request-
@@ -58,7 +61,7 @@ def sign_post(*, url: str, body: bytes, key_id: str, private_key_pem: str) -> Si
     path = parsed.path or "/"
     if parsed.query:
         path = f"{path}?{parsed.query}"
-    date = format_datetime(datetime.now(UTC), usegmt=True)
+    date = format_datetime(aware_utcnow(), usegmt=True)
     digest = "SHA-256=" + base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
     headers: dict[str, str] = {
         "Host": host,
@@ -258,19 +261,41 @@ def _verify_rsa_sha256(public_key_pem: str, signing_string: bytes, signature: by
     return True
 
 
+# Quote-aware tokenizer for the `Signature` header. Matches
+# `key="value"` pairs where the value is everything between the
+# quotes, including embedded commas. Falls back to `key=value`
+# (unquoted) for spec-permissive senders. The previous
+# `raw.split(",")` form silently mis-parsed any value carrying a
+# comma, which is permitted by the draft-cavage spec for
+# parameter-extension values.
+_SIGNATURE_HEADER_PAIR_RE = re.compile(
+    r"""
+    (?P<key>[A-Za-z][\w-]*)         # parameter name
+    \s*=\s*                          # `=` with optional whitespace
+    (?:
+        "(?P<qval>[^"]*)"            # quoted value: anything between "..."
+      | (?P<bval>[^,\s]+)            # bare value: up to next comma or whitespace
+    )
+    """,
+    re.VERBOSE,
+)
+
+
 def _parse_signature_header(raw: str) -> dict[str, str]:
     """Parse `Signature` header into a flat dict.
 
     Spec form: `keyId="...",algorithm="...",headers="...",signature="..."`.
+    Quote-aware: a quoted value may contain commas without confusing the
+    tokenizer (draft-cavage permits this in parameter-extension values).
     Robust against extra whitespace and trailing commas.
     """
     out: dict[str, str] = {}
-    for piece in raw.split(","):
-        piece = piece.strip()
-        if "=" not in piece:
-            continue
-        key, _, value = piece.partition("=")
-        out[key.strip().lower()] = value.strip().strip('"')
+    for match in _SIGNATURE_HEADER_PAIR_RE.finditer(raw):
+        key = match.group("key").lower()
+        value = match.group("qval")
+        if value is None:
+            value = match.group("bval") or ""
+        out[key] = value
     return out
 
 
@@ -295,5 +320,5 @@ def _date_within_skew(date_header: str | None) -> bool:
         return False
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)
-    delta = abs((datetime.now(UTC) - when).total_seconds())
+    delta = abs((aware_utcnow() - when).total_seconds())
     return delta <= _DATE_SKEW_SECONDS

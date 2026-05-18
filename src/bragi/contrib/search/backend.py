@@ -17,6 +17,8 @@ value the plugin registers via `register_search_backend`.
 from __future__ import annotations
 
 import re
+import threading
+import time
 from typing import Any
 
 from sqlalchemy import select, text
@@ -38,6 +40,52 @@ _FTS_TABLES = {
 }
 
 _BAD_QUERY_RE = re.compile(r"[^\w\s\-]")
+
+# Per-process cache for `(site_id, safe_query) -> total` over a
+# short TTL. The PR8 pagination move pushed the paged hit fetch
+# to a single UNION ALL + LIMIT/OFFSET, but `total` still required
+# two MATCH-evaluating `COUNT(*)` queries on every page request.
+# At personal-blog scale that's cheap; on a multi-million-row
+# corpus the two extra MATCH passes (no snippet expansion, no
+# row hydration) still cost meaningful CPU and disk reads. This
+# cache trades up to `_SEARCH_TOTAL_CACHE_TTL_S` seconds of
+# staleness for one COUNT-pair per query per TTL window. A
+# document landing mid-window can take up to that long to appear
+# in `total`; the hit list itself is fresh because the LIMIT/OFFSET
+# query runs every request.
+_SEARCH_TOTAL_CACHE_TTL_S = 30.0
+_SEARCH_TOTAL_CACHE_MAX = 4096
+_SEARCH_TOTAL_CACHE: dict[tuple[int, str], tuple[int, float]] = {}
+_SEARCH_TOTAL_CACHE_LOCK = threading.Lock()
+
+
+def _cached_total_or_none(site_id: int, safe_query: str) -> int | None:
+    """Return a fresh-enough cached total for the key, else None."""
+    now = time.monotonic()
+    with _SEARCH_TOTAL_CACHE_LOCK:
+        cached = _SEARCH_TOTAL_CACHE.get((site_id, safe_query))
+    if cached is None:
+        return None
+    total, written_at = cached
+    if (now - written_at) >= _SEARCH_TOTAL_CACHE_TTL_S:
+        return None
+    return total
+
+
+def _record_total(site_id: int, safe_query: str, total: int) -> None:
+    """Stash a freshly-computed total and bound the cache size."""
+    now = time.monotonic()
+    with _SEARCH_TOTAL_CACHE_LOCK:
+        _SEARCH_TOTAL_CACHE[(site_id, safe_query)] = (total, now)
+        if len(_SEARCH_TOTAL_CACHE) > _SEARCH_TOTAL_CACHE_MAX:
+            # Drop the entry with the oldest write time. Single-pass
+            # min over the small dict is cheap; strict LRU would be
+            # nicer but the cache rarely fills under normal traffic.
+            oldest_key = min(
+                _SEARCH_TOTAL_CACHE,
+                key=lambda k: _SEARCH_TOTAL_CACHE[k][1],
+            )
+            _SEARCH_TOTAL_CACHE.pop(oldest_key, None)
 
 
 def _safe_query(raw: str) -> str | None:
@@ -191,26 +239,35 @@ def _search(site_id: int, query: str, page: int, page_size: int) -> SearchResult
                 "offset": offset,
             },
         ).all()
-        post_total = db.execute(
-            text(
-                "SELECT COUNT(*) FROM posts_fts"
-                " JOIN posts ON posts.id = posts_fts.rowid"
-                " WHERE posts_fts MATCH :q"
-                " AND posts.site_id = :site_id"
-                " AND posts.status = :published"
-            ),
-            {"q": safe, "site_id": site_id, "published": PostStatus.PUBLISHED},
-        ).scalar_one()
-        page_total = db.execute(
-            text(
-                "SELECT COUNT(*) FROM pages_fts"
-                " JOIN pages ON pages.id = pages_fts.rowid"
-                " WHERE pages_fts MATCH :q"
-                " AND pages.site_id = :site_id"
-                " AND pages.status = :published"
-            ),
-            {"q": safe, "site_id": site_id, "published": "published"},
-        ).scalar_one()
+        # The paged SELECT is always fresh. `total` goes through a
+        # short-TTL cache so a heavy poller (or a paginated UI
+        # walking pages 2, 3, 4 of the same query) doesn't pay the
+        # COUNT pair on every request. Cache miss / stale: compute
+        # both counts and stash.
+        total = _cached_total_or_none(site_id, safe)
+        if total is None:
+            post_total = db.execute(
+                text(
+                    "SELECT COUNT(*) FROM posts_fts"
+                    " JOIN posts ON posts.id = posts_fts.rowid"
+                    " WHERE posts_fts MATCH :q"
+                    " AND posts.site_id = :site_id"
+                    " AND posts.status = :published"
+                ),
+                {"q": safe, "site_id": site_id, "published": PostStatus.PUBLISHED},
+            ).scalar_one()
+            page_total = db.execute(
+                text(
+                    "SELECT COUNT(*) FROM pages_fts"
+                    " JOIN pages ON pages.id = pages_fts.rowid"
+                    " WHERE pages_fts MATCH :q"
+                    " AND pages.site_id = :site_id"
+                    " AND pages.status = :published"
+                ),
+                {"q": safe, "site_id": site_id, "published": "published"},
+            ).scalar_one()
+            total = int(post_total) + int(page_total)
+            _record_total(site_id, safe, total)
 
     hits = [
         SearchHit(
@@ -226,7 +283,7 @@ def _search(site_id: int, query: str, page: int, page_size: int) -> SearchResult
     ]
     return SearchResults(
         hits=hits,
-        total=int(post_total) + int(page_total),
+        total=total,
         page=page,
         page_size=page_size,
         query=query,

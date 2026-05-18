@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
@@ -54,6 +54,18 @@ class Redirect(IdMixin, TimestampsMixin, Base):
             "source_path",
             "match_type",
             name="uq_redirects_site_source_match",
+        ),
+        # An empty `source_path` would silently match every URL on
+        # the site through the PR8 SQL-side PREFIX resolver
+        # (`substr(:path, 1, length(source_path)) = source_path`
+        # collapses to `'' == ''` for any incoming path). The admin
+        # form already rejects empty input and every programmatic
+        # writer constructs non-empty strings, so this is
+        # defence-in-depth against a future code path / manual SQL
+        # fix-up that accidentally lands an empty row.
+        CheckConstraint(
+            "length(source_path) > 0",
+            name="ck_redirects_source_path_nonempty",
         ),
     )
 

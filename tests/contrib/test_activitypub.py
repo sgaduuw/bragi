@@ -183,6 +183,46 @@ def test_verify_rejects_empty_algorithm() -> None:
     )
 
 
+def test_parse_signature_header_quote_aware() -> None:
+    """A quoted value carrying a comma must not split the parser.
+
+    draft-cavage-http-signatures-12 permits commas inside quoted
+    parameter values; the old `raw.split(",")` form would silently
+    fragment such a value and lose it. The new tokenizer keeps the
+    whole quoted run intact. Not exploitable today (verification
+    still requires the signature to validate end-to-end), but
+    matters as soon as a signer library adopts an extension that
+    embeds commas. See #182.
+    """
+    from bragi.contrib.activitypub.signature import _parse_signature_header
+
+    raw = (
+        'keyId="https://r.example/u/alice#main-key",'
+        'algorithm="rsa-sha256",'
+        'headers="(request-target) host date digest",'
+        'signature="abc,def,ghi"'  # commas inside the quoted value
+    )
+    parsed = _parse_signature_header(raw)
+    assert parsed["keyid"] == "https://r.example/u/alice#main-key"
+    assert parsed["algorithm"] == "rsa-sha256"
+    assert parsed["headers"] == "(request-target) host date digest"
+    # Critical: the comma-bearing signature value survives intact.
+    assert parsed["signature"] == "abc,def,ghi"
+
+
+def test_parse_signature_header_tolerates_whitespace_and_unquoted() -> None:
+    """Spec-permissive senders may add whitespace or use unquoted
+    values for parameter extensions. The parser should accept
+    both without dropping pairs."""
+    from bragi.contrib.activitypub.signature import _parse_signature_header
+
+    raw = '  keyId="x",  algorithm="rsa-sha256" ,  created=1234567890  '
+    parsed = _parse_signature_header(raw)
+    assert parsed["keyid"] == "x"
+    assert parsed["algorithm"] == "rsa-sha256"
+    assert parsed["created"] == "1234567890"
+
+
 def test_verify_always_checks_digest_for_post() -> None:
     """Body-tamper rejection no longer requires digest to be listed.
 
