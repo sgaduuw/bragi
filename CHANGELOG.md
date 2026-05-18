@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-05-18
+
 ### Security
 - **Cookie-session path treats inactive users as anonymous.**
   An admin who flips `User.is_active=False` expected access to
