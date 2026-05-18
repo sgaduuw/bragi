@@ -87,8 +87,18 @@ run() {
 
 # Interruptible sleep helper: backgrounds the sleep so the SIGTERM
 # trap can fire promptly instead of waiting up to the full sleep
-# duration.
+# duration. Reentrancy guard: if a prior call left $SLEEP_PID set
+# (caller bug or a future maintainer wraps this in a retry), kill
+# the previous background sleep before starting a new one. Without
+# the guard, $SLEEP_PID is overwritten and the trap's
+# `kill "$SLEEP_PID"` only reaches the most recent — the leaked
+# earlier sleeper holds the script open past the trap. Cheap to
+# defend; one branch.
 sleep_interruptible() {
+    if [ -n "${SLEEP_PID:-}" ]; then
+        kill -TERM "$SLEEP_PID" 2>/dev/null || true
+        wait "$SLEEP_PID" 2>/dev/null || true
+    fi
     sleep "$1" &
     SLEEP_PID=$!
     wait "$SLEEP_PID" 2>/dev/null || true

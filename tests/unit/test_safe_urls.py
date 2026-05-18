@@ -1,4 +1,4 @@
-"""Unit tests for `bragi.core.safe_redirect`.
+"""Unit tests for `bragi.core.safe_urls`.
 
 Two helpers, each backing one URL-gating contract:
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from bragi.core.safe_redirect import safe_external_url, safe_relative_path
+from bragi.core.safe_urls import is_idn_host, safe_external_url, safe_relative_path
 
 
 @pytest.mark.parametrize(
@@ -148,3 +148,46 @@ def test_safe_external_url_rejects_unicode_bidi(url: str) -> None:
 )
 def test_safe_external_url_rejects_control_chars(url: str) -> None:
     assert safe_external_url(url) is None
+
+
+# --------------------------- is_idn_host ---------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Cyrillic homograph hostnames that mimic Latin brands.
+        # `safe_external_url` accepts these (legitimate IDN syntax);
+        # the badge surfaces them to the moderator.
+        "https://раураl.com/x",
+        "https://аpple.com/x",
+        # Real-world legitimate non-Latin domains. We badge them
+        # too — false-positive friction is preferable to letting
+        # a Cyrillic spoof slip past unnoticed.
+        "https://пример.рф/",
+        "https://例え.jp/",
+        "https://café.fr/",
+    ],
+)
+def test_is_idn_host_flags_non_ascii_hostnames(url: str) -> None:
+    assert is_idn_host(url) is True
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/x",
+        "http://blog.example.com/posts/",
+        "https://example.com:8443/x",
+        # Non-ASCII in path / query, not host — not flagged.
+        "https://example.com/café",
+        "https://example.com/?q=résumé",
+    ],
+)
+def test_is_idn_host_passes_ascii_hostnames(url: str) -> None:
+    assert is_idn_host(url) is False
+
+
+@pytest.mark.parametrize("url", [None, "", "not a url", "javascript:alert(1)"])
+def test_is_idn_host_handles_empty_and_unparseable(url: str | None) -> None:
+    assert is_idn_host(url) is False

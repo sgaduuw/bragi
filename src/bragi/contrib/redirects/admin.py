@@ -32,7 +32,7 @@ from sqlalchemy import select
 from bragi.core.db import SessionLocal
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.permissions import require_role, resolve_site_or_abort
-from bragi.core.safe_redirect import safe_relative_path
+from bragi.core.safe_urls import safe_relative_path
 
 bp = Blueprint(
     "redirect_admin",

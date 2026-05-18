@@ -388,6 +388,14 @@ restart the admin + delivery processes. There is no `restore`
 subcommand by design; a tool that overwrites a live deployment
 is a big risk for not much help.
 
+`cms backup` is SQLite-only and exits 2 with a clear message
+under a non-SQLite `BRAGI_DATABASE_URL` (its `VACUUM INTO` is
+SQLite-specific). Postgres operators: use `pg_dump` for the
+DB half and a separate tar of `attachments_root` for the file
+half. `cms db vacuum` follows the same gate (`PRAGMA
+wal_checkpoint(TRUNCATE)` is SQLite-only); on Postgres use
+`VACUUM (FULL)` or your usual autovacuum tooling instead.
+
 ## Quick start (development)
 
 ```sh

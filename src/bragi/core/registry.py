@@ -60,7 +60,16 @@ class Registry:
     def add_image_processor(self, spec: ImageProcessorSpec) -> None:
         self.image_processors.append(spec)
 
-    def add_search_backend(self, spec: SearchBackendSpec) -> None:
+    def add_search_backend(self, spec: SearchBackendSpec | None) -> None:
+        # A plugin may return None from `register_search_backend` to
+        # signal "I don't apply in this deployment" (e.g. the bundled
+        # SQLite FTS5 backend skips registration under a non-SQLite
+        # `BRAGI_DATABASE_URL` because its `MATCH` predicate is
+        # SQLite-specific). Treating None as "skip" keeps the
+        # registry's day-one `register_*` shape additive and means
+        # the app-init loop doesn't need a per-hook filter.
+        if spec is None:
+            return
         self.search_backends.append(spec)
 
     def add_theme(self, spec: ThemeSpec) -> None:

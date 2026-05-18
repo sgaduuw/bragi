@@ -34,14 +34,14 @@ from bragi.core.db import SessionLocal
 from bragi.core.middleware.sessions import rotate_sid
 from bragi.core.models.user import User
 from bragi.core.models.user_identity import UserIdentity
-from bragi.core.safe_redirect import safe_relative_path
+from bragi.core.safe_urls import safe_relative_path
 from bragi.settings import settings
 
 bp = Blueprint("auth_github", __name__, url_prefix="/auth/github")
 
 
 def _safe_next(candidate: str | None) -> str:
-    """See `bragi.core.safe_redirect.safe_relative_path` for the rejection rules."""
+    """See `bragi.core.safe_urls.safe_relative_path` for the rejection rules."""
     return safe_relative_path(candidate) or "/"
 
 

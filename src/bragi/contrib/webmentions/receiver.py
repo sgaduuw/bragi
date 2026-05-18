@@ -56,7 +56,7 @@ from bragi.core.models.webmention import (
     Webmention,
     WebmentionStatus,
 )
-from bragi.core.safe_redirect import safe_external_url
+from bragi.core.safe_urls import safe_external_url
 from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)

@@ -75,8 +75,22 @@ def db_vacuum() -> None:
     """Compact the DB file and truncate the WAL.
 
     Heavier than ANALYZE; weekly cadence is typical. VACUUM cannot
-    run inside a transaction.
+    run inside a transaction. SQLite-only: the `PRAGMA
+    wal_checkpoint(TRUNCATE)` finaliser is SQLite-specific and
+    would 500 on Postgres. Without the gate the scheduler sidecar
+    would log `failed rc=*` lines on its weekly tick under a
+    Postgres `BRAGI_DATABASE_URL` until ops notice; same shape
+    as the `cms backup` gate.
     """
+    if engine.dialect.name != "sqlite":
+        click.echo(
+            f"cms db vacuum requires SQLite; current engine is "
+            f"`{engine.dialect.name}`. Use the engine's native "
+            "maintenance command instead (e.g. `VACUUM (FULL)` "
+            "for Postgres).",
+            err=True,
+        )
+        sys.exit(2)
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.execute(text("VACUUM"))
         # PRAGMA wal_checkpoint(TRUNCATE) finalises the WAL collapse;
