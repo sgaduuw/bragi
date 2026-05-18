@@ -131,6 +131,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   callers updated; `git mv` preserves history.
 
 ### Fixed
+- **`pyproject.toml` migrated to PEP 621 `[project]` table
+  (#168).** Poetry 2.x deprecated `[tool.poetry]` for metadata
+  (name / version / description / authors / dependencies /
+  scripts / readme / license / requires-python); on 2.x `poetry
+  check` emitted one warning per field. All metadata now lives
+  under `[project]`; the `bragi.plugins` entry-point group moves
+  to `[project.entry-points."bragi.plugins"]`; the
+  `bragi-admin` / `bragi-delivery` console scripts move to
+  `[project.scripts]`. `[tool.poetry]` retains only the
+  src-layout `packages` declaration (no portable PEP 621
+  equivalent). Caret constraints translated to PEP 508 explicit
+  bounds; runtime behaviour unchanged. Portfolio-wide sweep also
+  applied to mimir + johnny in parallel PRs.
 - **Empty `BRAGI_ADMIN_SESSION_COOKIE_SECURE=` no longer crashes
   boot (#226).** Pydantic-settings parses an exported-but-empty
   env value as `""`, which pydantic's bool validator rejects with
