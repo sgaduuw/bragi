@@ -283,6 +283,12 @@ def test_inbox_rejects_when_source_does_not_link_to_target(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify-first: a source that doesn't link to the target gets
+    a 400 with no DB row written. The previous behaviour persisted
+    a `status=REJECTED` row before validation, which gave an
+    unauthenticated attacker a per-request DoS surface (no UNIQUE
+    on the tuple, no rate limit). See #181."""
+
     class _Resp:
         status_code = 200
         content = b"<html>no link here</html>"
@@ -299,8 +305,38 @@ def test_inbox_rejects_when_source_does_not_link_to_target(
     )
     assert resp.status_code == 400
     db_session.rollback()
-    row = db_session.execute(select(Webmention)).scalars().one()
-    assert row.status == WebmentionStatus.REJECTED
+    rows = list(db_session.execute(select(Webmention)).scalars())
+    assert rows == []
+
+
+def test_inbox_writes_no_row_when_source_fetch_fails(
+    delivery_app: Flask,
+    client: FlaskClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other verify-first path: a source URL that 5xx's or that
+    `safe_get` blocks (e.g. an RFC 1918 redirect) gets a 400 with no
+    DB row. Closes the DoS surface the same way the no-link path
+    does. See #181."""
+
+    def _raise(*a, **kw):  # type: ignore[no-untyped-def]
+        raise RuntimeError("simulated network failure")
+
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", _raise)
+
+    resp = client.post(
+        "/webmentions",
+        data={
+            "source": "https://other.example/note",
+            "target": "https://blog.example.com/posts/hello/",
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 400
+    db_session.rollback()
+    rows = list(db_session.execute(select(Webmention)).scalars())
+    assert rows == []
 
 
 def test_inbox_rejects_unknown_target_site(

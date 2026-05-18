@@ -6,6 +6,58 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **FTS5 search `total` is short-TTL cached (#183).** The PR8
+  paged hit fetch already runs as one UNION ALL + LIMIT/OFFSET,
+  but `total` still required two MATCH-evaluating `COUNT(*)`
+  queries on every search page. The total now passes through a
+  per-process `(site_id, safe_query) -> (count, written_at)`
+  cache with a 30-second TTL and a 4096-entry bound. The hit
+  list stays fresh because the LIMIT/OFFSET query runs every
+  request; only the count can lag by up to one TTL window.
+  Trade-off matches what an admin actually sees in the UI: a
+  document published mid-window appears in the next page of
+  results immediately, but the "X results" counter may be one
+  short for up to 30s.
+
+### Fixed
+- **Webmention receiver verifies before persisting (#181).**
+  The inbox used to insert a `PENDING` row immediately on
+  receipt, then flip it to `REJECTED` or `FAILED` when the
+  source-fetch or link-presence checks failed. With no `UNIQUE`
+  on `(site_id, source_url, target_url)` and no rate limit, that
+  was a per-request DoS surface: an unauthenticated attacker
+  could flood `POST /webmentions` with arbitrary pairs and
+  persist one row per request. Source fetch + link check now run
+  before any DB write; failed attempts log a warning and return
+  400 without persisting. The admin moderation list now contains
+  only verified-but-pending-approval rows, which is the surface
+  humans act on.
+- **ActivityPub `Signature` header parser is quote-aware (#182).**
+  The previous `raw.split(",")` form silently mis-parsed any
+  parameter value carrying a comma, which the draft-cavage spec
+  permits for parameter-extension values. A new regex tokenizer
+  preserves the whole quoted value. Not exploitable today
+  (verification still requires the signature to validate
+  end-to-end), but matters as soon as a signer library adopts an
+  extension that embeds commas. Bare unquoted values continue to
+  parse for spec-permissive senders.
+- **`redirects.source_path` enforces `length(...) > 0` (#184).**
+  Defence-in-depth: the admin form already rejects empty input
+  and every programmatic writer constructs non-empty strings,
+  but PR8's SQL-side PREFIX resolver
+  (`substr(:path, 1, length(source_path)) = source_path`) would
+  collapse to `'' == ''` for any incoming path if an empty row
+  ever landed (importer bug, manual SQL fix-up, future code
+  path). The new `ck_redirects_source_path_nonempty` constraint
+  rejects empty rows at the DB level. Alembic migration
+  `a1b2c3d4e5f6` adds the check via `batch_alter_table`.
+- **`activitypub/signature.py` uses centralised `aware_utcnow()`
+  (#185).** Two `datetime.now(UTC)` callsites
+  (HTTP `Date` header and signature-skew arithmetic) now route
+  through `bragi.core.time.aware_utcnow()` for parity with the
+  rest of the federation code. Style nit; no observable change.
+
 ## [1.11.0] - 2026-05-18
 
 ### Added
