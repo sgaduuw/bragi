@@ -193,6 +193,23 @@ def test_queue_outbox_is_idempotent(db_session: Session) -> None:
     assert len(rows) == 1
 
 
+def test_outbox_mappers_tolerate_deleted_row_during_flight() -> None:
+    """Pass-6 CQ regression: the unpublish-cleanup path
+    (`_drop_pending_outbox_for_post`) deletes PENDING rows out
+    from under an in-flight sender's `send_pending` batch.
+    SQLAlchemy 2.x's default `confirm_deleted_rows=True` would
+    raise `StaleDataError` on the sender's UPDATE for the deleted
+    row, which rolls back the WHOLE batch — recipients of the
+    other successful sends then receive duplicates on the next
+    tick. The fix is `__mapper_args__ = {"confirm_deleted_rows":
+    False}` on both outbox mappers."""
+    from bragi.core.models.activitypub import ActivityPubOutbox
+    from bragi.core.models.webmention import WebmentionOutbox
+
+    assert WebmentionOutbox.__mapper__.confirm_deleted_rows is False
+    assert ActivityPubOutbox.__mapper__.confirm_deleted_rows is False
+
+
 def test_on_post_updated_drops_pending_outbox_when_unpublishing(
     db_session: Session,
 ) -> None:

@@ -7,6 +7,37 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Page revision restore re-runs the cross-site `parent_id`
+  check.** Pass-4 closed cross-site `parent_id` on the page
+  create / edit paths via `_validated_parent_id_or_error`, but
+  the revision-restore handler still copied
+  `revision.parent_id` verbatim. A revision row captured before
+  v1.12.0 (or any future row planted by a manual SQL fixup, a
+  background-job bug, or a non-admin write path) could carry a
+  cross-site value that the create/edit paths would now reject;
+  clicking "Restore" reintroduced the corrupted row. The restore
+  path now runs the same validator and refuses the restore with
+  a flash message if the captured `parent_id` doesn't name a
+  page on the current site.
+- **`safe_relative_path` rejects C0 / DEL control characters.**
+  A login `?next=/\nfoo` 500s the auth view's `redirect(...)`
+  call (werkzeug's HTTP header writer rejects `\r`/`\n`); worse,
+  a redirects-admin row persisted with `target="/\nfoo"` turns
+  every subsequent matching delivery request into a 500 on the
+  response-header writer. Reject inputs with any of `\x00-\x1f`
+  or `\x7f` at the application gate so the failure stays on
+  the input side rather than turning into a persistent per-URL
+  DoS owned by editor-rank users.
+- **Bearer cache invalidates on admin token revoke.** The
+  per-process verify-result cache (#M4 / pass-4) re-checks
+  `User.is_active` on a hit but not whether the token row still
+  exists. An admin who clicked "Revoke" expected the token to
+  stop authenticating immediately; in practice it kept working
+  for up to `_VERIFY_CACHE_TTL_S` (10s) because the cache
+  short-circuited the DB lookup that would have noticed the row
+  is gone. `revoke_token` now calls a new
+  `invalidate_verify_cache_for_public_id(public_id)` that drops
+  every cache entry for the revoked token's public_id.
 - **Login `?next=` / redirects `target=` reject backslash-escaped
   off-domain URLs.** Browsers normalise `\` to `/` in special-
   scheme (http / https) URLs before parsing per the WHATWG URL
@@ -179,6 +210,31 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the bearer API, not a CSRF bypass.
 
 ### Fixed
+- **Outbox sender no longer rolls back the whole batch when an
+  unpublish race deletes a row mid-flight.** The webmention and
+  ActivityPub outbox senders SELECT every PENDING row, mutate
+  them in-memory, then `db.commit()` once at the end. When the
+  unpublish-cleanup path (`_drop_pending_outbox_for_post`)
+  deleted one of those rows out from under the sender, SQLAlchemy
+  2.x's default `confirm_deleted_rows=True` raised
+  `StaleDataError` on the sender's UPDATE for the deleted row,
+  rolling back EVERY successful send in the same batch. On the
+  next tick the recipients of the successful sends received
+  duplicates. Setting `__mapper_args__ = {"confirm_deleted_rows":
+  False}` on both `WebmentionOutbox` and `ActivityPubOutbox`
+  makes the 0-row UPDATE a no-op; the other status flips persist.
+- **`bragi-tasks` no longer livelocks on a persistently-failing
+  migration.** A broken `alembic upgrade head` exited 1, compose
+  restarted `unless-stopped`, alembic failed again, repeat
+  forever; the web services sat in `created` state and operators
+  saw no clear failure signal. `scheduler.sh` now retries
+  alembic with backoff (`ALEMBIC_MAX_ATTEMPTS=5`,
+  `ALEMBIC_RETRY_DELAY=15s`) and exits 0 with a loud log line
+  after exhausting attempts. `compose.yml` switches the
+  `bragi-tasks` restart policy from `unless-stopped` to
+  `on-failure` so the deliberate exit 0 terminates the restart
+  loop and the service shows as `Exited (0)` with the failure
+  message above it.
 - **Apps wire `ProxyFix` when behind a trusted reverse proxy.**
   New `Settings.trusted_proxy_hops` (default 0; the production
   `compose.yml` sets it to 1). When > 0, both `create_admin_app`

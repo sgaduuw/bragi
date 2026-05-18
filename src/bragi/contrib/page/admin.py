@@ -603,6 +603,24 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
             flash("Revision not found.", "error")
             return redirect(url_for("page_admin.list_page_revisions", page_id=page.id))
         editor_user_id = int(session["user_id"])
+        # Pass-6 SEC-HIGH: revisions snapshot `parent_id` verbatim
+        # at capture time. A pre-v1.12.0 revision row may carry a
+        # cross-site parent_id that the v1.12.0 create/edit
+        # `_validated_parent_id_or_error` would now reject; without
+        # re-validating on restore, clicking "Restore" reintroduces
+        # the corrupted row. Re-run the same validator and refuse
+        # the restore on failure, exactly as the edit path does.
+        restored_parent_id, parent_err = _validated_parent_id_or_error(
+            db, revision.parent_id, page.site_id, exclude_page_id=page.id
+        )
+        if parent_err:
+            flash(
+                f"Cannot restore this revision: {parent_err} "
+                f"(captured `parent_id={revision.parent_id}` no longer points "
+                "at a page on this site).",
+                "error",
+            )
+            return redirect(url_for("page_admin.list_page_revisions", page_id=page.id))
         _snapshot_page(db, page, editor_user_id=editor_user_id)
         # Capture `before` BEFORE the mutation, mirroring the
         # normal edit flow. Restoring a revision can change slug,
@@ -620,7 +638,7 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
         page.title = revision.title
         page.slug = revision.slug
         page.status = revision.status
-        page.parent_id = revision.parent_id
+        page.parent_id = restored_parent_id
         page.body_markdown = revision.body_markdown
         page.body_html = revision.body_html
         page.body_excerpt = revision.body_excerpt

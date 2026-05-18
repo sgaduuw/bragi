@@ -133,6 +133,25 @@ def _verify_cache_store(presented: str, outcome: _VerifyOutcome) -> None:
             _VERIFY_CACHE.pop(oldest_key, None)
 
 
+def invalidate_verify_cache_for_public_id(public_id: str) -> None:
+    """Drop every cached verify outcome for `public_id`.
+
+    Called from the admin revoke path so a deleted token row stops
+    authenticating immediately. Without this, the cache would keep
+    a revoked token alive for up to `_VERIFY_CACHE_TTL_S` (10 s)
+    because cache hits skip the DB lookup that would otherwise
+    notice the row is gone; only `User.is_active` is re-checked on
+    a hit. The cache keys the entry on `(public_id, secret_hash)`
+    so a single revoke iterates the cache and removes every matching
+    `public_id` regardless of which presented secret produced the
+    entry (the secret is hashed; we can't reconstruct it from the
+    admin side).
+    """
+    with _VERIFY_CACHE_LOCK:
+        for key in [k for k in _VERIFY_CACHE if k[0] == public_id]:
+            _VERIFY_CACHE.pop(key, None)
+
+
 def _should_audit_token_use(token_id: int, now: datetime) -> bool:
     """Return True if a TOKEN_USED audit row should be written now.
 

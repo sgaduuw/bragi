@@ -476,6 +476,60 @@ def test_verify_cache_short_circuits_argon2_for_repeat_presentation(
         auth_mod.verify = auth_mod_orig_verify  # type: ignore[assignment]
 
 
+def test_revoke_token_invalidates_verify_cache(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """Pass-6 regression: revoking a token must drop its cached
+    verify outcome. The cache only re-checks `User.is_active` on a
+    hit, which stays True for a normal revoke (operator deleted
+    the token row, not disabled the user). Without an explicit
+    invalidation, a presented token continues authenticating for
+    up to `_VERIFY_CACHE_TTL_S` (10s) after admin revoke."""
+    from bragi.contrib.api_tokens import auth as auth_mod
+    from bragi.contrib.api_tokens.auth import invalidate_verify_cache_for_public_id
+
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    # Populate the cache with a positive outcome.
+    first = client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    assert first.status_code == 200
+
+    # Simulate the revoke path: delete the row + invalidate cache.
+    row = db_session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.user_id == user.id)
+    ).scalar_one()
+    public_id = row.public_id
+    db_session.delete(row)
+    db_session.commit()
+    invalidate_verify_cache_for_public_id(public_id)
+
+    # Stub verify so a re-call would explode; the cache must NOT
+    # short-circuit (the entry was just dropped).
+    sentinel = {"called": False}
+
+    orig_verify = auth_mod.verify
+
+    def _tracking_verify(*a, **kw):  # type: ignore[no-untyped-def]
+        sentinel["called"] = True
+        return orig_verify(*a, **kw)
+
+    auth_mod.verify = _tracking_verify  # type: ignore[assignment]
+    try:
+        resp = client.get(
+            "/admin/api/sites/blog/posts/",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        )
+    finally:
+        auth_mod.verify = orig_verify  # type: ignore[assignment]
+    # Token row is gone, so verify returns None and the bearer
+    # middleware falls through to session auth (redirect to login).
+    assert resp.status_code in (302, 303)
+    assert sentinel["called"], "verify() must run again after cache invalidation"
+
+
 def test_verify_cache_negative_hit_short_circuits_too(
     admin_app: Flask, client: FlaskClient, db_session: Session
 ) -> None:

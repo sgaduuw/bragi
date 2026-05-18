@@ -73,6 +73,13 @@ class ActivityPubFollower(IdMixin, TimestampsMixin, Base):
 
 class ActivityPubOutbox(IdMixin, TimestampsMixin, Base):
     __tablename__ = "activitypub_outbox"
+    # See `WebmentionOutbox.__mapper_args__` for the rationale: the
+    # AP unpublish-cleanup path deletes PENDING rows out from under
+    # a sender batch, and `confirm_deleted_rows=True` (SQLAlchemy 2.x
+    # default) would convert a benign 0-row UPDATE into a
+    # `StaleDataError` that rolls back the WHOLE batch, causing
+    # duplicate Create+Notes to followers on the next tick.
+    __mapper_args__ = {"confirm_deleted_rows": False}
 
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     post_id: Mapped[int | None] = mapped_column(
