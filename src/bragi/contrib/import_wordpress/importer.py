@@ -213,9 +213,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             excerpt = _compute_excerpt(item, body_md)
             resolved_author = _resolve_author(db, data, item, author_id, warnings, warned_multi)
             tags = _attach_terms(item, tag_lookup)
-            post, created = _upsert_post(
-                db, site_id, item, tags, resolved_author, body_md, excerpt
-            )
+            post, created = _upsert_post(db, site_id, item, tags, resolved_author, body_md, excerpt)
             if created:
                 posts_created += 1
             else:
