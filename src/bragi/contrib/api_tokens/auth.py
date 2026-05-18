@@ -17,6 +17,9 @@ the CSRF guard runs.
 
 from __future__ import annotations
 
+import threading
+from datetime import datetime, timedelta
+
 from flask import Flask, g, request
 from flask.typing import ResponseReturnValue
 from sqlalchemy import update
@@ -27,6 +30,45 @@ from bragi.core.db import SessionLocal
 from bragi.core.models.personal_access_token import PersonalAccessToken
 from bragi.core.models.user import User
 from bragi.core.time import naive_utcnow
+
+# Per-process throttle on `AuditAction.TOKEN_USED` so a high-QPS
+# integration (a poller hitting the JSON API every few seconds)
+# does not pile thousands of indistinguishable rows into audit_log
+# per token per day. The first use in any window writes the row;
+# subsequent uses by the same token within the window are silent.
+# Trade-off: a token revoked mid-window may have logged-but-suppressed
+# uses we can't see. Acceptable: the table-scan signal is
+# "this token was active around time T", not request-level provenance
+# (the access log already carries that).
+_TOKEN_AUDIT_INTERVAL = timedelta(seconds=60)
+# Bound on the in-process map so a fuzzer presenting many distinct
+# token public_ids cannot grow it without limit. On overflow,
+# evict the oldest entry (single-pass min by value; the dict is
+# small so the linear scan is cheap).
+_TOKEN_AUDIT_MAX = 4096
+_TOKEN_AUDIT_LAST: dict[int, datetime] = {}
+_TOKEN_AUDIT_LAST_LOCK = threading.Lock()
+
+
+def _should_audit_token_use(token_id: int, now: datetime) -> bool:
+    """Return True if a TOKEN_USED audit row should be written now.
+
+    Tracks the last emit time per token id in a process-local dict.
+    Under gunicorn threaded workers the lock guards the get+set
+    sequence; under multi-worker deploys each worker keeps its own
+    map (so the effective rate is up to one row per token per
+    `_TOKEN_AUDIT_INTERVAL` per worker, which is still a sharp drop
+    from one-per-request).
+    """
+    with _TOKEN_AUDIT_LAST_LOCK:
+        last = _TOKEN_AUDIT_LAST.get(token_id)
+        if last is not None and (now - last) < _TOKEN_AUDIT_INTERVAL:
+            return False
+        _TOKEN_AUDIT_LAST[token_id] = now
+        if len(_TOKEN_AUDIT_LAST) > _TOKEN_AUDIT_MAX:
+            oldest_id = min(_TOKEN_AUDIT_LAST, key=lambda k: _TOKEN_AUDIT_LAST[k])
+            _TOKEN_AUDIT_LAST.pop(oldest_id, None)
+        return True
 
 
 def install_bearer_middleware(app: Flask) -> None:
@@ -80,10 +122,11 @@ def _bearer_before_request() -> ResponseReturnValue | None:
     g.api_token_id = token_id
     g.api_token_scopes = scopes
     g.api_csrf_exempt = True
-    audit(
-        AuditAction.TOKEN_USED,
-        target_type="personal_access_token",
-        target_id=token_id,
-        extra={"path": request.path, "method": request.method},
-    )
+    if _should_audit_token_use(token_id, naive_utcnow()):
+        audit(
+            AuditAction.TOKEN_USED,
+            target_type="personal_access_token",
+            target_id=token_id,
+            extra={"path": request.path, "method": request.method},
+        )
     return None

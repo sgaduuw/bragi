@@ -83,25 +83,35 @@ def _resolve_prefix(session: Any, site_id: int, path: str) -> tuple[Redirect, st
     """Find the longest active PREFIX rule whose source_path the
     request path starts with. Returns `(row, resolved_target)`
     where `resolved_target` is `row.target` with the unmatched
-    tail of the request appended."""
-    candidates = (
+    tail of the request appended.
+
+    The prefix-match predicate is pushed to SQL via
+    `substr(:path, 1, length(source_path)) = source_path`. Using
+    `substr` instead of `LIKE :prefix || '%'` avoids having to
+    escape LIKE metacharacters (`%`, `_`) that could appear in a
+    user-supplied source_path; SQL `substr` is byte-literal. With
+    `ORDER BY length(source_path) DESC LIMIT 1`, we ask SQLite for
+    the longest matching row directly instead of pulling every
+    active prefix rule into memory.
+    """
+    row = cast(
+        "Redirect | None",
         session.execute(
             select(Redirect)
             .where(
                 Redirect.site_id == site_id,
                 Redirect.match_type == MatchType.PREFIX,
                 Redirect.active.is_(True),
+                func.substr(path, 1, func.length(Redirect.source_path)) == Redirect.source_path,
             )
             .order_by(func.length(Redirect.source_path).desc())
-        )
-        .scalars()
-        .all()
+            .limit(1)
+        ).scalar_one_or_none(),
     )
-    for row in candidates:
-        if path.startswith(row.source_path):
-            tail = path[len(row.source_path) :]
-            return row, row.target + tail
-    return None
+    if row is None:
+        return None
+    tail = path[len(row.source_path) :]
+    return row, row.target + tail
 
 
 def _resolve_regex(session: Any, site_id: int, path: str) -> tuple[Redirect, str] | None:

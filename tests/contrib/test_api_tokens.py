@@ -58,6 +58,24 @@ def _seed_owner_and_site(db: Session) -> tuple[User, Site]:
     return user, site
 
 
+@pytest.fixture(autouse=True)
+def _reset_token_audit_cache() -> Iterator[None]:
+    """Clear the per-process TOKEN_USED downsample cache between tests.
+
+    `bragi.contrib.api_tokens.auth` holds a module-level dict mapping
+    token id -> last-emit time so a high-QPS poller doesn't pile
+    indistinguishable audit rows. Each test gets a fresh in-memory
+    SQLite engine, so token ids restart at 1 every test; without
+    this reset, a prior test's cached entry would suppress the
+    next test's first TOKEN_USED row.
+    """
+    from bragi.contrib.api_tokens import auth as auth_mod
+
+    auth_mod._TOKEN_AUDIT_LAST.clear()
+    yield
+    auth_mod._TOKEN_AUDIT_LAST.clear()
+
+
 @pytest.fixture
 def admin_app(
     patched_session_locals: sessionmaker[Session],
@@ -351,6 +369,61 @@ def test_token_used_emits_audit_row(
         db_session.execute(select(AuditLog).where(AuditLog.action == "token.used")).scalars()
     )
     assert len(rows) >= 1
+
+
+def test_token_used_is_downsampled_within_window(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """Two bearer requests in quick succession emit one audit row,
+    not two. Without the downsample a high-QPS poller would write
+    one row per request, drowning the audit log in indistinguishable
+    entries. The autouse `_reset_token_audit_cache` fixture clears
+    the per-process cache before this test runs so token_id=1 (or
+    whatever id the new mint gets) doesn't see a stale entry from
+    another test.
+    """
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    for _ in range(4):
+        client.get(
+            "/admin/api/sites/blog/posts/",
+            headers={"Authorization": f"Bearer {plaintext}"},
+        )
+    rows = list(
+        db_session.execute(select(AuditLog).where(AuditLog.action == "token.used")).scalars()
+    )
+    assert len(rows) == 1
+
+
+def test_token_used_emits_again_after_window(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """After the in-process throttle window the next bearer request
+    writes a fresh audit row. Simulated by reaching into the cache
+    and aging the entry past the interval; the alternative (real
+    sleep) would slow the suite for one test.
+    """
+    from datetime import timedelta as _td
+
+    from bragi.contrib.api_tokens import auth as auth_mod
+
+    user = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    plaintext = _mint(db_session, user.id)
+    client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    # Age the cached entry past the throttle window.
+    for token_id in list(auth_mod._TOKEN_AUDIT_LAST):
+        auth_mod._TOKEN_AUDIT_LAST[token_id] -= auth_mod._TOKEN_AUDIT_INTERVAL + _td(seconds=5)
+    client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {plaintext}"},
+    )
+    rows = list(
+        db_session.execute(select(AuditLog).where(AuditLog.action == "token.used")).scalars()
+    )
+    assert len(rows) == 2
 
 
 # --------------------------- post is owned by API caller ---------------------------
