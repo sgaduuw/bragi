@@ -111,6 +111,17 @@ def backup(output_path: Path | None) -> None:
     `restore` subcommand on purpose: a CLI that overwrites live
     state is a big risk for not much help.
     """
+    if engine.dialect.name != "sqlite":
+        # `VACUUM INTO` is SQLite-specific. An operator who pointed
+        # `BRAGI_DATABASE_URL` at Postgres would otherwise hit an
+        # opaque SQL error here instead of a usable message.
+        click.echo(
+            f"cms backup requires SQLite; current engine is "
+            f"`{engine.dialect.name}`. For Postgres use pg_dump; for "
+            "other engines use the engine's native snapshot tool.",
+            err=True,
+        )
+        sys.exit(2)
     if output_path is None:
         stamp = aware_utcnow().strftime("%Y%m%d-%H%M%S")
         output_path = Path.cwd() / f"bragi-backup-{stamp}.tar.gz"

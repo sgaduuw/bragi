@@ -63,6 +63,21 @@ def create_admin_app() -> Flask:
         settings.attachments_max_bytes + 64 * 1024,
     )
 
+    # Admin session cookie hardening. `bragi_sid` is the keychain
+    # to the entire admin (server-side session lookup, no extra
+    # binding to the user). Default `Secure` to True in production
+    # so a misconfigured reverse proxy or a curl probe against `:80`
+    # for diagnostics can't leak the cookie over plain HTTP; in
+    # development, default False so `make dev` over `http://localhost`
+    # still works. `SAMESITE=Lax` is made explicit so it doesn't
+    # depend on Flask's implicit default.
+    if settings.admin_session_cookie_secure is None:
+        app.config["SESSION_COOKIE_SECURE"] = settings.env == "production"
+    else:
+        app.config["SESSION_COOKIE_SECURE"] = settings.admin_session_cookie_secure
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+
     # ProxyFix rewrites the WSGI environ from `X-Forwarded-*`
     # headers when the operator declared trusted hops. Without it,
     # `request.scheme` stays `http`, `url_for(..., _external=True)`

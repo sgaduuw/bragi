@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     delivery_host: str = "0.0.0.0"
     delivery_port: int = 8002
 
+    # Admin session cookie `Secure` flag. When None (default), the
+    # admin app derives it from `env`: True in production, False in
+    # development (otherwise `make dev` over plain http would never
+    # receive the cookie back). Override to True for a production
+    # deploy that's behind a TLS-terminating proxy but happens to
+    # not set `BRAGI_ENV=production`, or to False for a deliberate
+    # plain-http production scenario (don't).
+    admin_session_cookie_secure: bool | None = None
+
     # Trusted reverse-proxy hops in front of the WSGI apps. Set to
     # 1 when running behind exactly one TLS-terminating reverse
     # proxy (Caddy / nginx / Traefik, the documented deploy
