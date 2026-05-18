@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 
 from flask import Blueprint, abort, g, jsonify, request
 from flask.typing import ResponseReturnValue
@@ -188,7 +189,15 @@ def inbox() -> ResponseReturnValue:
     body = request.get_data() or b""
     try:
         activity = json.loads(body.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        # `RecursionError` covers deeply-nested attacker JSON
+        # (e.g. `[[[ ... ]]]` or `{"a":{"a":...}}` past Python's
+        # default 1000-level recursion limit). Without this, an
+        # unauthenticated attacker can flood the inbox with
+        # nested bodies for 500-spam (each request burns a worker
+        # for the parse depth and pollutes audit / access logs).
+        # Signature verification happens after JSON parse, so no
+        # auth is required to trigger.
         abort(400, description="body must be JSON")
     if not isinstance(activity, dict):
         abort(400, description="activity must be a JSON object")
@@ -377,8 +386,6 @@ def _fetch_actor(actor_iri: str) -> dict[str, object] | None:
     single-flight would need per-IRI condition variables) but
     converges on consistent cache state.
     """
-    import time
-
     now = time.monotonic()
     with _ACTOR_CACHE_LOCK:
         cached = _ACTOR_CACHE.get(actor_iri)

@@ -38,13 +38,16 @@ RUN chmod +x /app/scheduler.sh
 
 RUN pip install --no-deps -e .
 
-# Drop root for the runtime. Adds a non-login system user, gives
-# it ownership of /app (the source tree) and /data (the bind-mount
-# point used by the compose volume); the entrypoints inherit this
+# Drop root for the runtime. Adds a non-login system user with an
+# explicit UID, gives it ownership of /app (the source tree) and
+# /data (the volume mount point); the entrypoints inherit this
 # UID via `USER bragi` below. Worker-RCE blast radius is then
-# limited to the container fs and the bind-mount, not uid 0
-# escapes into the volume host.
-RUN useradd --system --create-home --shell /usr/sbin/nologin bragi \
+# limited to the container fs and the volume, not uid 0 escapes
+# into the volume host. The UID is pinned (`--uid 1000`) and
+# identical between admin and delivery Dockerfiles so the shared
+# /data volume is writable from both regardless of base-image
+# drift in the system-uid range.
+RUN useradd --system --create-home --shell /usr/sbin/nologin --uid 1000 bragi \
     && mkdir -p /data \
     && chown -R bragi:bragi /app /data
 USER bragi

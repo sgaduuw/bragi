@@ -44,6 +44,16 @@ bp = Blueprint(
 VALID_STATUS_CODES: frozenset[int] = frozenset({301, 302, 307, 308, 410})
 VALID_MATCH_TYPES: frozenset[str] = frozenset({MatchType.EXACT, MatchType.PREFIX, MatchType.REGEX})
 PAGE_SIZE = 50
+# Cap `source_path` length at 256 chars (admin form). The runtime
+# resolver runs `re.compile(row.source_path).fullmatch(path)` for
+# REGEX rows; without a length cap an editor-rank user could
+# persist a catastrophic-backtracking pattern (`^(a+)+$` shape) and
+# tie up a worker for seconds-to-minutes per matching 404. Capping
+# the length doesn't eliminate ReDoS (a 200-char pattern can still
+# backtrack pathologically) but bounds the worst-case input and
+# pushes the surface from "editor-rank persistent DoS" to "needs a
+# careful pattern within the cap, still gated by editor role".
+MAX_SOURCE_PATH_LENGTH = 256
 
 
 def _form_from_request() -> dict[str, object]:
@@ -84,19 +94,27 @@ def _validate(form: dict[str, object]) -> list[str]:
         errors.append("Source path is required.")
     elif not source_path.startswith("/"):
         errors.append("Source path must start with '/'.")
+    elif len(source_path) > MAX_SOURCE_PATH_LENGTH:
+        errors.append(
+            f"Source path must be at most {MAX_SOURCE_PATH_LENGTH} characters "
+            "(longer values exceed reasonable URL lengths and, for REGEX rows, "
+            "allow catastrophic-backtracking patterns)."
+        )
     target = form["target"]
     if not target:
         errors.append("Target is required.")
     elif isinstance(target, str) and safe_relative_path(target) is None:
         # `safe_relative_path` rejects absolute URLs, protocol-relative
-        # `//evil.example/x`, and any value containing `\` (browsers
+        # `//evil.example/x`, any value containing `\` (browsers
         # normalise backslash to `/` in special-scheme URLs before
-        # parsing, so `/\evil.example/x` lands off-domain). All three
-        # would let an editor-rank user turn the redirect table into a
-        # 301 phishing primitive against the site's readers.
+        # parsing, so `/\evil.example/x` lands off-domain), and any
+        # C0 / DEL control character (which would 500 the response
+        # header writer at delivery time). Each is a foot-gun that
+        # an editor-rank user could otherwise weaponise.
         errors.append(
             "Target must be a relative path starting with '/' (no "
-            "absolute URLs, no protocol-relative `//`, no backslashes)."
+            "absolute URLs, no protocol-relative `//`, no backslashes, "
+            "no control characters)."
         )
     if form["status_code"] not in VALID_STATUS_CODES:
         errors.append(f"Status code must be one of {sorted(VALID_STATUS_CODES)}.")

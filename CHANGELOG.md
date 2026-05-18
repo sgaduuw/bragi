@@ -6,6 +6,89 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **AP inbox catches `RecursionError` on deeply-nested JSON
+  (#215).** `json.loads` recurses; an unauthenticated attacker
+  could flood the inbox with `[[[...]]]` / `{"a":{"a":...}}` past
+  Python's default 1000 recursion limit and trigger uncaught 500s
+  (the except clause previously matched only `ValueError` /
+  `UnicodeDecodeError`). Signature verification happens after
+  JSON parse, so no auth was needed to trigger; the now-broader
+  except returns a clean 400.
+- **`safe_external_url` rejects Unicode bidi-formatting
+  codepoints (#209).** A stored `Webmention.author_url` with a
+  `‮` (RTL override) renders flipped in the admin
+  moderation list and can fool a moderator into approving a row
+  whose real destination is malicious. The h-card extractor
+  (and any future caller of the now-centralised
+  `bragi.core.safe_redirect.safe_external_url`) now rejects
+  `U+202A`-`U+202E` and `U+2066`-`U+2069`.
+
+### Changed
+- **Admin session cookie defaults to `Secure` in production
+  (#199).** New `Settings.admin_session_cookie_secure` knob
+  (default `None` = derive from `env`); `create_admin_app` sets
+  `SESSION_COOKIE_SECURE`, `SESSION_COOKIE_SAMESITE = "Lax"`,
+  and `SESSION_COOKIE_HTTPONLY` explicitly. The default closes
+  the case where a misconfigured reverse proxy or a curl probe
+  against `:80` could leak `bragi_sid` over plain HTTP without
+  the operator opting in. `make dev` over `http://localhost`
+  still works because `env != "production"` defaults to
+  `Secure=False`.
+- **Redirects admin caps `source_path` at 256 characters (#200).**
+  A REGEX-mode row goes through `re.compile(...).fullmatch(...)`
+  at delivery time; without a length cap an editor-rank user
+  could persist a catastrophic-backtracking pattern (`^(a+)+$`
+  shape) and tie up a worker per matching 404. Capping the
+  length bounds the worst-case input.
+- **`cms backup` gates on the SQLite engine (#204).** When
+  `BRAGI_DATABASE_URL` points at Postgres (or any non-SQLite
+  engine), the command now exits 2 with a clear "use pg_dump"
+  message rather than crashing through an opaque
+  `VACUUM INTO`-not-supported SQL error.
+- **Container `bragi` UID pinned to 1000 in both Dockerfiles
+  (#212).** Pinned identically so a base-image bump can't shift
+  the system uid range and break /data volume sharing across
+  the admin and delivery images.
+- **scheduler.sh sleep is interruptible (#217).** New
+  `sleep_interruptible` helper backgrounds the sleep so the
+  SIGTERM trap fires immediately. POSIX `/bin/sh` (dash) doesn't
+  interrupt a foreground `sleep` for a trapped signal, so a
+  `docker compose stop` mid-tick used to wait up to the full
+  sleep duration (10s main-loop / 15s alembic retry) before the
+  trap could forward. Applied to both the alembic-retry sleep
+  and the main-loop sleep.
+- **`Procfile.dev` adds a `tasks:` line (#206).** New
+  `scripts/dev-tasks.sh` mirrors `docker/scheduler.sh` but
+  invokes the cms commands against the local SQLite DB on a 60s
+  loop, so `make dev` exercises the same code paths the
+  production sidecar does.
+- **compose.yml documents embed / rendition / IndexNow knobs
+  (#207).** `BRAGI_EMBED_YOUTUBE_MODE`,
+  `BRAGI_EMBED_OEMBED_TIMEOUT_PER` / `_AGGREGATE` /
+  `_RERENDER_TIMEOUT_PER`, `BRAGI_ATTACHMENT_RENDITION_WIDTHS`,
+  `BRAGI_INDEXNOW_ENDPOINT`, and `BRAGI_SECURITY_EXPIRES_DAYS`
+  now appear as commented `# OPTIONAL` lines with defaults.
+
+### Fixed
+- **CI workflow has explicit minimum permissions (#205).**
+  `permissions: contents: read` at the top level so the
+  workflow token never carries repo-write by default when CI
+  runs untrusted PR code from forks.
+- Miscellaneous internal refactors (closing #201, #202, #203,
+  #211, #213, #216, #218): `_safe_external_url` lifted from
+  `webmentions/parse.py` into `bragi.core.safe_redirect` for
+  reuse; webmention `_queue_outbox_for_post` fallback uses
+  `urlparse(...).hostname` not `.netloc`; redirects admin flash
+  enumerates "no control characters" alongside the existing
+  rejections; activitypub views / signature `import time` /
+  `threading` moved to module level; search `_is_published`
+  drops the dead `or status == "published"` clause; new test
+  for AP unpublish-cleanup parity with the webmention side;
+  compose.dev.yml carries inline comments explaining why
+  `BRAGI_ENV` and `BRAGI_TRUSTED_PROXY_HOPS` are deliberately
+  unset.
+
 ## [1.12.0] - 2026-05-18
 
 ### Security

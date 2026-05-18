@@ -15,6 +15,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
+import threading
+import time
 from datetime import UTC
 from email.utils import format_datetime, parsedate_to_datetime
 from typing import NamedTuple
@@ -108,16 +110,12 @@ class _ReplayCache:
     __slots__ = ("_entries", "_lock", "_max_entries", "_ttl_seconds")
 
     def __init__(self, *, ttl_seconds: int = _DATE_SKEW_SECONDS, max_entries: int = 4096) -> None:
-        import threading
-
         self._entries: dict[tuple[str, str], float] = {}
         self._ttl_seconds = ttl_seconds
         self._max_entries = max_entries
         self._lock = threading.Lock()
 
     def add(self, key_id: str, signature_b64: str) -> bool:
-        import time
-
         now = time.monotonic()
         with self._lock:
             self._evict(now)

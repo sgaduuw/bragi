@@ -36,8 +36,11 @@ RUN pip install --no-deps -e .
 
 # Drop root for the runtime (same as admin). Even though delivery
 # is read-only at the schema level, a worker RCE under uid 0 still
-# escapes into the bind-mounted /data volume with root privileges.
-RUN useradd --system --create-home --shell /usr/sbin/nologin bragi \
+# escapes into the /data volume with root privileges. The UID is
+# pinned (`--uid 1000`) and identical to admin.Dockerfile so the
+# shared /data volume is writable from both containers regardless
+# of base-image drift in the system-uid range.
+RUN useradd --system --create-home --shell /usr/sbin/nologin --uid 1000 bragi \
     && mkdir -p /data \
     && chown -R bragi:bragi /app /data
 USER bragi

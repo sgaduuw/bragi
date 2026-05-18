@@ -10,6 +10,13 @@ on:
       - "release/**"
       - "hotfix/**"
 
+# Minimum permissions. CI runs untrusted PR code (`poetry install`
+# from a fork can execute arbitrary code in the build phase), so
+# the workflow token must not carry write permissions on repo
+# contents, packages, or anything else by default.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

@@ -117,6 +117,30 @@ services:
       # both federation inboxes and attachment uploads.
       # BRAGI_MAX_REQUEST_BYTES: "1048576"
       # BRAGI_ATTACHMENTS_MAX_BYTES: "20971520"
+      # `<picture srcset>` rendition widths produced on attachment
+      # upload. Defaults to the typical thumbnail / medium / large
+      # ladder; pass a JSON array to override (widths >= source
+      # are skipped, no upscale).
+      # BRAGI_ATTACHMENT_RENDITION_WIDTHS: "[320,800,1600]"
+      # YouTube embed mode: `click-to-load` (default) shows a
+      # static thumbnail until the reader clicks; `iframe` uses
+      # the youtube-nocookie iframe inline and autoplays on render.
+      # BRAGI_EMBED_YOUTUBE_MODE: "click-to-load"
+      # Per-call + aggregate oEmbed timeout (seconds) at save
+      # time. Aggregate is enforced across all embeds in one save.
+      # BRAGI_EMBED_OEMBED_TIMEOUT_PER: "2.0"
+      # BRAGI_EMBED_OEMBED_TIMEOUT_AGGREGATE: "5.0"
+      # Per-call timeout for the `cms embeds rerender-pending`
+      # task (relaxed cadence, can afford to wait longer).
+      # BRAGI_EMBED_RERENDER_TIMEOUT_PER: "15.0"
+      # IndexNow push-crawl endpoint. The default fans out to
+      # every participating search engine; set to a specific
+      # provider URL (e.g. https://www.bing.com/indexnow) when
+      # only one matters.
+      # BRAGI_INDEXNOW_ENDPOINT: "https://api.indexnow.org/indexnow"
+      # `Expires` field on /.well-known/security.txt, in days from
+      # the file's serve time. Default 365.
+      # BRAGI_SECURITY_EXPIRES_DAYS: "365"
       # Gunicorn worker count for the admin app. Default 2; admin
       # is low-concurrency (one operator). Dial up if you have
       # multiple authors hitting it concurrently.

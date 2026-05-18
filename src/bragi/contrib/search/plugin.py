@@ -56,10 +56,8 @@ def register_cli_command(group: click.Group) -> None:
 
 
 def _is_published(item: Any) -> bool:
-    """Both Post and Page use string status values; published is
-    represented by the same literal across the two."""
-    status = getattr(item, "status", None)
-    return status == PostStatus.PUBLISHED or status == "published"
+    """Both Post and Page use the same string status literal."""
+    return getattr(item, "status", None) == PostStatus.PUBLISHED
 
 
 def _index_or_remove(item: Any) -> None:
