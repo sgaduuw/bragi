@@ -448,6 +448,192 @@ def test_created_post_author_id_is_token_owner(
     assert post.author_id == user_id
 
 
+# --------------------------- cross-author authorisation ---------------------------
+#
+# Pre-PR9, the JSON API only enforced site membership: a token holder
+# with `author` rank + `post:write` scope could PATCH / publish another
+# author's post. The admin UI's `edit_post` already gated on
+# `((is_own and author) or editor+)`; the API now enforces the same
+# shape via `_require_post_write_access` in `api_tokens/api.py`.
+
+
+def _seed_second_author(db: Session, site: Site, *, email: str = "co@example.com") -> User:
+    co = User(email=email, display_name="Co", is_active=True)
+    db.add(co)
+    db.flush()
+    db.add(LocalCredential(user_id=co.id, password_hash=hash_password("co-password-123")))
+    db.add(UserSiteRole(user_id=co.id, site_id=site.id, role=Role.AUTHOR))
+    db.commit()
+    return co
+
+
+def test_author_cannot_patch_another_authors_post(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """A token with author rank + post:write must 403 on a PATCH
+    against a post they did not author."""
+    site = db_session.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+    owner = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    co = _seed_second_author(db_session, site)
+    # Owner authors the post.
+    owner_post = Post(
+        site_id=site.id,
+        slug="owners-post",
+        title="Owner's Post",
+        body_markdown="x",
+        body_html="<p>x</p>",
+        body_excerpt="x",
+        author_id=owner.id,
+        status=PostStatus.PUBLISHED,
+        published_at=datetime(2026, 5, 14, tzinfo=UTC).replace(tzinfo=None),
+    )
+    db_session.add(owner_post)
+    db_session.commit()
+    owner_post_id = owner_post.id
+
+    co_token = _mint(db_session, co.id)
+    resp = client.patch(
+        f"/admin/api/sites/blog/posts/{owner_post_id}/",
+        json={"title": "Hijacked"},
+        headers={"Authorization": f"Bearer {co_token}"},
+    )
+    assert resp.status_code == 403
+    assert resp.is_json
+    assert resp.json["error"] == "forbidden"
+    # The post was not mutated.
+    db_session.rollback()
+    after = db_session.get(Post, owner_post_id)
+    assert after is not None
+    assert after.title == "Owner's Post"
+
+
+def test_author_cannot_publish_another_authors_post(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """Same shape against the `/publish` action: 403 + no mutation."""
+    site = db_session.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+    owner = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    co = _seed_second_author(db_session, site)
+    draft = Post(
+        site_id=site.id,
+        slug="owners-draft",
+        title="Owner's Draft",
+        body_markdown="x",
+        body_html="<p>x</p>",
+        body_excerpt="x",
+        author_id=owner.id,
+        status=PostStatus.DRAFT,
+    )
+    db_session.add(draft)
+    db_session.commit()
+    draft_id = draft.id
+
+    co_token = _mint(db_session, co.id)
+    resp = client.post(
+        f"/admin/api/sites/blog/posts/{draft_id}/publish",
+        headers={"Authorization": f"Bearer {co_token}"},
+    )
+    assert resp.status_code == 403
+    db_session.rollback()
+    after = db_session.get(Post, draft_id)
+    assert after is not None
+    assert after.status == PostStatus.DRAFT
+
+
+def test_author_can_patch_their_own_post(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """Self-edit stays allowed (the gate is `(is_own and author) or
+    editor+`)."""
+    site = db_session.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+    co = _seed_second_author(db_session, site)
+    co_post = Post(
+        site_id=site.id,
+        slug="cos-post",
+        title="Co's Post",
+        body_markdown="x",
+        body_html="<p>x</p>",
+        body_excerpt="x",
+        author_id=co.id,
+        status=PostStatus.DRAFT,
+    )
+    db_session.add(co_post)
+    db_session.commit()
+    co_post_id = co_post.id
+
+    co_token = _mint(db_session, co.id)
+    resp = client.patch(
+        f"/admin/api/sites/blog/posts/{co_post_id}/",
+        json={"title": "Co's Edited Post"},
+        headers={"Authorization": f"Bearer {co_token}"},
+    )
+    assert resp.status_code == 200
+    db_session.rollback()
+    after = db_session.get(Post, co_post_id)
+    assert after is not None
+    assert after.title == "Co's Edited Post"
+
+
+def test_list_posts_scoped_to_caller_for_author_rank(
+    admin_app: Flask, client: FlaskClient, db_session: Session
+) -> None:
+    """An author-rank caller sees only their own posts; an
+    editor+/admin caller sees the full list. Without the scope, a
+    `post:read` author token would expose every author's drafts."""
+    site = db_session.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+    owner = db_session.execute(select(User).where(User.email == OWNER_EMAIL)).scalar_one()
+    co = _seed_second_author(db_session, site)
+    db_session.add(
+        Post(
+            site_id=site.id,
+            slug="owner-1",
+            title="Owner 1",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="x",
+            author_id=owner.id,
+            status=PostStatus.PUBLISHED,
+            published_at=datetime(2026, 5, 14, tzinfo=UTC).replace(tzinfo=None),
+        )
+    )
+    db_session.add(
+        Post(
+            site_id=site.id,
+            slug="co-1",
+            title="Co 1",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="x",
+            author_id=co.id,
+            status=PostStatus.PUBLISHED,
+            published_at=datetime(2026, 5, 14, tzinfo=UTC).replace(tzinfo=None),
+        )
+    )
+    db_session.commit()
+
+    co_token = _mint(db_session, co.id)
+    resp = client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {co_token}"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json
+    slugs = {p["slug"] for p in payload["posts"]}
+    assert slugs == {"co-1"}
+    assert payload["total"] == 1
+
+    owner_token = _mint(db_session, owner.id)
+    resp = client.get(
+        "/admin/api/sites/blog/posts/",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json
+    slugs = {p["slug"] for p in payload["posts"]}
+    assert {"owner-1", "co-1"}.issubset(slugs)
+    assert payload["total"] >= 2
+
+
 # --------------------------- lifecycle hooks ---------------------------
 #
 # Without the on_post_* hook dispatch the API would silently bypass

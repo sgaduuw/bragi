@@ -30,7 +30,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.models.personal_access_token import TokenScope
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
-from bragi.core.permissions import is_site_member
+from bragi.core.permissions import has_role, is_site_member
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.security import current_user
 from bragi.core.time import naive_utcnow, to_naive_utc
@@ -69,6 +69,24 @@ def _resolve_site(db: Session, site_slug: str) -> Site:
     if not is_site_member(current_user(), site):
         abort(403, description="not a member of this site")
     return site
+
+
+def _require_post_write_access(post: Post) -> None:
+    """Mirror the admin `edit_post` gate: an author may act only on
+    their own posts; editor+ may act on any post on the site.
+
+    The JSON API previously only required site membership, so a
+    member with `author` rank + `post:write` scope could mutate
+    another author's draft, retract their published post, or
+    trigger ActivityPub fanout / auto-301s on their behalf. The
+    admin view at `bragi.contrib.post.admin:edit_post` enforces
+    `((is_own and author) or editor+)`; this helper applies the
+    same gate to the API surface.
+    """
+    user = current_user()
+    is_own = bool(user and user.id == post.author_id)
+    if not ((is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)):
+        abort(403, description="forbidden: editor role required to mutate another author's post")
 
 
 def _post_to_json(post: Post) -> dict[str, Any]:
@@ -134,11 +152,21 @@ def list_posts(site_slug: str) -> ResponseReturnValue:
 
     with SessionLocal() as db:
         site = _resolve_site(db, site_slug)
-        total = db.execute(select(func.count(Post.id)).where(Post.site_id == site.id)).scalar_one()
+        # Author-rank callers see only their own posts (matches the
+        # admin list view's filter). Editor+ sees the full list.
+        # Without this scope, a token with author role + post:read
+        # would surface every author's drafts (body_markdown,
+        # scheduled posts, meta) on a multi-author site.
+        base_filter = Post.site_id == site.id
+        if not has_role("editor", site.id):
+            user = current_user()
+            assert user is not None
+            base_filter = base_filter & (Post.author_id == user.id)
+        total = db.execute(select(func.count(Post.id)).where(base_filter)).scalar_one()
         posts = list(
             db.execute(
                 select(Post)
-                .where(Post.site_id == site.id)
+                .where(base_filter)
                 .order_by(Post.published_at.desc().nulls_last(), Post.id.desc())
                 .limit(limit)
                 .offset(offset)
@@ -227,6 +255,7 @@ def update_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404, description="post not found")
+        _require_post_write_access(post)
         # Snapshot before mutation so on_post_updated subscribers
         # (notably the redirects plugin's slug-change auto-301)
         # can diff what changed.
@@ -289,6 +318,7 @@ def publish_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404, description="post not found")
+        _require_post_write_access(post)
         was_published = post.status == PostStatus.PUBLISHED
         post.status = PostStatus.PUBLISHED
         if post.published_at is None:
