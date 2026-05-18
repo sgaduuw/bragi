@@ -188,7 +188,7 @@ def inbox() -> ResponseReturnValue:
     body = request.get_data() or b""
     try:
         activity = json.loads(body.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         abort(400, description="body must be JSON")
     if not isinstance(activity, dict):
         abort(400, description="activity must be a JSON object")
