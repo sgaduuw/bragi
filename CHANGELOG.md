@@ -6,6 +6,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Registry fails loud on duplicate plugin registrations (#188).**
+  Each `Registry.add_*` method now dedups on the canonical unique
+  field (`.name` for content types / importers / OAuth providers /
+  auth methods / storage backends / image processors / search
+  backends, `.slug` for themes, `.endpoint` for admin nav items)
+  and raises `bragi.core.registry.DuplicateRegistration` when a
+  second spec claims the same key. Pre-v1.14.0 the bare
+  list-append silently shadowed the second registration: a
+  third-party plugin reusing `name="post"` (or `slug="default"`,
+  etc.) failed open with its registration dead and no log line.
+  External architectural review (2026-05-18) flagged this as a
+  silent-failure surface. The error message quotes the colliding
+  kind + key and nudges operators to `cms plugins list` (#190)
+  for triage; per-spec ownership tracking via pluggy's
+  hook-caller introspection (so the error can name the offending
+  plugin directly) remains a follow-up. The complementary
+  `Registry.freeze()` proposal from the review is deferred: it
+  would close the mutate-after-boot surface but breaks the three
+  test sites in `tests/contrib/test_themes.py` that inject test
+  themes through `app.extensions["registry"]` after factory
+  return, and the bug it prevents has not been observed in
+  practice.
+
 ## [1.13.0] - 2026-05-19
 
 ### Security
