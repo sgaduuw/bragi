@@ -131,6 +131,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   callers updated; `git mv` preserves history.
 
 ### Fixed
+- **Attachment delete cleanup now happens inside the cascade-delete
+  transaction (#171).** Pre-v1.13.0 the delete route committed the
+  cascade-delete first and then refcounted + unlinked the on-disk
+  file post-commit, leaving a narrow window during which a
+  concurrent upload of the same content-addressed bytes could
+  insert a new row referencing the storage_key we then unlinked.
+  The refcount check and `backend.remove` call now run between
+  `db.flush()` and `db.commit()` so SQLAlchemy's writer lock
+  (SQLite RESERVED, acquired on the cascade DELETE) queues other
+  writers under WAL until our cleanup commits. Regression test
+  pins the ordering invariant: every `backend.remove` call must
+  precede the delete-view's commit.
 - **`pyproject.toml` migrated to PEP 621 `[project]` table
   (#168).** Poetry 2.x deprecated `[tool.poetry]` for metadata
   (name / version / description / authors / dependencies /

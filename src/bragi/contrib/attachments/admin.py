@@ -463,8 +463,23 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
         filename = row.filename
         site_id = row.site_id
         # Collect rendition storage_keys before CASCADE removes the
-        # rows. We refcount them against both tables after commit
-        # and unlink orphans.
+        # rows. Refcount + filesystem removal happen INSIDE this
+        # transaction (between `db.flush()` and `db.commit()`) so a
+        # concurrent upload of the same content-addressed bytes
+        # cannot land an INSERT against the same `storage_key`
+        # between our refcount check and our `backend.remove` call
+        # (#171). Pre-v1.13.0 the commit fired first and the
+        # refcount loop ran post-commit, leaving a narrow window
+        # during which a concurrent upload could persist a row
+        # referencing a key we then unlinked. Holding the writer
+        # lock (SQLAlchemy's deferred BEGIN is upgraded to
+        # RESERVED on the cascade DELETE, which queues other
+        # writers under SQLite WAL) until commit collapses that
+        # window to zero on the cleanup side. A residual race on
+        # the upload side (an in-flight `store_bytes` that
+        # already ran before we acquired the lock) is acknowledged
+        # as out-of-scope: closing it requires the upload path to
+        # re-store inside its insert txn, tracked separately.
         rendition_keys = [
             r.storage_key
             for r in db.execute(
@@ -472,7 +487,7 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
             ).scalars()
         ]
         db.delete(row)
-        db.commit()
+        db.flush()  # apply cascade so refcount sees post-delete state
 
         # If no other row across attachments or renditions points
         # at a key, free the on-disk file. Otherwise leave it; some
@@ -491,6 +506,8 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
             )
             if still_used is None:
                 backend.remove(site_slug_for_storage, key)
+
+        db.commit()
 
     audit(
         "attachment.deleted",
