@@ -3,6 +3,11 @@
 {% block title %}{{ 'Edit' if is_edit else 'New' }} post &middot; bragi admin{% endblock %}
 {% block content %}
 <h1>{{ 'Edit post' if is_edit else 'New post' }}</h1>
+{% if is_edit %}
+<p style="margin-top: -0.5em; color: #666;">
+  <a href="{{ url_for('internal_links_admin.backlinks', target_type='post', target_id=post.id) }}">Backlinks &raquo;</a>
+</p>
+{% endif %}
 
 <form method="post"
       action="{{ url_for('post_admin.edit_post', post_id=post.id) if is_edit else url_for('post_admin.new_post') }}">

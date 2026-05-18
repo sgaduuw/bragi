@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+{% block title %}Backlinks &middot; {{ target_title }}{% endblock %}
+{% block content %}
+<h1>Backlinks for <em>{{ target_title }}</em></h1>
+<p style="color: #666;">
+  Same-site {{ target_type }}s and pages whose body links to this {{ target_type }}.
+  {% if target_type == "post" %}
+  <a href="{{ url_for('post_admin.edit_post', site_slug=site.slug, post_id=target_id) }}">Back to post edit</a>.
+  {% else %}
+  <a href="{{ url_for('page_admin.edit_page', site_slug=site.slug, page_id=target_id) }}">Back to page edit</a>.
+  {% endif %}
+</p>
+{% if not rows %}
+<p><em>No inbound links yet. (Sources are indexed when they're saved or published; run
+<code>cms internal-links rebuild-backlinks</code> after upgrading to v1.13.0 to backfill
+existing content.)</em></p>
+{% else %}
+<table style="width: 100%; border-collapse: collapse;">
+  <thead>
+    <tr>
+      <th style="text-align: left;">Source</th>
+      <th style="text-align: left;">Type</th>
+      <th style="text-align: left;">Slug</th>
+      <th style="text-align: left;">Status</th>
+      <th style="text-align: left;">Last updated</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><a href="{{ row.edit_url }}">{{ row.title or '(untitled)' }}</a></td>
+      <td>{{ row.source_type }}</td>
+      <td><code>{{ row.slug }}</code></td>
+      <td>{{ row.status }}</td>
+      <td>{% if row.updated_at %}{{ row.updated_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

@@ -3,6 +3,11 @@
 {% block title %}{{ 'Edit' if is_edit else 'New' }} page &middot; bragi admin{% endblock %}
 {% block content %}
 <h1>{{ 'Edit page' if is_edit else 'New page' }}</h1>
+{% if is_edit %}
+<p style="margin-top: -0.5em; color: #666;">
+  <a href="{{ url_for('internal_links_admin.backlinks', target_type='page', target_id=page.id) }}">Backlinks &raquo;</a>
+</p>
+{% endif %}
 
 {% if swap_pending %}
 <div class="banner banner--warning">

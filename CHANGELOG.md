@@ -43,6 +43,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `bragi.core.safe_urls.safe_external_url`) now rejects
   `U+202A`-`U+202E` and `U+2066`-`U+2069`.
 
+### Added
+- **Admin backlinks view (#116).** From a post or page edit
+  form, the new "Backlinks »" link reaches a list of every
+  same-site post / page whose `body_html` references this
+  target via `data-bragi-link`. Useful for impact analysis
+  before renaming or unpublishing a target. Backed by a new
+  `internal_links` edge table (composite PK on `(site_id,
+  source_type, source_id, target_type, target_id)`, indexed
+  on the inbound query); the table is populated by the
+  internal_links plugin's `on_post_published` /
+  `on_post_updated` hooks on every save, and `on_post_deleted`
+  drops edges referencing the deleted item from either side.
+  New `cms internal-links rebuild-backlinks [--site <slug>]`
+  command rebuilds the table from existing content on upgrade.
+  Schema migration `2e99f2f0e525` creates the table; the
+  table ships empty so the migration is fast on any DB size.
+  Slug-form markers (`post:my-slug`) are ignored by the
+  indexer; the delivery-time rewriter hardens them into
+  integer form on first render, and the next save re-indexes.
+
 ### Changed
 - **Moderator-facing IDN badge on the webmention moderation
   list (#225).** `safe_external_url` accepts Cyrillic / Greek
