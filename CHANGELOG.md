@@ -62,6 +62,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   policy: deprecation warning across one minor version, then
   removal in the named release with a back-link from the
   CHANGELOG entry.
+- **Plugin template-namespacing test (#189).** New
+  `tests/contrib/test_plugin_layout.py` walks every in-tree
+  `bragi.contrib.*` package and asserts that each plugin's
+  `templates/` directory only carries top-level entries that
+  are either the plugin's own slug or one of the shared
+  prefixes `admin` / `delivery`. Two plugins shipping
+  `templates/detail.html` would otherwise shadow each other
+  unpredictably (Flask's Jinja loader resolves by blueprint
+  registration order, which depends on pluggy discovery order).
+  Theme-over-plugin shadowing stays intentional and documented.
+  `bragi.contrib.auth_local`'s `login.html` /
+  `change_password.html` move under `templates/auth_local/`
+  to satisfy the rule; eight `render_template` callsites in
+  `auth_local/views.py` updated in lockstep. No user-visible
+  change to the rendered templates themselves.
 - **Admin backlinks view (#116).** From a post or page edit
   form, the new "Backlinks »" link reaches a list of every
   same-site post / page whose `body_html` references this
