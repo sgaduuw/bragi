@@ -6,6 +6,33 @@ citizen.
 
 ## Status
 
+1.11.0 shipped 2026-05-18. Three publishing surfaces land in this
+release: ActivityPub federation (one follow-able actor per site,
+RSA-SHA256 HTTP signatures, Mastodon-compatible Follow / Undo,
+Create+Note fanout on publish), indieweb webmentions (send +
+receive + admin moderation, h-card author parsing, "Mentioned by"
+aside), and personal access tokens with a JSON REST surface
+(`/admin/api/sites/<slug>/posts/`, scope-gated by `post:write`).
+Plus: Open Graph + Twitter Card meta on every post / page, per-tag
+Atom feeds, auto-rendered table of contents on multi-section
+posts, chronological archive at `<post_index>/archive/`, post-page
+chrome (author byline, reading time, "Updated YYYY-MM-DD"),
+related-posts aside, `cms export` (Hugo-shaped corpus dump),
+`cms backup` (single-file DB + attachments tarball), KaTeX +
+Mermaid + footnotes markdown, and a `/healthz` liveness endpoint
+on both apps. The deploy posture also hardened: SSRF guard on
+every outbound HTTP call driven by remote input, body-size cap
+(`MAX_CONTENT_LENGTH`), in-process replay cache on the AP inbox,
+production `SECRET_KEY` boot check, and `ON DELETE` actions
+across the full model graph so removing a Site / Post / User no
+longer leaves orphan rows. The hardcoded `/posts/` URL space is
+gone: posts now live under a per-site `Page` of kind `post_index`,
+so a site at `/blog/` gets post URLs at `/blog/<slug>/`. The
+migration auto-creates a `slug="posts"` post_index on every
+existing site to keep legacy URLs resolving without operator
+intervention. Closes #117, #115, #143, #144, #145, #146, #147,
+#148, #137, #133, #130, #129, #128, #127, #126, #124.
+
 1.10.0 shipped 2026-05-16. All day-one built-in plugins are in
 place: Post, Page, Tag, GitHub OAuth + local-credential auth
 (with `must_change` rotation), Hugo / Ghost / WordPress
@@ -264,29 +291,35 @@ in place rather than duplicating them.
   through verbatim. The same bragi markdown pipeline that runs
   on native authoring then renders it, so no shortcode
   translation step is needed. Every `aliases:` entry becomes a
-  301 Redirect from the legacy URL to the post's bragi
-  canonical (`/posts/<slug>/`). `tags:` lists upsert by slug.
-  CLI: `cms import hugo --site <slug> [--author <email>]
+  301 Redirect from the legacy URL to the post's bragi canonical
+  under the site's `post_index` page (e.g. `/blog/<slug>/` when
+  the site's post index lives at `/blog/`); fragments and query
+  strings on the alias are stripped before matching. Sites with
+  no `post_index` page have no public post URLs, so the importer
+  skips the redirect emission for those. `tags:` lists upsert by
+  slug. CLI: `cms import hugo --site <slug> [--author <email>]
   [--dry-run] <path>`.
 - **Ghost**: parses the single-file JSON export
   (`db[0].data.posts`). Bodies arrive as HTML and convert to
   markdown via `markdownify(heading_style="ATX")`; tags come
   from `data.tags` + `data.posts_tags`; authors match existing
   Users by email (else fall back to the first user). For every
-  published post a 301 from Ghost's permalink (`/<slug>/`) to
-  bragi's (`/posts/<slug>/`) lands so legacy bookmarks survive.
-  CLI: `cms import ghost --site <slug> [--author <email>]
-  [--dry-run] <path>`.
+  published post a 301 lands from Ghost's permalink (`/<slug>/`)
+  to bragi's canonical under the site's `post_index` page (e.g.
+  `/blog/<slug>/`) so legacy bookmarks survive. CLI:
+  `cms import ghost --site <slug> [--author <email>] [--dry-run]
+  <path>`.
 - **WordPress**: parses WXR (WordPress eXtended RSS) XML
   exports. `wp:post_type=post` rows become Posts, `page` rows
   become Pages; bodies are converted from WordPress HTML to
   markdown and run through the same pipeline. Categories and
   tags upsert by slug; authors match by email or fall back to
   the first user. Permalinks captured at export time become 301
-  redirects so legacy bookmarks survive. Idempotency keys on
-  `(site_id, source_id)` via `wp:post_id`. CLI:
-  `cms import wordpress --site <slug> [--author <email>]
-  [--dry-run] <wxr.xml>`.
+  redirects to the bragi canonical (posts resolve through the
+  site's `post_index` page; pages resolve through the static-page
+  chain). Idempotency keys on `(site_id, source_id)` via
+  `wp:post_id`. CLI: `cms import wordpress --site <slug>
+  [--author <email>] [--dry-run] <wxr.xml>`.
 
 Notion, Substack, and Medium importers are deferred to
 follow-up packages; no v1.x commitment.
@@ -353,7 +386,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.10.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.11.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -432,8 +465,10 @@ bragi/
 │   │   ├── text.py             # slugify
 │   │   └── useragent.py        # bot / browser / feed-reader classifier
 │   └── contrib/                # built-ins as plugins
+│       ├── activitypub/        # one fediverse actor per site (follow / undo / outbox fanout)
 │       ├── analytics/          # per-site pageview sink + admin dashboard
 │       ├── anchors/            # heading id injection
+│       ├── api_tokens/         # personal access tokens + JSON REST surface
 │       ├── attachments/        # upload + serve + media library
 │       ├── audit/              # audit-log admin
 │       ├── auth_github/        # OAuth via Authlib
@@ -449,13 +484,14 @@ bragi/
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301
-│       ├── search/             # SQLite FTS5 contentless index over post bodies
+│       ├── search/             # SQLite FTS5 over post + page bodies
 │       ├── seo/                # sitemap, robots.txt, security.txt, feed.xml
 │       ├── sessions/           # session admin (list / revoke)
 │       ├── sites/              # Site CRUD admin + alias subcommands
 │       ├── team/               # per-site team management (list / grant / revoke)
 │       ├── theme_default/      # in-tree default theme (registers slug "default")
-│       └── themes/             # file-based theme registry + admin picker
+│       ├── themes/             # file-based theme registry + admin picker
+│       └── webmentions/        # indieweb send + receive + admin moderation
 ├── alembic/                    # migrations
 ├── docker/                     # admin.Dockerfile, delivery.Dockerfile
 ├── .github/workflows/          # ci.yml, docker.yml
