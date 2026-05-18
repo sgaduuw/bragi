@@ -359,3 +359,76 @@ def test_restore_page_swaps_parent_too(
     with db_session_factory() as db:
         page = db.get(Page, page_id)
     assert page.parent_id is None
+
+
+def test_restore_page_refuses_cross_site_parent_id(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Pass-6 SEC-HIGH: a `PageRevision.parent_id` captured at a
+    point in time may carry a cross-site value (pre-v1.12.0
+    revisions, or any future row planted by a manual SQL fixup or
+    an admin bug). Restoring such a revision must NOT reintroduce
+    the cross-site `parent_id` even though the create/edit paths
+    now block it; the restore handler is a second write path that
+    must re-run the same validator."""
+    page_id = _page_id(db_session_factory)
+    # Seed a second site + a page on it, then plant a revision row
+    # for our page whose parent_id points at the other site's page.
+    with db_session_factory() as db:
+        user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
+        other_site = Site(
+            slug="other",
+            hostname="other.example.com",
+            title="Other",
+            canonical_url="https://other.example.com",
+            owner_user_id=user_id,
+        )
+        db.add(other_site)
+        db.flush()
+        other_page = Page(
+            site_id=other_site.id,
+            slug="other-page",
+            title="Other",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user_id,
+            status=PageStatus.PUBLISHED,
+        )
+        db.add(other_page)
+        db.flush()
+        # Plant the malicious revision. Distinguishing fields
+        # (title / body) let the assertions tell whether the
+        # restore was actually applied vs refused.
+        revision = PageRevision(
+            page_id=page_id,
+            title="Restored Title",
+            slug="restored-slug",
+            status=PageStatus.PUBLISHED,
+            parent_id=other_page.id,  # cross-site!
+            body_markdown="restored body",
+            body_html="<p>restored body</p>",
+            body_excerpt="restored body",
+            meta_description=None,
+            editor_user_id=user_id,
+        )
+        db.add(revision)
+        db.commit()
+        rev_id = revision.id
+
+    client = admin_app.test_client()
+    _login(client)
+    restore_token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/revisions/{rev_id}")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{page_id}/revisions/{rev_id}/restore",
+        data={"_csrf_token": restore_token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    # The page row must not have absorbed the cross-site parent_id
+    # nor any of the other restored fields (the restore was refused).
+    with db_session_factory() as db:
+        page = db.get(Page, page_id)
+    assert page.parent_id is None
+    assert page.title == "About"
+    assert page.body_markdown == "v1 page"

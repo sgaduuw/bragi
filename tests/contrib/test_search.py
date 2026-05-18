@@ -29,6 +29,25 @@ from bragi.core.models.user import User
 # ============================================================
 
 
+@pytest.fixture(autouse=True)
+def _reset_search_total_cache() -> Iterator[None]:
+    """Clear the per-process search-count cache between tests.
+
+    `bragi.contrib.search.backend` holds a module-level
+    `(site_id, safe_query) -> (total, written_at)` cache (TTL 30s,
+    bounded 4096). Each test gets a fresh in-memory SQLite engine,
+    so site ids restart at 1 every test; without this reset, a
+    prior test's cached count could leak into the next test that
+    happens to use the same `(site_id=1, query)` key. The cache
+    itself is also per-process and would survive across tests.
+    """
+    from bragi.contrib.search import backend as backend_mod
+
+    backend_mod._SEARCH_TOTAL_CACHE.clear()
+    yield
+    backend_mod._SEARCH_TOTAL_CACHE.clear()
+
+
 @pytest.fixture
 def fts_tables_present(
     db_session_factory: sessionmaker[Session],
@@ -452,6 +471,73 @@ def test_search_mixes_posts_and_pages_under_sql_pagination(
     assert scopes == {"post", "page"}
 
 
+def test_search_total_is_cached_within_ttl(
+    fts_tables_present: None,
+    seeded_site: tuple[Site, Site, User],
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`total` survives a TTL window: a row added after the first
+    search shows up in the hit list immediately, but `total` stays
+    cached for the configured window. See #183 for why we accept
+    that staleness."""
+    from bragi.contrib.search import backend as backend_mod
+
+    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
+    backend_mod._SEARCH_TOTAL_CACHE.clear()
+    blog, _, user = seeded_site
+
+    post_a = _published_post(db_session, blog, user, slug="a", title="A", body="rare-cached-zz")
+    index_post(post_a)
+
+    first = SQLiteFTS5SearchBackend.search(blog.id, "rare-cached-zz", 1, 10)
+    assert first.total == 1
+
+    # Add a second matching post and index it. The hit list will
+    # contain both rows, but `total` should still report 1 because
+    # the prior value is cached.
+    post_b = _published_post(db_session, blog, user, slug="b", title="B", body="rare-cached-zz")
+    index_post(post_b)
+
+    second = SQLiteFTS5SearchBackend.search(blog.id, "rare-cached-zz", 1, 10)
+    assert len(second.hits) == 2  # paged select is always fresh
+    assert second.total == 1  # cached count, ignoring the new row
+
+
+def test_search_total_refreshes_after_cache_expiry(
+    fts_tables_present: None,
+    seeded_site: tuple[Site, Site, User],
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the TTL elapses (simulated by ageing the cache entry),
+    the next search recomputes `total`."""
+    from bragi.contrib.search import backend as backend_mod
+
+    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
+    backend_mod._SEARCH_TOTAL_CACHE.clear()
+    blog, _, user = seeded_site
+
+    post_a = _published_post(db_session, blog, user, slug="a", title="A", body="rare-cached-yy")
+    index_post(post_a)
+    SQLiteFTS5SearchBackend.search(blog.id, "rare-cached-yy", 1, 10)
+    post_b = _published_post(db_session, blog, user, slug="b", title="B", body="rare-cached-yy")
+    index_post(post_b)
+
+    # Age every cache entry past the TTL window. Equivalent to
+    # waiting `_SEARCH_TOTAL_CACHE_TTL_S` seconds; the alternative
+    # (real sleep) would slow the suite for one test.
+    aged = -(backend_mod._SEARCH_TOTAL_CACHE_TTL_S + 5.0)
+    with backend_mod._SEARCH_TOTAL_CACHE_LOCK:
+        for key, (total, _written) in list(backend_mod._SEARCH_TOTAL_CACHE.items()):
+            backend_mod._SEARCH_TOTAL_CACHE[key] = (total, aged)
+
+    fresh = SQLiteFTS5SearchBackend.search(blog.id, "rare-cached-yy", 1, 10)
+    assert fresh.total == 2
+
+
 # ============================================================
 # lifecycle hookimpls
 # ============================================================
@@ -510,6 +596,46 @@ def test_on_post_deleted_removes(
     index_post(post)
     on_post_deleted(post, None)
     assert SQLiteFTS5SearchBackend.search(blog.id, "goes-away", 1, 10).total == 0
+
+
+def test_lifecycle_hookimpls_invalidate_total_cache(
+    fts_tables_present: None,
+    seeded_site: tuple[Site, Site, User],
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A publish event must drop the cached total so a freshly
+    indexed row appears in the next search's count immediately,
+    not after a 30s TTL window. Regression for the pass-4 finding
+    that the total cache was never invalidated."""
+    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
+    from bragi.contrib.search import backend as backend_mod
+    from bragi.contrib.search.plugin import on_post_published
+
+    blog, _, user = seeded_site
+    # Prime the cache with a known query.
+    post_a = _published_post(db_session, blog, user, slug="a", title="A", body="cache-me")
+    index_post(post_a)
+    assert SQLiteFTS5SearchBackend.search(blog.id, "cache-me", 1, 10).total == 1
+    assert len(backend_mod._SEARCH_TOTAL_CACHE) == 1
+    # Publish a second post via the lifecycle hook; the cache
+    # MUST be flushed so the next search counts both rows.
+    post_b = _published_post(db_session, blog, user, slug="b", title="B", body="cache-me")
+    on_post_published(post_b, None)
+    assert backend_mod._SEARCH_TOTAL_CACHE == {}
+    assert SQLiteFTS5SearchBackend.search(blog.id, "cache-me", 1, 10).total == 2
+
+
+def test_safe_query_normalizes_case_and_token_order() -> None:
+    """Equivalent queries (`Hello World` vs `world hello`) must
+    collapse to the same MATCH string so they share a cache key.
+    FTS5 is case-insensitive and AND is commutative, so this
+    doesn't change the result set."""
+    from bragi.contrib.search.backend import _safe_query
+
+    assert _safe_query("Hello World") == _safe_query("world hello")
+    assert _safe_query("HELLO") == _safe_query("hello")
 
 
 # ============================================================

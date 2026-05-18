@@ -41,6 +41,13 @@ services:
     environment:
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
       BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
+      BRAGI_ATTACHMENTS_ROOT: /data/uploads
+      # The scheduler boots through `create_admin_app`, which
+      # refuses to start with the bundled dev `SECRET_KEY` sentinel
+      # when `BRAGI_ENV=production`. Match the gunicorn services so
+      # a mis-set secret fails the sidecar's first migration tick
+      # rather than silently running with a dev key.
+      BRAGI_ENV: production
       # Cadence overrides (all in seconds). Leave commented for
       # the defaults defined in docker/scheduler.sh.
       # SCHEDULED_PUBLISH_EVERY: "60"
@@ -51,7 +58,12 @@ services:
       # VACUUM_EVERY: "604800"
     volumes:
       - bragi-data:/data
-    restart: unless-stopped
+    # `on-failure` (not `unless-stopped`) so a deliberate exit 0
+    # from scheduler.sh (after `ALEMBIC_MAX_ATTEMPTS` failed
+    # migration attempts) terminates the restart loop rather than
+    # bouncing forever. Without this, a broken migration deploys
+    # as a livelocked "half-up" state with no clear failure signal.
+    restart: on-failure
     healthcheck:
       # Sentinel touched by scheduler.sh after a successful
       # `alembic upgrade head`. Web containers gate on this via
@@ -69,6 +81,10 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8001:8001"
+    # `stop_grace_period` matches gunicorn's `--graceful-timeout 25`
+    # (with 5s slack) so an in-flight outbound POST (webmention,
+    # AP delivery) has time to return before SIGKILL fires.
+    stop_grace_period: 30s
     environment:
       # Required.
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
@@ -80,6 +96,16 @@ services:
       # produces a startup WARNING instead. Set to `production`
       # for any real deploy; leave unset for local dev.
       BRAGI_ENV: production
+      # Trusted reverse-proxy hops in front of this app. Set to 1
+      # when running behind exactly one TLS-terminating proxy (the
+      # documented deploy posture). `ProxyFix` then rewrites
+      # `request.scheme`/`remote_addr`/`host` from `X-Forwarded-*`
+      # so the OAuth callback URL builds as `https://...` and the
+      # audit log / session rows record the real client IP rather
+      # than the proxy's. NEVER set higher than the actual hop
+      # count: each unit of trust extends spoofability one hop
+      # outward.
+      BRAGI_TRUSTED_PROXY_HOPS: "1"
       # Optional (uncomment + populate to enable).
       # BRAGI_GITHUB_CLIENT_ID: ...
       # BRAGI_GITHUB_CLIENT_SECRET: ...
@@ -121,11 +147,13 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8002:8002"
+    stop_grace_period: 30s
     environment:
       BRAGI_DATABASE_URL: sqlite:////data/bragi.db
       BRAGI_SECRET_KEY: ${BRAGI_SECRET_KEY:?set BRAGI_SECRET_KEY in your environment or .env file}
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
       BRAGI_ENV: production
+      BRAGI_TRUSTED_PROXY_HOPS: "1"
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
       # Hard cap on inbound request body size; protects federation
       # inboxes (`/webmentions`, `/actor/inbox`) from streaming-

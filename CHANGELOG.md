@@ -6,6 +6,413 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-05-18
+
+### Security
+- **Cookie-session path treats inactive users as anonymous.**
+  An admin who flips `User.is_active=False` expected access to
+  stop immediately. The bearer middleware already re-checks
+  `is_active` per request, but `current_user()` (the cookie-
+  session path used by every admin route gate) returned the
+  inactive User row unchanged. A disabled user kept their
+  privileges until they logged out or the session row expired.
+  `current_user()` now returns None when `User.is_active=False`,
+  closing the asymmetry. `auth_local`'s login already enforces
+  `is_active=True` at sign-in, so a fresh login still works as
+  soon as the admin re-enables the user.
+- **Bearer cache re-checks `PersonalAccessToken.expires_at` on
+  every request.** The verify-result cache (#M4 / pass-4) stores
+  `(token_id, user_id, scopes_tuple)` with no timestamp, so a
+  token verified just before its `expires_at` kept authenticating
+  for up to TTL (10 s) past the declared end. The cache-hit path
+  already re-reads the token row to bump `last_used_at`; it now
+  also reads `expires_at` and treats a past value as no-auth.
+- **Page revision restore re-runs the cross-site `parent_id`
+  check.** Pass-4 closed cross-site `parent_id` on the page
+  create / edit paths via `_validated_parent_id_or_error`, but
+  the revision-restore handler still copied
+  `revision.parent_id` verbatim. A revision row captured before
+  v1.12.0 (or any future row planted by a manual SQL fixup, a
+  background-job bug, or a non-admin write path) could carry a
+  cross-site value that the create/edit paths would now reject;
+  clicking "Restore" reintroduced the corrupted row. The restore
+  path now runs the same validator and refuses the restore with
+  a flash message if the captured `parent_id` doesn't name a
+  page on the current site.
+- **`safe_relative_path` rejects C0 / DEL control characters.**
+  A login `?next=/\nfoo` 500s the auth view's `redirect(...)`
+  call (werkzeug's HTTP header writer rejects `\r`/`\n`); worse,
+  a redirects-admin row persisted with `target="/\nfoo"` turns
+  every subsequent matching delivery request into a 500 on the
+  response-header writer. Reject inputs with any of `\x00-\x1f`
+  or `\x7f` at the application gate so the failure stays on
+  the input side rather than turning into a persistent per-URL
+  DoS owned by editor-rank users.
+- **Bearer cache invalidates on admin token revoke.** The
+  per-process verify-result cache (#M4 / pass-4) re-checks
+  `User.is_active` on a hit but not whether the token row still
+  exists. An admin who clicked "Revoke" expected the token to
+  stop authenticating immediately; in practice it kept working
+  for up to `_VERIFY_CACHE_TTL_S` (10s) because the cache
+  short-circuited the DB lookup that would have noticed the row
+  is gone. `revoke_token` now calls a new
+  `invalidate_verify_cache_for_public_id(public_id)` that drops
+  every cache entry for the revoked token's public_id.
+- **Login `?next=` / redirects `target=` reject backslash-escaped
+  off-domain URLs.** Browsers normalise `\` to `/` in special-
+  scheme (http / https) URLs before parsing per the WHATWG URL
+  spec, so a `next=/\evil.example/x` lands the user on
+  `evil.example` after the 302 even though the path looked like
+  a same-host redirect. Pass-4 closed the `//` protocol-relative
+  case but missed the WHATWG-equivalent `\` form; the admin
+  domain (where the user just typed credentials) is a credible
+  launchpad for phishing. A new shared
+  `bragi.core.safe_redirect.safe_relative_path` helper backs
+  three callsites: `auth_local._safe_next`, `auth_github._safe_next`,
+  and the redirects admin `_validate`. Inputs with `\` (single
+  or repeated) are now rejected at form/query-arg time.
+- **Webmention h-card extractor drops `javascript:` / `data:` URLs
+  before persistence.** An attacker hosting a page like
+  `<a class="h-card" href="javascript:fetch('/'+document.cookie)">`
+  could send a webmention pointing at it; `extract_hcard` previously
+  ran `urljoin` and stored the string verbatim as
+  `Webmention.author_url`. The admin moderation list shows the
+  URL as truncated plain text, so a moderator couldn't easily
+  preview the trap; once Approved, the URL rendered as a
+  clickable `<a href>` on the public post and a reader's click
+  executed attacker JS in the delivery origin. `extract_hcard`
+  now gates `author_url` and `author_photo` through a new
+  `_safe_external_url` that requires an http(s) scheme.
+- **Redirects admin rejects absolute and protocol-relative
+  targets.** The admin form's `target` field accepted any string;
+  the redirect resolver follows the chain and serves the raw
+  target as the 301 destination. An editor-rank user could
+  insert `target=https://evil.example/phish` and turn the site's
+  redirect table into a 301 phishing primitive against its
+  readers. The admin validator now requires `target` to start
+  with `/` and rejects `//evil.example/x` (protocol-relative).
+  Importers and slug-change auto-301s always construct relative
+  targets, so the constraint only affects the human-facing
+  admin form.
+- **Page admin validates cross-site `parent_id` on both
+  create and edit.** Pre-fix, an author on site A could POST
+  `parent_id=<id-of-page-on-site-B>` and persist a row with
+  `(site_id=A, parent_id=B)`. Delivery-side resolution filters
+  by site so the corrupted row never serves real content, but
+  the cross-site parent slug leaked into the sitemap and any
+  slug-change auto-redirect derived from the URL chain. A new
+  `_validated_parent_id_or_error` helper mirrors the same-site
+  check the OG-image and default-OG-image resolvers already do.
+- **Bearer middleware caches verify outcomes to bound argon2
+  amplification.** Every bearer request invoked `argon2.verify()`
+  (~100 ms / ~64 MiB) whenever the presented public_id matched a
+  row. An attacker who guessed any valid public_id could
+  saturate a worker by hammering with random secrets, and a
+  legitimate high-QPS integration paid argon2 per request. The
+  middleware now caches `(public_id, sha256(secret))` -> verify
+  outcome for 10 seconds with a 4096-entry bound. Repeat
+  presentations short-circuit argon2; a smart attacker who
+  varies the secret per request still pays full argon2 (keys
+  are unique to them) but they're now bound only by network
+  throughput. The `last_used_at` bump and `User.is_active`
+  re-check still run on every cache-hit request so a disabled
+  user takes effect immediately; only argon2 is short-circuited.
+- **SSRF guard re-resolves the host at send-time and refuses
+  on DNS rebinding.** A DNS-rebinding attacker can serve a
+  public IP at URL-validation time and a private IP at
+  connection time (TTL 0 or interleaved A records). The
+  validation-time `_validate_url` then succeeds, the
+  `requests` / `urllib3` stack does its own `getaddrinfo` at
+  connect time, and the socket opens against the private IP.
+  `_validate_url` now returns the validated IP set;
+  `_GuardedAdapter.send` re-resolves the host one more time
+  and asserts the connect-time IPs are a subset of the
+  validated set. A residual TOCTOU window remains between
+  this check and the kernel's actual `getaddrinfo` at socket-
+  connect time (microseconds); full IP-pin-and-Host-rewrite at
+  the urllib3 connection layer is the next step.
+- **Webmention inbox fetch timeout tightened from 10s to 3s.**
+  The verify-first refactor in v1.12.0 moved DB writes after
+  the source fetch, eliminating the row-per-request DoS surface,
+  but the synchronous fetch still tied up a worker for the
+  full timeout window. With 4 workers and a 10s timeout, 0.4
+  req/s sufficed to pin the inbox. The dedicated
+  `HTTP_TIMEOUT_SECONDS = 3.0` on the receiver still tolerates
+  typical Mastodon-class RTTs while bounding the blast radius
+  of a malicious slow-source URL.
+- **GitHub OAuth callback no longer auto-links a new identity
+  to an existing local User by matching email.** Operators
+  running v1.x with both local-credential auth (e.g. an
+  `admin@example.com` seeded via `cms user create`) and GitHub
+  OAuth could be impersonated: an attacker who registered a
+  GitHub account using the operator's email and clicked "Sign
+  in with GitHub" was logged in as that admin, because the
+  callback's email-match fallback linked the brand-new
+  GitHub identity onto the existing local user row. The
+  fallback is gone. The callback now refuses an OAuth login
+  whose email collides with an existing local user, redirects
+  the user back to the local-auth login form with a clear
+  flash, and audits the attempt as
+  `auth.login.failure` with
+  `reason="oauth-email-collides-with-existing-user"`. Linking
+  a second auth method onto an existing account is a future
+  admin-side affordance (out of scope for the fix); until
+  then, operators who want both methods should pick one or
+  use a different email per identity.
+- **Attachment uploads gate on a content-type allowlist;
+  delivery serves with `X-Content-Type-Options: nosniff`
+  and inline-only-for-safe types.** Before this change, any
+  author-rank user on any site could upload an SVG (which can
+  embed `<script>`) or an HTML payload with a forged
+  `Content-Type`, and the delivery handler served the bytes
+  with the persisted content-type, `Content-Disposition:
+  inline`, and a year-long `Cache-Control: public, max-age,
+  immutable`. The result was a stored XSS on the public
+  reader surface with a year-long edge-cache TTL. New
+  `_ATTACHMENT_ALLOWED_CONTENT_TYPES` in `attachments/admin.py`
+  accepts only the Pillow-handled image types, `application/pdf`,
+  and `text/plain`; everything else is rejected at upload time
+  with a clear error. For declared `image/*` uploads the
+  Pillow probe must succeed (magic-byte verification), so a
+  forged `image/png` content-type carrying HTML is rejected.
+  Delivery now sets `X-Content-Type-Options: nosniff` on every
+  response and only serves `Content-Disposition: inline` for
+  inline-safe types (images / PDF / text); rows that pre-date
+  the allowlist serve as `attachment` instead.
+- **Webmention receiver verifies before persisting (#181).**
+  The inbox used to insert a `PENDING` row immediately on
+  receipt, then flip it to `REJECTED` or `FAILED` when the
+  source-fetch or link-presence checks failed. With no `UNIQUE`
+  on `(site_id, source_url, target_url)` and no rate limit, that
+  was a per-request DoS surface: an unauthenticated attacker
+  could flood `POST /webmentions` with arbitrary pairs and
+  persist one row per request. Source fetch + link check now run
+  before any DB write; failed attempts log a warning and return
+  400 without persisting. The admin moderation list now contains
+  only verified-but-pending-approval rows, which is the surface
+  humans act on.
+- **ActivityPub `Signature` header parser is quote-aware (#182).**
+  The previous `raw.split(",")` form silently mis-parsed any
+  parameter value carrying a comma, which the draft-cavage spec
+  permits for parameter-extension values. A new regex tokenizer
+  preserves the whole quoted value. Not exploitable today
+  (verification still requires the signature to validate
+  end-to-end), but matters as soon as a signer library adopts an
+  extension that embeds commas. Bare unquoted values continue to
+  parse for spec-permissive senders.
+
+### Changed
+- **FTS5 search `total` is short-TTL cached (#183).** The single
+  UNION ALL + LIMIT/OFFSET paged hit fetch is cheap, but `total`
+  still required two MATCH-evaluating `COUNT(*)` queries on
+  every search page. The total now passes through a per-process
+  `(site_id, safe_query) -> (count, written_at)` cache with a
+  30-second TTL and a 4096-entry bound, and is invalidated on
+  every post / page publish, update, and delete event so newly
+  indexed rows surface in the count immediately. The hit list
+  stays fresh because the LIMIT/OFFSET query runs every request;
+  only the count can lag by up to one TTL window when no write
+  intervenes. Cache keys also case-fold and sort tokens, so
+  equivalent queries (`Hello World` vs `world hello`) share a
+  cache slot.
+- **Admin app asserts boot ordering of CSRF and plugin
+  middleware (#187).** Plugin-provided before_request middleware
+  (notably the bearer middleware in `bragi.contrib.api_tokens`
+  that sets `g.api_csrf_exempt`) must register BEFORE the CSRF
+  guard so it runs first at request time, otherwise valid
+  bearer-token POSTs without a session CSRF token would be 400'd
+  by the CSRF guard. `register_csrf` now raises a `RuntimeError`
+  at boot if `pm.hook.on_app_init` hasn't run yet, naming
+  `apps/admin.py` as the fix location. CSRF itself was already
+  fail-closed (`g.api_csrf_exempt` defaults falsy, exemption
+  fires only when truthy and only after verified-bearer auth);
+  the assertion catches an ordering regression that would break
+  the bearer API, not a CSRF bypass.
+
+### Fixed
+- **ActivityPub fanout is idempotent across restore-as-republish.**
+  PR-D's `_drop_pending_outbox_for_post` deletes PENDING outbox
+  rows on unpublish but keeps SENT / FAILED rows as audit, and
+  PR-E added `on_post_published` firing on restore-as-publish.
+  Without dedup, a publish -> unpublish -> restore-as-republish
+  cycle queued a SECOND Create+Note per follower (followers
+  received a duplicate). `fanout_for_post` now skips followers
+  that already have a non-FAILED `ActivityPubOutbox` row for
+  `(post_id, follower_id)`. FAILED rows are NOT skipped so an
+  operator who wants to retry a previously-failed delivery via
+  republish can. The webmention plugin already did this shape
+  via `existing_targets`; the AP version now mirrors it.
+- **Outbox sender no longer rolls back the whole batch when an
+  unpublish race deletes a row mid-flight.** The webmention and
+  ActivityPub outbox senders SELECT every PENDING row, mutate
+  them in-memory, then `db.commit()` once at the end. When the
+  unpublish-cleanup path (`_drop_pending_outbox_for_post`)
+  deleted one of those rows out from under the sender, SQLAlchemy
+  2.x's default `confirm_deleted_rows=True` raised
+  `StaleDataError` on the sender's UPDATE for the deleted row,
+  rolling back EVERY successful send in the same batch. On the
+  next tick the recipients of the successful sends received
+  duplicates. Setting `__mapper_args__ = {"confirm_deleted_rows":
+  False}` on both `WebmentionOutbox` and `ActivityPubOutbox`
+  makes the 0-row UPDATE a no-op; the other status flips persist.
+- **`bragi-tasks` no longer livelocks on a persistently-failing
+  migration.** A broken `alembic upgrade head` exited 1, compose
+  restarted `unless-stopped`, alembic failed again, repeat
+  forever; the web services sat in `created` state and operators
+  saw no clear failure signal. `scheduler.sh` now retries
+  alembic with backoff (`ALEMBIC_MAX_ATTEMPTS=5`,
+  `ALEMBIC_RETRY_DELAY=15s`) and exits 0 with a loud log line
+  after exhausting attempts. `compose.yml` switches the
+  `bragi-tasks` restart policy from `unless-stopped` to
+  `on-failure` so the deliberate exit 0 terminates the restart
+  loop and the service shows as `Exited (0)` with the failure
+  message above it.
+- **Apps wire `ProxyFix` when behind a trusted reverse proxy.**
+  New `Settings.trusted_proxy_hops` (default 0; the production
+  `compose.yml` sets it to 1). When > 0, both `create_admin_app`
+  and `create_delivery_app` wrap the WSGI callable in
+  `werkzeug.middleware.proxy_fix.ProxyFix(x_for, x_proto, x_host)`
+  with that hop count. Three breakages on a fresh prod deploy
+  used to manifest as: (a) the GitHub OAuth `redirect_uri` built
+  via `url_for(_external=True)` emitted `http://...` because
+  `request.scheme` was the proxy's tell-the-app value; (b) every
+  `AuditLog.ip` and `Session.ip` row recorded the reverse proxy's
+  IP, hiding the real user; (c) per-IP analytics grouped every
+  visit under the proxy. ProxyFix rewrites all three from the
+  `X-Forwarded-*` headers. NEVER set the hop count higher than
+  the actual reverse-proxy depth: each unit extends spoofability
+  one hop outward.
+- **Post `published_at` is preserved across republish.** The
+  admin update path read "draft -> published" as a first-publish
+  transition unconditionally and stamped `published_at =
+  naive_utcnow()`, so a draft -> published -> draft -> published
+  cycle re-stamped the column and silently floated old posts to
+  the top of "newest first" lists. The api_tokens write path
+  already gated on `published_at is None`; the admin path now
+  mirrors that. The comment "Re-publishing doesn't reset the
+  timestamp" finally describes what the code does.
+- **Revision restore fires `on_post_published` on a
+  draft->published transition.** PR-C added `on_post_updated`
+  firing on restore; the publish event was missed. A restored
+  draft that crosses the published boundary now fires
+  `on_post_published` so the ActivityPub plugin's Create+Note
+  fanout, the sitemap rebuild trigger, and any other
+  `on_post_published` subscriber see the transition. The post
+  restore also stamps `published_at` on the first publish via
+  restore (`post.published_at is None` -> set), matching the
+  normal-edit path.
+- **Webmention + ActivityPub outbox PENDING rows are abandoned
+  on post unpublish.** Both senders processed every PENDING row
+  without checking the source post's current status, so a post
+  unpublished after `on_post_published` queued the fan-out
+  delivered a Note/webmention pointing at a URL that now
+  404s/410s. `webmentions.plugin.on_post_updated` and a new
+  `activitypub.plugin.on_post_updated` now detect the
+  `published -> not-published` transition and delete the
+  PENDING rows for the post; SENT / FAILED rows stay as audit.
+  Issuing a fediverse `Delete` activity for already-sent Notes
+  is the richer fix and is deferred.
+- **Webmention inbox dedupes repeat presentations of the same
+  `(source, target)` pair.** A well-behaved Mastodon retry would
+  previously accumulate one row per send in the moderation
+  queue, and approving one of them didn't dedupe the rest. The
+  receiver now queries for an existing row matching
+  `(site_id, source_url, target_url)` before insert; on a hit,
+  it refreshes the parsed h-card / content snippet / mention
+  type / `verified_at` but leaves moderation state (`status`,
+  `approved`) untouched so a previously-rejected mention can't
+  be re-presented into the queue.
+- **Containers run as non-root `bragi` user; gunicorn has a
+  graceful-shutdown window.** `docker/admin.Dockerfile` and
+  `docker/delivery.Dockerfile` add a `USER bragi` directive
+  (and `chown` /app + /data) so a worker RCE escapes to a
+  uid != 0 process rather than uid 0 with write access to the
+  bind-mounted /data volume. Both gunicorn `CMD`s gain
+  `--graceful-timeout 25` and `compose.yml` services set
+  `stop_grace_period: 30s` so an in-flight outbound POST
+  (webmention sender, AP delivery) has up to 25s to return
+  before SIGKILL fires. `docker/scheduler.sh` traps SIGTERM /
+  SIGINT and forwards to the active child PID so a
+  `docker compose stop` mid-vacuum lets the vacuum finish
+  cleanly rather than getting SIGKILLed after the loop's
+  `sleep 10`.
+- **`docker.yml`: `:latest` is gated to non-prerelease semver tags.**
+  The `type=raw,value=latest` line emitted `:latest` on every tag
+  push, including `v1.12.0-rc1` and any hotfix off an older
+  lineage. Switched to `flavor: latest=auto` so `:latest` only
+  follows non-prerelease tags. Caveat: a hotfix cut off an
+  older major (e.g. `v1.10.5` after `v1.11.0` shipped) still
+  claims `:latest` because the action compares the tag pattern
+  rather than the tag ordering against the registry. Operators
+  cutting hotfixes off older majors must manually re-tag
+  `:latest` afterwards if needed.
+- **FTS5 search `total` cache invalidates on lifecycle events.**
+  Post / page publish, update, and delete now flush
+  `_SEARCH_TOTAL_CACHE` via the lifecycle hookimpls in
+  `bragi.contrib.search.plugin`, so a newly published document
+  appears in the "X results" counter immediately rather than
+  after the next TTL window. Equivalent queries (`Hello World`
+  vs `world hello`) also collapse to one cache slot: `_safe_query`
+  now case-folds and sorts tokens, which is safe because FTS5
+  is case-insensitive by default and AND is commutative.
+- **Page / post revision restore fires `on_post_updated`.**
+  Restoring a prior revision mutates the live row (slug, title,
+  status, body, ...) but never fired the same lifecycle hook a
+  normal save does. Plugin subscribers (search index reindex,
+  redirects auto-301 on slug change, AP outbox fanout on a
+  status->published transition) silently missed every restore.
+  Both `post_admin.restore_revision` and
+  `page_admin.restore_page_revision` now capture before/after
+  snapshots, fire `pm.hook.on_post_updated`, and dispatch
+  `on_cache_purge` so the restore is observable end-to-end.
+- **Audit log `action` filter escapes SQL LIKE metacharacters.**
+  An admin filter value containing `%` or `_` was interpreted as
+  a wildcard, so `auth%` matched every row whose action started
+  with `auth` and `_` matched any single character. The filter
+  now SQL-escapes both characters (plus `\`) before interpolation
+  and passes `escape='\\'` to `like()`, so the input matches
+  literally and the planner can use the action index.
+- **Actor cache reads happen under the lock; post-fetch recheck.**
+  `_fetch_actor` previously read the cache without holding
+  `_ACTOR_CACHE_LOCK`, so the read could race a concurrent
+  overflow eviction. The lock now also brackets the read and a
+  post-fetch recheck: a concurrent inbox POST for the same IRI
+  that won the fetch race writes its result first, and we use
+  that fresher copy instead of overwriting it. Full single-flight
+  (per-IRI condition variables) is still deferred.
+- **`is_external` compares on hostname, not netloc.**
+  `urlparse(url).netloc` includes the port and userinfo, so a
+  remote URL carrying an explicit `:443` would never match a
+  `Site.hostname` (no port). Affected the webmention outbound
+  link-scan: same-site links could be misclassified and a
+  spurious mention sent to a sibling site. Now compares on
+  `hostname`.
+- **`cms backup` / `cms export` route timestamps through
+  `bragi.core.time.aware_utcnow`** for parity with the rest of
+  the codebase. `VACUUM INTO` now SQL-escapes single quotes in
+  the destination path; the path comes from a freshly-created
+  `TemporaryDirectory`, so this is defence-in-depth against a
+  pathological `$TMPDIR` rather than a real bug.
+- **`docker/compose.dev.yml` parity with production `compose.yml`.**
+  The local-build compose file was missing `BRAGI_ATTACHMENTS_ROOT`
+  on every service and `/healthz` healthchecks on `admin` /
+  `delivery`. A `compose -f docker/compose.dev.yml up` run now
+  matches the production shape so smoke tests don't drift from
+  what the published images get. Production `bragi-tasks` also
+  gains `BRAGI_ENV: production` (and `BRAGI_ATTACHMENTS_ROOT`) so
+  a mis-set `BRAGI_SECRET_KEY` fails the sidecar's first
+  migration tick rather than silently running with the dev key.
+- **`redirects.source_path` enforces `length(...) > 0` (#184).**
+  Defence-in-depth: the admin form already rejects empty input
+  and every programmatic writer constructs non-empty strings,
+  but the SQL-side PREFIX resolver
+  (`substr(:path, 1, length(source_path)) = source_path`) would
+  collapse to `'' == ''` for any incoming path if an empty row
+  ever landed (importer bug, manual SQL fix-up, future code
+  path). The new `ck_redirects_source_path_nonempty` constraint
+  rejects empty rows at the DB level. Alembic migration
+  `a1b2c3d4e5f6` adds the check via `batch_alter_table`.
+
 ## [1.11.0] - 2026-05-18
 
 ### Added

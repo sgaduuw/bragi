@@ -54,6 +54,21 @@ class Settings(BaseSettings):
     delivery_host: str = "0.0.0.0"
     delivery_port: int = 8002
 
+    # Trusted reverse-proxy hops in front of the WSGI apps. Set to
+    # 1 when running behind exactly one TLS-terminating reverse
+    # proxy (Caddy / nginx / Traefik, the documented deploy
+    # posture). With this > 0, `werkzeug.middleware.proxy_fix.ProxyFix`
+    # rewrites `request.scheme` / `request.remote_addr` /
+    # `request.host` from `X-Forwarded-Proto` / `X-Forwarded-For` /
+    # `X-Forwarded-Host` so the OAuth callback URL builds as
+    # `https://...`, audit-log / session rows record real client
+    # IPs instead of the proxy's, and analytics groups by real
+    # remote addresses. With this = 0 (the dev default) the apps
+    # bind directly and trust no forwarded headers. NEVER set this
+    # higher than the actual hop count: each unit of trust extends
+    # the X-Forwarded-* spoofability boundary one step outward.
+    trusted_proxy_hops: int = 0
+
     # Attachments storage. Local-disk backend by default; S3 / R2 /
     # GCS plug in via `register_storage_backend`.
     attachments_root: str = "var/uploads"

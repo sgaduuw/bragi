@@ -142,3 +142,32 @@ def test_resolve_redirect_is_per_site(
 
     assert from_a is not None and from_a.target == "/a-target"
     assert from_b is None
+
+
+def test_redirect_source_path_must_be_nonempty(db_session: Session) -> None:
+    """Empty `source_path` is rejected at the DB level.
+
+    Without the CHECK constraint, PR8's SQL-side PREFIX resolver
+    (`substr(:path, 1, length(source_path)) = source_path`) would
+    collapse to `'' == ''` for every incoming path and the empty-
+    prefix row would hijack every URL on the site (subject to
+    longer matches winning, which most sites won't have). Closes
+    #184.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    site = _make_site(db_session, slug="ck")
+    db_session.add(
+        Redirect(
+            site_id=site.id,
+            source_path="",  # rejected by ck_redirects_source_path_nonempty
+            target="/somewhere",
+            source=RedirectSource.MANUAL,
+        )
+    )
+    try:
+        db_session.commit()
+    except IntegrityError:
+        db_session.rollback()
+    else:  # pragma: no cover
+        raise AssertionError("empty source_path was accepted")

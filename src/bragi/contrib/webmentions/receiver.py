@@ -15,8 +15,18 @@ Validation order (per W3C §3.2):
 3. `source` GET returns 2xx HTML.
 4. `source` HTML contains a link to `target`.
 
-A failure at any step is recorded as `status=REJECTED`/`FAILED`
-with a `last_error` note for admin visibility.
+**Verify-first persistence.** Before v1.12.0 the inbox inserted a
+PENDING row immediately on receipt and later flipped it to
+REJECTED / FAILED on validation failure. That left a per-request
+DoS surface: an unauthenticated attacker could flood the endpoint
+with arbitrary `(source, target)` pairs and persist one row per
+request (no `UNIQUE` constraint on the tuple, no rate limit).
+Now we only persist after the full validation chain succeeds.
+Failed attempts log to `LOG.warning` so operators can spot a
+pattern in the access log without paying a `webmentions`-table
+write per request. The admin moderation list now reflects only
+verified-but-pending-approval rows, which is the surface humans
+actually act on.
 """
 
 from __future__ import annotations
@@ -36,7 +46,6 @@ from bragi.contrib.webmentions.parse import (
 )
 from bragi.core.db import SessionLocal
 from bragi.core.http import (
-    DEFAULT_TIMEOUT_SECONDS,
     SafeHTTPError,
     safe_get,
 )
@@ -50,7 +59,15 @@ from bragi.core.models.webmention import (
 from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)
-HTTP_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS
+# Tightened from the general `DEFAULT_TIMEOUT_SECONDS` (10s) to
+# 3s for the inbox specifically (#M6 / audit pass 4). The
+# inbox fetch runs synchronously on the request thread, so a
+# slow attacker-controlled source URL ties up a worker for
+# the full timeout window. With 4 workers and a 10s timeout,
+# 0.4 req/s sufficed to pin the inbox. 3s still tolerates
+# typical Mastodon-class round-trips while bounding the
+# blast radius of a malicious slow-source URL.
+HTTP_TIMEOUT_SECONDS = 3.0
 MAX_SOURCE_BYTES = 1_000_000  # 1 MiB cap on the fetched source body
 
 bp = Blueprint("webmentions_receiver", __name__)
@@ -58,7 +75,13 @@ bp = Blueprint("webmentions_receiver", __name__)
 
 @bp.route("/webmentions", methods=["POST"])
 def receive() -> ResponseReturnValue:
-    """Accept a webmention. Returns 202 on accept, 400 on bad input."""
+    """Accept a webmention. Returns 202 on accept, 400 on bad input.
+
+    Verify-first: source-fetch and link-presence checks happen
+    before any DB write. A failure on either logs a warning and
+    returns 400 without persisting a row. See module docstring
+    for the DoS rationale.
+    """
     source = (request.form.get("source") or "").strip()
     target = (request.form.get("target") or "").strip()
     if not source or not target:
@@ -73,44 +96,73 @@ def receive() -> ResponseReturnValue:
         if site is None:
             abort(400, description="target does not belong to a known site")
 
-        # Insert a PENDING row first so even a verification failure
-        # leaves an audit trail visible in admin moderation.
+        # Fetch + validate FIRST. Persist only after the link check
+        # passes, so an unverified attempt costs zero DB rows.
+        try:
+            html = _fetch_source(source)
+        except _FetchError as exc:
+            LOG.warning(
+                "webmention fetch failed: source=%s target=%s reason=%s",
+                source,
+                target,
+                exc,
+            )
+            return jsonify({"status": "rejected", "reason": str(exc)}), 400
+
+        if not source_links_to_target(html, source, target):
+            LOG.warning(
+                "webmention rejected: source HTML does not link to target; source=%s target=%s",
+                source,
+                target,
+            )
+            return jsonify({"status": "rejected", "reason": "no link"}), 400
+
+        # Verified: now upsert. Status lands as VERIFIED on a fresh
+        # row (still requires admin approval before public display).
+        # Pre-insert dedup: a well-behaved Mastodon retry presents
+        # the same (source, target) tuple multiple times; without
+        # this check the admin moderation queue accumulates
+        # duplicates and approving one of them doesn't dedupe the
+        # rest. On a repeat we refresh the parsed h-card / content
+        # snippet (the source page may have changed) and bump
+        # `verified_at`, but leave moderation state (`status`,
+        # `approved`) alone so a previously-rejected mention can't
+        # be re-presented into the queue.
+        name, url, photo = extract_hcard(html, source)
+        existing = db.execute(
+            select(Webmention).where(
+                Webmention.site_id == site.id,
+                Webmention.source_url == source,
+                Webmention.target_url == target,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.author_name = name
+            existing.author_url = url
+            existing.author_photo = photo
+            existing.content_text = _content_snippet(html)
+            existing.mention_type = classify_mention(html)
+            existing.verified_at = naive_utcnow()
+            db.commit()
+            return jsonify({"status": "accepted"}), 202
+
         row = Webmention(
             site_id=site.id,
             source_url=source,
             target_url=target,
-            status=WebmentionStatus.PENDING,
+            status=WebmentionStatus.VERIFIED,
             approved=False,
+            author_name=name,
+            author_url=url,
+            author_photo=photo,
+            content_text=_content_snippet(html),
+            mention_type=classify_mention(html),
+            verified_at=naive_utcnow(),
         )
-        db.add(row)
-        db.flush()
-
         post = _post_for_target(db, site, target)
         if post is not None:
             row.post_id = post.id
-
-        try:
-            html = _fetch_source(source)
-        except _FetchError as exc:
-            row.status = WebmentionStatus.FAILED
-            row.last_error = str(exc)
-            db.commit()
-            return jsonify({"status": "rejected", "reason": str(exc)}), 400
-
-        if not source_links_to_target(html, source, target):
-            row.status = WebmentionStatus.REJECTED
-            row.last_error = "source HTML does not link to target"
-            db.commit()
-            return jsonify({"status": "rejected", "reason": "no link"}), 400
-
-        name, url, photo = extract_hcard(html, source)
-        row.author_name = name
-        row.author_url = url
-        row.author_photo = photo
-        row.content_text = _content_snippet(html)
-        row.mention_type = classify_mention(html)
-        row.status = WebmentionStatus.VERIFIED
-        row.verified_at = naive_utcnow()
+        db.add(row)
         db.commit()
 
     return jsonify({"status": "accepted"}), 202

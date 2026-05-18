@@ -11,6 +11,7 @@ from __future__ import annotations
 import click
 import jinja2
 from flask import Flask, g, render_template, session
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from bragi import __version__
 from bragi.cli import cms
@@ -62,6 +63,22 @@ def create_admin_app() -> Flask:
         settings.attachments_max_bytes + 64 * 1024,
     )
 
+    # ProxyFix rewrites the WSGI environ from `X-Forwarded-*`
+    # headers when the operator declared trusted hops. Without it,
+    # `request.scheme` stays `http`, `url_for(..., _external=True)`
+    # emits `http://...` (breaking the GitHub OAuth callback URL
+    # match), audit-log / session rows record the proxy's IP for
+    # every request, and analytics group by the proxy. See
+    # `Settings.trusted_proxy_hops` for the "never trust more hops
+    # than you really have" warning.
+    if settings.trusted_proxy_hops > 0:
+        app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
+            app.wsgi_app,
+            x_for=settings.trusted_proxy_hops,
+            x_proto=settings.trusted_proxy_hops,
+            x_host=settings.trusted_proxy_hops,
+        )
+
     # Server-side sessions back the admin's session storage. Replaces
     # Flask's signed-cookie default; cookie carries only an opaque
     # UUID. Must be installed before any before_request hook reads
@@ -89,11 +106,19 @@ def create_admin_app() -> Flask:
     # registered AFTER plugin `on_app_init` (below) so the bearer
     # middleware in `bragi.contrib.api_tokens` gets to set
     # `g.api_csrf_exempt` before CSRF reads it. Flask runs
-    # before_request hooks in registration order; tying the
-    # exemption flag to verified-bearer-only means a request with
-    # `Authorization: bearer junk` can't bypass CSRF on a session-
-    # cookie POST. The bearer plugin uses `tryfirst=True` so its
-    # own `on_app_init` registers its hook ahead of others.
+    # before_request hooks in registration order; the bearer
+    # plugin uses `tryfirst=True` so its `on_app_init` registers
+    # the hook ahead of other plugins' on_app_init impls.
+    #
+    # CSRF itself is fail-closed: the guard skips only when
+    # `g.api_csrf_exempt` is truthy, and the bearer middleware
+    # sets it only after `verify()` accepts the token AND the
+    # user is active. A junk bearer header never reaches the
+    # flag. The ordering matters for the bearer API (valid bearer
+    # POSTs without a session CSRF token shouldn't 400), not for
+    # CSRF safety. `register_csrf` asserts at boot that
+    # `pm.hook.on_app_init` ran (#187), so a reorder regresses
+    # loudly instead of via "my API client returns 400" reports.
     register_site_resolver(app)
     # `/healthz` is the container healthcheck target. Register
     # before the site-prefixed admin scaffolding so the route is
@@ -138,6 +163,10 @@ def create_admin_app() -> Flask:
     app.cli.add_command(cms)
 
     pm.hook.on_app_init(app=app, registry=registry)
+    # Marker for `register_csrf` to assert the ordering invariant
+    # at boot (#187). If someone reorders these two calls the
+    # CSRF assertion fires with a clear error.
+    app.extensions["_bragi_on_app_init_completed"] = True
 
     # CSRF guard: registered AFTER plugin on_app_init so the
     # bearer middleware's before_request fires first and can set

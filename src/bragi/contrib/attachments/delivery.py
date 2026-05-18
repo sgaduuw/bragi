@@ -4,6 +4,20 @@ Mounted under /attachments on the delivery app. Serves the bytes
 keyed by `storage_key` (SHA-256) for the resolved site. The
 content-addressed URL makes far-future caching safe: bytes never
 change for a given key.
+
+**XSS posture** (#H2 / audit pass 4): the upload path's
+content-type allowlist (`_ATTACHMENT_ALLOWED_CONTENT_TYPES` in
+`attachments/admin.py`) is the primary defence; only image
+types, PDF, and plaintext can land. This module adds two
+defence-in-depth headers on every response:
+
+- `X-Content-Type-Options: nosniff` so a browser cannot decide
+  to render bytes as a different (more dangerous) type than the
+  declared one.
+- `Content-Disposition: inline` only for image / PDF / text;
+  everything else (which would only land via a future allowlist
+  expansion or a DB-row injected through bypass) is served as
+  `attachment` so the browser downloads rather than renders.
 """
 
 from __future__ import annotations
@@ -16,6 +30,23 @@ from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.storage import resolve as resolve_storage
+
+# Types we're confident a browser will render without script
+# execution: raster images and PDF. Plaintext is rendered but
+# can't execute. Everything else lands as a download.
+_INLINE_SAFE_CONTENT_TYPES: frozenset[str] = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/tiff",
+        "image/bmp",
+        "image/avif",
+        "application/pdf",
+        "text/plain",
+    }
+)
 
 bp = Blueprint(
     "attachment_delivery",
@@ -66,7 +97,14 @@ def serve_attachment(storage_key: str) -> ResponseReturnValue:
         abort(404)
 
     response = Response(data, mimetype=content_type)
-    response.headers["Content-Disposition"] = f'inline; filename="{filename}"'
+    disposition = (
+        "inline" if (content_type or "").lower() in _INLINE_SAFE_CONTENT_TYPES else "attachment"
+    )
+    response.headers["Content-Disposition"] = f'{disposition}; filename="{filename}"'
+    # Defeat browser content sniffing so the declared content_type
+    # is authoritative. Without this, an HTML payload mis-declared
+    # as `text/plain` could be sniffed and rendered as HTML.
+    response.headers["X-Content-Type-Options"] = "nosniff"
     # Content-addressed: bytes never change for a given key.
     response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return response

@@ -38,10 +38,32 @@ def fanout_for_post(db: Session, post: Post, *, post_path: str) -> int:
     Returns the count queued. The activity_json is the same for
     every recipient; we duplicate it per row so a single bad
     inbox doesn't block redelivery to the others.
+
+    Idempotency: skip followers that already have a non-FAILED
+    outbox row for `(post_id, follower_id)`. Without this dedup,
+    a publish->unpublish->restore-as-republish cycle queues a
+    SECOND Create+Note per follower (the unpublish-cleanup
+    deletes PENDING rows but keeps SENT/FAILED as audit; the
+    restore's `on_post_published` then re-runs fanout against
+    the same followers). Followers that ALREADY received a Note
+    for this post via a prior fanout should NOT get a duplicate.
+    FAILED rows are NOT skipped: the operator may want to retry
+    a previously-failed delivery by republishing. The webmention
+    plugin already does the same shape via `existing_targets`.
     """
     site = db.get(Site, post.site_id)
     if site is None:
         return 0
+    already_queued: set[int] = {
+        row.follower_id
+        for row in db.execute(
+            select(ActivityPubOutbox).where(
+                ActivityPubOutbox.post_id == post.id,
+                ActivityPubOutbox.status != ActivityPubOutboxStatus.FAILED,
+            )
+        ).scalars()
+        if row.follower_id is not None
+    }
     note = note_for_post(site, post, post_path=post_path)
     activity = create_for_note(site, note)
     serialised = json.dumps(activity)
@@ -52,6 +74,8 @@ def fanout_for_post(db: Session, post: Post, *, post_path: str) -> int:
     )
     count = 0
     for f in followers:
+        if f.id in already_queued:
+            continue
         inbox = f.shared_inbox_url or f.inbox_url
         db.add(
             ActivityPubOutbox(

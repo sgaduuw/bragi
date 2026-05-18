@@ -39,6 +39,23 @@ from bragi.core.models.webmention import (
 LOG = logging.getLogger(__name__)
 
 
+def _drop_pending_outbox_for_post(post: Post, session: Any) -> None:
+    """Delete every PENDING outbox row for `post`.
+
+    Called when the post leaves the published state. `SENT` /
+    `FAILED` rows stay as audit; only the about-to-be-flushed
+    PENDING queue is abandoned.
+    """
+    pending = session.execute(
+        select(WebmentionOutbox).where(
+            WebmentionOutbox.post_id == post.id,
+            WebmentionOutbox.status == WebmentionOutboxStatus.PENDING,
+        )
+    ).scalars()
+    for row in pending:
+        session.delete(row)
+
+
 def _queue_outbox_for_post(post: Post, session: Any) -> None:
     """Insert one WebmentionOutbox row per external link in `post`.
 
@@ -137,11 +154,24 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], se
     No-op on draft posts (no public URL to mention from). The
     outbox queue de-dups by target_url, so an unchanged link set
     creates no new rows.
+
+    Unpublish handling: when a post leaves the published state
+    (`before['status']=='published'`, `after['status']!='published'`),
+    drop every PENDING outbox row for it. The sender otherwise
+    flushes the queue against a now-404/410 URL after the post
+    was already pulled, surprising the receivers; the right
+    semantic for "post unpublished" is "abandon the pending
+    fanout", not "deliver a webmention pointing at a missing
+    page". `SENT` / `FAILED` rows are kept as audit.
     """
-    del before
     if not isinstance(item, Post):
         return
-    if after.get("status") != "published":
+    was_published = (before or {}).get("status") == "published"
+    is_published = after.get("status") == "published"
+    if was_published and not is_published:
+        _drop_pending_outbox_for_post(item, session)
+        return
+    if not is_published:
         return
     _queue_outbox_for_post(item, session)
 

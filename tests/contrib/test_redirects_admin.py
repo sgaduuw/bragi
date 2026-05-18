@@ -184,6 +184,47 @@ def test_new_requires_source_to_start_with_slash(admin_app: Flask) -> None:
     assert b"must start with" in resp.data.lower()
 
 
+def test_new_rejects_absolute_url_target(admin_app: Flask) -> None:
+    """SEC-M1 regression (audit pass 4): an editor-rank user must
+    not be able to insert `target=https://evil.example/phish`. The
+    redirect resolver follows the chain, breaks on absolute targets,
+    then serves the absolute URL as the 301 destination. Without
+    the admin-form constraint, the redirects table is an
+    open-redirect / phishing primitive against the site's readers.
+    Importers and slug-change hooks always construct relative
+    targets, so the constraint only affects the human-facing form.
+    """
+    client = admin_app.test_client()
+    _login(client)
+    for bad_target in (
+        "https://evil.example/phish",
+        "http://evil.example/phish",
+        "//evil.example/phish",  # protocol-relative
+        # Pass-5 regression: WHATWG URL parser normalises `\` to `/`
+        # in special-scheme URLs before parsing, so `/\evil.example/x`
+        # becomes `//evil.example/x` in the browser and lands
+        # off-domain. The startswith('//') gate misses this; the
+        # `safe_relative_path` helper rejects the backslash directly.
+        "/\\evil.example/phish",
+        "\\evil.example/phish",
+        "/path\\with\\backslashes",
+    ):
+        token = csrf_token(client, path="/admin/sites/blog/redirects/new")
+        resp = client.post(
+            "/admin/sites/blog/redirects/new",
+            data={
+                "source_path": "/popular/",
+                "target": bad_target,
+                "status_code": "301",
+                "match_type": "exact",
+                "_csrf_token": token,
+            },
+        )
+        assert resp.status_code == 200, f"{bad_target} should re-render with error"
+        body = resp.data.lower()
+        assert b"target must" in body or b"protocol-relative" in body
+
+
 def test_new_rejects_invalid_status_code(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)

@@ -409,6 +409,71 @@ def test_swap_skip_redirect_flag_suppresses_kind_redirect(
     assert rows == []
 
 
+def test_edit_rejects_cross_site_parent_id(
+    admin_app: Flask, db_session: Session, db_session_factory: sessionmaker[Session]
+) -> None:
+    """SEC-M3 regression (audit pass 4): an author on site A who
+    POSTs `parent_id=<id of a page on site B>` must be refused. The
+    delivery-side resolver filters by site so the cross-site row
+    would never serve real content, but the corrupted row leaks the
+    cross-site parent's slug into the sitemap and into any
+    slug-change auto-redirects derived from its URL chain.
+
+    The previous behaviour (just parsing the parent_id as an int
+    with no site check) silently accepted the cross-site value.
+    """
+    # Seed a second site and a page on it; that page's id is the
+    # cross-site value we'll try to POST.
+    site_b = Site(
+        slug="other",
+        hostname="other.example.com",
+        title="Other",
+        canonical_url="https://other.example.com",
+        owner_user_id=db_session.execute(select(User)).scalar_one().id,
+    )
+    db_session.add(site_b)
+    db_session.flush()
+    foreign_parent = Page(
+        site_id=site_b.id,
+        slug="foreign-parent",
+        title="Foreign Parent",
+        author_id=db_session.execute(select(User)).scalar_one().id,
+        status=PageStatus.PUBLISHED,
+        kind=PageKind.STATIC,
+        body_markdown="",
+        body_html="",
+        body_excerpt="",
+    )
+    db_session.add(foreign_parent)
+    db_session.commit()
+    foreign_parent_id = foreign_parent.id
+
+    news_id = _page_id(db_session_factory, "news")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{news_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{news_id}/edit",
+        data={
+            "title": "News",
+            "slug": "news",
+            # Foreign parent_id from site B; must be rejected.
+            "parent_id": str(foreign_parent_id),
+            "body_markdown": "",
+            "status": "published",
+            "kind": "static",
+            "_csrf_token": token,
+        },
+    )
+    # Re-renders the form (200) with an error flash, no DB mutation.
+    assert resp.status_code == 200
+    assert b"parent page must belong to this site" in resp.data.lower()
+    with db_session_factory() as db:
+        row = db.get(Page, news_id)
+        assert row is not None
+        assert row.parent_id is None  # untouched
+
+
 def test_demotion_alone_does_not_insert_redirect(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:

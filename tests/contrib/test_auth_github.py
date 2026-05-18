@@ -144,11 +144,13 @@ def admin_app(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
-    # Pre-seed the owner using the OAuth profile email so the
-    # callback tests that assert exactly one User after login still
-    # hold: the OAuth flow links its identity to the existing owner
-    # row rather than creating a duplicate.
-    owner = make_test_user(db_session, email="ada@example.com")
+    # Pre-seed an owner under a DIFFERENT email than the OAuth mock
+    # profile (`ada@example.com`). After the SEC-H1 fix the callback
+    # no longer auto-links a new OAuth identity onto a local User
+    # whose email happens to match; a separate `seeded-owner` row
+    # keeps the site shape valid for non-OAuth-callback tests while
+    # leaving the OAuth profile's email free to auto-create.
+    owner = make_test_user(db_session, email="seeded-owner@example.com")
     db_session.add(
         Site(
             slug="blog",
@@ -209,7 +211,13 @@ def test_callback_reuses_existing_identity(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A second login with the same GitHub id reuses the User + identity."""
+    """A second login with the same GitHub id reuses the User + identity.
+
+    Counts: the fixture pre-seeds a `seeded-owner` user, and the
+    first OAuth callback auto-creates the `ada@example.com` user
+    plus its identity. The second callback for the same GitHub id
+    must not create a duplicate.
+    """
     _mock_authlib_client(monkeypatch)
     client = admin_app.test_client()
     client.get("/auth/github/callback?code=abc")
@@ -217,33 +225,46 @@ def test_callback_reuses_existing_identity(
     with db_session_factory() as db:
         users = db.execute(select(User)).scalars().all()
         identities = db.execute(select(UserIdentity)).scalars().all()
-    assert len(users) == 1
+    assert len(users) == 2  # seeded-owner + ada (auto-created)
     assert len(identities) == 1
+    oauth_user = next(u for u in users if u.email == "ada@example.com")
+    assert identities[0].user_id == oauth_user.id
 
 
-def test_callback_links_to_user_by_email_when_no_identity(
+def test_callback_rejects_oauth_email_colliding_with_existing_user(
     admin_app: Flask,
+    db_session: Session,
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`cms user create` seeded a User; first OAuth login attaches an
-    identity rather than creating a duplicate.
-
-    The `admin_app` fixture already seeds `ada@example.com` as the
-    site owner (P1 / #77), which matches the OAuth profile email; no
-    extra User insert is needed (and would clash on the unique
-    email index).
+    """SEC-H1 regression: when no UserIdentity matches the inbound
+    GitHub id AND the OAuth profile's email already belongs to a
+    local User (e.g. a `cms user create` bootstrap admin row), the
+    callback MUST refuse rather than auto-link the identity to that
+    row. The previous behaviour was a one-step admin-takeover
+    primitive: an attacker who registers a GitHub account with the
+    operator's email gets logged in as that admin.
     """
-    _mock_authlib_client(monkeypatch)
+    # Pre-seed a local user whose email matches the OAuth profile.
+    db_session.add(make_test_user(db_session, email="ada@example.com"))
+    db_session.commit()
 
+    _mock_authlib_client(monkeypatch)
     client = admin_app.test_client()
-    client.get("/auth/github/callback?code=abc")
+    resp = client.get("/auth/github/callback?code=abc", follow_redirects=False)
+    # Redirects to the local-auth login form with a flash, not a
+    # successful OAuth login.
+    assert resp.status_code == 302
+    assert "/auth/login" in resp.headers.get("Location", "")
+
+    with client.session_transaction() as sess:
+        assert sess.get("user_id") is None
+
+    # No UserIdentity row was created; the existing local user is
+    # untouched.
     with db_session_factory() as db:
-        users = db.execute(select(User)).scalars().all()
         identities = db.execute(select(UserIdentity)).scalars().all()
-    assert len(users) == 1
-    assert len(identities) == 1
-    assert identities[0].user_id == users[0].id
+    assert identities == []
 
 
 def test_callback_sets_session_user_id(

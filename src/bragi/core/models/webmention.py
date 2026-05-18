@@ -33,10 +33,10 @@ from bragi.core.models._mixins import IdMixin, TimestampsMixin
 class WebmentionStatus:
     """Lifecycle states for `Webmention.status`."""
 
-    PENDING = "pending"  # received, not yet verified
-    VERIFIED = "verified"  # source fetched + contains link to target
+    PENDING = "pending"  # verified, awaiting admin approval
+    VERIFIED = "verified"  # admin-approved; renders on the public post
     REJECTED = "rejected"  # admin or system rejected
-    FAILED = "failed"  # verification failed (network, missing link)
+    FAILED = "failed"  # historical: pre-v1.12 unverified rows; receiver no longer creates these
 
 
 class WebmentionType:
@@ -87,6 +87,16 @@ class WebmentionOutboxStatus:
 
 class WebmentionOutbox(IdMixin, TimestampsMixin, Base):
     __tablename__ = "webmention_outbox"
+    # The unpublish-cleanup path (`plugin._drop_pending_outbox_for_post`)
+    # deletes PENDING rows out from under an in-flight sender's
+    # `send_pending` batch. SQLAlchemy 2.x's default behaviour raises
+    # `StaleDataError` on the sender's eventual UPDATE for the deleted
+    # row, which rolls back EVERY successful send in the same batch.
+    # On the next tick the recipients of the successful sends get
+    # duplicate webmentions. Turning off `confirm_deleted_rows` makes
+    # the 0-row UPDATE a no-op instead of an error; the sender's other
+    # status flips persist independently.
+    __mapper_args__ = {"confirm_deleted_rows": False}
 
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), index=True)

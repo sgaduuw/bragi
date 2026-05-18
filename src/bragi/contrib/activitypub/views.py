@@ -365,13 +365,25 @@ def _fetch_actor(actor_iri: str) -> dict[str, object] | None:
     to a private / loopback / link-local / multicast / reserved
     address (also re-checks every redirect hop). The cache is a
     module-level dict bounded by `_ACTOR_CACHE_MAX_ENTRIES`.
+
+    Cache reads happen under `_ACTOR_CACHE_LOCK` so the read is
+    consistent with the eviction+write block at the end. The
+    network fetch runs without the lock held (otherwise every
+    inbox POST would serialise behind every other actor fetch).
+    After the fetch returns we re-check the cache: a concurrent
+    inbox POST for the same actor may have populated it while
+    we were on the wire. This still allows two coincident
+    fetches for the same IRI under high concurrency (proper
+    single-flight would need per-IRI condition variables) but
+    converges on consistent cache state.
     """
     import time
 
-    cached = _ACTOR_CACHE.get(actor_iri)
     now = time.monotonic()
-    if cached and (now - cached[0]) < _ACTOR_CACHE_SECONDS:
-        return cached[1]
+    with _ACTOR_CACHE_LOCK:
+        cached = _ACTOR_CACHE.get(actor_iri)
+        if cached and (now - cached[0]) < _ACTOR_CACHE_SECONDS:
+            return cached[1]
     try:
         resp = safe_get(
             actor_iri,
@@ -398,12 +410,19 @@ def _fetch_actor(actor_iri: str) -> dict[str, object] | None:
     # under gunicorn's threaded workers two concurrent overflows
     # can otherwise step on each other (`pop` could see the key
     # already removed by the other thread). The lock collapses
-    # the iterate+pop+set into a single critical section.
+    # the iterate+pop+set into a single critical section. Recheck
+    # the cache inside the lock: a concurrent fetch may have
+    # populated it while we were on the wire, and we'd rather use
+    # the fresher copy than overwrite it.
+    fresh_now = time.monotonic()
     with _ACTOR_CACHE_LOCK:
+        recheck = _ACTOR_CACHE.get(actor_iri)
+        if recheck and (fresh_now - recheck[0]) < _ACTOR_CACHE_SECONDS:
+            return recheck[1]
         if len(_ACTOR_CACHE) >= _ACTOR_CACHE_MAX_ENTRIES:
             oldest_key = min(_ACTOR_CACHE, key=lambda k: _ACTOR_CACHE[k][0])
             _ACTOR_CACHE.pop(oldest_key, None)
-        _ACTOR_CACHE[actor_iri] = (now, doc)
+        _ACTOR_CACHE[actor_iri] = (fresh_now, doc)
     return doc
 
 

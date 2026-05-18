@@ -67,6 +67,14 @@ def test_is_external_strips_own_host() -> None:
     assert not is_external("/relative", "blog.example")
 
 
+def test_is_external_compares_on_hostname_not_netloc() -> None:
+    """`urlparse(url).netloc` includes the port; `Site.hostname`
+    never carries one. Comparing on `netloc` would mis-flag a
+    same-site URL that includes its port as external."""
+    assert not is_external("https://blog.example:443/x", "blog.example")
+    assert is_external("https://other.example:443/x", "blog.example")
+
+
 def test_find_endpoint_prefers_link_header() -> None:
     endpoint = find_endpoint(
         {"Link": '<https://target.example/wm>; rel="webmention"'},
@@ -99,6 +107,30 @@ def test_extract_hcard_picks_name_url_photo() -> None:
     assert name == "Ada"
     assert url == "https://author.example"
     assert photo == "https://author.example/me.jpg"
+
+
+def test_extract_hcard_drops_javascript_url() -> None:
+    """Pass-5 regression: a `javascript:` URL in the h-card `href`
+    must NOT be persisted as `Webmention.author_url`. The h-card
+    is parsed from attacker-controlled HTML; once a moderator
+    approves the row, the URL is rendered as an `<a href>` on the
+    public post and a click executes attacker JS in the delivery
+    origin. The extractor drops any non-http(s) scheme."""
+    html = (
+        '<a class="h-card" href="javascript:alert(1)">Friendly</a>'
+        '<img class="u-photo" src="javascript:void(0)">'
+    )
+    name, url, photo = extract_hcard(html, "https://victim.example/")
+    assert name == "Friendly"
+    assert url is None
+    assert photo is None
+
+
+def test_extract_hcard_drops_data_url() -> None:
+    """Same gate covers `data:`, `file:`, `gopher:`, etc."""
+    html = '<a class="h-card" href="data:text/html,xyz">x</a>'
+    _name, url, _photo = extract_hcard(html, "https://victim.example/")
+    assert url is None
 
 
 def test_classify_mention_picks_specific_class() -> None:
@@ -159,6 +191,51 @@ def test_queue_outbox_is_idempotent(db_session: Session) -> None:
     db_session.commit()
     rows = list(db_session.execute(select(WebmentionOutbox)).scalars())
     assert len(rows) == 1
+
+
+def test_outbox_mappers_tolerate_deleted_row_during_flight() -> None:
+    """Pass-6 CQ regression: the unpublish-cleanup path
+    (`_drop_pending_outbox_for_post`) deletes PENDING rows out
+    from under an in-flight sender's `send_pending` batch.
+    SQLAlchemy 2.x's default `confirm_deleted_rows=True` would
+    raise `StaleDataError` on the sender's UPDATE for the deleted
+    row, which rolls back the WHOLE batch — recipients of the
+    other successful sends then receive duplicates on the next
+    tick. The fix is `__mapper_args__ = {"confirm_deleted_rows":
+    False}` on both outbox mappers."""
+    from bragi.core.models.activitypub import ActivityPubOutbox
+    from bragi.core.models.webmention import WebmentionOutbox
+
+    assert WebmentionOutbox.__mapper__.confirm_deleted_rows is False
+    assert ActivityPubOutbox.__mapper__.confirm_deleted_rows is False
+
+
+def test_on_post_updated_drops_pending_outbox_when_unpublishing(
+    db_session: Session,
+) -> None:
+    """Pass-5 regression: when a post leaves the published state,
+    PENDING outbox rows must be abandoned. The sender otherwise
+    flushes a fresh webmention against a now-404/410 URL after
+    the post has already been pulled."""
+    from bragi.contrib.webmentions.plugin import on_post_updated
+
+    _, _, post = _seed_blog(db_session)
+    _queue_outbox_for_post(post, db_session)
+    db_session.commit()
+    assert (
+        db_session.execute(select(WebmentionOutbox)).scalars().one().status
+        == WebmentionOutboxStatus.PENDING
+    )
+
+    # Simulate the unpublish transition.
+    on_post_updated(
+        post,
+        before={"status": "published"},
+        after={"status": "draft"},
+        session=db_session,
+    )
+    db_session.commit()
+    assert list(db_session.execute(select(WebmentionOutbox)).scalars()) == []
 
 
 # --------------------------- sender ---------------------------
@@ -277,12 +354,76 @@ def test_inbox_accepts_valid_mention(
     assert row.post_id is not None
 
 
+def test_inbox_dedupes_repeat_presentation_of_same_source_target(
+    delivery_app: Flask,
+    client: FlaskClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pass-5 regression: a well-behaved Mastodon retry that
+    presents the same (source, target) twice must NOT accumulate
+    two rows in the admin moderation queue. The second call
+    refreshes the parsed fields (h-card / content snippet may
+    have changed) and bumps `verified_at`, but moderation state
+    (status, approved) is preserved so a rejected mention can't
+    be re-presented into the queue."""
+
+    class _RespV1:
+        status_code = 200
+        content = (
+            b'<a class="h-card" href="https://author.example">Ada</a>'
+            b'<a href="https://blog.example.com/posts/hello/">link</a>'
+        )
+
+    class _RespV2:
+        status_code = 200
+        content = (
+            b'<a class="h-card" href="https://author.example">Ada (renamed)</a>'
+            b'<a href="https://blog.example.com/posts/hello/">link</a>'
+        )
+
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", lambda *a, **kw: _RespV1())
+    resp = client.post(
+        "/webmentions",
+        data={
+            "source": "https://other.example/note",
+            "target": "https://blog.example.com/posts/hello/",
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 202
+
+    # Second presentation, same (source, target), updated source page.
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", lambda *a, **kw: _RespV2())
+    resp = client.post(
+        "/webmentions",
+        data={
+            "source": "https://other.example/note",
+            "target": "https://blog.example.com/posts/hello/",
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 202
+
+    db_session.rollback()
+    rows = db_session.execute(select(Webmention)).scalars().all()
+    assert len(rows) == 1
+    # h-card refresh observable on the same row.
+    assert rows[0].author_name == "Ada (renamed)"
+
+
 def test_inbox_rejects_when_source_does_not_link_to_target(
     delivery_app: Flask,
     client: FlaskClient,
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify-first: a source that doesn't link to the target gets
+    a 400 with no DB row written. The previous behaviour persisted
+    a `status=REJECTED` row before validation, which gave an
+    unauthenticated attacker a per-request DoS surface (no UNIQUE
+    on the tuple, no rate limit). See #181."""
+
     class _Resp:
         status_code = 200
         content = b"<html>no link here</html>"
@@ -299,8 +440,38 @@ def test_inbox_rejects_when_source_does_not_link_to_target(
     )
     assert resp.status_code == 400
     db_session.rollback()
-    row = db_session.execute(select(Webmention)).scalars().one()
-    assert row.status == WebmentionStatus.REJECTED
+    rows = list(db_session.execute(select(Webmention)).scalars())
+    assert rows == []
+
+
+def test_inbox_writes_no_row_when_source_fetch_fails(
+    delivery_app: Flask,
+    client: FlaskClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other verify-first path: a source URL that 5xx's or that
+    `safe_get` blocks (e.g. an RFC 1918 redirect) gets a 400 with no
+    DB row. Closes the DoS surface the same way the no-link path
+    does. See #181."""
+
+    def _raise(*a, **kw):  # type: ignore[no-untyped-def]
+        raise RuntimeError("simulated network failure")
+
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", _raise)
+
+    resp = client.post(
+        "/webmentions",
+        data={
+            "source": "https://other.example/note",
+            "target": "https://blog.example.com/posts/hello/",
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 400
+    db_session.rollback()
+    rows = list(db_session.execute(select(Webmention)).scalars())
+    assert rows == []
 
 
 def test_inbox_rejects_unknown_target_site(

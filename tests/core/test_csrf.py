@@ -22,6 +22,7 @@ from bragi.core.middleware.csrf import (
     HEADER_NAME,
     SESSION_KEY,
     UNSAFE_METHODS,
+    register_csrf,
 )
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user import User
@@ -183,3 +184,40 @@ def test_bogus_bearer_does_not_bypass_csrf(admin_app: Flask) -> None:
         headers={"Authorization": "Bearer brg_xx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"},
     )
     assert resp.status_code == 400
+
+
+def test_register_csrf_raises_when_on_app_init_marker_missing() -> None:
+    """Boot ordering (#187): register_csrf in the admin app factory
+    must come after pm.hook.on_app_init so plugin-provided
+    before_request hooks register first. Simulate the broken
+    ordering: a plugin manager is wired but the on_app_init marker
+    isn't set yet.
+    """
+    app = Flask("test-bragi-admin")
+    app.config["SECRET_KEY"] = "x" * 32
+    # Sentinel: only the truthiness is read by the assertion.
+    app.extensions["plugin_manager"] = object()
+    with pytest.raises(RuntimeError, match=r"register_csrf called before pm\.hook\.on_app_init"):
+        register_csrf(app)
+
+
+def test_register_csrf_succeeds_after_on_app_init_marker_set() -> None:
+    """With the marker set (matching what apps/admin.py does),
+    register_csrf installs cleanly and exposes the Jinja global.
+    """
+    app = Flask("test-bragi-admin")
+    app.config["SECRET_KEY"] = "x" * 32
+    app.extensions["plugin_manager"] = object()
+    app.extensions["_bragi_on_app_init_completed"] = True
+    register_csrf(app)
+    assert "csrf_token" in app.jinja_env.globals
+
+
+def test_register_csrf_skips_assertion_without_plugin_manager() -> None:
+    """Bare-Flask unit tests don't wire a plugin manager; the boot
+    assertion is then skipped so test fixtures stay terse.
+    """
+    app = Flask("test-bragi-admin")
+    app.config["SECRET_KEY"] = "x" * 32
+    register_csrf(app)
+    assert "csrf_token" in app.jinja_env.globals

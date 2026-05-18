@@ -14,12 +14,14 @@ from typing import Any
 
 import click
 from flask import Blueprint, has_app_context
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from bragi.api import hookimpl
 from bragi.contrib.activitypub.cli import activitypub_group
 from bragi.contrib.activitypub.sender import fanout_for_post
 from bragi.contrib.activitypub.views import bp as activitypub_bp
+from bragi.core.models.activitypub import ActivityPubOutbox, ActivityPubOutboxStatus
 from bragi.core.models.post import Post
 
 LOG = logging.getLogger(__name__)
@@ -64,3 +66,34 @@ def on_post_published(item: Any, session: Any) -> None:
         fanout_for_post(session, item, post_path=path)
     except SQLAlchemyError as exc:
         LOG.warning("activitypub fanout failed: %s", exc)
+
+
+@hookimpl
+def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], session: Any) -> None:
+    """Abandon PENDING fan-out when the post leaves published state.
+
+    `on_post_published` queues a `Create+Note` per follower. If a
+    moderator unpublishes the post before the sender has flushed
+    the queue, the followers should NOT still receive a Note
+    pointing at a URL that now 404s/410s. Delete the PENDING rows;
+    SENT / FAILED rows stay as audit. Issuing a fediverse `Delete`
+    activity for any Notes that already went out is a richer fix
+    (separate hookspec / out of scope here).
+    """
+    if not isinstance(item, Post):
+        return
+    was_published = (before or {}).get("status") == "published"
+    is_published = after.get("status") == "published"
+    if not (was_published and not is_published):
+        return
+    try:
+        pending = session.execute(
+            select(ActivityPubOutbox).where(
+                ActivityPubOutbox.post_id == item.id,
+                ActivityPubOutbox.status == ActivityPubOutboxStatus.PENDING,
+            )
+        ).scalars()
+        for row in pending:
+            session.delete(row)
+    except SQLAlchemyError as exc:
+        LOG.warning("activitypub pending-cleanup failed: %s", exc)

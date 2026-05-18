@@ -108,6 +108,36 @@ def _normalized_parent_id(value: str) -> int | None:
         return None
 
 
+def _validated_parent_id_or_error(
+    db: Session,
+    parent_id: int | None,
+    site_id: int,
+    exclude_page_id: int | None = None,
+) -> tuple[int | None, str | None]:
+    """Verify `parent_id` (if non-None) names a Page on `site_id`.
+
+    Returns `(parent_id, None)` on success or `(None, error_msg)`
+    on failure. Mirrors the cross-site validators already on the
+    OG-image and site-default-OG-image resolvers; without it, an
+    author on site A could POST `parent_id=<id-of-a-page-on-site-B>`
+    and land a row with `(site_id=A, parent_id=B)`. Delivery-side
+    resolution filters by site so the cross-site row never serves
+    real content, but the corrupted row leaks the cross-site
+    parent's slug into the sitemap and into any slug-change
+    auto-redirect derived from its URL chain (#M3 / audit pass 4).
+    """
+    if parent_id is None:
+        return None, None
+    parent = db.get(Page, parent_id)
+    if parent is None:
+        return None, f"Parent page #{parent_id} not found."
+    if parent.site_id != site_id:
+        return None, "Parent page must belong to this site."
+    if exclude_page_id is not None and parent.id == exclude_page_id:
+        return None, "A page cannot be its own parent."
+    return parent_id, None
+
+
 def _slug_in_use(
     db: object,
     site_id: int,
@@ -201,6 +231,10 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
 
         parent_id = _normalized_parent_id(form["parent_id"])
+        parent_id, parent_err = _validated_parent_id_or_error(db, parent_id, site_id)
+        if parent_err is not None:
+            flash(parent_err, "error")
+            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
             flash(
@@ -330,8 +364,11 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             flash("Kind must be 'static' or 'post_index'.", "error")
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
         parent_id = _normalized_parent_id(form["parent_id"])
-        if parent_id == page.id:
-            flash("A page cannot be its own parent.", "error")
+        parent_id, parent_err = _validated_parent_id_or_error(
+            db, parent_id, page.site_id, exclude_page_id=page.id
+        )
+        if parent_err is not None:
+            flash(parent_err, "error")
             return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
         slug = str(form["slug"])
         if _slug_in_use(db, page.site_id, parent_id, slug, exclude_page_id=page.id):
@@ -566,11 +603,42 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
             flash("Revision not found.", "error")
             return redirect(url_for("page_admin.list_page_revisions", page_id=page.id))
         editor_user_id = int(session["user_id"])
+        # Pass-6 SEC-HIGH: revisions snapshot `parent_id` verbatim
+        # at capture time. A pre-v1.12.0 revision row may carry a
+        # cross-site parent_id that the v1.12.0 create/edit
+        # `_validated_parent_id_or_error` would now reject; without
+        # re-validating on restore, clicking "Restore" reintroduces
+        # the corrupted row. Re-run the same validator and refuse
+        # the restore on failure, exactly as the edit path does.
+        restored_parent_id, parent_err = _validated_parent_id_or_error(
+            db, revision.parent_id, page.site_id, exclude_page_id=page.id
+        )
+        if parent_err:
+            flash(
+                f"Cannot restore this revision: {parent_err} "
+                f"(captured `parent_id={revision.parent_id}` no longer points "
+                "at a page on this site).",
+                "error",
+            )
+            return redirect(url_for("page_admin.list_page_revisions", page_id=page.id))
         _snapshot_page(db, page, editor_user_id=editor_user_id)
+        # Capture `before` BEFORE the mutation, mirroring the
+        # normal edit flow. Restoring a revision can change slug,
+        # title, status, and parent; plugin subscribers (search
+        # index, redirects auto-301, AP outbox fanout on a
+        # status->published transition) should see the same
+        # `on_post_updated` they'd see for a hand edit.
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "kind": page.kind,
+        }
+        was_unpublished = page.status != PageStatus.PUBLISHED
         page.title = revision.title
         page.slug = revision.slug
         page.status = revision.status
-        page.parent_id = revision.parent_id
+        page.parent_id = restored_parent_id
         page.body_markdown = revision.body_markdown
         page.body_html = revision.body_html
         page.body_excerpt = revision.body_excerpt
@@ -578,7 +646,22 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
         db.commit()
         restored_id = page.id
         site_id_for_audit = page.site_id
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "kind": page.kind,
+        }
+        is_first_publish = was_unpublished and page.status == PageStatus.PUBLISHED
         pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        if is_first_publish:
+            # AP / sitemap / search subscribers listen to
+            # `on_post_published`; a restore that crosses
+            # draft->published must fire it so the transition is
+            # observable like a hand edit. (Page has no
+            # `published_at` field, so no timestamp to stamp.)
+            pm.hook.on_post_published(item=page, session=db)
         pm.hook.on_cache_purge(scope="page", key=str(restored_id))
 
     audit(

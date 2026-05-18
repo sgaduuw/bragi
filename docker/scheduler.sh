@@ -40,27 +40,71 @@ VACUUM_EVERY=${VACUUM_EVERY:-604800}
 
 log() { echo "[scheduler $(date -Iseconds)] $*"; }
 
+# Track the active child PID so SIGTERM/SIGINT can forward to it
+# before exiting the loop. Without this, `docker compose stop`
+# sends SIGTERM and the outer `sleep` runs to completion (10s
+# default), then SIGKILL fires; a multi-minute `cms db vacuum` or
+# AP-send-pending run mid-tick loses work. The trap forwards the
+# signal to the child and exits the loop.
+CHILD_PID=
+shutting_down=0
+
+forward_signal() {
+    shutting_down=1
+    if [ -n "$CHILD_PID" ]; then
+        log "shutdown: forwarding signal to child pid=$CHILD_PID"
+        kill -TERM "$CHILD_PID" 2>/dev/null || true
+        wait "$CHILD_PID" 2>/dev/null || true
+    fi
+    log "shutdown: exiting"
+    exit 0
+}
+
+trap forward_signal TERM INT
+
 run() {
     label=$1; shift
-    if "$@"; then
-        :
-    else
-        rc=$?
+    "$@" &
+    CHILD_PID=$!
+    wait "$CHILD_PID"
+    rc=$?
+    CHILD_PID=
+    if [ $rc -ne 0 ] && [ $shutting_down -eq 0 ]; then
         log "$label: failed rc=$rc"
     fi
 }
 
-log "alembic: start"
-if alembic upgrade head; then
-    log "alembic: ok"
-    # Healthcheck sentinel: the web containers' depends_on uses
-    # condition: service_healthy and a `test -f /data/.migrated` test,
-    # so gunicorn waits for this file before it starts serving.
-    touch /data/.migrated
-else
-    log "alembic: failed (rc=$?), refusing to start sidecar loop"
-    exit 1
-fi
+# Cap alembic restart-loop on a persistently-failing migration.
+# `compose.yml` switches this service to `restart: on-failure`, so
+# a non-zero exit triggers a restart; after `ALEMBIC_MAX_ATTEMPTS`
+# the script exits 0 with a loud log line, which `on-failure`
+# treats as terminal (no further restart). Without this the
+# sidecar bounces forever and the depending web services stay
+# stuck in "created" state with no clear failure signal to ops.
+ALEMBIC_MAX_ATTEMPTS=${ALEMBIC_MAX_ATTEMPTS:-5}
+ALEMBIC_RETRY_DELAY=${ALEMBIC_RETRY_DELAY:-15}
+attempt=1
+while true; do
+    log "alembic: attempt $attempt of $ALEMBIC_MAX_ATTEMPTS"
+    if alembic upgrade head; then
+        log "alembic: ok (attempt $attempt)"
+        # Healthcheck sentinel: the web containers' depends_on uses
+        # condition: service_healthy and a `test -f /data/.migrated`
+        # test, so gunicorn waits for this file before it starts.
+        touch /data/.migrated
+        break
+    fi
+    rc=$?
+    if [ "$attempt" -ge "$ALEMBIC_MAX_ATTEMPTS" ]; then
+        log "alembic: failed $ALEMBIC_MAX_ATTEMPTS times (last rc=$rc); giving up. The web services will NOT come up. Check the migration error above, fix, then run: docker compose up -d bragi-tasks"
+        # Exit 0 so `restart: on-failure` stops trying. Status shows
+        # as `Exited (0)` and operators see this log line above it.
+        exit 0
+    fi
+    log "alembic: attempt $attempt failed (rc=$rc); retrying in ${ALEMBIC_RETRY_DELAY}s"
+    sleep "$ALEMBIC_RETRY_DELAY"
+    attempt=$((attempt + 1))
+done
 
 now=$(date +%s)
 last_scheduled_publish=$now

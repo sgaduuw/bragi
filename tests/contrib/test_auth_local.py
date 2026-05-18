@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 from flask import Flask
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.admin import create_admin_app
@@ -187,6 +188,39 @@ def test_login_rotates_session_id(admin_app: Flask) -> None:
     post_sid = client.get_cookie("bragi_sid")
     assert post_sid is not None
     assert post_sid.value != pre_sid_value
+
+
+def test_current_user_returns_none_for_inactive_account(
+    admin_app: Flask, db_session: Session
+) -> None:
+    """Pass-7 regression: an admin who flips a User.is_active to
+    False expects access to stop immediately. The bearer middleware
+    already re-checks per request; the cookie-session path
+    (`current_user()`) previously returned the inactive User row
+    unchanged, so an existing logged-in session kept its
+    privileges until logout / session expiry. Fix: treat inactive
+    as anonymous (returns None)."""
+    from flask import session as flask_session
+
+    from bragi.core.security import current_user
+
+    user = db_session.execute(select(User).where(User.email == TEST_EMAIL)).scalar_one()
+
+    # Sanity: an active user resolves correctly.
+    with admin_app.test_request_context("/"):
+        flask_session["user_id"] = user.id
+        resolved = current_user()
+        assert resolved is not None
+        assert resolved.email == TEST_EMAIL
+
+    # Disable the user and re-check in a fresh request context
+    # (the per-request `g._cached_user` would otherwise mask the change).
+    user.is_active = False
+    db_session.commit()
+
+    with admin_app.test_request_context("/"):
+        flask_session["user_id"] = user.id
+        assert current_user() is None
 
 
 def test_failed_login_does_not_rotate_session_id(admin_app: Flask) -> None:

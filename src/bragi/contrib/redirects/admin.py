@@ -8,9 +8,9 @@ imported / manual rows survive the route change unchanged (the
 rows carry `site_id`, the URL just made the selection explicit).
 
 Hit counts are maintained by the resolver in
-`bragi.contrib.redirects.plugin`. Match type `exact` is the only
-resolver-enforced value today; `prefix` and `regex` can be stored
-but won't fire until #13 lands.
+`bragi.contrib.redirects.plugin`. All three match types (`exact`,
+`prefix`, `regex`) are wired through the resolver and the admin
+form accepts any of them.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from sqlalchemy import select
 from bragi.core.db import SessionLocal
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.permissions import require_role, resolve_site_or_abort
+from bragi.core.safe_redirect import safe_relative_path
 
 bp = Blueprint(
     "redirect_admin",
@@ -67,15 +68,36 @@ def _form_from_request() -> dict[str, object]:
 
 
 def _validate(form: dict[str, object]) -> list[str]:
-    """Return a list of human-readable validation errors."""
+    """Return a list of human-readable validation errors.
+
+    Targets must be relative paths (start with '/'). Absolute URLs
+    are rejected (#M1 / audit pass 4): an editor-rank user could
+    otherwise insert `target=https://evil.example/phish` and turn
+    the site's redirect table into a 301 phishing primitive
+    against its readers. Auto-301 callsites (importers,
+    slug-change hooks) always construct relative targets so this
+    constraint only affects the human-facing admin form.
+    """
     errors: list[str] = []
     source_path = form["source_path"]
     if not isinstance(source_path, str) or not source_path:
         errors.append("Source path is required.")
     elif not source_path.startswith("/"):
         errors.append("Source path must start with '/'.")
-    if not form["target"]:
+    target = form["target"]
+    if not target:
         errors.append("Target is required.")
+    elif isinstance(target, str) and safe_relative_path(target) is None:
+        # `safe_relative_path` rejects absolute URLs, protocol-relative
+        # `//evil.example/x`, and any value containing `\` (browsers
+        # normalise backslash to `/` in special-scheme URLs before
+        # parsing, so `/\evil.example/x` lands off-domain). All three
+        # would let an editor-rank user turn the redirect table into a
+        # 301 phishing primitive against the site's readers.
+        errors.append(
+            "Target must be a relative path starting with '/' (no "
+            "absolute URLs, no protocol-relative `//`, no backslashes)."
+        )
     if form["status_code"] not in VALID_STATUS_CODES:
         errors.append(f"Status code must be one of {sorted(VALID_STATUS_CODES)}.")
     if form["match_type"] not in VALID_MATCH_TYPES:
