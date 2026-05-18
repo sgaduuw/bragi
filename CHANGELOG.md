@@ -44,6 +44,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `U+202A`-`U+202E` and `U+2066`-`U+2069`.
 
 ### Changed
+- **Moderator-facing IDN badge on the webmention moderation
+  list (#225).** `safe_external_url` accepts Cyrillic / Greek
+  homograph hostnames (`раураl.com`, `аpple.com`) because they
+  parse as legitimate IDN, and rejecting them outright would
+  break real-world non-Latin domains (`пример.рф`, `例え.jp`).
+  New `is_idn_host(url)` helper renders an `[IDN]` badge next
+  to source / author URLs in the admin moderation list so a
+  reviewer has the signal without losing IDN traffic. Adjacent
+  to the bidi rejection in #209 but distinct: bidi has no
+  legitimate use, IDN does.
+- **`cms db vacuum` gates on the SQLite engine (#227).** Mirror
+  of the `cms backup` gate; the `PRAGMA wal_checkpoint(TRUNCATE)`
+  finaliser is SQLite-specific and would 500 on Postgres.
+  Without the gate the scheduler sidecar's weekly tick would log
+  `failed rc=*` lines under `BRAGI_DATABASE_URL=postgresql://...`
+  until ops notice. Same shape applied to
+  `bragi.contrib.search.SQLiteFTS5SearchBackend`: registration
+  returns None under a non-SQLite engine, so `/search` returns
+  "no backend registered" instead of a per-request SQL 500.
 - **Admin session cookie defaults to `Secure` in production
   (#199).** New `Settings.admin_session_cookie_secure` knob
   (default `None` = derive from `env`); `create_admin_app` sets
@@ -69,14 +88,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (#212).** Pinned identically so a base-image bump can't shift
   the system uid range and break /data volume sharing across
   the admin and delivery images.
-- **scheduler.sh sleep is interruptible (#217).** New
+- **scheduler.sh sleep is interruptible (#217, #228).** New
   `sleep_interruptible` helper backgrounds the sleep so the
   SIGTERM trap fires immediately. POSIX `/bin/sh` (dash) doesn't
   interrupt a foreground `sleep` for a trapped signal, so a
   `docker compose stop` mid-tick used to wait up to the full
   sleep duration (10s main-loop / 15s alembic retry) before the
   trap could forward. Applied to both the alembic-retry sleep
-  and the main-loop sleep.
+  and the main-loop sleep. Reentrancy guard kills any previously
+  set `$SLEEP_PID` before backgrounding a new sleeper, so a
+  caller bug or future retry-wrap can't leak the prior PID past
+  the trap's reach.
 - **`Procfile.dev` adds a `tasks:` line (#206).** New
   `scripts/dev-tasks.sh` mirrors `docker/scheduler.sh` but
   invokes the cms commands against the local SQLite DB on a 60s
@@ -88,8 +110,48 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `_RERENDER_TIMEOUT_PER`, `BRAGI_ATTACHMENT_RENDITION_WIDTHS`,
   `BRAGI_INDEXNOW_ENDPOINT`, and `BRAGI_SECURITY_EXPIRES_DAYS`
   now appear as commented `# OPTIONAL` lines with defaults.
+- **compose.yml admin block is denser (#232).** The admin
+  service env block had 60 comment lines vs 5 active vars
+  (12:1); operators scanning to confirm `BRAGI_ENV` /
+  `BRAGI_TRUSTED_PROXY_HOPS` had to skip past 12 multi-line
+  optional-knob explanations. Each optional knob is now a
+  one-line commented assignment; the per-knob rationale lives
+  in `src/bragi/settings.py` field docstrings (pointed at from
+  the new header comment). Same shape on the delivery block.
+- **README backups section spells out the SQLite-only gate
+  (#230).** Postgres operators now learn from the README that
+  `cms backup` exits 2 and pointed at `pg_dump`, rather than
+  discovering by running it.
+- **`bragi.core.safe_redirect` renamed to `bragi.core.safe_urls`
+  (#231).** The module houses both `safe_relative_path` (for
+  redirect targets) and `safe_external_url` (for URLs that
+  never feed a redirect: webmention author URLs render as
+  `<a href>`, not 302 destinations). Module name now matches
+  the docstring's "user / attacker-supplied URLs" scope. Five
+  callers updated; `git mv` preserves history.
 
 ### Fixed
+- **Empty `BRAGI_ADMIN_SESSION_COOKIE_SECURE=` no longer crashes
+  boot (#226).** Pydantic-settings parses an exported-but-empty
+  env value as `""`, which pydantic's bool validator rejects with
+  `bool_parsing`. Operators who delete a value from `.env` and
+  leave the key (or write `KEY=` in shell sourcing) hit a fatal
+  boot-time error instead of the documented "unset = derive from
+  env" path. A `BeforeValidator` on the field coerces `""` to
+  `None`.
+- **`fanout_for_post` docstring spells out the unfollow/refollow
+  edge case (#224).** Pass-8 audit flagged the dedup as missing
+  the cycle, but inspecting the schema shows `follower_id` is
+  `ondelete=CASCADE`: the Undo Follow handler deletes all outbox
+  rows referencing the follower (SENT included). The dedup
+  invariant holds for surviving rows; the unfollow/refollow case
+  re-queues a fresh Create+Note that the receiver dedups by
+  `activity.id`. No code change; docstring now matches reality
+  and notes why the SET NULL alternative wasn't pursued.
+- **`cms backup` Postgres-engine path now has test coverage
+  (#229).** Mocked dialect, asserted `exit_code == 2` and the
+  user-facing "requires SQLite" / "pg_dump" message; a future
+  refactor can't silently drop the gate.
 - **CI workflow has explicit minimum permissions (#205).**
   `permissions: contents: read` at the top level so the
   workflow token never carries repo-write by default when CI

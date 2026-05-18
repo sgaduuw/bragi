@@ -33,6 +33,7 @@ def _empty_str_to_none(value: object) -> object:
         return None
     return value
 
+
 LOG = logging.getLogger(__name__)
 
 
