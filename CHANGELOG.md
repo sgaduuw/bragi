@@ -6,6 +6,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **JSON API enforces the admin's author-or-editor gate.**
+  `PATCH /admin/api/sites/<slug>/posts/<id>/` and
+  `POST /admin/api/sites/<slug>/posts/<id>/publish` previously
+  only checked site membership: any token holder with `author`
+  role + `post:write` scope could mutate another author's post,
+  retract their published content, or trigger ActivityPub fanout
+  / auto-301s on their behalf. The admin UI's `edit_post` gate
+  (`(is_own and author) or editor+`) is now applied to the API
+  surface via a new `_require_post_write_access(post)` helper.
+  `GET /admin/api/sites/<slug>/posts/` similarly scopes the list
+  to the caller's own posts when they hold only `author` rank;
+  editor+ continues to see every author's posts. Multi-author
+  deployments running v1.10.x with a minted token in `author`
+  hands should treat this as a privilege-escalation fix.
+
 ### Changed
 - **FTS5 search pushes pagination to SQL.** The mixed post + page
   search previously loaded every matching row from both FTS
@@ -74,6 +90,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the compose-enforced `${VAR:?...}` shape.
 
 ### Fixed
+- **Post admin's `published_at` stamps route through
+  `naive_utcnow()`.** Two write sites in `post/admin.py`
+  (`create_post`, `edit_post` first-publish transition) still
+  used `datetime.now(UTC)` after the PR2 datetime-convention
+  sweep, persisting a tz-aware value into a naive `Mapped[datetime]`
+  column. SQLAlchemy + SQLite silently drop the tz on the way
+  in, but reads-back-after-write across cached attribute access
+  saw inconsistent shapes. Both sites now go through the
+  centralised helper alongside every other timestamp emitter.
 - **`ON DELETE` actions extended across the rest of the model
   graph.** The first FK-ondelete migration only touched the
   federation tables (#162-#166). This migration covers the other

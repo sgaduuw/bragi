@@ -15,8 +15,6 @@ URL, so these views assume an authenticated user.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from flask import (
     Blueprint,
     abort,
@@ -47,6 +45,7 @@ from bragi.core.permissions import (
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.security import current_user
 from bragi.core.text import slugify
+from bragi.core.time import naive_utcnow
 
 bp = Blueprint(
     "post_admin",
@@ -224,7 +223,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             body_excerpt=make_excerpt(body_markdown),
             author_id=int(session["user_id"]),
             status=new_status,
-            published_at=(datetime.now(UTC) if new_status == PostStatus.PUBLISHED else None),
+            published_at=(naive_utcnow() if new_status == PostStatus.PUBLISHED else None),
             og_image_id=og_image_id,
         )
         db.add(new_post_row)
@@ -310,7 +309,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             post.status != PostStatus.PUBLISHED and form["status"] == PostStatus.PUBLISHED
         )
         if is_first_publish:
-            post.published_at = datetime.now(UTC)
+            post.published_at = naive_utcnow()
         post.status = form["status"]
 
         _sync_post_tags(db, post, form["tags"], post.site_id)
