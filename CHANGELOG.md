@@ -7,6 +7,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Webmention receiver gates `source` / `target` through
+  `safe_external_url`.** Pre-v1.13.0 the inbox accepted both URLs
+  through a local `_is_absolute_http` helper that only verified
+  scheme + non-empty netloc. That let through (a) Unicode
+  bidi-formatting codepoints in `source_url`, which render flipped
+  in the admin moderation list AND in the public post page's
+  "Mentioned by" `<a href>`, so a moderator can be fooled into
+  approving a row whose visible destination differs from its real
+  destination, and (b) C0 / DEL control characters, which 500
+  werkzeug's header-value writer the moment the stored value
+  flows through a response header or `redirect(...)`. Both
+  classes are now rejected at the inbox via the centralised
+  `safe_external_url` gate; the unused `_is_absolute_http`
+  helper is gone.
+- **`safe_external_url` rejects C0 / DEL control characters.**
+  Mirrors the gate `safe_relative_path` already had. Backstops
+  the webmention receiver hardening above for any future caller
+  (OG-image source-page extraction, internal-links destinations)
+  so the same shape can't slip back in.
 - **AP inbox catches `RecursionError` on deeply-nested JSON
   (#215).** `json.loads` recurses; an unauthenticated attacker
   could flood the inbox with `[[[...]]]` / `{"a":{"a":...}}` past

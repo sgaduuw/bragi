@@ -497,6 +497,72 @@ def test_inbox_400_on_missing_params(client: FlaskClient) -> None:
     assert resp.status_code == 400
 
 
+@pytest.mark.parametrize(
+    "bad_source",
+    [
+        # Unicode bidi-formatting codepoints: a stored `‮` (RTL
+        # override) in source_url flips the rendered URL in the admin
+        # moderation list AND in the public post page's "Mentioned by"
+        # `<a href>`, fooling both moderator and reader. Pass-8 HIGH
+        # SEC-1: pre-v1.13.0 the receiver gated `source` through
+        # `_is_absolute_http` (scheme + netloc only); these slipped.
+        "https://evil.example/‮reverse",
+        "https://‮evil.example/x",
+        # C0 control characters in source_url: werkzeug's
+        # header-value writer raises on `\r` / `\n` the moment the
+        # stored value flows through a response header or
+        # `redirect(...)`. Without rejection at the inbox, a single
+        # malicious POST persists a Webmention row whose render
+        # 500s every subsequent admin moderation list view (pass-8
+        # MEDIUM SEC-2 backing for the receiver-side fix).
+        "https://evil.example/\rfoo",
+        "https://evil.example/\nfoo",
+        "https://evil.example/\x00foo",
+        # Non-http(s) schemes were already rejected, but keep one
+        # case here so the parametrize block documents the full
+        # `safe_external_url` contract the receiver now relies on.
+        "javascript:alert(1)",
+    ],
+)
+def test_inbox_rejects_unsafe_source_url(client: FlaskClient, bad_source: str) -> None:
+    """Inbox refuses bidi / control / non-http(s) source URLs.
+
+    Pass-8 hardening: source / target are gated through
+    `safe_external_url` instead of the older `_is_absolute_http`
+    helper, closing a moderator-deception + persistent-DoS pair.
+    """
+    resp = client.post(
+        "/webmentions",
+        data={
+            "source": bad_source,
+            "target": "https://blog.example.com/post-1/",
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "bad_target",
+    [
+        "https://blog.example.com/‮post-1/",
+        "https://blog.example.com/post-1/\rfoo",
+        "https://blog.example.com/post-1/\nfoo",
+    ],
+)
+def test_inbox_rejects_unsafe_target_url(client: FlaskClient, bad_target: str) -> None:
+    """`target` is gated through the same `safe_external_url` check."""
+    resp = client.post(
+        "/webmentions",
+        data={
+            "source": "https://other.example/page",
+            "target": bad_target,
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 400
+
+
 # --------------------------- discovery link ---------------------------
 
 

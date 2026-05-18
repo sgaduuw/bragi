@@ -55,6 +55,14 @@ rejection:
   list and can fool a moderator into approving a row whose real
   destination is malicious. The same chars have no legitimate
   place in a URL anyway.
+- Any C0 / DEL control character (`\\x00`-`\\x1f`, `\\x7f`).
+  Same rationale as for `safe_relative_path`: an attacker
+  webmention POST with `source=http://evil.example/\\r\\nX:`
+  persists, and the moment the stored value flows through
+  werkzeug's header-value writer (response header, log line,
+  `redirect(...)`) it 500s. Rejecting at the inbox keeps the
+  failure on the input side rather than turning a stored bad
+  value into a persistent per-row DoS.
 """
 
 from __future__ import annotations
@@ -96,16 +104,25 @@ def safe_relative_path(candidate: str | None) -> str | None:
 def safe_external_url(url: str | None) -> str | None:
     """Return `url` iff its scheme is http(s) and it has a hostname.
 
-    Rejects `javascript:`, `data:`, `file:`, `gopher:`, and any
-    URL containing Unicode bidi-formatting codepoints
-    (`U+202A`-`U+202E`, `U+2066`-`U+2069`). Used to gate any URL
-    extracted from attacker-controlled HTML (webmention h-card,
-    OG-image source-page extraction, internal-links destinations)
-    before it lands in the DB.
+    Rejects `javascript:`, `data:`, `file:`, `gopher:`, any URL
+    containing Unicode bidi-formatting codepoints
+    (`U+202A`-`U+202E`, `U+2066`-`U+2069`), and any URL containing
+    C0 / DEL control characters (`\\x00`-`\\x1f`, `\\x7f`). The
+    control-char check mirrors `safe_relative_path`: a stored
+    `source_url` containing `\\r`/`\\n` 500s werkzeug's
+    header-value writer when the value is later rendered into a
+    response header or used in a `redirect(...)`, and the rest of
+    the C0 block have no business in an attacker-supplied URL
+    either. Used to gate any URL extracted from attacker-controlled
+    HTML (webmention h-card, OG-image source-page extraction,
+    internal-links destinations) and the webmention receiver's own
+    `source` / `target` inputs before they land in the DB.
     """
     if not url:
         return None
     if any(ord(c) in _BIDI_CODEPOINTS for c in url):
+        return None
+    if any(ord(c) in _CONTROL_CHAR_CODEPOINTS for c in url):
         return None
     parsed = urlparse(url)
     if parsed.scheme.lower() not in {"http", "https"}:
