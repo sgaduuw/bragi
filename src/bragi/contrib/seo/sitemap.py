@@ -9,8 +9,13 @@ content type with the same shape gets sitemap coverage for free.
 
 URL building goes through `spec.url_for(item)`, which returns a
 relative path; the canonical hostname is prefixed at render
-time. Pages' `url_for` walks the parent-slug chain, so there's
-an extra DB lookup per page; fine at personal-blog scale.
+time. Pages' `url_for` walks the parent-slug chain via
+`_resolve_segments`, which would otherwise issue one query per
+ancestor depth per page. We call `prewarm_page_url_cache(db,
+site.id)` before the loop so every page's parent walk hits
+SQLAlchemy's identity map instead of the DB; sitemap generation
+on a deep-doc tree (#172) drops from `K * depth` queries to one
+query for the whole page table.
 
 Entries are sorted by `updated_at` descending across all content
 types so the most recently changed URLs appear first (the
@@ -29,6 +34,7 @@ from sqlalchemy import select
 
 from bragi.core.cache import apply_cache_policy
 from bragi.core.db import SessionLocal
+from bragi.core.url import prewarm_page_url_cache
 
 bp = Blueprint("seo_sitemap", __name__)
 
@@ -49,6 +55,10 @@ def sitemap_xml() -> ResponseReturnValue:
     canonical = (site.canonical_url or "").rstrip("/")
     entries: list[tuple[Any, str, Any]] = []
     with SessionLocal() as db:
+        # Bulk-load the site's pages so every per-row `url_for`'s
+        # parent-chain walk hits the session identity map rather
+        # than the DB. See module docstring for the cost model.
+        prewarm_page_url_cache(db, site.id)
         for spec in specs:
             model = spec.model
             rows = (

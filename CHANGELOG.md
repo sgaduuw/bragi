@@ -7,6 +7,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **Sitemap builder prewarms the page-URL identity map (#172).**
+  `bragi.core.url._resolve_segments` walks a Page's parent chain
+  one `db.get(Page, parent_id)` per ancestor depth, fine for the
+  typical 1-3 CMS depth but pathological in a batch: a sitemap of
+  K pages whose deepest chain is D would have issued `K * D`
+  per-row queries. The pre-v1.11.0 audit (pass 2) flagged this
+  as latent. Fix: new
+  `bragi.core.url.prewarm_page_url_cache(db, site_id)` bulk-loads
+  every Page on the site into the session's identity map; the
+  sitemap builder calls it once before iterating, so every
+  `_resolve_segments` call's ancestor walk hits in-memory rather
+  than the DB. Net cost drops from `K * D` queries to one query
+  for the whole sitemap. Rows are stashed on `db.info` so
+  SQLAlchemy's weak-referenced identity map can't drop them
+  mid-loop. Single-page callers (admin edit, slug-change
+  auto-301) are unchanged on purpose; loading every site page to
+  build one URL would be a regression. Recursive-CTE and
+  denormalised-slug-path alternatives discussed in the issue
+  rejected: identity-map prewarm is strictly smaller and
+  identical in steady-state cost.
 - **Registry fails loud on duplicate plugin registrations (#188).**
   Each `Registry.add_*` method now dedups on the canonical unique
   field (`.name` for content types / importers / OAuth providers /
