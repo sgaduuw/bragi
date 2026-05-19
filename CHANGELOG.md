@@ -6,6 +6,31 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Theme switching now actually changes the rendered output.**
+  v1.14.0 shipped four in-tree themes and the per-Site picker on
+  the site-edit form, but switching the picker had no visible
+  effect: Jinja's `Environment` keeps a process-wide
+  compiled-template cache keyed on template name, so the first
+  request that resolved `delivery/base.html` cached the active
+  theme's compile and every later request from a different site
+  (with a different theme) reused that cached compile without
+  consulting `ThemeAwareLoader` again. Fix: `ThemeAwareLoader`'s
+  `get_source` now returns an `uptodate` callable that returns
+  False whenever the request's active theme differs from the one
+  that loaded the cached source; the delivery app factory pairs
+  this with `app.jinja_env.auto_reload = True` so Jinja honors
+  `uptodate` on every render. Same-theme repeats still hit the
+  cache (uptodate returns True, no reparse); only the
+  cross-theme case forces a recompile. The fallback path is
+  wrapped too so a later theme registration or a site switching
+  from "no theme" to a theme also invalidates the cache. Catch:
+  the existing test fixtures create a fresh `create_delivery_app()`
+  per test, so the cache started empty in every case and the
+  bug never surfaced under CI; a new test now drives two
+  back-to-back requests with different themes through the same
+  app to pin the invariant.
+
 ### Changed
 - **CI actions bumped to latest majors.** The v1.14.0 docker
   build surfaced GitHub's Node.js 20 deprecation warning on
