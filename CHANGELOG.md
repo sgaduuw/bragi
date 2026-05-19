@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-05-19
+
 ### Added
 - **Multi-arch container images (`linux/amd64` +
   `linux/arm64`) (#167).** `.github/workflows/docker.yml` now

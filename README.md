@@ -6,6 +6,44 @@ citizen.
 
 ## Status
 
+1.14.0 shipped 2026-05-19. Theme catalog, multi-arch images, and
+plugin-platform hardening. Added: three new in-tree themes
+(`bragi.contrib.theme_minimal`, `theme_serif`, `theme_terminal`),
+each with `@media (prefers-color-scheme: dark)` and a
+`<meta name="color-scheme" content="light dark">` hint, so every
+shipped theme follows the visitor's OS preference automatically;
+`theme_default` retrofitted with the same dark-mode treatment so
+the auto-light/dark contract is uniform across the in-tree set;
+admin theme picker now lists four options instead of one (#126).
+README gains an "Authoring a third-party theme" section covering
+the `bragi-theme-<slug>` distribution-name convention, the
+`register_theme` hookimpl pattern, the `delivery/base.html` block
+surface a theme must preserve, the `/theme/<slug>/static/<path>`
+URL space, the recommended `prefers-color-scheme: dark` recipe,
+and the install / activate / disable cycle. Container images now
+ship as multi-arch manifest lists covering `linux/amd64` and
+`linux/arm64` on every tag push: Apple Silicon laptops, Ampere /
+Graviton servers, and ARM homelabs run natively rather than under
+QEMU emulation; `docker pull` resolves the right variant for the
+host architecture automatically (#167). Plugin-set boot smoke
+test asserts that `create_admin_app()` and `create_delivery_app()`
+boot cleanly under the real entry-point manifest, that every
+declared entry-point name reaches the running `PluginManager`,
+that every loaded plugin contributes a hookimpl, and that
+back-to-back factory calls both succeed (#169). Changed:
+`Registry.add_*` methods now dedup on the canonical unique field
+(`.name` / `.slug` / `.endpoint`) and raise
+`DuplicateRegistration` on collision instead of bare-appending and
+silently shadowing the second registration; external
+architectural review (2026-05-18) flagged this as a load-bearing
+silent-failure surface (#188). Sitemap builder prewarms the
+page-URL identity map in one bulk SELECT before iterating
+content-type rows, dropping `K * D` per-row queries on a deep
+docs-style page tree to one query for the whole sitemap; rows are
+stashed on `db.info` so SQLAlchemy's weak-referenced identity map
+can't drop them mid-loop (#172). Closes #126, #167, #169, #172,
+#188.
+
 1.13.0 shipped 2026-05-19. Eighth audit-pass rollup plus operator
 ergonomics. Security: webmention receiver gates `source` /
 `target` through the centralised `safe_external_url` (the local
@@ -482,7 +520,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.13.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.14.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
