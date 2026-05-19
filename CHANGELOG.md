@@ -27,7 +27,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   expected slug + label, ships a resolvable `delivery/base.html`
   with the `content` block intact, includes the dark-mode CSS,
   and uses a `PackageLoader` (not a `DictLoader` or filesystem
-  path) so the templates ride inside the wheel.
+  path) so the templates ride inside the wheel. README gains a
+  new "Authoring a third-party theme" section covering the
+  `bragi-theme-<slug>` distribution-name convention, the
+  package layout, the `register_theme` hookimpl pattern, the
+  `delivery/base.html` block surface a theme must preserve, the
+  `/theme/<slug>/static/<path>` static-file URL space, the
+  recommended `prefers-color-scheme: dark` pattern with CSS
+  custom properties, and the install / activate / disable
+  cycle. Same hook surface the in-tree themes use; no
+  internal-only fast path.
 - **Plugin-set boot smoke test (#169).** New
   `tests/integration/test_plugin_set_smoke.py` asserts that
   `create_admin_app()` and `create_delivery_app()` complete
