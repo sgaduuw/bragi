@@ -609,6 +609,9 @@ bragi/
 │       ├── sites/              # Site CRUD admin + alias subcommands
 │       ├── team/               # per-site team management (list / grant / revoke)
 │       ├── theme_default/      # in-tree default theme (registers slug "default")
+│       ├── theme_minimal/      # lean, content-first theme (slug "minimal")
+│       ├── theme_serif/        # long-form reading theme (slug "serif")
+│       ├── theme_terminal/     # monospace dev-focused theme (slug "terminal")
 │       ├── themes/             # file-based theme registry + admin picker
 │       └── webmentions/        # indieweb send + receive + admin moderation
 ├── alembic/                    # migrations
