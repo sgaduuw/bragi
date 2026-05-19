@@ -79,6 +79,19 @@ def create_delivery_app() -> Flask:
     else:
         chain = package_loader
     app.jinja_loader = ThemeAwareLoader(chain)
+    # Jinja's Environment caches compiled templates by name. Once
+    # `delivery/base.html` is compiled under one site's theme,
+    # subsequent requests for the same name from a site with a
+    # different theme return the cached compile and never consult
+    # `ThemeAwareLoader`. `auto_reload=True` makes Jinja invoke the
+    # `uptodate` callable on every render; `ThemeAwareLoader`
+    # returns one that fails whenever the active theme differs
+    # from the one that loaded the cached source. The cache still
+    # functions for same-theme repeats (uptodate returns True, no
+    # reparse); only the cross-theme case invalidates. Without
+    # this pair switching themes in the admin appears to do
+    # nothing.
+    app.jinja_env.auto_reload = True
 
     pm = create_plugin_manager()
     registry = Registry()
