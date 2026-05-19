@@ -609,6 +609,9 @@ bragi/
 │       ├── sites/              # Site CRUD admin + alias subcommands
 │       ├── team/               # per-site team management (list / grant / revoke)
 │       ├── theme_default/      # in-tree default theme (registers slug "default")
+│       ├── theme_minimal/      # lean, content-first theme (slug "minimal")
+│       ├── theme_serif/        # long-form reading theme (slug "serif")
+│       ├── theme_terminal/     # monospace dev-focused theme (slug "terminal")
 │       ├── themes/             # file-based theme registry + admin picker
 │       └── webmentions/        # indieweb send + receive + admin moderation
 ├── alembic/                    # migrations
@@ -620,6 +623,158 @@ bragi/
     ├── core/                   # core middleware / cache / permissions tests
     └── integration/            # full stack lifecycle scenarios
 ```
+
+## Authoring a third-party theme
+
+A theme is a plain Python package that registers a `ThemeSpec` via
+the `register_theme` hook on the `bragi.plugins` entry-point group.
+Same surface the in-tree `theme_default` / `theme_minimal` /
+`theme_serif` / `theme_terminal` use; nothing internal-only.
+
+**Distribution name.** Follow the `bragi-theme-<slug>` convention
+(e.g. `bragi-theme-coral`). It keeps third-party packages
+greppable on PyPI and signals theme-package shape without further
+inspection. The Python import name is independent (`coral_theme`,
+`bragi_theme_coral`, whatever you like); only the distribution
+name follows the convention.
+
+**Package layout.**
+
+```
+bragi-theme-coral/
+├── pyproject.toml
+├── README.md
+└── coral_theme/
+    ├── __init__.py
+    ├── plugin.py
+    ├── templates/
+    │   └── delivery/
+    │       └── base.html
+    └── static/                # optional
+        └── theme.css
+```
+
+**`plugin.py` (the whole file).**
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+
+import jinja2
+
+from bragi.api import ThemeSpec, hookimpl
+
+
+@hookimpl
+def register_theme() -> ThemeSpec:
+    return ThemeSpec(
+        slug="coral",
+        display_name="Coral",
+        template_loader=jinja2.PackageLoader("coral_theme", "templates"),
+        # Drop `static_dir` if your theme inlines its CSS in
+        # `delivery/base.html` (the in-tree themes do).
+        static_dir=Path(__file__).parent / "static",
+    )
+```
+
+**`pyproject.toml` entry-point declaration.**
+
+```toml
+[project.entry-points."bragi.plugins"]
+coral_theme = "coral_theme.plugin"
+```
+
+The entry-point name (`coral_theme` above) must be unique across
+every plugin installed in the deployment; bragi's runtime fails
+loud on collision (#188). Pick a name that includes your slug so
+the `cms plugins list` output (#190) reads naturally.
+
+**Required template: `delivery/base.html`.** Bragi resolves
+`delivery/base.html` against your theme first (via
+`ThemeAwareLoader`) for every Site that selected your slug. Your
+template must preserve the block surface every content-type
+template extends:
+
+| Block | Purpose |
+|---|---|
+| `title` | `<title>` content |
+| `meta` | description / canonical / robots meta tags |
+| `feed_links` | Atom `<link rel="alternate">` |
+| `social_meta` | Open Graph + Twitter Card meta (content templates override) |
+| `jsonld` | JSON-LD `<script>` (content templates override) |
+| `content` | the page body |
+
+Plus the Jinja globals plugins register: `pygments_css_url`,
+`webmention_endpoint_url`, etc. Easiest path: copy
+`bragi.contrib.theme_default`'s `delivery/base.html` as your
+starting scaffold and restyle from there.
+
+**Optional templates: anything under `delivery/`.** A theme that
+ships `delivery/post_detail.html` shadows the post plugin's
+default, etc. Override only the templates you actually want to
+change; the rest fall through to the plugin's own
+`templates/delivery/`.
+
+**Static assets.** If `static_dir` is set, the delivery app
+serves your files at `/theme/<slug>/static/<path>`. Reference
+them from your templates with that URL:
+
+```html
+<link rel="stylesheet" href="/theme/coral/static/theme.css">
+```
+
+The path is reserved; `bragi.contrib.themes` owns the
+blueprint that serves it.
+
+**Automatic light / dark.** The in-tree themes all use the
+`@media (prefers-color-scheme: dark)` pattern with CSS custom
+properties. Recommended:
+
+```html
+<meta name="color-scheme" content="light dark">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #222222;
+    /* ... */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0d0d;
+      --fg: #f3f4f6;
+      /* ... */
+    }
+  }
+</style>
+```
+
+Cribbed verbatim from `bragi.contrib.theme_minimal`; pick the
+palette that suits your theme.
+
+**Installing.** Install your package into the same Python
+environment as bragi (the `admin` and `delivery` containers, or
+`poetry add` in a dev tree):
+
+```sh
+pip install bragi-theme-coral
+```
+
+Restart both apps; the entry-point group is read at process
+boot. Once installed, your slug appears in the admin theme
+picker on the site-edit form, and `cms plugins list` reports
+your distribution name + version under "origin".
+
+**Activating.** Per-Site selection via the admin site-edit
+form, or set `Site.theme = "coral"` in the DB. NULL means "use
+the bundled default theme"; an unknown slug falls back to
+default with a logged warning rather than 500ing the page.
+
+**Disabling a bundled theme.** Comment its line under
+`[project.entry-points."bragi.plugins"]` in bragi's
+`pyproject.toml` and rebuild the images; no internal fast path
+keeps it around. Same mechanism for any bundled plugin.
 
 ## Versioning and releases
 

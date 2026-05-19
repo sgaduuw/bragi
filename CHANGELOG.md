@@ -7,6 +7,36 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Three new in-tree themes plus automatic light / dark on
+  every theme (#126).** `bragi.contrib.theme_minimal` (clean
+  sans-serif, narrow column), `bragi.contrib.theme_serif`
+  (long-form reading, serif body, paper-tone backgrounds), and
+  `bragi.contrib.theme_terminal` (all-monospace, Solarized
+  palette, bracket-delimited section markers) all ship under
+  the `bragi.plugins` entry-point group with slugs `"minimal"`,
+  `"serif"`, and `"terminal"`. Each theme's `delivery/base.html`
+  carries a `<meta name="color-scheme" content="light dark">`
+  hint plus a `@media (prefers-color-scheme: dark)` block, so
+  every shipped theme follows the visitor's OS preference
+  automatically. `theme_default` gained the same light / dark
+  treatment in lockstep so the contract is uniform across the
+  whole in-tree set. The admin theme picker now lists four
+  options instead of one; `Site.theme = "minimal"` (etc.)
+  selects them with no schema change. Backed by a parametrized
+  test catalog that asserts each theme registers with the
+  expected slug + label, ships a resolvable `delivery/base.html`
+  with the `content` block intact, includes the dark-mode CSS,
+  and uses a `PackageLoader` (not a `DictLoader` or filesystem
+  path) so the templates ride inside the wheel. README gains a
+  new "Authoring a third-party theme" section covering the
+  `bragi-theme-<slug>` distribution-name convention, the
+  package layout, the `register_theme` hookimpl pattern, the
+  `delivery/base.html` block surface a theme must preserve, the
+  `/theme/<slug>/static/<path>` static-file URL space, the
+  recommended `prefers-color-scheme: dark` pattern with CSS
+  custom properties, and the install / activate / disable
+  cycle. Same hook surface the in-tree themes use; no
+  internal-only fast path.
 - **Plugin-set boot smoke test (#169).** New
   `tests/integration/test_plugin_set_smoke.py` asserts that
   `create_admin_app()` and `create_delivery_app()` complete
