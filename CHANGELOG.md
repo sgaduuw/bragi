@@ -6,6 +6,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **CI actions bumped to latest majors.** The v1.14.0 docker
+  build surfaced GitHub's Node.js 20 deprecation warning on
+  every `actions/*` and `docker/*` action used in the workflows
+  (forced to Node.js 24 default starting 2026-06-02; Node.js 20
+  removed from runners 2026-09-16). Both `ci.yml` and
+  `docker.yml` now pin the current major of each action:
+  `actions/checkout@v6`, `actions/setup-python@v6`,
+  `docker/setup-qemu-action@v4`, `docker/setup-buildx-action@v4`,
+  `docker/login-action@v4`, `docker/metadata-action@v6`,
+  `docker/build-push-action@v7`. Input shapes are unchanged
+  across all bumps (verified by re-running CI on the bumps PR);
+  the only runtime delta is that each action now runs under
+  Node.js 24, which the runners ship by default.
+
+## [1.14.1] - 2026-05-20
+
 ### Fixed
 - **Theme switching now actually changes the rendered output.**
   v1.14.0 shipped four in-tree themes and the per-Site picker on
@@ -30,21 +47,6 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bug never surfaced under CI; a new test now drives two
   back-to-back requests with different themes through the same
   app to pin the invariant.
-
-### Changed
-- **CI actions bumped to latest majors.** The v1.14.0 docker
-  build surfaced GitHub's Node.js 20 deprecation warning on
-  every `actions/*` and `docker/*` action used in the workflows
-  (forced to Node.js 24 default starting 2026-06-02; Node.js 20
-  removed from runners 2026-09-16). Both `ci.yml` and
-  `docker.yml` now pin the current major of each action:
-  `actions/checkout@v6`, `actions/setup-python@v6`,
-  `docker/setup-qemu-action@v4`, `docker/setup-buildx-action@v4`,
-  `docker/login-action@v4`, `docker/metadata-action@v6`,
-  `docker/build-push-action@v7`. Input shapes are unchanged
-  across all bumps (verified by re-running CI on the bumps PR);
-  the only runtime delta is that each action now runs under
-  Node.js 24, which the runners ship by default.
 
 ## [1.14.0] - 2026-05-19
 

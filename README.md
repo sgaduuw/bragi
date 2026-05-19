@@ -6,6 +6,24 @@ citizen.
 
 ## Status
 
+1.14.1 shipped 2026-05-20. Hotfix for theme switching: the four
+in-tree themes shipped in v1.14.0 registered correctly and the
+per-Site picker saved correctly, but switching the picker had no
+visible effect on the public side. Jinja's `Environment` keeps a
+process-wide compiled-template cache keyed on template name, so
+the first request to resolve `delivery/base.html` cached that
+theme's compile and every later request from a different site
+reused the cache without consulting `ThemeAwareLoader` again.
+Whichever site rendered first effectively pinned the rendered
+theme for the lifetime of the process. Fix: `ThemeAwareLoader`'s
+`get_source` returns an `uptodate` callable that snapshots the
+resolved theme slug at load time; the delivery app factory now
+sets `jinja_env.auto_reload = True` so Jinja honors `uptodate`
+on every render. Same-theme repeats still hit the cache; only
+the cross-theme case forces a recompile. Operators on v1.14.0
+should bump `BRAGI_TAG=v1.14.1` and restart both web services to
+pick the fix up.
+
 1.14.0 shipped 2026-05-19. Theme catalog, multi-arch images, and
 plugin-platform hardening. Added: three new in-tree themes
 (`bragi.contrib.theme_minimal`, `theme_serif`, `theme_terminal`),
@@ -520,7 +538,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.14.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.14.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
