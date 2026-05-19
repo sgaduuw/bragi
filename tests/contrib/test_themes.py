@@ -188,6 +188,114 @@ def test_theme_loader_falls_back_on_unknown_slug(
     assert resp.status_code == 200
 
 
+def test_theme_swap_between_sites_invalidates_template_cache(
+    db_session: Session,
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    """Two sites in the same app, each picking a different theme, must
+    each render their own theme's `delivery/base.html` even though
+    they share Jinja's Environment-level template cache.
+
+    Pre-fix bug: Jinja caches the compiled template keyed on the
+    template *name* (`delivery/base.html`) the first time the
+    `ThemeAwareLoader` resolves it. The next request, even from a
+    site with a different theme, gets the cached compile back from
+    the env without consulting our loader again. The result is
+    that whichever theme rendered first effectively "wins" for the
+    lifetime of the process; switching the theme in the admin
+    appears to do nothing.
+
+    Fix: `auto_reload=True` on the delivery jinja_env plus a
+    theme-aware `uptodate` callable from `ThemeAwareLoader` that
+    forces recompile when the active site's theme has changed
+    since the cached version was loaded.
+    """
+    owner = make_test_user(db_session)
+    db_session.add(
+        Site(
+            slug="alpha",
+            hostname="alpha.example.com",
+            title="Alpha",
+            canonical_url="https://alpha.example.com",
+            active=True,
+            theme="alpha-theme",
+            owner_user_id=owner.id,
+        )
+    )
+    db_session.add(
+        Site(
+            slug="beta",
+            hostname="beta.example.com",
+            title="Beta",
+            canonical_url="https://beta.example.com",
+            active=True,
+            theme="beta-theme",
+            owner_user_id=owner.id,
+        )
+    )
+    db_session.commit()
+
+    app = create_delivery_app()
+    # Two distinct theme stubs so we can tell from the response
+    # body which one rendered. Both ship a `delivery/base.html`
+    # so they compete for the same env-cache slot.
+    app.extensions["registry"].add_theme(
+        ThemeSpec(
+            slug="alpha-theme",
+            display_name="Alpha",
+            template_loader=jinja2.DictLoader(
+                {
+                    "delivery/base.html": (
+                        "<!doctype html><html><body>ALPHA_BASE"
+                        "{% block content %}{% endblock %}</body></html>"
+                    )
+                }
+            ),
+        )
+    )
+    app.extensions["registry"].add_theme(
+        ThemeSpec(
+            slug="beta-theme",
+            display_name="Beta",
+            template_loader=jinja2.DictLoader(
+                {
+                    "delivery/base.html": (
+                        "<!doctype html><html><body>BETA_BASE"
+                        "{% block content %}{% endblock %}</body></html>"
+                    )
+                }
+            ),
+        )
+    )
+
+    @app.route("/__base")
+    def _base():
+        from flask import render_template_string
+
+        return render_template_string(
+            "{% extends 'delivery/base.html' %}{% block content %}.{% endblock %}"
+        )
+
+    client = app.test_client()
+    # Order matters: alpha first warms the env cache. beta then
+    # must NOT see alpha's cached compile.
+    resp_alpha = client.get("/__base", headers={"Host": "alpha.example.com"})
+    assert resp_alpha.status_code == 200
+    assert b"ALPHA_BASE" in resp_alpha.data
+
+    resp_beta = client.get("/__base", headers={"Host": "beta.example.com"})
+    assert resp_beta.status_code == 200
+    assert b"BETA_BASE" in resp_beta.data, (
+        "beta-themed site rendered alpha's base; the Jinja env-level "
+        "template cache served the cached compile from the prior "
+        "alpha request without consulting `ThemeAwareLoader`"
+    )
+    # And alpha again, to make sure beta didn't poison the cache
+    # in the opposite direction either.
+    resp_alpha_again = client.get("/__base", headers={"Host": "alpha.example.com"})
+    assert b"ALPHA_BASE" in resp_alpha_again.data
+
+
 def test_theme_loader_outside_request_context_is_safe() -> None:
     """`ThemeAwareLoader` must not raise when there's no Flask context.
     Tests that import the loader directly (e.g. unit tests) shouldn't
