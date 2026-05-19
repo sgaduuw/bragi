@@ -7,6 +7,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Multi-arch container images (`linux/amd64` +
+  `linux/arm64`) (#167).** `.github/workflows/docker.yml` now
+  registers QEMU binfmt handlers and passes `platforms:
+  linux/amd64,linux/arm64` to `docker/build-push-action`, so
+  every `v*.*.*` tag push produces a multi-arch manifest list
+  for both `bragi-admin` and `bragi-delivery`. `docker pull`
+  resolves the right variant for the host architecture
+  automatically. Apple Silicon laptops, Ampere / Graviton
+  servers, and ARM homelabs (Raspberry Pi, ...) now run native
+  rather than through QEMU emulation. Both Dockerfiles are
+  arch-agnostic by construction (`python:3.12-slim` is itself a
+  multi-arch manifest list; every runtime dep ships arm64
+  wheels), so no Dockerfile change was needed. Build time on
+  tag push roughly doubles (arm64 builds run under QEMU
+  emulation on the amd64 GHA runner); release is not a
+  hot-path workflow, so the cost is paid once per tag rather
+  than on every PR.
 - **Three new in-tree themes plus automatic light / dark on
   every theme (#126).** `bragi.contrib.theme_minimal` (clean
   sans-serif, narrow column), `bragi.contrib.theme_serif`
