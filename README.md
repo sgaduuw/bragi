@@ -6,6 +6,44 @@ citizen.
 
 ## Status
 
+1.14.0 shipped 2026-05-19. Theme catalog, multi-arch images, and
+plugin-platform hardening. Added: three new in-tree themes
+(`bragi.contrib.theme_minimal`, `theme_serif`, `theme_terminal`),
+each with `@media (prefers-color-scheme: dark)` and a
+`<meta name="color-scheme" content="light dark">` hint, so every
+shipped theme follows the visitor's OS preference automatically;
+`theme_default` retrofitted with the same dark-mode treatment so
+the auto-light/dark contract is uniform across the in-tree set;
+admin theme picker now lists four options instead of one (#126).
+README gains an "Authoring a third-party theme" section covering
+the `bragi-theme-<slug>` distribution-name convention, the
+`register_theme` hookimpl pattern, the `delivery/base.html` block
+surface a theme must preserve, the `/theme/<slug>/static/<path>`
+URL space, the recommended `prefers-color-scheme: dark` recipe,
+and the install / activate / disable cycle. Container images now
+ship as multi-arch manifest lists covering `linux/amd64` and
+`linux/arm64` on every tag push: Apple Silicon laptops, Ampere /
+Graviton servers, and ARM homelabs run natively rather than under
+QEMU emulation; `docker pull` resolves the right variant for the
+host architecture automatically (#167). Plugin-set boot smoke
+test asserts that `create_admin_app()` and `create_delivery_app()`
+boot cleanly under the real entry-point manifest, that every
+declared entry-point name reaches the running `PluginManager`,
+that every loaded plugin contributes a hookimpl, and that
+back-to-back factory calls both succeed (#169). Changed:
+`Registry.add_*` methods now dedup on the canonical unique field
+(`.name` / `.slug` / `.endpoint`) and raise
+`DuplicateRegistration` on collision instead of bare-appending and
+silently shadowing the second registration; external
+architectural review (2026-05-18) flagged this as a load-bearing
+silent-failure surface (#188). Sitemap builder prewarms the
+page-URL identity map in one bulk SELECT before iterating
+content-type rows, dropping `K * D` per-row queries on a deep
+docs-style page tree to one query for the whole sitemap; rows are
+stashed on `db.info` so SQLAlchemy's weak-referenced identity map
+can't drop them mid-loop (#172). Closes #126, #167, #169, #172,
+#188.
+
 1.13.0 shipped 2026-05-19. Eighth audit-pass rollup plus operator
 ergonomics. Security: webmention receiver gates `source` /
 `target` through the centralised `safe_external_url` (the local
@@ -224,7 +262,12 @@ are unchanged.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
-`bragi-delivery:vX.Y.Z` on every tag push.
+`bragi-delivery:vX.Y.Z` on every tag push, as multi-arch
+manifest lists covering `linux/amd64` and `linux/arm64`. `docker
+pull` resolves the right variant for the host architecture
+automatically; Apple Silicon laptops, Ampere / Graviton servers,
+and ARM homelabs run natively rather than through QEMU
+emulation.
 
 ## What bragi is
 
@@ -477,7 +520,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.13.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.14.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -609,6 +652,9 @@ bragi/
 │       ├── sites/              # Site CRUD admin + alias subcommands
 │       ├── team/               # per-site team management (list / grant / revoke)
 │       ├── theme_default/      # in-tree default theme (registers slug "default")
+│       ├── theme_minimal/      # lean, content-first theme (slug "minimal")
+│       ├── theme_serif/        # long-form reading theme (slug "serif")
+│       ├── theme_terminal/     # monospace dev-focused theme (slug "terminal")
 │       ├── themes/             # file-based theme registry + admin picker
 │       └── webmentions/        # indieweb send + receive + admin moderation
 ├── alembic/                    # migrations
@@ -621,6 +667,158 @@ bragi/
     └── integration/            # full stack lifecycle scenarios
 ```
 
+## Authoring a third-party theme
+
+A theme is a plain Python package that registers a `ThemeSpec` via
+the `register_theme` hook on the `bragi.plugins` entry-point group.
+Same surface the in-tree `theme_default` / `theme_minimal` /
+`theme_serif` / `theme_terminal` use; nothing internal-only.
+
+**Distribution name.** Follow the `bragi-theme-<slug>` convention
+(e.g. `bragi-theme-coral`). It keeps third-party packages
+greppable on PyPI and signals theme-package shape without further
+inspection. The Python import name is independent (`coral_theme`,
+`bragi_theme_coral`, whatever you like); only the distribution
+name follows the convention.
+
+**Package layout.**
+
+```
+bragi-theme-coral/
+├── pyproject.toml
+├── README.md
+└── coral_theme/
+    ├── __init__.py
+    ├── plugin.py
+    ├── templates/
+    │   └── delivery/
+    │       └── base.html
+    └── static/                # optional
+        └── theme.css
+```
+
+**`plugin.py` (the whole file).**
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+
+import jinja2
+
+from bragi.api import ThemeSpec, hookimpl
+
+
+@hookimpl
+def register_theme() -> ThemeSpec:
+    return ThemeSpec(
+        slug="coral",
+        display_name="Coral",
+        template_loader=jinja2.PackageLoader("coral_theme", "templates"),
+        # Drop `static_dir` if your theme inlines its CSS in
+        # `delivery/base.html` (the in-tree themes do).
+        static_dir=Path(__file__).parent / "static",
+    )
+```
+
+**`pyproject.toml` entry-point declaration.**
+
+```toml
+[project.entry-points."bragi.plugins"]
+coral_theme = "coral_theme.plugin"
+```
+
+The entry-point name (`coral_theme` above) must be unique across
+every plugin installed in the deployment; bragi's runtime fails
+loud on collision (#188). Pick a name that includes your slug so
+the `cms plugins list` output (#190) reads naturally.
+
+**Required template: `delivery/base.html`.** Bragi resolves
+`delivery/base.html` against your theme first (via
+`ThemeAwareLoader`) for every Site that selected your slug. Your
+template must preserve the block surface every content-type
+template extends:
+
+| Block | Purpose |
+|---|---|
+| `title` | `<title>` content |
+| `meta` | description / canonical / robots meta tags |
+| `feed_links` | Atom `<link rel="alternate">` |
+| `social_meta` | Open Graph + Twitter Card meta (content templates override) |
+| `jsonld` | JSON-LD `<script>` (content templates override) |
+| `content` | the page body |
+
+Plus the Jinja globals plugins register: `pygments_css_url`,
+`webmention_endpoint_url`, etc. Easiest path: copy
+`bragi.contrib.theme_default`'s `delivery/base.html` as your
+starting scaffold and restyle from there.
+
+**Optional templates: anything under `delivery/`.** A theme that
+ships `delivery/post_detail.html` shadows the post plugin's
+default, etc. Override only the templates you actually want to
+change; the rest fall through to the plugin's own
+`templates/delivery/`.
+
+**Static assets.** If `static_dir` is set, the delivery app
+serves your files at `/theme/<slug>/static/<path>`. Reference
+them from your templates with that URL:
+
+```html
+<link rel="stylesheet" href="/theme/coral/static/theme.css">
+```
+
+The path is reserved; `bragi.contrib.themes` owns the
+blueprint that serves it.
+
+**Automatic light / dark.** The in-tree themes all use the
+`@media (prefers-color-scheme: dark)` pattern with CSS custom
+properties. Recommended:
+
+```html
+<meta name="color-scheme" content="light dark">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #222222;
+    /* ... */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0d0d;
+      --fg: #f3f4f6;
+      /* ... */
+    }
+  }
+</style>
+```
+
+Cribbed verbatim from `bragi.contrib.theme_minimal`; pick the
+palette that suits your theme.
+
+**Installing.** Install your package into the same Python
+environment as bragi (the `admin` and `delivery` containers, or
+`poetry add` in a dev tree):
+
+```sh
+pip install bragi-theme-coral
+```
+
+Restart both apps; the entry-point group is read at process
+boot. Once installed, your slug appears in the admin theme
+picker on the site-edit form, and `cms plugins list` reports
+your distribution name + version under "origin".
+
+**Activating.** Per-Site selection via the admin site-edit
+form, or set `Site.theme = "coral"` in the DB. NULL means "use
+the bundled default theme"; an unknown slug falls back to
+default with a logged warning rather than 500ing the page.
+
+**Disabling a bundled theme.** Comment its line under
+`[project.entry-points."bragi.plugins"]` in bragi's
+`pyproject.toml` and rebuild the images; no internal fast path
+keeps it around. Same mechanism for any bundled plugin.
+
 ## Versioning and releases
 
 The version lives in `pyproject.toml` (`version` field), read at
@@ -628,7 +826,8 @@ runtime via `importlib.metadata` and exposed as `bragi.__version__`.
 
 Production images are tagged `bragi-admin:vX.Y.Z` and
 `bragi-delivery:vX.Y.Z` on the GitHub Container Registry, built by
-the `docker.yml` workflow on git tag push.
+the `docker.yml` workflow on git tag push as multi-arch manifest
+lists covering `linux/amd64` and `linux/arm64`.
 
 PyPI publication is not on the path (the `bragi` distribution name
 is held by an unrelated project); ship is container-only.

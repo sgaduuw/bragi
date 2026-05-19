@@ -1,6 +1,6 @@
 [project]
 name = "bragi"
-version = "1.13.0"
+version = "1.14.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
@@ -61,6 +61,9 @@ indexnow = "bragi.contrib.indexnow.plugin"
 search = "bragi.contrib.search.plugin"
 themes = "bragi.contrib.themes.plugin"
 theme_default = "bragi.contrib.theme_default.plugin"
+theme_minimal = "bragi.contrib.theme_minimal.plugin"
+theme_serif = "bragi.contrib.theme_serif.plugin"
+theme_terminal = "bragi.contrib.theme_terminal.plugin"
 embeds = "bragi.contrib.embeds.plugin"
 internal_links = "bragi.contrib.internal_links.plugin"
 markdown_extras = "bragi.contrib.markdown_extras.plugin"

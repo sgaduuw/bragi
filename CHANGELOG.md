@@ -6,6 +6,118 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-05-19
+
+### Added
+- **Multi-arch container images (`linux/amd64` +
+  `linux/arm64`) (#167).** `.github/workflows/docker.yml` now
+  registers QEMU binfmt handlers and passes `platforms:
+  linux/amd64,linux/arm64` to `docker/build-push-action`, so
+  every `v*.*.*` tag push produces a multi-arch manifest list
+  for both `bragi-admin` and `bragi-delivery`. `docker pull`
+  resolves the right variant for the host architecture
+  automatically. Apple Silicon laptops, Ampere / Graviton
+  servers, and ARM homelabs (Raspberry Pi, ...) now run native
+  rather than through QEMU emulation. Both Dockerfiles are
+  arch-agnostic by construction (`python:3.12-slim` is itself a
+  multi-arch manifest list; every runtime dep ships arm64
+  wheels), so no Dockerfile change was needed. Build time on
+  tag push roughly doubles (arm64 builds run under QEMU
+  emulation on the amd64 GHA runner); release is not a
+  hot-path workflow, so the cost is paid once per tag rather
+  than on every PR.
+- **Three new in-tree themes plus automatic light / dark on
+  every theme (#126).** `bragi.contrib.theme_minimal` (clean
+  sans-serif, narrow column), `bragi.contrib.theme_serif`
+  (long-form reading, serif body, paper-tone backgrounds), and
+  `bragi.contrib.theme_terminal` (all-monospace, Solarized
+  palette, bracket-delimited section markers) all ship under
+  the `bragi.plugins` entry-point group with slugs `"minimal"`,
+  `"serif"`, and `"terminal"`. Each theme's `delivery/base.html`
+  carries a `<meta name="color-scheme" content="light dark">`
+  hint plus a `@media (prefers-color-scheme: dark)` block, so
+  every shipped theme follows the visitor's OS preference
+  automatically. `theme_default` gained the same light / dark
+  treatment in lockstep so the contract is uniform across the
+  whole in-tree set. The admin theme picker now lists four
+  options instead of one; `Site.theme = "minimal"` (etc.)
+  selects them with no schema change. Backed by a parametrized
+  test catalog that asserts each theme registers with the
+  expected slug + label, ships a resolvable `delivery/base.html`
+  with the `content` block intact, includes the dark-mode CSS,
+  and uses a `PackageLoader` (not a `DictLoader` or filesystem
+  path) so the templates ride inside the wheel. README gains a
+  new "Authoring a third-party theme" section covering the
+  `bragi-theme-<slug>` distribution-name convention, the
+  package layout, the `register_theme` hookimpl pattern, the
+  `delivery/base.html` block surface a theme must preserve, the
+  `/theme/<slug>/static/<path>` static-file URL space, the
+  recommended `prefers-color-scheme: dark` pattern with CSS
+  custom properties, and the install / activate / disable
+  cycle. Same hook surface the in-tree themes use; no
+  internal-only fast path.
+- **Plugin-set boot smoke test (#169).** New
+  `tests/integration/test_plugin_set_smoke.py` asserts that
+  `create_admin_app()` and `create_delivery_app()` complete
+  without exception under the real `bragi.plugins` entry-point
+  manifest, that every declared entry-point name in
+  `pyproject.toml` is present in the running `PluginManager`
+  (silently-dropped entry-points fail loud), that every loaded
+  plugin contributes at least one hookimpl (catches a plugin
+  loaded with a stale `@hookimpl` marker or empty body), and
+  that back-to-back factory calls both succeed (regression-pins
+  the per-app `Registry` invariant against a future
+  module-level state refactor that would trip #188's
+  duplicate-registration guard). Pluggy load order across
+  `entry_points` discovery isn't deterministic; the other
+  integration tests touch specific flows but none assert the
+  whole manifest boots in isolation. Filed deliberately as
+  deferred during the v1.11.0 audit (pass 2).
+
+### Changed
+- **Sitemap builder prewarms the page-URL identity map (#172).**
+  `bragi.core.url._resolve_segments` walks a Page's parent chain
+  one `db.get(Page, parent_id)` per ancestor depth, fine for the
+  typical 1-3 CMS depth but pathological in a batch: a sitemap of
+  K pages whose deepest chain is D would have issued `K * D`
+  per-row queries. The pre-v1.11.0 audit (pass 2) flagged this
+  as latent. Fix: new
+  `bragi.core.url.prewarm_page_url_cache(db, site_id)` bulk-loads
+  every Page on the site into the session's identity map; the
+  sitemap builder calls it once before iterating, so every
+  `_resolve_segments` call's ancestor walk hits in-memory rather
+  than the DB. Net cost drops from `K * D` queries to one query
+  for the whole sitemap. Rows are stashed on `db.info` so
+  SQLAlchemy's weak-referenced identity map can't drop them
+  mid-loop. Single-page callers (admin edit, slug-change
+  auto-301) are unchanged on purpose; loading every site page to
+  build one URL would be a regression. Recursive-CTE and
+  denormalised-slug-path alternatives discussed in the issue
+  rejected: identity-map prewarm is strictly smaller and
+  identical in steady-state cost.
+- **Registry fails loud on duplicate plugin registrations (#188).**
+  Each `Registry.add_*` method now dedups on the canonical unique
+  field (`.name` for content types / importers / OAuth providers /
+  auth methods / storage backends / image processors / search
+  backends, `.slug` for themes, `.endpoint` for admin nav items)
+  and raises `bragi.core.registry.DuplicateRegistration` when a
+  second spec claims the same key. Pre-v1.14.0 the bare
+  list-append silently shadowed the second registration: a
+  third-party plugin reusing `name="post"` (or `slug="default"`,
+  etc.) failed open with its registration dead and no log line.
+  External architectural review (2026-05-18) flagged this as a
+  silent-failure surface. The error message quotes the colliding
+  kind + key and nudges operators to `cms plugins list` (#190)
+  for triage; per-spec ownership tracking via pluggy's
+  hook-caller introspection (so the error can name the offending
+  plugin directly) remains a follow-up. The complementary
+  `Registry.freeze()` proposal from the review is deferred: it
+  would close the mutate-after-boot surface but breaks the three
+  test sites in `tests/contrib/test_themes.py` that inject test
+  themes through `app.extensions["registry"]` after factory
+  return, and the bug it prevents has not been observed in
+  practice.
+
 ## [1.13.0] - 2026-05-19
 
 ### Security

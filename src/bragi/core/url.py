@@ -31,6 +31,16 @@ _TAG_SEGMENT_RE = re.compile(r"^[a-z0-9-]+$")
 def _resolve_segments(db: Session, page: Page) -> list[str]:
     """Walk the parent chain root-first, returning slugs.
 
+    Per ancestor walked, this issues one `db.get(Page, parent_id)`
+    call. SQLAlchemy's identity map short-circuits the round-trip
+    when the parent row is already attached to `db`, so a batch
+    caller that pre-loads the site's pages (see
+    `prewarm_page_url_cache`) reduces the cost from O(depth)
+    queries per call to O(1) queries for the whole batch. Without
+    prewarm a single-page caller pays O(depth) queries, which is
+    fine at typical CMS depth (1-3) but pathological for a
+    deep-doc tree iterated in a loop (#172).
+
     Defends against cycles even though admin validation should
     prevent them; a corrupted DB shouldn't 500 a render.
     """
@@ -47,6 +57,35 @@ def _resolve_segments(db: Session, page: Page) -> list[str]:
         cursor = db.get(Page, cursor.parent_id)
     segments.reverse()
     return segments
+
+
+def prewarm_page_url_cache(db: Session, site_id: int) -> None:
+    """Load every Page on `site_id` into `db`'s identity map.
+
+    After this call, `_resolve_segments`'s `db.get(Page, parent_id)`
+    look-ups hit SQLAlchemy's identity map rather than round-trip
+    to the database, so building K page URLs on a site whose
+    deepest chain is D queries the DB once for the whole batch
+    instead of K * D times (#172). Idempotent: a second call on
+    the same session is a no-op-and-a-half (the rows are already
+    attached; SQLAlchemy still does the SELECT, but the result
+    rows merge into the existing entities).
+
+    Batch callers (sitemap.xml builder, future bulk-redirect
+    audit) should call this once before iterating; single-page
+    callers (admin edit, slug-change auto-301) gain nothing from
+    it and shouldn't pay the cost of fetching every page on the
+    site.
+
+    The fetched rows are stashed on `db.info` so SQLAlchemy's
+    weak-referenced identity map can't drop them mid-loop: every
+    map entry is a `weakref.ref`, so without a durable strong
+    reference the GC reclaims the rows immediately after `.all()`
+    returns and the next `db.get(Page, ...)` round-trips to the DB.
+    """
+    rows = db.execute(select(Page).where(Page.site_id == site_id)).scalars().all()
+    bucket = db.info.setdefault("_bragi_prewarmed_pages", {})
+    bucket[site_id] = rows
 
 
 def page_url_for(page: Page, *, db: Session | None = None) -> str:

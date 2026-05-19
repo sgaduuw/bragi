@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}{{ site.title if site else 'bragi' }}{% endblock %}</title>
   {% block meta %}
     {% if meta_description %}<meta name="description" content="{{ meta_description }}">{% endif %}
@@ -11,69 +12,70 @@
   {% endblock %}
   {% block feed_links %}{% if site %}<link rel="alternate" type="application/atom+xml" title="{{ site.title }}" href="/feed.xml">{% endif %}{% endblock %}
   {% if webmention_endpoint_url is defined and webmention_endpoint_url() %}<link rel="webmention" href="{{ webmention_endpoint_url() }}">{% endif %}
-  {# Plugin-contributed stylesheets. Each plugin that needs one
-     exposes a Jinja global (e.g. `pygments_css_url`) via
-     `register_template_globals`; this list grows organically. #}
   {% if pygments_css_url is defined %}<link rel="stylesheet" href="{{ pygments_css_url }}">{% endif %}
-  {% block social_meta %}{# Content-type templates override this with og:* and twitter:* tags. #}{% endblock %}
-  {% block jsonld %}{# Content-type templates override this with a JSON-LD <script>. #}{% endblock %}
-  <meta name="color-scheme" content="light dark">
+  {% block social_meta %}{% endblock %}
+  {% block jsonld %}{% endblock %}
   <style>
     :root {
       color-scheme: light dark;
       --bg: #ffffff;
-      --fg: #222222;
-      --muted: #777777;
-      --rule: #dddddd;
-      --pre-bg: #f5f5f5;
-      --aside-bg: #f7f7f5;
-      --aside-rule: #e2e2dc;
-      --footnote-fg: #555555;
-      --footer-fg: #888888;
-      --link: #1d4ed8;
+      --fg: #111111;
+      --muted: #6b7280;
+      --rule: #e5e7eb;
+      --pre-bg: #f3f4f6;
+      --aside-bg: #f9fafb;
+      --aside-rule: #e5e7eb;
+      --footnote-fg: #4b5563;
+      --footer-fg: #9ca3af;
+      --link: #2563eb;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #15171a;
-        --fg: #e6e6e6;
-        --muted: #9aa0a6;
-        --rule: #2a2d31;
-        --pre-bg: #1f2227;
-        --aside-bg: #1c1f24;
-        --aside-rule: #2a2d31;
-        --footnote-fg: #b0b3b8;
-        --footer-fg: #8a8f97;
-        --link: #7aa2f7;
+        --bg: #0d0d0d;
+        --fg: #f3f4f6;
+        --muted: #9ca3af;
+        --rule: #1f2024;
+        --pre-bg: #161718;
+        --aside-bg: #131416;
+        --aside-rule: #1f2024;
+        --footnote-fg: #b3b8c0;
+        --footer-fg: #6b7280;
+        --link: #93c5fd;
       }
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      max-width: 42rem;
-      margin: 2rem auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+      max-width: 36rem;
+      margin: 3rem auto;
       padding: 0 1rem;
       color: var(--fg);
       background: var(--bg);
-      line-height: 1.6;
+      line-height: 1.65;
     }
     a { color: var(--link); }
-    header.site { margin-bottom: 2rem; border-bottom: 1px solid var(--rule); padding-bottom: 1rem; }
-    header.site a.brand { color: inherit; text-decoration: none; font-weight: 700; }
-    article header { margin-bottom: 1.5rem; }
+    h1, h2, h3 { line-height: 1.25; letter-spacing: -0.01em; }
+    h1 { font-weight: 700; font-size: 1.875rem; }
+    h2 { font-weight: 600; font-size: 1.375rem; margin-top: 2rem; }
+    h3 { font-weight: 600; font-size: 1.125rem; }
+    header.site { margin-bottom: 2.5rem; }
+    header.site a.brand { color: inherit; text-decoration: none; font-weight: 600; font-size: 1rem; letter-spacing: 0.01em; }
+    article header { margin-bottom: 1.25rem; }
     article h1 { margin-bottom: 0.25rem; }
-    article .meta { color: var(--muted); font-size: 0.9em; }
-    pre { overflow-x: auto; padding: 0.75rem; background: var(--pre-bg); border-radius: 4px; }
-    code { font-family: ui-monospace, Menlo, Consolas, monospace; }
-    footer.site { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--footer-fg); font-size: 0.85em; }
-    /* Embeds plugin: responsive 16:9 wrapper + click-to-load thumbnail. */
+    article .meta { color: var(--muted); font-size: 0.875em; }
+    pre { overflow-x: auto; padding: 0.875rem 1rem; background: var(--pre-bg); border-radius: 6px; font-size: 0.9em; }
+    code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+    p > code, li > code { padding: 0.1em 0.3em; background: var(--pre-bg); border-radius: 3px; font-size: 0.9em; }
+    footer.site { margin-top: 4rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--footer-fg); font-size: 0.8em; }
+    /* Embeds plugin. */
     .bragi-embed { margin: 1.5rem 0; }
-    .bragi-embed--youtube { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 4px; overflow: hidden; }
+    .bragi-embed--youtube { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
     .bragi-embed--youtube iframe { width: 100%; height: 100%; border: 0; }
     .bragi-embed--youtube-cto button { position: relative; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; }
     .bragi-embed--youtube-cto img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .bragi-embed--youtube-cto .bragi-embed-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 4rem; color: #fff; text-shadow: 0 0 12px rgba(0, 0, 0, 0.7); }
-    .bragi-embed--pending { padding: 0.75rem 1rem; background: var(--aside-bg); border: 1px solid var(--aside-rule); border-radius: 4px; }
+    .bragi-embed--pending { padding: 0.75rem 1rem; background: var(--aside-bg); border: 1px solid var(--aside-rule); border-radius: 6px; }
     .bragi-embed--pending a { word-break: break-all; }
-    /* markdown-it-footnote: numeric inline ref + collected list at the end. */
+    /* Footnotes. */
     sup.footnote-ref { font-size: 0.75em; line-height: 0; vertical-align: super; }
     sup.footnote-ref a { text-decoration: none; }
     sup.footnote-ref a::before { content: "["; }
@@ -81,12 +83,12 @@
     section.footnotes { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: 0.9em; color: var(--footnote-fg); }
     section.footnotes ol { padding-left: 1.25rem; }
     section.footnotes a.footnote-backref { text-decoration: none; margin-left: 0.25rem; }
-    /* Table of contents (long posts only). */
-    .toc-wrapper { background: var(--aside-bg); border: 1px solid var(--aside-rule); border-radius: 4px; padding: 0.75rem 1rem; margin: 1.5rem 0; }
-    .toc-wrapper h2 { margin: 0 0 0.5rem; font-size: 1rem; }
+    /* Table of contents. */
+    .toc-wrapper { background: var(--aside-bg); border: 1px solid var(--aside-rule); border-radius: 6px; padding: 0.875rem 1rem; margin: 1.5rem 0; }
+    .toc-wrapper h2 { margin: 0 0 0.5rem; font-size: 0.95rem; font-weight: 600; }
     .toc-wrapper ol.toc { margin: 0; padding-left: 1.25rem; }
     .toc-wrapper ol.toc ol { padding-left: 1.25rem; }
-    .toc-wrapper ol.toc a { text-decoration: none; }
+    .toc-wrapper ol.toc a { text-decoration: none; color: var(--link); }
     .toc-wrapper ol.toc a:hover { text-decoration: underline; }
   </style>
 </head>
