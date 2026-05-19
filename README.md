@@ -224,7 +224,12 @@ are unchanged.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
-`bragi-delivery:vX.Y.Z` on every tag push.
+`bragi-delivery:vX.Y.Z` on every tag push, as multi-arch
+manifest lists covering `linux/amd64` and `linux/arm64`. `docker
+pull` resolves the right variant for the host architecture
+automatically; Apple Silicon laptops, Ampere / Graviton servers,
+and ARM homelabs run natively rather than through QEMU
+emulation.
 
 ## What bragi is
 
@@ -783,7 +788,8 @@ runtime via `importlib.metadata` and exposed as `bragi.__version__`.
 
 Production images are tagged `bragi-admin:vX.Y.Z` and
 `bragi-delivery:vX.Y.Z` on the GitHub Container Registry, built by
-the `docker.yml` workflow on git tag push.
+the `docker.yml` workflow on git tag push as multi-arch manifest
+lists covering `linux/amd64` and `linux/arm64`.
 
 PyPI publication is not on the path (the `bragi` distribution name
 is held by an unrelated project); ship is container-only.
