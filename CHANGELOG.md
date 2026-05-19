@@ -6,6 +6,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Plugin-set boot smoke test (#169).** New
+  `tests/integration/test_plugin_set_smoke.py` asserts that
+  `create_admin_app()` and `create_delivery_app()` complete
+  without exception under the real `bragi.plugins` entry-point
+  manifest, that every declared entry-point name in
+  `pyproject.toml` is present in the running `PluginManager`
+  (silently-dropped entry-points fail loud), that every loaded
+  plugin contributes at least one hookimpl (catches a plugin
+  loaded with a stale `@hookimpl` marker or empty body), and
+  that back-to-back factory calls both succeed (regression-pins
+  the per-app `Registry` invariant against a future
+  module-level state refactor that would trip #188's
+  duplicate-registration guard). Pluggy load order across
+  `entry_points` discovery isn't deterministic; the other
+  integration tests touch specific flows but none assert the
+  whole manifest boots in isolation. Filed deliberately as
+  deferred during the v1.11.0 audit (pass 2).
+
 ### Changed
 - **Sitemap builder prewarms the page-URL identity map (#172).**
   `bragi.core.url._resolve_segments` walks a Page's parent chain
