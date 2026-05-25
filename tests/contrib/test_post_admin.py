@@ -32,9 +32,15 @@ PASSWORD = "correct-horse-battery-staple"
 def admin_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
-    """Admin app with one Site, one User, one Post pre-seeded."""
+    """Admin app with one Site, one User, one Post pre-seeded.
+
+    The `patched_session_locals` dependency points the shared
+    `_SessionFactoryProxy` at the test factory. The per-importer
+    monkeypatch list that used to live here is no longer needed
+    after the proxy refactor (#256).
+    """
     user = User(email=EMAIL, display_name="Ada Lovelace", is_active=True, is_superuser=True)
     db_session.add(user)
     db_session.flush()
@@ -62,15 +68,6 @@ def admin_app(
         )
     )
     db_session.commit()
-
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.permissions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
 
     yield create_admin_app()
 
