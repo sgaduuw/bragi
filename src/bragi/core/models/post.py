@@ -64,6 +64,9 @@ class Post(IdMixin, TimestampsMixin, Base):
     # auto-expiry (NULL = pinned indefinitely); "currently pinned"
     # is evaluated at query time as
     # `is_pinned AND (pinned_until IS NULL OR pinned_until > now)`.
+    # `pinned_until` is naive UTC (matching `published_at`,
+    # `scheduled_for`, and `naive_utcnow()` everywhere else on
+    # the model) so the comparison is naive-vs-naive.
     is_pinned: Mapped[bool] = mapped_column(default=False)
     pinned_until: Mapped[datetime | None] = mapped_column(default=None)
 

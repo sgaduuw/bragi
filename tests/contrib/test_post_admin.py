@@ -296,6 +296,9 @@ def test_delete_post_removes_row(
 def test_post_defaults_for_pinning_fields(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
+    # Tests Python-layer column defaults on the ORM model; the
+    # migration's server_default path is exercised by the
+    # up-down-up smoke documented in the plan's Task 1 Step 7.
     with db_session_factory() as db:
         post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
         assert post.is_pinned is False
