@@ -80,9 +80,9 @@ def admin_and_delivery(
     monkeypatch.setattr("bragi.contrib.redirects.admin.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
     monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
 
     yield create_admin_app(), create_delivery_app(), post_id
 

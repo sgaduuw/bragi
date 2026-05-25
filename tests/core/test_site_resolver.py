@@ -36,7 +36,7 @@ def delivery_app(
 
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
     monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
     yield create_delivery_app()
 
@@ -106,7 +106,7 @@ def test_deactivated_canonical_does_not_resolve(
     db_session.commit()
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
     monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
 
     app = create_delivery_app()
@@ -135,7 +135,7 @@ def test_deactivated_site_aliases_also_do_not_resolve(
     db_session.commit()
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
     monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
 
     app = create_delivery_app()
@@ -162,7 +162,7 @@ def test_reactivating_a_site_makes_it_resolve_again(
     db_session.commit()
     monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
+    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
     monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
 
     # First leg: deactivated.
