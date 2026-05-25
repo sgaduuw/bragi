@@ -664,6 +664,87 @@ def test_pin_toggle_cross_site_404(
     assert resp.status_code == 404
 
 
+def test_pin_toggle_writes_unpin_audit_log(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Unpinning an already-pinned post writes POST_UNPINNED."""
+    from bragi.core.models.audit_log import AuditLog
+
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        post.is_pinned = True
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+
+    with db_session_factory() as db:
+        row = db.execute(
+            select(AuditLog)
+            .where(AuditLog.target_type == "post", AuditLog.target_id == pid)
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        ).scalar_one()
+        assert row.action == "post.unpinned"
+        # Reloaded post is no longer pinned.
+        assert db.get(Post, pid).is_pinned is False
+
+
+def test_pin_toggle_forbidden_for_non_member(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A logged-in user with no role on the site gets 403."""
+    from bragi.contrib.auth_local.passwords import hash_password
+    from bragi.core.models.local_credential import LocalCredential
+
+    outsider_email = "outsider@example.com"
+    outsider_pw = "outsider-password-xyzzy"
+
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        pid = post.id
+
+        outsider = User(
+            email=outsider_email,
+            display_name="Outsider",
+            is_active=True,
+            is_superuser=False,
+        )
+        db.add(outsider)
+        db.flush()
+        db.add(LocalCredential(user_id=outsider.id, password_hash=hash_password(outsider_pw)))
+        db.commit()
+
+    client = admin_app.test_client()
+    # Manually authenticate as the outsider (skipping the _login helper
+    # which logs in as the seeded superuser ada@example.com).
+    token = csrf_token(client, path="/auth/login")
+    client.post(
+        "/auth/login",
+        data={"email": outsider_email, "password": outsider_pw, "_csrf_token": token},
+    )
+
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 403
+
+
 def test_edit_get_loads_for_pinned_post(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
