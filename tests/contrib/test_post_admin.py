@@ -745,6 +745,46 @@ def test_pin_toggle_forbidden_for_non_member(
     assert resp.status_code == 403
 
 
+def test_post_list_renders_pinned_column(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        owner = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        # Promote the seeded draft to published + pinned.
+        pinned = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        pinned.status = PostStatus.PUBLISHED
+        pinned.published_at = datetime(2026, 5, 1, 12, 0)
+        pinned.is_pinned = True
+        # Add a second published-but-unpinned row.
+        unpinned = Post(
+            site_id=site_id,
+            slug="b",
+            title="Unpinned B",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=owner.id,
+            status=PostStatus.PUBLISHED,
+            published_at=datetime(2026, 5, 2, 12, 0),
+        )
+        db.add(unpinned)
+        db.commit()
+        pinned_id, unpinned_id = pinned.id, unpinned.id
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/posts/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert f'id="pinned-cell-{pinned_id}"' in body
+    assert f'id="pinned-cell-{unpinned_id}"' in body
+    pinned_idx = body.index(f"pinned-cell-{pinned_id}")
+    assert "Unpin" in body[pinned_idx : pinned_idx + 500]
+    unpinned_idx = body.index(f"pinned-cell-{unpinned_id}")
+    assert "Pin" in body[unpinned_idx : unpinned_idx + 500]
+
+
 def test_edit_get_loads_for_pinned_post(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:

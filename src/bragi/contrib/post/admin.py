@@ -208,8 +208,8 @@ def list_posts(site_slug: str) -> ResponseReturnValue:
     # htmx dispatch: return just the table partial for hx-get
     # refreshes; full page for cold loads (and crawlers).
     if is_htmx():
-        return render_template("admin/_post_list_table.html", posts=posts)
-    return render_template("admin/list.html", posts=posts)
+        return render_template("admin/_post_list_table.html", posts=posts, site=site)
+    return render_template("admin/list.html", posts=posts, site=site)
 
 
 @bp.route("/new", methods=["GET", "POST"])
