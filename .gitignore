@@ -230,3 +230,6 @@ __marimo__/
 *.db-wal
 *.db-shm
 
+# Superpowers brainstorming session state (mockups persist here)
+.superpowers/
+
