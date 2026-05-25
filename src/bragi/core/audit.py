@@ -34,6 +34,8 @@ class AuditAction:
     POST_CREATED = "post.created"
     POST_UPDATED = "post.updated"
     POST_DELETED = "post.deleted"
+    POST_PINNED = "post.pinned"
+    POST_UNPINNED = "post.unpinned"
 
     AUTH_LOGIN_SUCCESS = "auth.login.success"
     AUTH_LOGIN_FAILURE = "auth.login.failure"
