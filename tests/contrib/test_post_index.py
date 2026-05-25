@@ -375,3 +375,37 @@ def test_post_index_no_pinned_posts_renders_baseline_unchanged(delivery_app: Fla
     assert 'aria-label="Pinned posts"' not in body
     # Sanity: usual recency content still renders.
     assert "Published 11" in body
+
+
+def test_pinned_section_html_shape_multi(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        for slug in ("published-11", "published-10", "published-09"):
+            p = db.execute(select(Post).where(Post.slug == slug)).scalar_one()
+            p.is_pinned = True
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert 'aria-label="Pinned posts"' in body
+    assert 'class="pinned-strip"' in body
+    assert body.count('class="pinned-card"') == 3
+    assert 'class="pinned-dots"' in body
+    assert body.count('href="#pinned-') == 3
+
+
+def test_pinned_section_html_shape_single_no_dots(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        p = db.execute(select(Post).where(Post.slug == "published-11")).scalar_one()
+        p.is_pinned = True
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert 'class="pinned-card"' in body
+    assert 'class="pinned-dots"' not in body

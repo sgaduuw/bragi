@@ -22,6 +22,7 @@
   {{ page.body_html | internal_link_rewrite | safe }}
 </div>
 {% endif %}
+{% include "delivery/_pinned_carousel.html" %}
 {% if posts %}
 <ul class="post-list">
   {% for post in posts %}
@@ -54,6 +55,6 @@
 </nav>
 {% endif %}
 {% else %}
-<p>No posts yet.</p>
+<p>{{ "No more posts yet." if pinned_posts else "No posts yet." }}</p>
 {% endif %}
 {% endblock %}
