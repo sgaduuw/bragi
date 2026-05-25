@@ -21,8 +21,9 @@ resolved theme slug at load time; the delivery app factory now
 sets `jinja_env.auto_reload = True` so Jinja honors `uptodate`
 on every render. Same-theme repeats still hit the cache; only
 the cross-theme case forces a recompile. Operators on v1.14.0
-should bump `BRAGI_TAG=v1.14.1` and restart both web services to
-pick the fix up.
+should bump `BRAGI_TAG=v1.14.1` and restart all three services
+(`bragi-tasks`, `admin`, `delivery`) to pick the fix up — the tag
+parameterises the sidecar image too.
 
 1.14.0 shipped 2026-05-19. Theme catalog, multi-arch images, and
 plugin-platform hardening. Added: three new in-tree themes
@@ -39,11 +40,9 @@ the `bragi-theme-<slug>` distribution-name convention, the
 surface a theme must preserve, the `/theme/<slug>/static/<path>`
 URL space, the recommended `prefers-color-scheme: dark` recipe,
 and the install / activate / disable cycle. Container images now
-ship as multi-arch manifest lists covering `linux/amd64` and
-`linux/arm64` on every tag push: Apple Silicon laptops, Ampere /
-Graviton servers, and ARM homelabs run natively rather than under
-QEMU emulation; `docker pull` resolves the right variant for the
-host architecture automatically (#167). Plugin-set boot smoke
+ship as multi-arch manifest lists (`linux/amd64` + `linux/arm64`)
+on every tag push (#167); see the "Releases" section below for
+the deploy-side narrative. Plugin-set boot smoke
 test asserts that `create_admin_app()` and `create_delivery_app()`
 boot cleanly under the real entry-point manifest, that every
 declared entry-point name reaches the running `PluginManager`,
@@ -441,8 +440,8 @@ in place rather than duplicating them.
   strings on the alias are stripped before matching. Sites with
   no `post_index` page have no public post URLs, so the importer
   skips the redirect emission for those. `tags:` lists upsert by
-  slug. CLI: `cms import hugo --site <slug> [--author <email>]
-  [--dry-run] <path>`.
+  slug. CLI: `flask --app 'bragi.apps.admin:create_admin_app' cms
+  import hugo --site <slug> [--author <email>] [--dry-run] <path>`.
 - **Ghost**: parses the single-file JSON export
   (`db[0].data.posts`). Bodies arrive as HTML and convert to
   markdown via `markdownify(heading_style="ATX")`; tags come
@@ -451,8 +450,8 @@ in place rather than duplicating them.
   published post a 301 lands from Ghost's permalink (`/<slug>/`)
   to bragi's canonical under the site's `post_index` page (e.g.
   `/blog/<slug>/`) so legacy bookmarks survive. CLI:
-  `cms import ghost --site <slug> [--author <email>] [--dry-run]
-  <path>`.
+  `flask --app 'bragi.apps.admin:create_admin_app' cms import
+  ghost --site <slug> [--author <email>] [--dry-run] <path>`.
 - **WordPress**: parses WXR (WordPress eXtended RSS) XML
   exports. `wp:post_type=post` rows become Posts, `page` rows
   become Pages; bodies are converted from WordPress HTML to
@@ -462,15 +461,16 @@ in place rather than duplicating them.
   redirects to the bragi canonical (posts resolve through the
   site's `post_index` page; pages resolve through the static-page
   chain). Idempotency keys on `(site_id, source_id)` via
-  `wp:post_id`. CLI: `cms import wordpress --site <slug>
-  [--author <email>] [--dry-run] <wxr.xml>`.
+  `wp:post_id`. CLI: `flask --app 'bragi.apps.admin:create_admin_app'
+  cms import wordpress --site <slug> [--author <email>] [--dry-run]
+  <wxr.xml>`.
 
 Notion, Substack, and Medium importers are deferred to
 follow-up packages; no v1.x commitment.
 
 ## Export (portability)
 
-`flask --app bragi.apps.admin cms export [--site <slug>] [--output <dir>]`
+`flask --app 'bragi.apps.admin:create_admin_app' cms export [--site <slug>] [--output <dir>]`
 writes a Hugo-shaped tree per site: posts as
 `content/posts/<slug>.md` with YAML frontmatter, pages under
 `content/pages/`, attachment bytes under `static/attachments/`
@@ -487,8 +487,8 @@ build at any time.
 
 ## Backups
 
-`flask --app bragi.apps.admin cms backup [--output PATH]` writes
-a single `.tar.gz` containing a consistent SQLite snapshot
+`flask --app 'bragi.apps.admin:create_admin_app' cms backup [--output PATH]`
+writes a single `.tar.gz` containing a consistent SQLite snapshot
 (produced with `VACUUM INTO`, so no companion `-wal` / `-shm`
 files) plus the contents of `Settings.attachments_root` as
 `attachments/`. Default output: `bragi-backup-YYYYMMDD-HHMMSS.tar.gz`
@@ -589,7 +589,7 @@ on the compose services so an in-flight outbound POST
 (webmention sender, AP delivery) has up to 25 s to return on
 `docker compose stop` before SIGKILL fires; the `bragi-tasks`
 sidecar retries `alembic upgrade head` with backoff
-(`ALEMBIC_MAX_ATTEMPTS=5`, `ALEMBIC_RETRY_DELAY=15s`) and exits
+(`ALEMBIC_MAX_ATTEMPTS=5`, `ALEMBIC_RETRY_DELAY=15`, in seconds) and exits
 0 after exhausting attempts so a broken migration shows as a
 clean `Exited (0)` rather than livelocking the deploy.
 
@@ -636,13 +636,22 @@ bragi/
 │   │   ├── audit.py            # AuditLog writer
 │   │   ├── cache.py            # Cache-Control / ETag / 304 helpers
 │   │   ├── db.py               # SessionLocal
+│   │   ├── export.py           # corpus export writer (cms export)
+│   │   ├── feed.py             # Atom feed builder
+│   │   ├── healthz.py          # /healthz handler
 │   │   ├── htmx.py             # HX-Request dispatch helpers
+│   │   ├── http.py             # hardened outbound fetcher (safe_get / safe_post)
+│   │   ├── image_processor.py  # rendition pipeline
 │   │   ├── permissions.py      # per-site role enforcement
 │   │   ├── registry.py         # in-process Registry (content types, importers, nav, ...)
+│   │   ├── safe_urls.py        # safe_external_url + IDN gate
 │   │   ├── security.py         # current_user / is_superuser
 │   │   ├── seo.py              # title/meta/canonical/og helpers
 │   │   ├── storage.py          # attachment storage backend
 │   │   ├── text.py             # slugify
+│   │   ├── themes.py           # ThemeAwareLoader + theme registry
+│   │   ├── time.py             # aware_utcnow
+│   │   ├── url.py              # URL helpers
 │   │   └── useragent.py        # bot / browser / feed-reader classifier
 │   └── contrib/                # built-ins as plugins
 │       ├── activitypub/        # one fediverse actor per site (follow / undo / outbox fanout)
@@ -682,7 +691,8 @@ bragi/
     ├── unit/                   # pure logic, no DB
     ├── contrib/                # one file per built-in plugin
     ├── core/                   # core middleware / cache / permissions tests
-    └── integration/            # full stack lifecycle scenarios
+    ├── integration/            # full stack lifecycle scenarios
+    └── test_*.py               # cross-cutting smoke (CLI, hookspecs, plugin set)
 ```
 
 ## Authoring a third-party theme
