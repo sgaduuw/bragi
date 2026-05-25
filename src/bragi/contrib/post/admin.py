@@ -154,6 +154,8 @@ def _snapshot_post(
             body_html=post.body_html,
             body_excerpt=post.body_excerpt,
             meta_description=post.meta_description,
+            is_pinned=post.is_pinned,
+            pinned_until=post.pinned_until,
         )
     )
 
@@ -573,7 +575,13 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         # redirects auto-301, AP outbox fanout on a
         # status->published transition) should see the same
         # `on_post_updated` they'd see for a hand edit.
-        before = {"slug": post.slug, "title": post.title, "status": post.status}
+        before = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
         was_unpublished = post.status != PostStatus.PUBLISHED
         post.title = revision.title
         post.slug = revision.slug
@@ -582,6 +590,8 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         post.body_html = revision.body_html
         post.body_excerpt = revision.body_excerpt
         post.meta_description = revision.meta_description
+        post.is_pinned = revision.is_pinned
+        post.pinned_until = revision.pinned_until
         # If the restore crosses the draft->published boundary,
         # mirror the normal edit flow: stamp `published_at` only if
         # it hasn't been set before, and fire `on_post_published`
@@ -594,7 +604,13 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         db.commit()
         restored_id = post.id
         site_id_for_audit = post.site_id
-        after = {"slug": post.slug, "title": post.title, "status": post.status}
+        after = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
         if is_first_publish:
