@@ -542,6 +542,128 @@ def test_edit_post_form_clears_pinned_until_when_empty(
         assert reloaded.pinned_until is None
 
 
+def test_pin_toggle_htmx_returns_updated_cell(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert f'id="pinned-cell-{pid}"' in body
+    assert "Unpin" in body
+
+    with db_session_factory() as db:
+        assert db.get(Post, pid).is_pinned is True
+
+
+def test_pin_toggle_writes_audit_log(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    from bragi.core.models.audit_log import AuditLog
+
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+
+    with db_session_factory() as db:
+        row = db.execute(
+            select(AuditLog)
+            .where(AuditLog.target_type == "post", AuditLog.target_id == pid)
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        ).scalar_one()
+    assert row.action == "post.pinned"
+
+
+def test_pin_toggle_non_htmx_redirects_to_list(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+    assert "/admin/sites/blog/posts" in resp.headers["Location"]
+
+
+def test_pin_toggle_cross_site_404(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Toggling a post that belongs to a different site under the
+    URL of site `blog` 404s, mirroring edit/delete behaviour."""
+    with db_session_factory() as db:
+        owner = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        other = Site(
+            slug="other",
+            hostname="other.example.com",
+            title="Other",
+            canonical_url="https://other.example.com",
+            owner_user_id=owner.id,
+        )
+        db.add(other)
+        db.flush()
+        foreign = Post(
+            site_id=other.id,
+            slug="z",
+            title="Z",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=owner.id,
+            status=PostStatus.PUBLISHED,
+            published_at=datetime(2026, 5, 1, 12, 0),
+        )
+        db.add(foreign)
+        db.commit()
+        foreign_id = foreign.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{foreign_id}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 404
+
+
 def test_edit_get_loads_for_pinned_post(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:

@@ -417,6 +417,52 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     return redirect(url_for("post_admin.list_posts"))
 
 
+@bp.route("/<int:post_id>/pin-toggle", methods=["POST"])
+def pin_toggle(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Flip Post.is_pinned via an htmx-friendly POST.
+
+    The list-view button posts here and (for htmx requests) gets
+    the updated cell back for `hx-swap=outerHTML`. Plain (non-htmx)
+    submitters get a redirect to the list. Does not touch
+    `pinned_until`; nuanced expiry timing belongs on the edit
+    form.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
+        active = current_user()
+        is_own = bool(active and active.id == post.author_id)
+        if not ((is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)):
+            abort(403)
+
+        before_pinned = post.is_pinned
+        post.is_pinned = not before_pinned
+        db.commit()
+
+        toggled_site_id = site.id
+        # Render the partial inside the session so SQLAlchemy
+        # relationship access (e.g. any lazy-load the template
+        # needs) still has a live connection.
+        htmx_resp = (
+            render_template("admin/_pinned_cell.html", post=post, site=site) if is_htmx() else None
+        )
+
+    audit(
+        AuditAction.POST_PINNED if not before_pinned else AuditAction.POST_UNPINNED,
+        target_type="post",
+        target_id=post_id,
+        site_id=toggled_site_id,
+        extra={"before": before_pinned, "after": not before_pinned},
+    )
+
+    if htmx_resp is not None:
+        return htmx_resp
+    return redirect(url_for("post_admin.list_posts", site_slug=site_slug))
+
+
 @bp.route("/<int:post_id>/delete", methods=["POST"])
 def delete_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
