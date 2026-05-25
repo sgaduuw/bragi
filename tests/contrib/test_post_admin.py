@@ -785,6 +785,43 @@ def test_post_list_renders_pinned_column(
     assert "Pin" in body[unpinned_idx : unpinned_idx + 500]
 
 
+def test_edit_form_shows_pin_fieldset_for_published_post(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        post.is_pinned = True
+        post.pinned_until = datetime(2026, 12, 31, 12, 0)
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{pid}/edit")
+    body = resp.get_data(as_text=True)
+    assert 'name="is_pinned"' in body
+    assert "checked" in body
+    assert 'name="pinned_until"' in body
+    assert "2026-12-31T12:00" in body
+
+
+def test_edit_form_hides_pin_fieldset_for_draft_post(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    # The seeded "hello" post starts as DRAFT; verify the fieldset
+    # is absent for that case.
+    with db_session_factory() as db:
+        pid = db.execute(select(Post.id).where(Post.slug == "hello")).scalar_one()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{pid}/edit")
+    body = resp.get_data(as_text=True)
+    assert 'name="is_pinned"' not in body
+
+
 def test_edit_get_loads_for_pinned_post(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:

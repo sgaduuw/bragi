@@ -41,6 +41,22 @@
     </select>
   </fieldset>
 
+  {% if form.get('status') == 'published' %}
+  <fieldset>
+    <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+      <input type="checkbox" name="is_pinned" value="1"
+             {% if form.get('is_pinned') == '1' %}checked{% endif %}>
+      Pin on landing page
+    </label>
+    <label for="pinned_until" style="margin-left: 1.5rem;">
+      Optional auto-unpin date:
+      <input type="datetime-local" name="pinned_until" id="pinned_until"
+             value="{{ form.get('pinned_until', '') }}">
+    </label>
+    <small style="margin-left: 1.5rem;">Naive UTC. Leave blank for an open-ended pin.</small>
+  </fieldset>
+  {% endif %}
+
   <fieldset>
     <label for="tags">Tags</label>
     <input type="text" name="tags" id="tags"
