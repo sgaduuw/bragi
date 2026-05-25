@@ -43,7 +43,7 @@ from flask import (
     request,
 )
 from flask.typing import ResponseReturnValue
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from werkzeug.wrappers import Response
 
@@ -61,6 +61,7 @@ from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
 from bragi.core.seo import og_image_url_for
+from bragi.core.time import naive_utcnow
 from bragi.core.url import page_url_for, post_index_page_for, tag_segment_for, tag_url_for
 
 DEFAULT_POSTS_PER_PAGE = 10
@@ -152,10 +153,38 @@ def render_post_index_page(site: Site, page: Page) -> Response:
 
     per_page = _posts_per_page(site)
     with SessionLocal() as db:
+        now = naive_utcnow()
+
+        # Pinned set, scoped to site, only on page 1. Posts are
+        # "currently pinned" when is_pinned AND no expiry has passed.
+        pinned_posts: list[Post] = []
+        if page_n == 1:
+            pinned_posts = list(
+                db.execute(
+                    select(Post)
+                    .where(
+                        Post.site_id == site.id,
+                        Post.status == PostStatus.PUBLISHED,
+                        Post.is_pinned.is_(True),
+                        or_(
+                            Post.pinned_until.is_(None),
+                            Post.pinned_until > now,
+                        ),
+                    )
+                    .order_by(Post.published_at.desc())
+                )
+                .scalars()
+                .all()
+            )
+        pinned_ids = {p.id for p in pinned_posts}
+
         base = select(Post).where(
             Post.site_id == site.id,
             Post.status == PostStatus.PUBLISHED,
         )
+        if pinned_ids:
+            base = base.where(Post.id.notin_(pinned_ids))
+
         total = db.execute(select(func.count()).select_from(base.subquery())).scalar_one()
         total_pages = max(1, (total + per_page - 1) // per_page)
         if page_n > total_pages and total > 0:
@@ -173,14 +202,22 @@ def render_post_index_page(site: Site, page: Page) -> Response:
             .all()
         )
 
-        # ETag folds in (site, page, per_page, max updated_at over
-        # both the listing and the page row itself). A re-save of
-        # the page or any listed post invalidates the cached body.
+        # ETag inputs include pinned_posts' updated_at (they're rendered
+        # on page 1) plus a minute-truncated min(pinned_until) so the
+        # cached response invalidates when an expiry passes.
         candidates = [p.updated_at for p in posts] + [page.updated_at]
+        candidates.extend(p.updated_at for p in pinned_posts)
         last_modified = max(candidates)
+
+        expiry_key = ""
+        pinned_with_expiry = [p.pinned_until for p in pinned_posts if p.pinned_until]
+        if pinned_with_expiry:
+            min_exp = min(pinned_with_expiry)
+            expiry_key = min_exp.strftime("%Y%m%d%H%M")
+
         etag = etag_for(
             "post_index",
-            f"{site.id}|{page.id}|{page_n}|{per_page}",
+            f"{site.id}|{page.id}|{page_n}|{per_page}|{expiry_key}",
             last_modified,
         )
         not_modified = maybe_304(request, etag=etag, last_modified=last_modified)
@@ -192,6 +229,7 @@ def render_post_index_page(site: Site, page: Page) -> Response:
             site=site,
             page=page,
             posts=posts,
+            pinned_posts=pinned_posts,
             page_n=page_n,
             total_pages=total_pages,
             has_prev=page_n > 1,

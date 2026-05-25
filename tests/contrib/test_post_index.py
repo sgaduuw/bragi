@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from flask import Flask
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.delivery import create_delivery_app
@@ -284,3 +285,93 @@ def test_page_plugin_owns_post_index_dispatch() -> None:
     """
     app = create_delivery_app()
     assert "page_delivery" in app.blueprints
+
+
+def test_post_index_page1_renders_pinned_section_and_excludes_from_recency(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    # Pin "Published 11" (the newest of the seeded 12). Page 1
+    # (per_page=5) would normally show Published 11..07.
+    with db_session_factory() as db:
+        p = db.execute(select(Post).where(Post.slug == "published-11")).scalar_one()
+        p.is_pinned = True
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    assert resp.status_code == 200
+    body = resp.data.decode()
+
+    assert 'aria-label="Pinned posts"' in body
+    assert "Published 11" in body
+    # The pinned post is in the carousel, NOT in the recency list.
+    recency_idx = body.index('class="post-list"')
+    pinned_idx = body.index('aria-label="Pinned posts"')
+    assert pinned_idx < recency_idx
+    assert "Published 11" not in body[recency_idx:]
+    # The next 5 recency items are Published 10..06.
+    for i in range(6, 11):
+        assert f"Published {i:02d}" in body[recency_idx:]
+
+
+def test_post_index_page2_reinstates_pinned_in_recency(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        # Pin "Published 03" so it would otherwise sit on page 2.
+        p = db.execute(select(Post).where(Post.slug == "published-03")).scalar_one()
+        p.is_pinned = True
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get("/posts/?page=2", headers={"Host": "blog.example.com"})
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert 'aria-label="Pinned posts"' not in body  # only on page 1
+    assert "Published 03" in body  # back in date order
+
+
+def test_post_index_drops_post_with_expired_pinned_until(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        p = db.execute(select(Post).where(Post.slug == "published-10")).scalar_one()
+        p.is_pinned = True
+        # In the past relative to the seeded `base` dates (2026-05-01+).
+        p.pinned_until = datetime(2026, 5, 5, 0, 0)
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert 'aria-label="Pinned posts"' not in body  # expired -> not pinned
+    assert "Published 10" in body  # but still in recency
+
+
+def test_post_index_excludes_archived_posts_from_pinned_section(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        # The seeded "Archived" post; mark it pinned too.
+        p = db.execute(select(Post).where(Post.slug == "archived-1")).scalar_one()
+        p.is_pinned = True
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert 'aria-label="Pinned posts"' not in body
+    assert "Archived" not in body  # still hidden because status=archived
+
+
+def test_post_index_no_pinned_posts_renders_baseline_unchanged(delivery_app: Flask) -> None:
+    """Without any pinned posts, the carousel section is absent and
+    the page is byte-for-byte the same as it was pre-feature
+    (modulo HTML whitespace tolerance handled by the absent
+    aria-label assertion)."""
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert 'aria-label="Pinned posts"' not in body
+    # Sanity: usual recency content still renders.
+    assert "Published 11" in body
