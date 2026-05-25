@@ -47,6 +47,13 @@ def _serve_url(storage_key: str) -> str:
         return f"/attachments/{storage_key}"
 
 
+def attachment_url(attachment: Attachment | None) -> str:
+    """Public URL for a single attachment. Returns "" on None."""
+    if attachment is None:
+        return ""
+    return _serve_url(attachment.storage_key)
+
+
 def srcset_for(attachment: Attachment | None) -> str:
     """Return a `srcset` attribute value for an image Attachment.
 
@@ -125,6 +132,7 @@ def register_template_globals(env: jinja2.Environment) -> None:
     ladder without pulling in plugin internals.
     """
     env.globals["srcset_for"] = srcset_for
+    env.globals["attachment_url"] = attachment_url
 
 
 @hookimpl

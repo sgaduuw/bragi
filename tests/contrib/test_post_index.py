@@ -393,7 +393,7 @@ def test_pinned_section_html_shape_multi(
     assert 'class="pinned-strip"' in body
     assert body.count('class="pinned-card"') == 3
     assert 'class="pinned-dots"' in body
-    assert body.count('href="#pinned-') == 3
+    assert body.count('<a href="#pinned-') == 3
 
 
 def test_pinned_section_html_shape_single_no_dots(
@@ -409,3 +409,34 @@ def test_pinned_section_html_shape_single_no_dots(
     body = resp.data.decode()
     assert 'class="pinned-card"' in body
     assert 'class="pinned-dots"' not in body
+
+
+def test_pinned_card_renders_featured_image_when_set(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    from bragi.core.models.attachment import Attachment
+
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        owner_id = db.execute(select(Site.owner_user_id).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site_id,
+            uploaded_by=owner_id,
+            filename="pinned-hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=1024,
+            storage_key="pinned-hero.jpg",
+        )
+        db.add(att)
+        db.flush()
+        p = db.execute(select(Post).where(Post.slug == "published-11")).scalar_one()
+        p.is_pinned = True
+        p.featured_image_id = att.id
+        db.commit()
+
+    resp = delivery_app.test_client().get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert 'aria-label="Pinned posts"' in body
+    # The img tag is inside the pinned card with the attachment URL.
+    assert '<img src="' in body
+    assert "pinned-hero.jpg" in body  # storage_key appears in the URL

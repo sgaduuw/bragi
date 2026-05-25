@@ -13,7 +13,7 @@ admin form picks an existing Attachment or leaves them blank.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,6 +21,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from bragi.core.models._base import Base
 from bragi.core.models._mixins import IdMixin, TimestampsMixin
 from bragi.core.models.tag import Tag, post_tags
+
+if TYPE_CHECKING:
+    from bragi.core.models.attachment import Attachment
 
 
 class PostStatus:
@@ -80,6 +83,18 @@ class Post(IdMixin, TimestampsMixin, Base):
     )
     og_image_id: Mapped[int | None] = mapped_column(
         ForeignKey("attachments.id", ondelete="SET NULL"), default=None
+    )
+
+    # Loaded relationships for template helpers (`featured_image`,
+    # `og_image`). `lazy="joined"` because the typical access is
+    # "post that's about to render -> its image" -- one query that
+    # joins the attachment is cheaper than the N+1 alternative.
+    # SET NULL on delete already governed by the FK on the column.
+    featured_image: Mapped[Attachment | None] = relationship(
+        "Attachment", foreign_keys=[featured_image_id], lazy="joined"
+    )
+    og_image: Mapped[Attachment | None] = relationship(
+        "Attachment", foreign_keys=[og_image_id], lazy="joined"
     )
 
     # Import provenance: `(site_id, source_id)` is unique enough
