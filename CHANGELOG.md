@@ -7,6 +7,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **`bragi.core.db.SessionLocal` is now a lazy proxy.** Previously
+  it was a `sessionmaker` bound directly at import time, which
+  meant every `from bragi.core.db import SessionLocal` captured
+  the binding and tests had to enumerate every importer in a
+  56-entry `_SESSION_LOCAL_IMPORTERS` list to monkey-patch them
+  all (drifted silently when new modules added the import,
+  masked by the local `bragi.db` dev file but red in CI). The
+  proxy is a singleton callable that delegates to a swappable
+  `_factory` field; `with SessionLocal() as db:` keeps its
+  exact semantics. The conftest fixture now patches one place,
+  and the `__all__ = ["SessionLocal", "bp"]` re-export in
+  `bragi/contrib/post/delivery.py` (which existed only to
+  satisfy 19 stale test patches) is gone; those tests now
+  patch the canonical `bragi.core.db.SessionLocal._factory`
+  path.
 - **CI actions bumped to latest majors.** The v1.14.0 docker
   build surfaced GitHub's Node.js 20 deprecation warning on
   every `actions/*` and `docker/*` action used in the workflows
