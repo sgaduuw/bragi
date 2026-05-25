@@ -293,6 +293,15 @@ def test_delete_post_removes_row(
         assert db.get(Post, post_id) is None
 
 
+def test_post_defaults_for_pinning_fields(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        assert post.is_pinned is False
+        assert post.pinned_until is None
+
+
 def test_posts_nav_entry_registered(admin_app: Flask) -> None:
     """The post plugin contributes a 'Posts' entry to the admin nav."""
     registry = admin_app.extensions["registry"]

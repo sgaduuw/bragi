@@ -59,6 +59,14 @@ class Post(IdMixin, TimestampsMixin, Base):
     canonical_url: Mapped[str | None] = mapped_column(String(255), default=None)
     noindex: Mapped[bool] = mapped_column(default=False)
 
+    # Editorial pin: surfaces the post above the recency list on
+    # the site's post-index page. `pinned_until` is an optional
+    # auto-expiry (NULL = pinned indefinitely); "currently pinned"
+    # is evaluated at query time as
+    # `is_pinned AND (pinned_until IS NULL OR pinned_until > now)`.
+    is_pinned: Mapped[bool] = mapped_column(default=False)
+    pinned_until: Mapped[datetime | None] = mapped_column(default=None)
+
     # Featured / OG image FKs into `attachments`. Nullable so a post
     # without media works; the delivery template falls back to
     # `(site.canonical_url)` social previews when og_image is unset.
