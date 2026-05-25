@@ -1,0 +1,40 @@
+{# Pinned carousel section, rendered above the recency list on
+   page 1 of the post-index page. CSS scroll-snap; dot indicators
+   via anchor links and :target. Single-pin case omits the dots. #}
+{% if pinned_posts %}
+<section class="pinned" aria-label="Pinned posts">
+  <h2 class="pinned-label">Pinned</h2>
+  <div class="pinned-strip" role="region" tabindex="0">
+    {% for post in pinned_posts %}
+      <article class="pinned-card" id="pinned-{{ post.id }}">
+        {% if post.featured_image_id %}
+          <img src="{{ attachment_url(post.featured_image) }}" alt="" loading="lazy">
+        {% endif %}
+        <h3><a href="{{ url_for_post(post) }}">{{ post.title }}</a></h3>
+        <time datetime="{{ post.published_at.isoformat() }}" class="meta">
+          {{ post.published_at.strftime('%Y-%m-%d') }}
+        </time>
+        {% if post.body_excerpt %}<p class="excerpt">{{ post.body_excerpt }}</p>{% endif %}
+      </article>
+    {% endfor %}
+  </div>
+  {% if pinned_posts|length > 1 %}
+    <nav class="pinned-dots" aria-label="Pinned carousel pagination">
+      {% for post in pinned_posts %}
+        <a href="#pinned-{{ post.id }}" aria-label="Go to pinned post {{ loop.index }}"></a>
+      {% endfor %}
+    </nav>
+    {# Active-dot styling: per-card :target drives a sibling selector.
+       The attribute selector `a[href="#pinned-N"]` is self-documenting
+       and robust to DOM reordering. Inlined here so single-pin pages
+       don't carry the extra rules. #}
+    <style>
+      {% for post in pinned_posts %}
+      #pinned-{{ post.id }}:target ~ .pinned-dots a[href="#pinned-{{ post.id }}"] {
+        background: var(--dot-active, var(--fg, #475569));
+      }
+      {% endfor %}
+    </style>
+  {% endif %}
+</section>
+{% endif %}

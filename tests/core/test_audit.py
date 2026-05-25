@@ -412,6 +412,13 @@ def test_audit_nav_entry_only_for_superuser(admin_app: Flask) -> None:
     assert b"Audit log" not in resp.data
 
 
+def test_audit_action_has_pin_constants() -> None:
+    from bragi.core.audit import AuditAction
+
+    assert AuditAction.POST_PINNED == "post.pinned"
+    assert AuditAction.POST_UNPINNED == "post.unpinned"
+
+
 # Sanity: helper does NOT explode when SessionLocal is broken even
 # inside a request context (rather than rolling the whole request).
 def test_audit_failure_inside_request_does_not_break_response(

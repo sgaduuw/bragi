@@ -90,6 +90,42 @@
     .toc-wrapper ol.toc ol { padding-left: 1.25rem; }
     .toc-wrapper ol.toc a { text-decoration: none; color: var(--link); }
     .toc-wrapper ol.toc a:hover { text-decoration: underline; }
+    /* Pinned carousel on the post-index landing page. */
+    .pinned { margin: 1.5rem 0; }
+    .pinned-label {
+      font-size: 0.875rem; text-transform: uppercase;
+      letter-spacing: 0.05em; margin: 0 0 0.5rem 0;
+      color: var(--muted);
+    }
+    .pinned-strip {
+      display: flex; gap: 1rem;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
+    }
+    .pinned-card {
+      flex: 0 0 min(60%, 24rem);
+      scroll-snap-align: start;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--bg);
+    }
+    .pinned-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+    .pinned-card h3 { margin: 0.5rem 0.75rem 0.25rem; font-size: 1rem; }
+    .pinned-card h3 a { text-decoration: none; }
+    .pinned-card time { display: block; margin: 0 0.75rem; font-size: 0.85em; color: var(--muted); }
+    .pinned-card p.excerpt { margin: 0.5rem 0.75rem 0.75rem; font-size: 0.9em; }
+    .pinned-dots {
+      display: flex; gap: 0.5rem; justify-content: center;
+      margin-top: 0.75rem;
+    }
+    .pinned-dots a {
+      width: 0.5rem; height: 0.5rem; border-radius: 50%;
+      background: var(--rule);
+      display: inline-block;
+      transition: background 0.15s ease;
+    }
   </style>
 </head>
 <body>

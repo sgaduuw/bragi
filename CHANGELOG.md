@@ -6,6 +6,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Pinned posts on the index landing page.** Editor-chosen
+  posts surface in a CSS scroll-snap carousel above the
+  chronological recency list. Schema: `posts.is_pinned`
+  (boolean) + optional `posts.pinned_until` (auto-clear
+  datetime). Admin edit form gains a checkbox + datetime
+  input near the status select (visible only when status is
+  `published`); the post list gets a per-row Pin/Unpin button
+  backed by an htmx-friendly endpoint. Pinned posts are
+  removed from the page-1 recency list and reappear in their
+  natural date position on page 2+. Single-pin renders as a
+  plain card with no carousel chrome. Closes #125.
+
 ### Changed
 - **`bragi.core.db.SessionLocal` is now a lazy proxy.** Previously
   it was a `sessionmaker` bound directly at import time, which

@@ -15,6 +15,8 @@ URL, so these views assume an authenticated user.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from flask import (
     Blueprint,
     abort,
@@ -64,6 +66,11 @@ def _form_from_request() -> dict[str, str]:
         "status": request.form.get("status") or PostStatus.DRAFT,
         "tags": (request.form.get("tags") or "").strip(),
         "og_image_id": (request.form.get("og_image_id") or "").strip(),
+        # Pinning. The checkbox sends "1" when ticked, absent when not.
+        # The datetime-local input sends "" when cleared; we parse it
+        # as naive UTC (matching `scheduled_for`'s convention) below.
+        "is_pinned": "1" if request.form.get("is_pinned") else "",
+        "pinned_until": (request.form.get("pinned_until") or "").strip(),
     }
 
 
@@ -89,6 +96,22 @@ def _resolve_og_image_id(db: Session, raw: str, site_id: int) -> tuple[int | Non
     if attachment.site_id != site_id:
         return None, "OG image must belong to this site."
     return candidate_id, None
+
+
+def _parse_pinned_until(raw: str) -> tuple[datetime | None, str | None]:
+    """Parse the datetime-local form input.
+
+    Empty string -> (None, None) (clears the pin expiry).
+    Valid `YYYY-MM-DDTHH:MM` -> (datetime, None), treated as naive UTC,
+    matching the project-wide convention that all naive datetimes are UTC.
+    Anything else -> (None, error_message).
+    """
+    if not raw:
+        return None, None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%dT%H:%M"), None
+    except ValueError:
+        return None, f"Invalid auto-unpin date: {raw!r}"
 
 
 def _parse_tag_csv(raw: str) -> list[tuple[str, str]]:
@@ -185,8 +208,8 @@ def list_posts(site_slug: str) -> ResponseReturnValue:
     # htmx dispatch: return just the table partial for hx-get
     # refreshes; full page for cold loads (and crawlers).
     if is_htmx():
-        return render_template("admin/_post_list_table.html", posts=posts)
-    return render_template("admin/list.html", posts=posts)
+        return render_template("admin/_post_list_table.html", posts=posts, site=site)
+    return render_template("admin/list.html", posts=posts, site=site)
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -212,6 +235,11 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             flash(og_image_err, "error")
             return render_template("admin/edit.html", post=None, form=form)
 
+        pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
+        if pin_err is not None:
+            flash(pin_err, "error")
+            return render_template("admin/edit.html", post=None, form=form)
+
         body_markdown = form["body_markdown"]
         new_status = form["status"]
         new_post_row = Post(
@@ -225,6 +253,8 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             status=new_status,
             published_at=(naive_utcnow() if new_status == PostStatus.PUBLISHED else None),
             og_image_id=og_image_id,
+            is_pinned=(form["is_pinned"] == "1"),
+            pinned_until=pinned_until,
         )
         db.add(new_post_row)
         db.flush()
@@ -278,6 +308,14 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                 "status": post.status,
                 "tags": ", ".join(t.label for t in post.tags),
                 "og_image_id": str(post.og_image_id) if post.og_image_id else "",
+                # Include pin state so the template can pre-fill the
+                # checkbox and datetime input. Without these keys the
+                # template renders both fields as empty, and the next
+                # save would silently clear an existing pin.
+                "is_pinned": "1" if post.is_pinned else "",
+                "pinned_until": (
+                    post.pinned_until.strftime("%Y-%m-%dT%H:%M") if post.pinned_until else ""
+                ),
             }
             return render_template("admin/edit.html", post=post, form=form)
 
@@ -290,7 +328,13 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             flash(og_image_err, "error")
             return render_template("admin/edit.html", post=post, form=form)
 
-        before = {"slug": post.slug, "title": post.title, "status": post.status}
+        before = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
         # Snapshot the pre-edit state so the editor can roll back
         # later. Captured BEFORE the mutation: the live row stays
         # "current" and the most recent revision is "what it was
@@ -302,6 +346,16 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post.body_html = render_markdown(form["body_markdown"])
         post.body_excerpt = make_excerpt(form["body_markdown"])
         post.og_image_id = og_image_id
+
+        # Pinning. The checkbox semantics: "1" -> True, "" -> False.
+        # The datetime input has its own validator that surfaces a
+        # flash if the format is wrong.
+        pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
+        if pin_err is not None:
+            flash(pin_err, "error")
+            return render_template("admin/edit.html", post=post, form=form)
+        post.is_pinned = form["is_pinned"] == "1"
+        post.pinned_until = pinned_until
 
         # Transition to published sets published_at the first time
         # the column is empty (i.e. the post has never been
@@ -323,7 +377,13 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         db.commit()
         updated_id = post.id
         updated_site_id = post.site_id
-        after = {"slug": post.slug, "title": post.title, "status": post.status}
+        after = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
         skip_redirect = request.form.get("skip_redirect") == "1"
 
         pm = current_app.extensions["plugin_manager"]
@@ -355,6 +415,52 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         extra={"before": before, "after": after},
     )
     return redirect(url_for("post_admin.list_posts"))
+
+
+@bp.route("/<int:post_id>/pin-toggle", methods=["POST"])
+def pin_toggle(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Flip Post.is_pinned via an htmx-friendly POST.
+
+    The list-view button posts here and (for htmx requests) gets
+    the updated cell back for `hx-swap=outerHTML`. Plain (non-htmx)
+    submitters get a redirect to the list. Does not touch
+    `pinned_until`; nuanced expiry timing belongs on the edit
+    form.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
+        active = current_user()
+        is_own = bool(active and active.id == post.author_id)
+        if not ((is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)):
+            abort(403)
+
+        before_pinned = post.is_pinned
+        post.is_pinned = not before_pinned
+        db.commit()
+
+        toggled_site_id = site.id
+        # Render the partial inside the session so SQLAlchemy
+        # relationship access (e.g. any lazy-load the template
+        # needs) still has a live connection.
+        htmx_resp = (
+            render_template("admin/_pinned_cell.html", post=post, site=site) if is_htmx() else None
+        )
+
+    audit(
+        AuditAction.POST_PINNED if not before_pinned else AuditAction.POST_UNPINNED,
+        target_type="post",
+        target_id=post_id,
+        site_id=toggled_site_id,
+        extra={"before": before_pinned, "after": not before_pinned},
+    )
+
+    if htmx_resp is not None:
+        return htmx_resp
+    return redirect(url_for("post_admin.list_posts", site_slug=site_slug))
 
 
 @bp.route("/<int:post_id>/delete", methods=["POST"])

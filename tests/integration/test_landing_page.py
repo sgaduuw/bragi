@@ -149,3 +149,62 @@ def test_root_renders_post_index_listing_when_home_set_to_blog_index(
     assert "An excerpt." in body
     # POST_INDEX home: posts now live at `/<slug>/`, not `/posts/<slug>/`
     assert 'href="/first/"' in body
+
+
+def test_root_renders_pinned_carousel_above_recency(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    from sqlalchemy import select
+
+    blog_index_id = delivery_app.extensions["_test_blog_index_id"]
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.home_page_id = blog_index_id
+        user_id = site.owner_user_id
+        # Pin "First Post" (already seeded by the fixture as published).
+        first = db.execute(select(Post).where(Post.slug == "first")).scalar_one()
+        first.is_pinned = True
+        # Add a second pinned post so the carousel renders dots.
+        second = Post(
+            site_id=site.id,
+            slug="second",
+            title="Second Post",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="Second excerpt.",
+            author_id=user_id,
+            status=PostStatus.PUBLISHED,
+            published_at=datetime(2026, 5, 13, tzinfo=UTC),
+            is_pinned=True,
+        )
+        # Add an unpinned post to populate the recency list below.
+        third = Post(
+            site_id=site.id,
+            slug="third",
+            title="Third Post",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="Third excerpt.",
+            author_id=user_id,
+            status=PostStatus.PUBLISHED,
+            published_at=datetime(2026, 5, 12, tzinfo=UTC),
+        )
+        db.add_all([second, third])
+        db.commit()
+        first_id, second_id = first.id, second.id
+
+    resp = delivery_app.test_client().get("/", headers={"Host": "blog.example.com"})
+    assert resp.status_code == 200
+    body = resp.data.decode()
+
+    # Carousel section + per-card IDs + dots (>=2 pins)
+    assert 'aria-label="Pinned posts"' in body
+    assert f'id="pinned-{first_id}"' in body
+    assert f'id="pinned-{second_id}"' in body
+    assert 'class="pinned-dots"' in body
+
+    # Page 1 recency list excludes pinned posts; "Third Post" remains
+    recency_idx = body.index('class="post-list"')
+    assert "First Post" not in body[recency_idx:]
+    assert "Second Post" not in body[recency_idx:]
+    assert "Third Post" in body[recency_idx:]
