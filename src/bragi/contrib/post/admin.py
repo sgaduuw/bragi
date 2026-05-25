@@ -308,6 +308,14 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                 "status": post.status,
                 "tags": ", ".join(t.label for t in post.tags),
                 "og_image_id": str(post.og_image_id) if post.og_image_id else "",
+                # Include pin state so the template can pre-fill the
+                # checkbox and datetime input. Without these keys the
+                # template renders both fields as empty, and the next
+                # save would silently clear an existing pin.
+                "is_pinned": "1" if post.is_pinned else "",
+                "pinned_until": (
+                    post.pinned_until.strftime("%Y-%m-%dT%H:%M") if post.pinned_until else ""
+                ),
             }
             return render_template("admin/edit.html", post=post, form=form)
 

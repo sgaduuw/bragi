@@ -540,3 +540,60 @@ def test_edit_post_form_clears_pinned_until_when_empty(
         reloaded = db.get(Post, post_id)
         assert reloaded.is_pinned is True
         assert reloaded.pinned_until is None
+
+
+def test_edit_get_loads_for_pinned_post(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """GET-then-save round-trip must not silently clear pin state.
+
+    The template renders the pin fieldset in Task 6; this test proves
+    the GET does not error on a pinned post and that a subsequent POST
+    carrying the prefilled values preserves the pin state. If the GET
+    form dict were missing the pin keys the template would have nothing
+    to pre-fill, and a re-save would clear is_pinned and pinned_until.
+    """
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        post.is_pinned = True
+        post.pinned_until = datetime(2026, 12, 31, 12, 0)
+        db.commit()
+        post_id = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
+    assert resp.status_code == 200
+
+    # Simulate a re-save of the form with the prefilled pin values as
+    # the browser will send them once Task 6's template ships. If the
+    # GET form dict were missing the pin keys the template would not
+    # have anything to render into the form, so the POST below would
+    # represent the user submitting an empty checkbox and blank date
+    # (i.e. a silent clear). Sending the values explicitly here proves
+    # the POST path round-trips them correctly; the GET form dict fix
+    # is what makes that round-trip possible end-to-end.
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "_csrf_token": token,
+            "title": "Hello World",
+            "slug": "hello",
+            "body_markdown": "Hello!",
+            "status": "published",
+            "tags": "",
+            "og_image_id": "",
+            "is_pinned": "1",
+            "pinned_until": "2026-12-31T12:00",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        reloaded = db.get(Post, post_id)
+        assert reloaded.is_pinned is True
+        assert reloaded.pinned_until == datetime(2026, 12, 31, 12, 0)
