@@ -461,3 +461,82 @@ def test_on_post_deleted_fires_with_row_still_in_session(
     )
     assert len(lifecycle_recorder.deleted) == 1
     assert lifecycle_recorder.deleted[0]["slug"] == "hello"
+
+
+# ============================================================
+# Pinning fields round-trip (#125)
+# ============================================================
+
+
+def test_edit_post_form_round_trips_pinning_fields(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        post_id = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "_csrf_token": token,
+            "title": "Hello World",
+            "slug": "hello",
+            "body_markdown": "Hello!",
+            "status": "published",
+            "tags": "",
+            "og_image_id": "",
+            "is_pinned": "1",
+            "pinned_until": "2026-12-31T12:00",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        reloaded = db.get(Post, post_id)
+        assert reloaded.is_pinned is True
+        assert reloaded.pinned_until == datetime(2026, 12, 31, 12, 0)
+
+
+def test_edit_post_form_clears_pinned_until_when_empty(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        post.is_pinned = True
+        post.pinned_until = datetime(2026, 12, 31, 12, 0)
+        db.commit()
+        post_id = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "_csrf_token": token,
+            "title": "Hello World",
+            "slug": "hello",
+            "body_markdown": "Hello!",
+            "status": "published",
+            "tags": "",
+            "og_image_id": "",
+            "is_pinned": "1",
+            "pinned_until": "",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        reloaded = db.get(Post, post_id)
+        assert reloaded.is_pinned is True
+        assert reloaded.pinned_until is None
