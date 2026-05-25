@@ -19,6 +19,8 @@ table.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -47,3 +49,10 @@ class PostRevision(IdMixin, TimestampsMixin, Base):
     body_html: Mapped[str] = mapped_column(Text, default="")
     body_excerpt: Mapped[str] = mapped_column(Text, default="")
     meta_description: Mapped[str | None] = mapped_column(Text, default=None)
+    # Editorial pin snapshot. Matches the spec's edge-case table:
+    # restoring a revision should bring back the pin state too.
+    # Pre-feature revisions default to (False, NULL) and a restore
+    # therefore clears the pin — acceptable because those revisions
+    # predate the pinning feature and had no pin to remember.
+    is_pinned: Mapped[bool] = mapped_column(default=False)
+    pinned_until: Mapped[datetime | None] = mapped_column(default=None)
