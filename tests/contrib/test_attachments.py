@@ -2305,3 +2305,100 @@ def test_regenerate_all_purges_and_reenqueues(
     assert all(r.format in {"avif", "webp", "original"} for r in rows)
     assert all(r.status == "pending" for r in rows)
     assert len(rows) == 9
+
+
+def test_picker_thumbnail_uses_smallest_webp_when_available(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """When done WebP renditions exist for an attachment, the
+    picker grid links thumbnails to the smallest one (by width)."""
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="a" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        for w in (320, 800):
+            db.add(
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label=f"{w}w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="done",
+                    storage_key=f"{att.storage_key}/{w}/webp",
+                    width=w,
+                    height=w // 2,
+                    bytes_size=10,
+                )
+            )
+        # Capture the storage_key before the session closes; the
+        # session's expire-on-commit would detach `att` and any
+        # later attribute access would raise.
+        original_storage_key = att.storage_key
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/picker")
+    body = resp.data.decode()
+    # The smallest webp's storage_key (the path-style "<sha>/320/webp")
+    # is what the picker should pass to the admin bytes route.
+    assert f"{original_storage_key}/320/webp" in body
+
+
+def test_picker_thumbnail_falls_back_to_original_when_no_done_rendition(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """When no done rendition exists for an attachment (just
+    uploaded, worker hasn't drained), the picker thumbnail falls
+    back to the original storage_key.
+    """
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="b" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        # A pending row exists but no done rendition yet.
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="pending",
+            )
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/picker")
+    body = resp.data.decode()
+    # The original SHA appears in the rendered URL (via the
+    # picker's fallback path).
+    assert ("b" * 64) in body
+    # And the rendered URL does NOT include the "/320/webp" suffix
+    # since no done rendition exists.
+    assert f"{('b' * 64)}/320/webp" not in body

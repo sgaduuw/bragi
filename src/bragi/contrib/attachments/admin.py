@@ -202,11 +202,42 @@ def picker(site_slug: str) -> ResponseReturnValue:
         peek = db.execute(peek_query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
         has_more = peek is not None
 
+        # Map each attachment id to its smallest done WebP
+        # rendition's storage_key. The picker template uses this
+        # to render thumbnail src URLs; if an attachment has no
+        # done rendition yet (just uploaded), the mapping yields
+        # None and the template falls back to the original
+        # storage_key.
+        thumb_storage_key_by_id: dict[int, str] = {}
+        if rows:
+            rendition_rows = (
+                db.execute(
+                    select(AttachmentRendition)
+                    .where(
+                        AttachmentRendition.status == "done",
+                        AttachmentRendition.format == "webp",
+                        AttachmentRendition.attachment_id.in_([r.id for r in rows]),
+                    )
+                    .order_by(
+                        AttachmentRendition.attachment_id,
+                        AttachmentRendition.width.asc(),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for rr in rendition_rows:
+                # The first row per attachment_id is the smallest
+                # width (ORDER BY ... width ASC). Subsequent rows
+                # for the same attachment are skipped.
+                thumb_storage_key_by_id.setdefault(rr.attachment_id, rr.storage_key or "")
+
     return render_template(
         "admin/attachments_picker.html",
         rows=rows,
         page=page,
         has_more=has_more,
+        thumb_storage_key_by_id=thumb_storage_key_by_id,
     )
 
 
