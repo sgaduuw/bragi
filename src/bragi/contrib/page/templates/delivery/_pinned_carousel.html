@@ -2,7 +2,9 @@
    page 1 of the post-index page. CSS scroll-snap; dot indicators
    via anchor links and :target. Single-pin case omits the dots. #}
 {% if pinned_posts %}
-<section class="pinned" aria-label="Pinned posts">
+<section class="pinned"
+         data-autoadvance-seconds="{{ pinned_autoadvance_seconds | default(7) }}"
+         aria-label="Pinned posts">
   <h2 class="pinned-label">Pinned</h2>
   <div class="pinned-strip" role="region" tabindex="0">
     {% for post in pinned_posts %}

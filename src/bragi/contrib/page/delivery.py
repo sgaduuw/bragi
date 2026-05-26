@@ -66,10 +66,34 @@ from bragi.core.url import page_url_for, post_index_page_for, tag_segment_for, t
 
 DEFAULT_POSTS_PER_PAGE = 10
 
+DEFAULT_PINNED_AUTOADVANCE_SECONDS = 7
+
+
+def _pinned_autoadvance_seconds(site: Site) -> int:
+    """Resolve `Site.extra_settings.pinned_autoadvance_seconds`.
+
+    Returns the per-site override (int), the default 7, or 0 to
+    disable. Malformed values (non-int, negative) fall back to the
+    default rather than 500-ing the public page; no admin UI exists
+    yet so the safest posture is "ignore garbage".
+    """
+    raw = site.extra_settings.get("pinned_autoadvance_seconds")
+    if raw is None:
+        return DEFAULT_PINNED_AUTOADVANCE_SECONDS
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_PINNED_AUTOADVANCE_SECONDS
+    if value < 0:
+        return DEFAULT_PINNED_AUTOADVANCE_SECONDS
+    return value
+
+
 bp = Blueprint(
     "page_delivery",
     __name__,
     template_folder="templates",
+    static_folder="static",
 )
 
 
@@ -217,7 +241,7 @@ def render_post_index_page(site: Site, page: Page) -> Response:
 
         etag = etag_for(
             "post_index",
-            f"{site.id}|{page.id}|{page_n}|{per_page}|{expiry_key}",
+            f"{site.id}|{page.id}|{page_n}|{per_page}|{expiry_key}|aa{_pinned_autoadvance_seconds(site)}",
             last_modified,
         )
         not_modified = maybe_304(request, etag=etag, last_modified=last_modified)
@@ -230,6 +254,7 @@ def render_post_index_page(site: Site, page: Page) -> Response:
             page=page,
             posts=posts,
             pinned_posts=pinned_posts,
+            pinned_autoadvance_seconds=_pinned_autoadvance_seconds(site),
             page_n=page_n,
             total_pages=total_pages,
             has_prev=page_n > 1,
