@@ -21,7 +21,7 @@ from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from bragi.core.seo import og_image_url_for
+from bragi.core.seo import featured_image_url_for
 from tests.conftest import seed_blog_index
 
 
@@ -115,7 +115,7 @@ def test_post_emits_og_and_twitter_meta(delivery_app: Flask) -> None:
 def test_post_with_site_default_emits_image(
     delivery_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    """Site.default_og_image_id is the fallback when post has none."""
+    """Site.default_featured_image_id is the fallback when post has none."""
     from sqlalchemy import select
 
     with db_session_factory() as db:
@@ -125,7 +125,7 @@ def test_post_with_site_default_emits_image(
             .scalar_one()
             .id
         )
-        site.default_og_image_id = default_id
+        site.default_featured_image_id = default_id
         db.commit()
 
     resp = delivery_app.test_client().get("/posts/hello/", headers={"Host": "blog.example.com"})
@@ -138,7 +138,7 @@ def test_post_with_site_default_emits_image(
 def test_post_specific_image_beats_site_default(
     delivery_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    """Post.og_image_id wins over Site.default_og_image_id."""
+    """Post.featured_image_id wins over Site.default_featured_image_id."""
     from sqlalchemy import select
 
     with db_session_factory() as db:
@@ -153,9 +153,9 @@ def test_post_specific_image_beats_site_default(
             .scalar_one()
             .id
         )
-        site.default_og_image_id = default_id
+        site.default_featured_image_id = default_id
         post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
-        post.og_image_id = specific_id
+        post.featured_image_id = specific_id
         db.commit()
 
     resp = delivery_app.test_client().get("/posts/hello/", headers={"Host": "blog.example.com"})
@@ -183,7 +183,7 @@ def test_post_index_emits_og_and_twitter_meta(delivery_app: Flask) -> None:
     assert 'name="twitter:card" content="summary"' in body
 
 
-def test_og_image_url_for_returns_none_without_canonical_url(
+def test_featured_image_url_for_returns_none_without_canonical_url(
     delivery_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
     """Empty `site.canonical_url` short-circuits to None (OG meta omitted)."""
@@ -196,14 +196,14 @@ def test_og_image_url_for_returns_none_without_canonical_url(
             .scalar_one()
             .id
         )
-        site.default_og_image_id = attachment_id
+        site.default_featured_image_id = attachment_id
         site.canonical_url = ""
         db.commit()
         post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
-        assert og_image_url_for(item=post, site=site, db=db) is None
+        assert featured_image_url_for(item=post, site=site, db=db) is None
 
 
-def test_og_image_url_for_returns_none_when_neither_set(
+def test_featured_image_url_for_returns_none_when_neither_set(
     delivery_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
     """No post-level image and no site default leaves the meta out."""
@@ -213,29 +213,29 @@ def test_og_image_url_for_returns_none_when_neither_set(
         site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
         post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
         # Confirm the fixture state.
-        assert site.default_og_image_id is None
-        assert post.og_image_id is None
-        assert og_image_url_for(item=post, site=site, db=db) is None
+        assert site.default_featured_image_id is None
+        assert post.featured_image_id is None
+        assert featured_image_url_for(item=post, site=site, db=db) is None
 
 
 # --------------------------- cross-site rejection ---------------------------
 
 
-def test_resolve_og_image_id_rejects_cross_site_attachment(
+def test_resolve_featured_image_id_rejects_cross_site_attachment(
     delivery_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    """An attachment from a different site must not save as og_image.
+    """An attachment from a different site must not save as featured_image.
 
-    The validation lives in the post admin's `_resolve_og_image_id`
+    The validation lives in the post admin's `_resolve_featured_image_id`
     helper. Without it a crafted form POST could attach another
     tenant's attachment to this site's post, leaking the image
     through the OG meta on social previews. Same shape lives on the
-    sites admin's `_default_og_image_id_or_error` and the page
+    sites admin's `_default_featured_image_id_or_error` and the page
     admin's resolver; this test pins the post helper.
     """
     from sqlalchemy import select
 
-    from bragi.contrib.post.admin import _resolve_og_image_id
+    from bragi.contrib.post.admin import _resolve_featured_image_id
 
     with db_session_factory() as db:
         site_a = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
@@ -271,26 +271,26 @@ def test_resolve_og_image_id_rejects_cross_site_attachment(
         )
         db.add(own)
         db.commit()
-        value, err = _resolve_og_image_id(db, str(own.id), site_a.id)
+        value, err = _resolve_featured_image_id(db, str(own.id), site_a.id)
         assert value == own.id
         assert err is None
 
         # Cross-site rejected with a clear error.
-        value, err = _resolve_og_image_id(db, str(foreign.id), site_a.id)
+        value, err = _resolve_featured_image_id(db, str(foreign.id), site_a.id)
         assert value is None
         assert err is not None and "this site" in err
 
         # Unknown id rejected.
-        value, err = _resolve_og_image_id(db, "99999", site_a.id)
+        value, err = _resolve_featured_image_id(db, "99999", site_a.id)
         assert value is None
         assert err is not None and "not found" in err
 
         # Empty input clears.
-        value, err = _resolve_og_image_id(db, "", site_a.id)
+        value, err = _resolve_featured_image_id(db, "", site_a.id)
         assert value is None
         assert err is None
 
         # Non-integer input rejected.
-        value, err = _resolve_og_image_id(db, "abc", site_a.id)
+        value, err = _resolve_featured_image_id(db, "abc", site_a.id)
         assert value is None
         assert err is not None

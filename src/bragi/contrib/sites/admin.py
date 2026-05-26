@@ -74,7 +74,7 @@ def _form_from_request() -> dict[str, str]:
         "canonical_url": (request.form.get("canonical_url") or "").strip(),
         "theme": (request.form.get("theme") or "").strip(),
         "home_page_id": (request.form.get("home_page_id") or "").strip(),
-        "default_og_image_id": (request.form.get("default_og_image_id") or "").strip(),
+        "default_featured_image_id": (request.form.get("default_featured_image_id") or "").strip(),
     }
 
 
@@ -119,14 +119,16 @@ def _published_pages_for(db: Any, site_id: int) -> list[Page]:
     )
 
 
-def _default_og_image_id_or_error(db: Any, raw: str, site_id: int) -> tuple[int | None, str | None]:
-    """Resolve the form's `default_og_image_id` value.
+def _default_featured_image_id_or_error(
+    db: Any, raw: str, site_id: int
+) -> tuple[int | None, str | None]:
+    """Resolve the form's `default_featured_image_id` value.
 
     Empty clears (None, None); a valid same-site attachment id
     resolves to (int, None); anything that doesn't exist or
     belongs to another site returns (None, message). Same-site
     is the load-bearing check: without it a crafted POST could
-    point this site's default OG image at another tenant's
+    point this site's default featured image at another tenant's
     attachment.
     """
     if not raw:
@@ -134,13 +136,31 @@ def _default_og_image_id_or_error(db: Any, raw: str, site_id: int) -> tuple[int 
     try:
         candidate_id = int(raw)
     except ValueError:
-        return None, "Default OG image id must be an integer."
+        return None, "Default featured image id must be an integer."
     attachment = db.get(Attachment, candidate_id)
     if attachment is None:
-        return None, "Default OG image attachment not found."
+        return None, "Default featured image attachment not found."
     if attachment.site_id != site_id:
-        return None, "Default OG image must belong to this site."
+        return None, "Default featured image must belong to this site."
     return candidate_id, None
+
+
+def _load_default_featured_image(db: Any, raw: str | None, site_id: int) -> Attachment | None:
+    """Load the Attachment for the form's inline thumbnail preview.
+
+    Returns None for any invalid input. Cross-checks site_id so a
+    stale form-state can't leak a different tenant's attachment.
+    """
+    if not raw:
+        return None
+    try:
+        att_id = int(raw)
+    except ValueError:
+        return None
+    attachment: Attachment | None = db.get(Attachment, att_id)
+    if attachment is None or attachment.site_id != site_id:
+        return None
+    return attachment
 
 
 def _home_page_id_or_error(db: Any, raw: str, site_id: int) -> tuple[int | None, str | None]:
@@ -417,8 +437,8 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 "canonical_url": site.canonical_url,
                 "theme": site.theme or "",
                 "home_page_id": str(site.home_page_id) if site.home_page_id else "",
-                "default_og_image_id": (
-                    str(site.default_og_image_id) if site.default_og_image_id else ""
+                "default_featured_image_id": (
+                    str(site.default_featured_image_id) if site.default_featured_image_id else ""
                 ),
             }
             aliases = (
@@ -438,6 +458,9 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 aliases=aliases,
                 themes=themes,
                 home_pages=home_pages,
+                default_featured_image=_load_default_featured_image(
+                    db, form["default_featured_image_id"], site.id
+                ),
             )
 
         form = _form_from_request()
@@ -448,11 +471,11 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         home_page_value, home_page_err = _home_page_id_or_error(db, form["home_page_id"], site.id)
         if home_page_err is not None:
             errors.append(home_page_err)
-        default_og_image_value, default_og_image_err = _default_og_image_id_or_error(
-            db, form["default_og_image_id"], site.id
+        default_featured_image_value, default_featured_image_err = (
+            _default_featured_image_id_or_error(db, form["default_featured_image_id"], site.id)
         )
-        if default_og_image_err is not None:
-            errors.append(default_og_image_err)
+        if default_featured_image_err is not None:
+            errors.append(default_featured_image_err)
         home_pages = _published_pages_for(db, site.id)
         if errors:
             for err in errors:
@@ -463,6 +486,9 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 form=form,
                 themes=themes,
                 home_pages=home_pages,
+                default_featured_image=_load_default_featured_image(
+                    db, form["default_featured_image_id"], site.id
+                ),
             )
 
         # Uniqueness checks excluding the row being edited.
@@ -478,6 +504,9 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                     form=form,
                     themes=themes,
                     home_pages=home_pages,
+                    default_featured_image=_load_default_featured_image(
+                        db, form["default_featured_image_id"], site.id
+                    ),
                 )
 
         old_home_page_id = site.home_page_id
@@ -489,7 +518,7 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         site.canonical_url = form["canonical_url"] or f"https://{form['hostname']}"
         site.theme = theme_value
         site.home_page_id = home_page_value
-        site.default_og_image_id = default_og_image_value
+        site.default_featured_image_id = default_featured_image_value
         # Sync the page-slug → / redirect inside the same
         # transaction so a half-applied state (site updated but
         # redirect stale) can never be observed.

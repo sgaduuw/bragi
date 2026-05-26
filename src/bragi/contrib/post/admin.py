@@ -65,7 +65,7 @@ def _form_from_request() -> dict[str, str]:
         "body_markdown": request.form.get("body_markdown") or "",
         "status": request.form.get("status") or PostStatus.DRAFT,
         "tags": (request.form.get("tags") or "").strip(),
-        "og_image_id": (request.form.get("og_image_id") or "").strip(),
+        "featured_image_id": (request.form.get("featured_image_id") or "").strip(),
         # Pinning. The checkbox sends "1" when ticked, absent when not.
         # The datetime-local input sends "" when cleared; we parse it
         # as naive UTC (matching `scheduled_for`'s convention) below.
@@ -74,7 +74,9 @@ def _form_from_request() -> dict[str, str]:
     }
 
 
-def _resolve_og_image_id(db: Session, raw: str, site_id: int) -> tuple[int | None, str | None]:
+def _resolve_featured_image_id(
+    db: Session, raw: str, site_id: int
+) -> tuple[int | None, str | None]:
     """Validate a form-supplied attachment id.
 
     Returns `(value, error)`: empty string clears (None, None); a
@@ -89,13 +91,33 @@ def _resolve_og_image_id(db: Session, raw: str, site_id: int) -> tuple[int | Non
     try:
         candidate_id = int(raw)
     except ValueError:
-        return None, "OG image id must be an integer."
+        return None, "Featured image id must be an integer."
     attachment = db.get(Attachment, candidate_id)
     if attachment is None:
-        return None, "OG image attachment not found."
+        return None, "Featured image attachment not found."
     if attachment.site_id != site_id:
-        return None, "OG image must belong to this site."
+        return None, "Featured image must belong to this site."
     return candidate_id, None
+
+
+def _load_featured_image(db: Session, raw: str | None, site_id: int) -> Attachment | None:
+    """Load the Attachment for the form's inline thumbnail preview.
+
+    Returns None for any invalid input — the picker just shows the
+    \"Pick image\" button rather than a thumbnail. Always cross-checks
+    the site_id so a stale form-state can't leak a different tenant's
+    attachment into the rendered form.
+    """
+    if not raw:
+        return None
+    try:
+        att_id = int(raw)
+    except ValueError:
+        return None
+    attachment = db.get(Attachment, att_id)
+    if attachment is None or attachment.site_id != site_id:
+        return None
+    return attachment
 
 
 def _parse_pinned_until(raw: str) -> tuple[datetime | None, str | None]:
@@ -154,6 +176,7 @@ def _snapshot_post(
             body_html=post.body_html,
             body_excerpt=post.body_excerpt,
             meta_description=post.meta_description,
+            featured_image_id=post.featured_image_id,
             is_pinned=post.is_pinned,
             pinned_until=post.pinned_until,
         )
@@ -226,21 +249,38 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         site_id = site.id
 
         if request.method == "GET":
-            return render_template("admin/edit.html", post=None, form={})
+            return render_template("admin/edit.html", post=None, form={}, featured_image=None)
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template("admin/edit.html", post=None, form=form)
-        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], site_id)
-        if og_image_err is not None:
-            flash(og_image_err, "error")
-            return render_template("admin/edit.html", post=None, form=form)
+            return render_template(
+                "admin/edit.html",
+                post=None,
+                form=form,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+            )
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return render_template(
+                "admin/edit.html",
+                post=None,
+                form=form,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+            )
 
         pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
         if pin_err is not None:
             flash(pin_err, "error")
-            return render_template("admin/edit.html", post=None, form=form)
+            return render_template(
+                "admin/edit.html",
+                post=None,
+                form=form,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+            )
 
         body_markdown = form["body_markdown"]
         new_status = form["status"]
@@ -254,7 +294,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             author_id=int(session["user_id"]),
             status=new_status,
             published_at=(naive_utcnow() if new_status == PostStatus.PUBLISHED else None),
-            og_image_id=og_image_id,
+            featured_image_id=featured_image_id,
             is_pinned=(form["is_pinned"] == "1"),
             pinned_until=pinned_until,
         )
@@ -309,7 +349,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                 "body_markdown": post.body_markdown,
                 "status": post.status,
                 "tags": ", ".join(t.label for t in post.tags),
-                "og_image_id": str(post.og_image_id) if post.og_image_id else "",
+                "featured_image_id": str(post.featured_image_id) if post.featured_image_id else "",
                 # Include pin state so the template can pre-fill the
                 # checkbox and datetime input. Without these keys the
                 # template renders both fields as empty, and the next
@@ -319,16 +359,39 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                     post.pinned_until.strftime("%Y-%m-%dT%H:%M") if post.pinned_until else ""
                 ),
             }
-            return render_template("admin/edit.html", post=post, form=form)
+            return render_template(
+                "admin/edit.html",
+                post=post,
+                form=form,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), post.site_id
+                ),
+            )
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template("admin/edit.html", post=post, form=form)
-        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], post.site_id)
-        if og_image_err is not None:
-            flash(og_image_err, "error")
-            return render_template("admin/edit.html", post=post, form=form)
+            return render_template(
+                "admin/edit.html",
+                post=post,
+                form=form,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), post.site_id
+                ),
+            )
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], post.site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return render_template(
+                "admin/edit.html",
+                post=post,
+                form=form,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), post.site_id
+                ),
+            )
 
         before = {
             "slug": post.slug,
@@ -347,7 +410,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post.body_markdown = form["body_markdown"]
         post.body_html = render_markdown(form["body_markdown"])
         post.body_excerpt = make_excerpt(form["body_markdown"])
-        post.og_image_id = og_image_id
+        post.featured_image_id = featured_image_id
 
         # Pinning. The checkbox semantics: "1" -> True, "" -> False.
         # The datetime input has its own validator that surfaces a
@@ -355,7 +418,14 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
         if pin_err is not None:
             flash(pin_err, "error")
-            return render_template("admin/edit.html", post=post, form=form)
+            return render_template(
+                "admin/edit.html",
+                post=post,
+                form=form,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), post.site_id
+                ),
+            )
         post.is_pinned = form["is_pinned"] == "1"
         post.pinned_until = pinned_until
 
@@ -590,6 +660,7 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         post.body_html = revision.body_html
         post.body_excerpt = revision.body_excerpt
         post.meta_description = revision.meta_description
+        post.featured_image_id = revision.featured_image_id
         post.is_pinned = revision.is_pinned
         post.pinned_until = revision.pinned_until
         # If the restore crosses the draft->published boundary,

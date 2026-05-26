@@ -28,6 +28,7 @@
       {% for r in rows %}
         <button type="button"
                 class="picker-card"
+                data-attachment-id="{{ r.id }}"
                 data-storage-key="{{ r.storage_key }}"
                 data-filename="{{ r.filename }}"
                 data-alt-text="{{ r.alt_text or '' }}"
@@ -36,10 +37,9 @@
                        padding: 0.5rem; background: white; border: 1px solid #ddd;
                        border-radius: 4px; cursor: pointer; text-align: left;
                        overflow: hidden;">
-          {# Build the URL by hand: the delivery blueprint isn't
-             mounted on the admin app, so url_for can't resolve
-             `attachment_delivery.serve_attachment` here. The
-             public delivery URL is always `/attachments/<key>`. #}
+          {# Public-serving URL — `/attachments/<key>` is mounted on
+             both the delivery and admin apps (so the picker
+             thumbnails resolve here without an absolute URL). #}
           <img src="/attachments/{{ r.storage_key }}"
                alt="{{ r.alt_text or '' }}"
                loading="lazy"
