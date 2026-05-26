@@ -31,6 +31,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   today). Closes #266.
 
 ### Fixed
+- **Admin image-picker preview thumbnails no longer 302 to the
+  login page.** The attachment-delivery blueprint is mounted on
+  the admin app so the picker dialog can render
+  `<img src="/attachments/<key>">` against the admin host (#269);
+  the admin auth gate was redirecting those bytes to
+  `/auth/login`, so the browser rendered the login HTML in place
+  of the image and every preview appeared broken even for a
+  logged-in operator. The `attachment_delivery.serve_attachment`
+  endpoint is now in `PUBLIC_ENDPOINTS` alongside `static` and
+  `_healthz`. No auth elevation — the same path on the delivery
+  app already serves anonymously. Closes #273.
 - **Pinned-posts carousel dot navigation no longer vertically
   jumps the page.** Clicking a dot used to scroll the page so
   the targeted card sat at the top of the viewport; on readers
