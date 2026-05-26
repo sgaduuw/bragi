@@ -217,7 +217,12 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Personal docs trio (rsync'd between workspaces, not committed; see CLAUDE.md)
+# Claude tooling (rsync'd between workspaces, not committed):
+# - the CLAUDE.md / CONTEXT.md / MEMORY.md trio inside _claude/
+# - specs / plans / brainstorm session state for AI-assisted work
+# - the root-level CLAUDE.md stub that points into _claude/
+# See _claude/CLAUDE.md for the wider convention.
+/_claude/
 /CLAUDE.md
 /CONTEXT.md
 /MEMORY.md
@@ -230,6 +235,7 @@ __marimo__/
 *.db-wal
 *.db-shm
 
-# Superpowers brainstorming session state (mockups persist here)
+# Brainstorming session state from earlier tooling versions; the
+# active path is _claude/brainstorm/ (gitignored via /_claude/).
 .superpowers/
 
