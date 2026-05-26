@@ -1759,3 +1759,58 @@ def test_srcset_helper_returns_empty_for_non_image(
         attachment = db.get(Attachment, attachment_id)
         value = srcset_for(attachment)
     assert value == ""
+
+
+def test_storage_writes_rendition_under_nested_path(tmp_attachments_root: Path) -> None:
+    """Renditions are stored at
+    <root>/<site>/<sha[:2]>/<sha>/<width>/<format>, separate from
+    the original at .../<sha>/original.<ext>.
+    """
+    from bragi.core.storage import store_rendition
+
+    sha = "f" * 64
+    store_rendition("blog", sha, width=320, format_slug="webp", data=b"WEBPbytes")
+    expected = tmp_attachments_root / "blog" / "ff" / sha / "320" / "webp"
+    assert expected.read_bytes() == b"WEBPbytes"
+
+
+def test_storage_reads_rendition_back(tmp_attachments_root: Path) -> None:
+    from bragi.core.storage import read_rendition, store_rendition
+
+    sha = "a" * 64
+    store_rendition("blog", sha, width=800, format_slug="avif", data=b"AVIFstub")
+    assert read_rendition("blog", sha, width=800, format_slug="avif") == b"AVIFstub"
+
+
+def test_storage_writes_original_under_nested_path(tmp_attachments_root: Path) -> None:
+    from bragi.core.storage import store_original
+
+    sha_returned, size = store_original("blog", content_type="image/jpeg", data=b"JPEGbytes")
+    assert size == len(b"JPEGbytes")
+    expected = tmp_attachments_root / "blog" / sha_returned[:2] / sha_returned / "original.jpg"
+    assert expected.read_bytes() == b"JPEGbytes"
+
+
+def test_storage_read_bytes_finds_original_under_sha_dir(
+    tmp_attachments_root: Path,
+) -> None:
+    """The existing `read_bytes(site, sha)` callers (delivery
+    /attachments/<key>, refcount sweep, picker fallback) must
+    keep working after the migration moves the file under
+    <sha>/original.<ext>. `read_bytes` looks inside the sha
+    directory for the lone original.<ext> file.
+    """
+    from bragi.core.storage import read_bytes, store_original
+
+    sha_returned, _ = store_original("blog", content_type="image/png", data=b"PNGbytes")
+    assert read_bytes("blog", sha_returned) == b"PNGbytes"
+
+
+def test_storage_remove_drops_rendition_file(tmp_attachments_root: Path) -> None:
+    from bragi.core.storage import remove_rendition, store_rendition
+
+    sha = "c" * 64
+    store_rendition("blog", sha, width=320, format_slug="webp", data=b"WEBPbytes")
+    remove_rendition("blog", sha, width=320, format_slug="webp")
+    expected = tmp_attachments_root / "blog" / "cc" / sha / "320" / "webp"
+    assert not expected.exists()
