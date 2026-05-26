@@ -94,6 +94,12 @@ bp = Blueprint(
     __name__,
     template_folder="templates",
     static_folder="static",
+    # Namespace the blueprint's static prefix: Flask auto-registers an
+    # app-level `/static/<path>` from the bragi package's static folder,
+    # which would shadow this blueprint's static endpoint (registration
+    # order wins in werkzeug's URL map). `/static/page/<path>` keeps
+    # the two distinct. Same shape as `theme_static`'s `/theme/<slug>/static/`.
+    static_url_path="/static/page",
 )
 
 

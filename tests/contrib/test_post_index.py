@@ -510,7 +510,7 @@ def test_pinned_section_includes_carousel_script_when_multi_pin(
     client = delivery_app.test_client()
     resp = client.get("/posts/", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
-    assert "/static/pinned-carousel.js" in body
+    assert "/static/page/pinned-carousel.js" in body
 
 
 def test_pinned_section_omits_carousel_script_when_single_pin(
@@ -524,7 +524,7 @@ def test_pinned_section_omits_carousel_script_when_single_pin(
     client = delivery_app.test_client()
     resp = client.get("/posts/", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
-    assert "/static/pinned-carousel.js" not in body
+    assert "/static/page/pinned-carousel.js" not in body
 
 
 def test_pinned_section_omits_carousel_script_when_no_pin(
@@ -533,4 +533,4 @@ def test_pinned_section_omits_carousel_script_when_no_pin(
     client = delivery_app.test_client()
     resp = client.get("/posts/", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
-    assert "/static/pinned-carousel.js" not in body
+    assert "/static/page/pinned-carousel.js" not in body
