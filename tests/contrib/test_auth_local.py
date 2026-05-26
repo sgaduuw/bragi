@@ -373,27 +373,6 @@ def test_admin_index_renders_chrome_with_nav(admin_app: Flask) -> None:
     assert "Log out" in body
 
 
-def test_attachment_delivery_endpoint_is_public_on_admin(admin_app: Flask) -> None:
-    """Anonymous /attachments/<key> hits on the admin app must NOT
-    redirect to /auth/login. The attachment-delivery blueprint is
-    mounted on admin so the image-picker dialog can render previews
-    against the admin host; the bytes are CDN-style content already
-    served anonymously on delivery, so admin needs the same posture.
-    Without the carve-out, every `<img>` in the picker dialog 302s
-    to /auth/login and the browser renders login HTML in place of
-    the bytes. Regression net for #273.
-    """
-    client = admin_app.test_client()
-    resp = client.get("/attachments/some-storage-key", follow_redirects=False)
-    # Without the carve-out this would be a 302 to /auth/login. With
-    # it, the request reaches the route, which 404s because the test
-    # Host doesn't resolve to a site (g.site is None) or no
-    # attachment exists with that key. Either way: 404, not 302.
-    assert resp.status_code == 404, (
-        f"expected 404, got {resp.status_code} " f"(Location: {resp.headers.get('Location')!r})"
-    )
-
-
 def test_login_endpoint_is_public(admin_app: Flask) -> None:
     """The login view must be reachable without a session, or login is impossible."""
     client = admin_app.test_client()

@@ -121,6 +121,29 @@
   import Image from 'https://esm.sh/@tiptap/extension-image@2.6';
   import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
 
+  // Site-scoped admin URL for attachment bytes. The stored
+  // markdown uses public `/attachments/<key>` URLs so it round-
+  // trips cleanly to delivery; in the editor we rewrite to the
+  // admin-scoped URL on load (so in-editor previews resolve) and
+  // back to the public URL on save. The delivery `/attachments/`
+  // route resolves the site from the Host header, which doesn't
+  // match on the admin host, so the editor can't fetch them
+  // unrewritten.
+  const ADMIN_ATTACHMENT_PREFIX = {{ url_for(
+      "attachment_admin.serve_attachment_bytes",
+      site_slug=request.view_args["site_slug"],
+      storage_key="__STORAGE_KEY__",
+  ) | tojson }}.replace("__STORAGE_KEY__", "");
+  const PUBLIC_ATTACHMENT_MARKER = "](/attachments/";
+  const ADMIN_ATTACHMENT_MARKER = "](" + ADMIN_ATTACHMENT_PREFIX;
+
+  function publicToAdmin(md) {
+    return md.split(PUBLIC_ATTACHMENT_MARKER).join(ADMIN_ATTACHMENT_MARKER);
+  }
+  function adminToPublic(md) {
+    return md.split(ADMIN_ATTACHMENT_MARKER).join(PUBLIC_ATTACHMENT_MARKER);
+  }
+
   const textarea = document.getElementById('body_markdown');
   const mount = document.getElementById('tiptap-editor');
   const toolbar = document.getElementById('tiptap-editor-toolbar');
@@ -141,9 +164,9 @@
           tightLists: true,
         }),
       ],
-      content: textarea.value,
+      content: publicToAdmin(textarea.value),
       onUpdate: ({ editor }) => {
-        textarea.value = editor.storage.markdown.getMarkdown();
+        textarea.value = adminToPublic(editor.storage.markdown.getMarkdown());
       },
       onSelectionUpdate: ({ editor }) => updateToolbarActive(editor),
     });
@@ -259,11 +282,13 @@
         // tiptap-markdown serializes it as `![alt](src)`. The
         // previous `insertContent('![alt](url)')` shape inserted the
         // markdown as plain text, which then got its special chars
-        // escaped on save (#270).
+        // escaped on save (#270). The src uses the admin-scoped URL
+        // so the in-editor preview resolves; adminToPublic rewrites
+        // it back to the public form on save.
         editor
           .chain()
           .focus()
-          .setImage({ src: `/attachments/${key}`, alt: alt })
+          .setImage({ src: ADMIN_ATTACHMENT_PREFIX + key, alt: alt })
           .run();
         pickerDialog.close();
       });
@@ -367,7 +392,7 @@
     const form = textarea.closest('form');
     if (form) {
       form.addEventListener('submit', () => {
-        textarea.value = editor.storage.markdown.getMarkdown();
+        textarea.value = adminToPublic(editor.storage.markdown.getMarkdown());
       });
     }
   }

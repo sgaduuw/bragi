@@ -37,10 +37,11 @@
                        padding: 0.5rem; background: white; border: 1px solid #ddd;
                        border-radius: 4px; cursor: pointer; text-align: left;
                        overflow: hidden;">
-          {# Public-serving URL — `/attachments/<key>` is mounted on
-             both the delivery and admin apps (so the picker
-             thumbnails resolve here without an absolute URL). #}
-          <img src="/attachments/{{ r.storage_key }}"
+          {# Site-scoped admin URL: the delivery /attachments/<key>
+             route resolves the site from the Host header, which
+             doesn't match on the admin host. attachment_admin's
+             /file/<key> reads the site from the URL path. #}
+          <img src="{{ url_for('attachment_admin.serve_attachment_bytes', site_slug=request.view_args['site_slug'], storage_key=r.storage_key) }}"
                alt="{{ r.alt_text or '' }}"
                loading="lazy"
                style="width: 100%; height: 120px; object-fit: cover;

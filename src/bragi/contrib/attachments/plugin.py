@@ -88,18 +88,16 @@ def srcset_for(attachment: Attachment | None) -> str:
 
 
 @hookimpl
-def register_admin_blueprint() -> list[Blueprint]:
-    """Mount the attachment admin Blueprint at /admin/attachments and
-    the public-serving Blueprint at /attachments/<key> on the admin
-    app too.
+def register_admin_blueprint() -> Blueprint:
+    """Mount the attachment admin Blueprint at /admin/sites/<slug>/attachments.
 
-    The picker dialog (and any future admin surface that previews
-    attachments) renders `<img src=\"/attachments/<key>\">` against
-    the same host the admin runs on. Without this mount the
-    thumbnails 404 on the admin app even though the bytes are
-    perfectly reachable from delivery.
+    Includes the site-scoped bytes route
+    `attachment_admin.serve_attachment_bytes` for admin previews;
+    the delivery `/attachments/<key>` route is intentionally NOT
+    cross-mounted here because it resolves the site from the Host
+    header and the admin's Host won't match any site.
     """
-    return [attachment_admin_bp, attachment_delivery_bp]
+    return attachment_admin_bp
 
 
 @hookimpl

@@ -55,16 +55,29 @@ bp = Blueprint(
 )
 
 
-@bp.route("/<storage_key>", methods=["GET"])
-def serve_attachment(storage_key: str) -> ResponseReturnValue:
-    site = g.get("site")
-    if site is None:
-        abort(404)
+def build_attachment_response(site: object, storage_key: str) -> Response:
+    """Look up `storage_key` on `site` and build the bytes Response.
+
+    Used by both the delivery `/attachments/<key>` route (site
+    resolved from the Host header) and the admin
+    `/admin/sites/<slug>/attachments/file/<key>` route (site
+    resolved from the URL path). Aborts 404 when neither an
+    attachment nor a rendition row exists for `storage_key`
+    under `site.id`, or when the storage backend has no bytes for
+    the key.
+
+    `site` is typed as `object` because the route layer has
+    already done the multisite scoping; this helper only needs
+    `site.id` and `site.slug`. Keeping it loose here avoids a
+    circular import on `bragi.core.models.site.Site`.
+    """
+    site_id: int = site.id  # type: ignore[attr-defined]
+    site_slug: str = site.slug  # type: ignore[attr-defined]
 
     with SessionLocal() as db:
         row = db.execute(
             select(Attachment).where(
-                Attachment.site_id == site.id,
+                Attachment.site_id == site_id,
                 Attachment.storage_key == storage_key,
             )
         ).scalar_one_or_none()
@@ -79,7 +92,7 @@ def serve_attachment(storage_key: str) -> ResponseReturnValue:
                 select(AttachmentRendition)
                 .join(Attachment, AttachmentRendition.attachment_id == Attachment.id)
                 .where(
-                    Attachment.site_id == site.id,
+                    Attachment.site_id == site_id,
                     AttachmentRendition.storage_key == storage_key,
                 )
             ).scalar_one_or_none()
@@ -92,7 +105,7 @@ def serve_attachment(storage_key: str) -> ResponseReturnValue:
             filename = parent.filename if parent is not None else storage_key
 
     try:
-        data = resolve_storage(current_app).read(site.slug, storage_key)
+        data = resolve_storage(current_app).read(site_slug, storage_key)
     except FileNotFoundError:
         abort(404)
 
@@ -108,3 +121,12 @@ def serve_attachment(storage_key: str) -> ResponseReturnValue:
     # Content-addressed: bytes never change for a given key.
     response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return response
+
+
+@bp.route("/<storage_key>", methods=["GET"])
+def serve_attachment(storage_key: str) -> ResponseReturnValue:
+    """Public bytes endpoint on delivery: site resolved via Host."""
+    site = g.get("site")
+    if site is None:
+        abort(404)
+    return build_attachment_response(site, storage_key)
