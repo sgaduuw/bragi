@@ -1,4 +1,5 @@
 {% extends "admin/base.html" %}
+{% from "admin/_image_picker_field.html" import image_picker_field %}
 {% set is_edit = site is not none %}
 {% block title %}{{ 'Edit' if is_edit else 'New' }} site &middot; bragi admin{% endblock %}
 {% block content %}
@@ -84,14 +85,14 @@
   {% endif %}
 
   {% if is_edit %}
-  <fieldset>
-    <label for="default_og_image_id">Default social-share image (attachment id)</label>
-    <input type="number" name="default_og_image_id" id="default_og_image_id" min="1"
-           value="{{ form.get('default_og_image_id', '') }}">
-    <small>Optional. Used as the og:image / twitter:image fallback
-      for posts and pages that don't specify one. Look up the
-      attachment id in the attachments admin.</small>
-  </fieldset>
+  {{ image_picker_field(
+       name="default_featured_image_id",
+       value=form.get("default_featured_image_id"),
+       attachment=default_featured_image,
+       label="Default featured image",
+       picker_url=url_for("attachment_admin.picker", site_slug=site.slug),
+       helper="Optional. Fallback used wherever a post or page reads featured_image: og:image / twitter:image, landing-page cards, post-detail hero."
+     ) }}
 
   <fieldset>
     <label for="home_page_id">Home page</label>

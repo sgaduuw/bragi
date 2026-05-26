@@ -49,6 +49,12 @@ class PostRevision(IdMixin, TimestampsMixin, Base):
     body_html: Mapped[str] = mapped_column(Text, default="")
     body_excerpt: Mapped[str] = mapped_column(Text, default="")
     meta_description: Mapped[str | None] = mapped_column(Text, default=None)
+    # Featured-image snapshot. The FK is not enforced on the revision
+    # row — the attachment can be deleted between snapshot and
+    # restore and we still want the revision to round-trip cleanly
+    # (the post just loses the image on restore, matching the
+    # SET-NULL behaviour on the live post column).
+    featured_image_id: Mapped[int | None] = mapped_column(default=None)
     # Editorial pin snapshot. Matches the spec's edge-case table:
     # restoring a revision should bring back the pin state too.
     # Pre-feature revisions default to (False, NULL) and a restore

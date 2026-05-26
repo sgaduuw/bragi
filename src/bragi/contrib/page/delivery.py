@@ -60,7 +60,7 @@ from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
-from bragi.core.seo import og_image_url_for
+from bragi.core.seo import featured_image_url_for
 from bragi.core.time import naive_utcnow
 from bragi.core.url import page_url_for, post_index_page_for, tag_segment_for, tag_url_for
 
@@ -238,7 +238,7 @@ def render_post_index_page(site: Site, page: Page) -> Response:
             canonical_url=(
                 f"{site.canonical_url}{page_url_for(page, db=db)}" if site.canonical_url else None
             ),
-            og_image_url=og_image_url_for(item=page, site=site, db=db),
+            og_image_url=featured_image_url_for(item=page, site=site, db=db),
         )
         response = make_response(body)
         attach_validators(response, etag=etag, last_modified=last_modified)

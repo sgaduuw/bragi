@@ -30,13 +30,16 @@ listing isn't reachable.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bragi.core.models._base import Base
 from bragi.core.models._mixins import IdMixin, TimestampsMixin
+
+if TYPE_CHECKING:
+    from bragi.core.models.attachment import Attachment
 
 
 class PageStatus:
@@ -102,12 +105,18 @@ class Page(IdMixin, TimestampsMixin, Base):
     canonical_url: Mapped[str | None] = mapped_column(String(255), default=None)
     noindex: Mapped[bool] = mapped_column(default=False)
 
-    # OG / Twitter Card image. Nullable; falls back through the
-    # site's default_og_image, then omitted entirely. ON DELETE
+    # Featured image. Used for OG / Twitter Card meta, the landing-
+    # page card on parent listings, and the page-detail hero where
+    # applicable. Nullable; falls back through the site's
+    # `default_featured_image_id`, then omitted entirely. ON DELETE
     # SET NULL so removing the underlying attachment reverts to
     # fallback rather than dangling the column.
-    og_image_id: Mapped[int | None] = mapped_column(
+    featured_image_id: Mapped[int | None] = mapped_column(
         ForeignKey("attachments.id", ondelete="SET NULL"), default=None
+    )
+
+    featured_image: Mapped[Attachment | None] = relationship(
+        "Attachment", foreign_keys=[featured_image_id], lazy="joined"
     )
 
     # Import provenance: `(site_id, source_id)` is the idempotency

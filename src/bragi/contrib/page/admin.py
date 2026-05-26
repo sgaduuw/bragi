@@ -62,11 +62,13 @@ def _form_from_request() -> dict[str, str]:
         "status": request.form.get("status") or PageStatus.DRAFT,
         "kind": (request.form.get("kind") or PageKind.STATIC).strip(),
         "parent_id": (request.form.get("parent_id") or "").strip(),
-        "og_image_id": (request.form.get("og_image_id") or "").strip(),
+        "featured_image_id": (request.form.get("featured_image_id") or "").strip(),
     }
 
 
-def _resolve_og_image_id(db: Session, raw: str, site_id: int) -> tuple[int | None, str | None]:
+def _resolve_featured_image_id(
+    db: Session, raw: str, site_id: int
+) -> tuple[int | None, str | None]:
     """Validate a form-supplied attachment id; same shape as the
     post admin's helper. The same-site check prevents a crafted
     POST from surfacing another tenant's attachment."""
@@ -75,13 +77,32 @@ def _resolve_og_image_id(db: Session, raw: str, site_id: int) -> tuple[int | Non
     try:
         candidate_id = int(raw)
     except ValueError:
-        return None, "OG image id must be an integer."
+        return None, "Featured image id must be an integer."
     attachment = db.get(Attachment, candidate_id)
     if attachment is None:
-        return None, "OG image attachment not found."
+        return None, "Featured image attachment not found."
     if attachment.site_id != site_id:
-        return None, "OG image must belong to this site."
+        return None, "Featured image must belong to this site."
     return candidate_id, None
+
+
+def _load_featured_image(db: Session, raw: str | None, site_id: int) -> Attachment | None:
+    """Load the Attachment for the form's inline thumbnail preview.
+
+    Returns None for any invalid input. Same shape as the post
+    admin's helper; cross-checks site_id so a stale form-state
+    can't leak a different tenant's attachment.
+    """
+    if not raw:
+        return None
+    try:
+        att_id = int(raw)
+    except ValueError:
+        return None
+    attachment = db.get(Attachment, att_id)
+    if attachment is None or attachment.site_id != site_id:
+        return None
+    return attachment
 
 
 def _existing_post_index(
@@ -176,6 +197,7 @@ def _snapshot_page(
             body_html=page.body_html,
             body_excerpt=page.body_excerpt,
             meta_description=page.meta_description,
+            featured_image_id=page.featured_image_id,
         )
     )
 
@@ -217,35 +239,69 @@ def new_page(site_slug: str) -> ResponseReturnValue:
 
         if request.method == "GET":
             parents = _all_pages_for_picker(db, site_id)
-            return render_template("admin/page_edit.html", page=None, form={}, parents=parents)
+            return render_template(
+                "admin/page_edit.html", page=None, form={}, parents=parents, featured_image=None
+            )
 
         form = _form_from_request()
         parents = _all_pages_for_picker(db, site_id)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=None,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+            )
 
         new_kind = str(form["kind"])
         if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
             flash("Kind must be 'static' or 'post_index'.", "error")
-            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=None,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+            )
 
         parent_id = _normalized_parent_id(form["parent_id"])
         parent_id, parent_err = _validated_parent_id_or_error(db, parent_id, site_id)
         if parent_err is not None:
             flash(parent_err, "error")
-            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=None,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+            )
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
             flash(
                 f"A page with slug {slug!r} already exists under that parent.",
                 "error",
             )
-            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
-        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], site_id)
-        if og_image_err is not None:
-            flash(og_image_err, "error")
-            return render_template("admin/page_edit.html", page=None, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=None,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+            )
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return render_template(
+                "admin/page_edit.html",
+                page=None,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+            )
 
         # Promotion to POST_INDEX swaps any existing POST_INDEX page
         # back to STATIC. Require explicit confirmation so the
@@ -260,6 +316,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 page=None,
                 form=form,
                 parents=parents,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
                 swap_pending=True,
                 swap_target=existing_index,
             )
@@ -283,7 +340,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             author_id=int(session["user_id"]),
             status=new_status,
             kind=new_kind,
-            og_image_id=og_image_id,
+            featured_image_id=featured_image_id,
         )
         db.add(page_row)
         db.commit()
@@ -351,36 +408,86 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "status": page.status,
                 "kind": page.kind,
                 "parent_id": str(page.parent_id) if page.parent_id else "",
-                "og_image_id": str(page.og_image_id) if page.og_image_id else "",
+                "featured_image_id": str(page.featured_image_id) if page.featured_image_id else "",
             }
-            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+            )
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+            )
         new_kind = str(form["kind"])
         if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
             flash("Kind must be 'static' or 'post_index'.", "error")
-            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+            )
         parent_id = _normalized_parent_id(form["parent_id"])
         parent_id, parent_err = _validated_parent_id_or_error(
             db, parent_id, page.site_id, exclude_page_id=page.id
         )
         if parent_err is not None:
             flash(parent_err, "error")
-            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+            )
         slug = str(form["slug"])
         if _slug_in_use(db, page.site_id, parent_id, slug, exclude_page_id=page.id):
             flash(
                 f"A page with slug {slug!r} already exists under that parent.",
                 "error",
             )
-            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
-        og_image_id, og_image_err = _resolve_og_image_id(db, form["og_image_id"], page.site_id)
-        if og_image_err is not None:
-            flash(og_image_err, "error")
-            return render_template("admin/page_edit.html", page=page, form=form, parents=parents)
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+            )
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], page.site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+            )
 
         # Promotion-to-POST_INDEX swap requires explicit confirmation.
         # Excludes self so editing an already-POST_INDEX page doesn't
@@ -397,6 +504,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 page=page,
                 form=form,
                 parents=parents,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
                 swap_pending=True,
                 swap_target=existing_index,
             )
@@ -425,6 +535,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                     page=page,
                     form=form,
                     parents=parents,
+                    featured_image=_load_featured_image(
+                        db, form.get("featured_image_id"), page.site_id
+                    ),
                     demotion_pending=True,
                     demotion_post_count=published_count,
                 )
@@ -456,7 +569,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page.body_excerpt = make_excerpt(str(form["body_markdown"]))
         page.status = str(form["status"])
         page.kind = new_kind
-        page.og_image_id = og_image_id
+        page.featured_image_id = featured_image_id
 
         db.commit()
         updated_id = page.id
@@ -643,6 +756,7 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
         page.body_html = revision.body_html
         page.body_excerpt = revision.body_excerpt
         page.meta_description = revision.meta_description
+        page.featured_image_id = revision.featured_image_id
         db.commit()
         restored_id = page.id
         site_id_for_audit = page.site_id

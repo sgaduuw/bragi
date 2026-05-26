@@ -32,3 +32,7 @@ class PageRevision(IdMixin, TimestampsMixin, Base):
     body_html: Mapped[str] = mapped_column(Text, default="")
     body_excerpt: Mapped[str] = mapped_column(Text, default="")
     meta_description: Mapped[str | None] = mapped_column(Text, default=None)
+    # Featured-image snapshot. No FK constraint on the revision row
+    # so the attachment may have been deleted between snapshot and
+    # restore; the post's live FK is SET NULL in that case.
+    featured_image_id: Mapped[int | None] = mapped_column(default=None)

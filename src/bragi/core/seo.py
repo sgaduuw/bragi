@@ -1,9 +1,10 @@
 """SEO helper utilities.
 
-Currently houses the OG image resolver shared by the post and
-page delivery templates. JSON-LD generation lives next to each
-content type's render; this module is a place for cross-content
-helpers (OG meta, future twitter:site handle resolution, etc.).
+Currently houses the featured-image resolver shared by the post
+and page delivery templates (for OG / Twitter Card meta).
+JSON-LD generation lives next to each content type's render;
+this module is a place for cross-content helpers (OG meta,
+future twitter:site handle resolution, etc.).
 """
 
 from __future__ import annotations
@@ -16,18 +17,18 @@ from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 
 
-def og_image_url_for(
+def featured_image_url_for(
     *,
     item: Any,
     site: Any,
     db: Session | None = None,
 ) -> str | None:
-    """Return the absolute URL for `item`'s OG image, or None.
+    """Return the absolute URL for `item`'s featured image, or None.
 
     Resolution chain:
 
-    1. `item.og_image_id` if set.
-    2. `site.default_og_image_id` if set.
+    1. `item.featured_image_id` if set.
+    2. `site.default_featured_image_id` if set.
     3. None: callers omit the `og:image` / `twitter:image` meta.
 
     The returned URL is absolute (prefixed with
@@ -42,9 +43,11 @@ def og_image_url_for(
     """
     if site is None or not getattr(site, "canonical_url", ""):
         return None
-    attachment_id: int | None = getattr(item, "og_image_id", None) if item is not None else None
+    attachment_id: int | None = (
+        getattr(item, "featured_image_id", None) if item is not None else None
+    )
     if attachment_id is None:
-        attachment_id = getattr(site, "default_og_image_id", None)
+        attachment_id = getattr(site, "default_featured_image_id", None)
     if attachment_id is None:
         return None
 

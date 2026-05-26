@@ -57,7 +57,7 @@ _POST_KEY_ORDER: tuple[str, ...] = (
     "description",
     "tags",
     "aliases",
-    "og_image",
+    "featured_image",
 )
 _PAGE_KEY_ORDER: tuple[str, ...] = (
     "title",
@@ -66,7 +66,7 @@ _PAGE_KEY_ORDER: tuple[str, ...] = (
     "parent_slug",
     "draft",
     "description",
-    "og_image",
+    "featured_image",
 )
 
 
@@ -217,8 +217,8 @@ def _write_post(
     aliases = aliases_by_target.get(canonical_target, [])
     if aliases:
         fm["aliases"] = aliases
-    if post.og_image_id is not None and post.og_image_id in storage_key_by_id:
-        fm["og_image"] = storage_key_by_id[post.og_image_id]
+    if post.featured_image_id is not None and post.featured_image_id in storage_key_by_id:
+        fm["featured_image"] = storage_key_by_id[post.featured_image_id]
 
     target.write_text(
         _render_frontmatter_and_body(fm, post.body_markdown, _POST_KEY_ORDER),
@@ -252,8 +252,8 @@ def _write_page(
         fm["draft"] = True
     if page.meta_description:
         fm["description"] = page.meta_description
-    if page.og_image_id is not None and page.og_image_id in storage_key_by_id:
-        fm["og_image"] = storage_key_by_id[page.og_image_id]
+    if page.featured_image_id is not None and page.featured_image_id in storage_key_by_id:
+        fm["featured_image"] = storage_key_by_id[page.featured_image_id]
 
     target.write_text(
         _render_frontmatter_and_body(fm, page.body_markdown, _PAGE_KEY_ORDER),

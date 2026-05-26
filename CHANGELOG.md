@@ -22,6 +22,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Closes #125.
 
 ### Changed
+- **`og_image` collapsed into `featured_image` everywhere.** The
+  social-share image and the featured image were two parallel
+  attachment FKs on `posts` (`og_image_id`) and a separate field
+  on `sites` (`default_og_image_id`); pages had neither.
+  Authors had to set the same image twice to get both the social
+  preview and the landing-page card. The new shape: a single
+  `featured_image_id` on `posts`, `pages`, and `sites`
+  (renamed from `default_og_image_id`), backfilled from the
+  prior `og_image_id` on save-through, mirrored on
+  `post_revisions` / `page_revisions` so restore brings the
+  image back. The admin edit form replaces the bare numeric-id
+  input with an attachment picker that opens the existing
+  attachments grid in a `<dialog>` and renders an inline
+  thumbnail of the current selection. The migration backfills
+  legacy `og_image_id` values into `featured_image_id` for any
+  post where the latter was unset; data is preserved and the
+  drop of `og_image_id` is final. Frontmatter import readers
+  read the `featured_image` key (was `og_image`). Closes #268,
+  #269.
 - **`bragi.core.db.SessionLocal` is now a lazy proxy.** Previously
   it was a `sessionmaker` bound directly at import time, which
   meant every `from bragi.core.db import SessionLocal` captured
