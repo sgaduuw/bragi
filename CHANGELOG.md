@@ -20,6 +20,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reappear in their natural date position on page 2+.
   Single-pin renders as a plain card with no carousel chrome.
   Closes #125.
+- **Pinned-posts carousel auto-advance.** When two or more posts
+  are pinned, the carousel now rotates to the next card on a
+  timer (default every 7 seconds). Per-site override via
+  `Site.extra_settings.pinned_autoadvance_seconds` (int, 0
+  disables). Pauses on hover, on `focus-within`, when the
+  section leaves the viewport, and when the user has
+  `prefers-reduced-motion: reduce` set. The carousel still works
+  fully without JavaScript (manual swipe + anchor-link dots, as
+  today). Closes #266.
+
+### Fixed
+- **Pinned-posts carousel dot navigation no longer vertically
+  jumps the page.** Clicking a dot used to scroll the page so
+  the targeted card sat at the top of the viewport; on readers
+  who had scrolled past the carousel into the recency list, that
+  was jarring. The dots now scroll the strip horizontally
+  in-place via a small JavaScript handler, preserving the
+  document's scroll position. `history.replaceState` keeps the
+  URL fragment in sync so the `:target`-driven active-dot
+  styling still works. Closes #267.
 
 ### Changed
 - **`og_image` collapsed into `featured_image` everywhere.** The
