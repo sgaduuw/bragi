@@ -2168,3 +2168,140 @@ def test_process_renditions_respects_batch_limit(
         )
     assert len(done) == 2
     assert len(pending) == 7
+
+
+def test_regenerate_missing_enqueues_for_site_only(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """`cms media regenerate-missing --site blog` enqueues pending
+    rows for `blog`'s attachments only; `other`'s attachments are
+    untouched.
+    """
+    from click.testing import CliRunner
+
+    from bragi.contrib.attachments.cli import media_group
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        other = db.execute(select(Site).where(Site.slug == "other")).scalar_one()
+        db.add_all(
+            [
+                Attachment(
+                    site_id=blog.id,
+                    filename="a.png",
+                    content_type="image/png",
+                    size_bytes=10,
+                    storage_key="a" * 64,
+                    width=2000,
+                    height=1000,
+                ),
+                Attachment(
+                    site_id=other.id,
+                    filename="b.png",
+                    content_type="image/png",
+                    size_bytes=10,
+                    storage_key="b" * 64,
+                    width=2000,
+                    height=1000,
+                ),
+            ]
+        )
+        db.commit()
+
+    runner = CliRunner()
+    with admin_app.app_context():
+        result = runner.invoke(media_group, ["regenerate-missing", "--site", "blog"])
+    assert result.exit_code == 0, result.output
+
+    with db_session_factory() as db:
+        blog_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        other_id = db.execute(select(Site.id).where(Site.slug == "other")).scalar_one()
+        blog_rows = (
+            db.execute(
+                select(AttachmentRendition)
+                .join(Attachment, AttachmentRendition.attachment_id == Attachment.id)
+                .where(Attachment.site_id == blog_id)
+            )
+            .scalars()
+            .all()
+        )
+        other_rows = (
+            db.execute(
+                select(AttachmentRendition)
+                .join(Attachment, AttachmentRendition.attachment_id == Attachment.id)
+                .where(Attachment.site_id == other_id)
+            )
+            .scalars()
+            .all()
+        )
+    assert len(blog_rows) == 9  # 3 widths * 3 formats
+    assert len(other_rows) == 0
+
+
+def test_regenerate_all_requires_yes_flag(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    from click.testing import CliRunner
+
+    from bragi.contrib.attachments.cli import media_group
+
+    runner = CliRunner()
+    with admin_app.app_context():
+        result = runner.invoke(media_group, ["regenerate-all", "--site", "blog"])
+    assert result.exit_code != 0
+    assert "--yes" in result.output
+
+
+def test_regenerate_all_purges_and_reenqueues(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    from click.testing import CliRunner
+
+    from bragi.contrib.attachments.cli import media_group
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        blog = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        attachment = Attachment(
+            site_id=blog.id,
+            filename="a.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="a" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(attachment)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=attachment.id,
+                size_label="999w",
+                format="bogus",
+                content_type="image/bogus",
+                status="done",
+                storage_key=f"{attachment.storage_key}/999/bogus",
+                width=999,
+                height=500,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+
+    runner = CliRunner()
+    with admin_app.app_context():
+        result = runner.invoke(media_group, ["regenerate-all", "--site", "blog", "--yes"])
+    assert result.exit_code == 0, result.output
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+    # The stale `999w/bogus` row is gone; 9 new pending rows replace it.
+    assert all(r.format in {"avif", "webp", "original"} for r in rows)
+    assert all(r.status == "pending" for r in rows)
+    assert len(rows) == 9

@@ -16,8 +16,14 @@ import click
 from flask import current_app
 from flask.cli import with_appcontext
 from PIL import Image
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import select, update
 
+# Importing the helper from admin keeps one source of truth for the
+# upload-vs-regenerate target-content-type rule. The admin module is
+# already loaded eagerly by the plugin factory, so this import adds
+# no extra cost.
+from bragi.contrib.attachments.admin import _rendition_target_content_type
 from bragi.core.db import SessionLocal
 from bragi.core.image_processor import resize_and_encode
 from bragi.core.models.attachment import Attachment
@@ -26,6 +32,7 @@ from bragi.core.models.site import Site
 from bragi.core.storage import read_bytes as storage_read_bytes
 from bragi.core.storage import resolve as resolve_storage
 from bragi.core.storage import store_rendition
+from bragi.core.themes import resolved_widths
 from bragi.core.time import naive_utcnow
 from bragi.settings import settings
 
@@ -269,3 +276,109 @@ def process_renditions(limit: int | None) -> None:
         db.commit()
 
     click.echo(f"processed {done_count} rendition(s); {failed_count} failed/re-pended")
+
+
+@media_group.command("regenerate-missing")
+@click.option("--site", "site_slug", required=True, help="Site slug to scan.")
+@with_appcontext
+def regenerate_missing(site_slug: str) -> None:
+    """Enqueue pending renditions for every gap.
+
+    Scans `site_slug`'s image attachments; for each, computes the
+    `(width, format)` set the active theme wants (via
+    `resolved_widths(active_theme)` × `{avif, webp, original}`)
+    and inserts a `status='pending'` row for any combination not
+    already present. The worker
+    (`cms media process-renditions`) drains them later.
+
+    Non-image attachments (no `width` recorded on the row) are
+    skipped.
+    """
+    with SessionLocal() as db:
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+        if site is None:
+            click.echo(f"No site with slug {site_slug!r}.", err=True)
+            raise click.exceptions.Exit(1)
+
+        registry = current_app.extensions.get("registry")
+        theme = registry.theme(site.theme) if registry and site.theme else None
+        widths = resolved_widths(theme)
+        formats = ("avif", "webp", "original")
+        target = {(f"{w}w", f) for w in widths for f in formats}
+
+        attachments = (
+            db.execute(select(Attachment).where(Attachment.site_id == site.id)).scalars().all()
+        )
+        added = 0
+        for attachment in attachments:
+            if attachment.width is None:
+                continue
+            existing = {
+                (r.size_label, r.format)
+                for r in db.execute(
+                    select(AttachmentRendition).where(
+                        AttachmentRendition.attachment_id == attachment.id
+                    )
+                ).scalars()
+            }
+            for size_label, fmt in target - existing:
+                # Don't enqueue widths larger than the source: the
+                # encoder's no-upscale check would skip them anyway,
+                # but we'd churn the worker and accumulate `failed`
+                # rows on every regenerate-missing call.
+                width_px = int(size_label.rstrip("w"))
+                if width_px >= attachment.width:
+                    continue
+                db.add(
+                    AttachmentRendition(
+                        attachment_id=attachment.id,
+                        size_label=size_label,
+                        format=fmt,
+                        content_type=_rendition_target_content_type(fmt, attachment.content_type),
+                        status="pending",
+                    )
+                )
+                added += 1
+        db.commit()
+    click.echo(f"Enqueued {added} pending rendition(s) for site {site_slug!r}.")
+
+
+@media_group.command("regenerate-all")
+@click.option("--site", "site_slug", required=True, help="Site slug to scan.")
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Required confirmation for the destructive op.",
+)
+@with_appcontext
+def regenerate_all(site_slug: str, yes: bool) -> None:
+    """Drop every rendition row for a site, then re-enqueue from
+    scratch under the active theme.
+
+    Use after a backwards-incompatible change to the rendition
+    layout, or to clear out stale `failed` rows after fixing the
+    underlying cause.
+    """
+    if not yes:
+        raise click.UsageError("regenerate-all is destructive; pass --yes to confirm.")
+
+    with SessionLocal() as db:
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+        if site is None:
+            click.echo(f"No site with slug {site_slug!r}.", err=True)
+            raise click.exceptions.Exit(1)
+        attachment_ids = [
+            a.id
+            for a in db.execute(select(Attachment).where(Attachment.site_id == site.id)).scalars()
+        ]
+        if attachment_ids:
+            db.execute(
+                sa_delete(AttachmentRendition).where(
+                    AttachmentRendition.attachment_id.in_(attachment_ids)
+                )
+            )
+        db.commit()
+
+    # Re-enqueue using the same path as regenerate-missing.
+    ctx = click.get_current_context()
+    ctx.invoke(regenerate_missing, site_slug=site_slug)
