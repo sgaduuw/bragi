@@ -41,7 +41,7 @@ def upgrade() -> None:
         sa.text(
             """
             UPDATE attachment_renditions
-            SET format = COALESCE(content_type, 'original'),
+            SET format = 'original',
                 status = 'done',
                 attempts = 0,
                 processed_at = updated_at

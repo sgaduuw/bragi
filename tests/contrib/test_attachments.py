@@ -1627,7 +1627,7 @@ def test_pictureify_expands_attachment_img(
             AttachmentRendition(
                 attachment_id=att.id,
                 size_label="320w",
-                format="image/png",
+                format="original",
                 storage_key="0" * 64,
                 content_type="image/png",
                 width=320,

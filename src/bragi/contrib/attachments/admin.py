@@ -339,7 +339,7 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
                         # Synchronous-resize path still produces a
                         # single format per row; the worker-driven
                         # multi-format path lands in a later task.
-                        format=content_type,
+                        format="original",
                         storage_key=resized_key,
                         content_type=content_type,
                         width=resized_meta.width,
