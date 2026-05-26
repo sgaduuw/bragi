@@ -2506,3 +2506,53 @@ def test_pictureify_falls_back_to_bare_img_with_no_renditions(
     assert "<picture>" not in out
     assert "<source" not in out
     assert "<img " in out
+
+
+def test_attachments_list_surfaces_failed_rendition_count(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="e" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add_all(
+            [
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label="320w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="failed",
+                    attempts=3,
+                    last_error="encoder gave up",
+                ),
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label="800w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="failed",
+                    attempts=3,
+                    last_error="encoder gave up",
+                ),
+            ]
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/")
+    body = resp.data.decode()
+    assert "2 renditions failed" in body

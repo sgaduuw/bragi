@@ -137,6 +137,22 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
             )
         ).scalar_one()
 
+        # Failed renditions are sticky: the worker retries up to
+        # max_attempts then parks the row at status='failed' so an
+        # operator notices and can re-enqueue via
+        # `cms media regenerate-missing` after fixing the root cause
+        # (corrupt source bytes, encoder bug, etc.). Surfacing the
+        # count here is the nag.
+        failed_rendition_count = db.execute(
+            select(func.count())
+            .select_from(AttachmentRendition)
+            .join(Attachment, AttachmentRendition.attachment_id == Attachment.id)
+            .where(
+                Attachment.site_id == site.id,
+                AttachmentRendition.status == "failed",
+            )
+        ).scalar_one()
+
     return render_template(
         "admin/attachments_list.html",
         rows=rows,
@@ -144,6 +160,7 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         has_more=has_more,
         missing_alt=missing_alt,
         missing_alt_count=missing_alt_count,
+        failed_rendition_count=failed_rendition_count,
     )
 
 
