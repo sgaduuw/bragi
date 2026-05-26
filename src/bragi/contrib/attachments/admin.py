@@ -44,6 +44,8 @@ from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
+from bragi.core.storage import store_original
+from bragi.core.themes import resolved_widths
 from bragi.settings import settings
 
 # Allowlist of MIME types accepted at upload time. Anything not
@@ -82,6 +84,22 @@ _ATTACHMENT_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
         "text/plain",
     }
 )
+
+
+def _rendition_target_content_type(format_slug: str, source_content_type: str) -> str:
+    """Content-type to record on a pending rendition row.
+
+    `'avif'` → `image/avif`, `'webp'` → `image/webp`, `'original'`
+    → the source's own content_type so the worker re-encodes in
+    the same format the upload arrived as. Kept at module scope
+    so the worker / backfill CLI can reuse without re-deriving.
+    """
+    if format_slug == "avif":
+        return "image/avif"
+    if format_slug == "webp":
+        return "image/webp"
+    return source_content_type
+
 
 bp = Blueprint(
     "attachment_admin",
@@ -214,6 +232,9 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
         require_role("author", site.id)
         site_id = site.id
         site_slug_for_storage = site.slug
+        # Carry the theme slug across the session boundary so the
+        # enqueue block below doesn't have to re-load the Site row.
+        site_theme_slug = site.theme
 
     if request.method == "GET":
         return render_template("admin/attachments_new.html")
@@ -251,8 +272,15 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
         # Store first so the row's storage_key matches the backend
         # location. Idempotent: a duplicate upload reuses the file.
+        # `store_original` lands at <sha>/original.<ext> (the
+        # rendition-aware layout); `backend.remove` below knows to
+        # walk that path on rollback. The backend handle is still
+        # used for the rollback so a non-local backend stays
+        # consistent on the cleanup path.
         backend = resolve_storage(current_app)
-        storage_key, size = backend.store(site_slug_for_storage, data)
+        storage_key, size = store_original(
+            site_slug_for_storage, content_type=content_type, data=data
+        )
         existing = db.execute(
             select(Attachment).where(
                 Attachment.site_id == site_id,
@@ -310,45 +338,37 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
         db.flush()  # populate attachment.id for the rendition FKs
         new_id = attachment.id
 
-        # Rendition ladder: generate one rendition per configured
-        # width below the source. Synchronous on upload per #41's
-        # phase 2 design note ("start synchronous, revisit if it
-        # hurts"). Failures are logged and skipped so a single bad
-        # decode never blocks the upload.
+        # Enqueue pending rendition rows per the active theme's
+        # widths × {avif, webp, original}. The worker
+        # (`cms media process-renditions`) drains them on the
+        # scheduler cadence; upload returns fast with the original
+        # only. Skips enqueue when the upload isn't an image (no
+        # width recorded by the probe) so PDFs / text never end
+        # up with a phantom ladder.
         rendition_count = 0
-        if (
-            processor is not None
-            and processor.resize is not None
-            and width is not None
-            and height is not None
-        ):
-            for target_width in settings.attachment_rendition_widths:
+        if width is not None and height is not None:
+            registry = current_app.extensions.get("registry")
+            active_theme = (
+                registry.theme(site_theme_slug)
+                if registry is not None and site_theme_slug
+                else None
+            )
+            widths = resolved_widths(active_theme)
+            for target_width in widths:
                 if target_width >= width:
+                    # Skip slots the source can't satisfy (no upscaling).
                     continue
-                resized = processor.resize(data, target_width)
-                if resized is None:
-                    continue
-                resized_meta = processor.probe(resized)
-                if resized_meta is None:
-                    continue
-                resized_key, resized_size = backend.store(site_slug_for_storage, resized)
-                db.add(
-                    AttachmentRendition(
-                        attachment_id=new_id,
-                        size_label=f"{target_width}w",
-                        # Synchronous-resize path still produces a
-                        # single format per row; the worker-driven
-                        # multi-format path lands in a later task.
-                        format="original",
-                        storage_key=resized_key,
-                        content_type=content_type,
-                        width=resized_meta.width,
-                        height=resized_meta.height,
-                        bytes_size=resized_size,
-                        status="done",
+                for format_slug in ("avif", "webp", "original"):
+                    db.add(
+                        AttachmentRendition(
+                            attachment_id=new_id,
+                            size_label=f"{target_width}w",
+                            format=format_slug,
+                            content_type=_rendition_target_content_type(format_slug, content_type),
+                            status="pending",
+                        )
                     )
-                )
-                rendition_count += 1
+                    rendition_count += 1
 
         db.commit()
 

@@ -170,8 +170,10 @@ def test_upload_writes_row_and_file(
     assert row.size_bytes == len(data)
     assert row.storage_key == expected_key
 
-    # File on disk under <site_slug>/<key[:2]>/<key>.
-    on_disk = tmp_attachments_root / "blog" / expected_key[:2] / expected_key
+    # File on disk under the rendition-aware layout
+    # <site_slug>/<key[:2]>/<key>/original.<ext> (Task 5 / Task 6
+    # switched the upload path to `store_original`).
+    on_disk = tmp_attachments_root / "blog" / expected_key[:2] / expected_key / "original.png"
     assert on_disk.read_bytes() == data
 
 
@@ -284,7 +286,11 @@ def test_delete_removes_row_and_file(
     assert resp.status_code == 302
     with db_session_factory() as db:
         assert db.execute(select(Attachment)).scalars().first() is None
-    on_disk = tmp_attachments_root / "blog" / expected_key[:2] / expected_key
+    # The original lives at <sha>/original.<ext>; remove() drops the
+    # file but leaves the sha directory in place (it can still hold
+    # renditions, per core.storage.remove docstring). What matters
+    # for this test is that the original bytes are gone.
+    on_disk = tmp_attachments_root / "blog" / expected_key[:2] / expected_key / "original.txt"
     assert not on_disk.exists()
 
 
@@ -789,7 +795,13 @@ def test_upload_image_generates_rendition_ladder(
     db_session_factory: sessionmaker[Session],
     tmp_attachments_root: Path,
 ) -> None:
-    """Source wider than every ladder width: every slot fills."""
+    """Source wider than every ladder width: every slot enqueues.
+
+    Post Task 6 the upload no longer runs sync resize: it inserts
+    `status='pending'` rows (one per width × {avif, webp, original})
+    and the worker fills bytes / dimensions later. This test
+    asserts the *shape* of the enqueue: full ladder × 3 formats.
+    """
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
@@ -812,28 +824,33 @@ def test_upload_image_generates_rendition_ladder(
             db.execute(
                 select(AttachmentRendition)
                 .where(AttachmentRendition.attachment_id == attachment.id)
-                .order_by(AttachmentRendition.width)
+                .order_by(AttachmentRendition.size_label, AttachmentRendition.format)
             )
             .scalars()
             .all()
         )
     # Default ladder is [320, 800, 1600]; all below source's 2000.
-    assert [r.size_label for r in renditions] == ["320w", "800w", "1600w"]
-    assert [r.width for r in renditions] == [320, 800, 1600]
-    # Heights are aspect-preserving rescales of 1500.
-    assert renditions[0].height == round(1500 * 320 / 2000)
-    # Each rendition's bytes are on disk under <slug>/<key[:2]>/<key>.
-    for r in renditions:
-        on_disk = tmp_attachments_root / "blog" / r.storage_key[:2] / r.storage_key
-        assert on_disk.exists()
-        assert on_disk.stat().st_size == r.bytes_size
+    # 3 widths × 3 formats = 9 pending rows.
+    assert len(renditions) == 9
+    assert sorted({r.size_label for r in renditions}) == ["1600w", "320w", "800w"]
+    assert sorted({r.format for r in renditions}) == ["avif", "original", "webp"]
+    # Worker hasn't run yet: no bytes, no dimensions, no storage_key.
+    assert all(r.status == "pending" for r in renditions)
+    assert all(r.storage_key is None for r in renditions)
+    assert all(r.width is None and r.height is None for r in renditions)
+    assert all(r.bytes_size is None for r in renditions)
 
 
 def test_upload_skips_widths_at_or_above_source(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
-    """A 600w source produces only the 320w rendition (800 and 1600 skip)."""
+    """A 600w source enqueues only the 320w slot (800 / 1600 skip).
+
+    No-upscaling rule applies to the enqueue too: ladder widths
+    at or above the source's own width are dropped from the
+    pending set. Each surviving width still gets three format rows.
+    """
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
@@ -851,7 +868,10 @@ def test_upload_skips_widths_at_or_above_source(
 
     with db_session_factory() as db:
         rows = db.execute(select(AttachmentRendition)).scalars().all()
-    assert [r.size_label for r in rows] == ["320w"]
+    assert sorted({r.size_label for r in rows}) == ["320w"]
+    # 1 width × 3 formats = 3 pending rows.
+    assert len(rows) == 3
+    assert all(r.status == "pending" for r in rows)
 
 
 def test_upload_non_image_creates_no_renditions(
@@ -882,7 +902,13 @@ def test_upload_with_custom_ladder(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ladder is configurable; override at runtime and observe."""
+    """The ladder is configurable; override at runtime and observe.
+
+    With no theme on the test fixture's Site (Site.theme=None),
+    `resolved_widths(None)` falls back to
+    `Settings.attachment_rendition_widths`, which this test
+    monkeypatches. Each width still gets three format rows.
+    """
     monkeypatch.setattr(
         "bragi.settings.settings.attachment_rendition_widths",
         [100, 200],
@@ -903,12 +929,11 @@ def test_upload_with_custom_ladder(
     )
 
     with db_session_factory() as db:
-        rows = (
-            db.execute(select(AttachmentRendition).order_by(AttachmentRendition.width))
-            .scalars()
-            .all()
-        )
-    assert [r.size_label for r in rows] == ["100w", "200w"]
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+    # 2 ladder widths × 3 formats = 6 pending rows.
+    assert sorted({r.size_label for r in rows}) == ["100w", "200w"]
+    assert len(rows) == 6
+    assert all(r.status == "pending" for r in rows)
 
 
 def test_delete_cascades_renditions_and_unlinks_storage(
@@ -916,6 +941,12 @@ def test_delete_cascades_renditions_and_unlinks_storage(
     db_session_factory: sessionmaker[Session],
     tmp_attachments_root: Path,
 ) -> None:
+    """Delete cascades pending rendition rows and unlinks the
+    original. With Task 6 the upload only enqueues pending
+    renditions (no on-disk rendition files yet), so this asserts
+    the cascade + the original-file cleanup; rendition-file
+    cleanup is covered by the worker tests once Task 7 lands.
+    """
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
@@ -935,18 +966,17 @@ def test_delete_cascades_renditions_and_unlinks_storage(
         attachment = db.execute(select(Attachment)).scalar_one()
         aid = attachment.id
         parent_key = attachment.storage_key
-        rendition_keys = [
-            r.storage_key
-            for r in db.execute(
-                select(AttachmentRendition).where(AttachmentRendition.attachment_id == aid)
-            ).scalars()
-        ]
+        rendition_count = len(
+            db.execute(select(AttachmentRendition).where(AttachmentRendition.attachment_id == aid))
+            .scalars()
+            .all()
+        )
 
-    assert len(rendition_keys) == 3
-    # All files exist before delete.
-    for key in {parent_key, *rendition_keys}:
-        on_disk = tmp_attachments_root / "blog" / key[:2] / key
-        assert on_disk.exists(), f"expected {key} on disk before delete"
+    # 3 widths × 3 formats, all pending.
+    assert rendition_count == 9
+    # Original is on disk under the new <sha>/original.<ext> layout.
+    original_on_disk = tmp_attachments_root / "blog" / parent_key[:2] / parent_key / "original.png"
+    assert original_on_disk.exists(), "expected original on disk before delete"
 
     token = csrf_token(client, path="/admin/sites/blog/attachments/")
     client.post(
@@ -956,10 +986,13 @@ def test_delete_cascades_renditions_and_unlinks_storage(
 
     with db_session_factory() as db:
         assert db.execute(select(Attachment)).scalars().first() is None
+        # Cascade dropped the pending rendition rows too.
         assert db.execute(select(AttachmentRendition)).scalars().first() is None
-    for key in {parent_key, *rendition_keys}:
-        on_disk = tmp_attachments_root / "blog" / key[:2] / key
-        assert not on_disk.exists(), f"{key} should have been unlinked"
+    # Original is unlinked. The enclosing <sha> directory may
+    # still exist (core.storage.remove leaves it alone for the
+    # rendition-tree case); what matters is that the original
+    # bytes are gone.
+    assert not original_on_disk.exists()
 
 
 def test_delete_refcount_and_remove_happen_before_commit(
@@ -1059,8 +1092,16 @@ def test_delivery_serves_rendition_by_storage_key(
     admin_app: Flask,
     delivery_app: Flask,
     db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
 ) -> None:
-    """A rendition's key works against the same /attachments route."""
+    """A rendition's key works against the same /attachments route.
+
+    Post Task 6 the upload only enqueues `status='pending'` rows
+    (no storage_key, no bytes). This test plants a done rendition
+    by hand so the delivery contract stays under test; the
+    upload-to-served-rendition end-to-end path lands once the
+    worker (Task 7) is wired in.
+    """
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
@@ -1075,27 +1116,60 @@ def test_delivery_serves_rendition_by_storage_key(
         },
         content_type="multipart/form-data",
     )
+
+    # Plant one done rendition with bytes on disk, simulating what
+    # the worker will produce. Use a fresh content-addressed key
+    # for the resized bytes.
+    resized = _make_png(width=320, height=213)
+    resized_key = hashlib.sha256(resized).hexdigest()
+    resized_on_disk = tmp_attachments_root / "blog" / resized_key[:2] / resized_key / "original.png"
+    resized_on_disk.parent.mkdir(parents=True, exist_ok=True)
+    resized_on_disk.write_bytes(resized)
     with db_session_factory() as db:
-        rendition = db.execute(
-            select(AttachmentRendition).where(AttachmentRendition.size_label == "320w")
-        ).scalar_one()
+        att = db.execute(select(Attachment)).scalar_one()
+        # Drop the upload's pending rows and seed one done row.
+        db.execute(
+            AttachmentRendition.__table__.delete().where(
+                AttachmentRendition.attachment_id == att.id
+            )
+        )
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="original",
+                storage_key=resized_key,
+                content_type="image/png",
+                width=320,
+                height=213,
+                bytes_size=len(resized),
+                status="done",
+            )
+        )
+        db.commit()
 
     delivery_client = delivery_app.test_client()
     resp = delivery_client.get(
-        f"/attachments/{rendition.storage_key}",
+        f"/attachments/{resized_key}",
         headers={"Host": "blog.example.com"},
     )
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("image/png")
-    assert len(resp.data) == rendition.bytes_size
+    assert len(resp.data) == len(resized)
 
 
 def test_delivery_rendition_cross_site_isolation(
     admin_app: Flask,
     delivery_app: Flask,
     db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
 ) -> None:
-    """A rendition under site A is not reachable on site B."""
+    """A rendition under site A is not reachable on site B.
+
+    Plant a done rendition by hand (the upload only enqueues
+    pending rows post Task 6) so the cross-site isolation
+    contract on the delivery path stays under test.
+    """
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
@@ -1110,12 +1184,39 @@ def test_delivery_rendition_cross_site_isolation(
         },
         content_type="multipart/form-data",
     )
+
+    resized = _make_png(width=320, height=213)
+    resized_key = hashlib.sha256(resized).hexdigest()
+    resized_on_disk = tmp_attachments_root / "blog" / resized_key[:2] / resized_key / "original.png"
+    resized_on_disk.parent.mkdir(parents=True, exist_ok=True)
+    resized_on_disk.write_bytes(resized)
     with db_session_factory() as db:
-        rendition = db.execute(select(AttachmentRendition).limit(1)).scalar_one()
+        att = db.execute(select(Attachment)).scalar_one()
+        # Drop the upload's pending rows so the seed doesn't trip
+        # the (attachment_id, size_label, format) unique constraint.
+        db.execute(
+            AttachmentRendition.__table__.delete().where(
+                AttachmentRendition.attachment_id == att.id
+            )
+        )
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="original",
+                storage_key=resized_key,
+                content_type="image/png",
+                width=320,
+                height=213,
+                bytes_size=len(resized),
+                status="done",
+            )
+        )
+        db.commit()
 
     delivery_client = delivery_app.test_client()
     resp = delivery_client.get(
-        f"/attachments/{rendition.storage_key}",
+        f"/attachments/{resized_key}",
         headers={"Host": "other.example.com"},
     )
     assert resp.status_code == 404
@@ -1126,6 +1227,13 @@ def test_srcset_helper_emits_ordered_parts(
     delivery_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
+    """The srcset helper emits done renditions ascending + original.
+
+    Post Task 6 the upload only enqueues pending rendition rows;
+    `srcset_for` deliberately skips them (storage_key is None) so
+    the served srcset never references bytes that aren't on disk.
+    Plant two done renditions by hand to assert the ordered output.
+    """
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
@@ -1142,6 +1250,42 @@ def test_srcset_helper_emits_ordered_parts(
     )
     with db_session_factory() as db:
         attachment = db.execute(select(Attachment)).scalar_one()
+        # Drop the upload's pending rows; seed two done renditions
+        # at the widths the worker would have produced for a 1200w
+        # source (1600w skipped by the no-upscaling rule).
+        db.execute(
+            AttachmentRendition.__table__.delete().where(
+                AttachmentRendition.attachment_id == attachment.id
+            )
+        )
+        db.add_all(
+            [
+                AttachmentRendition(
+                    attachment_id=attachment.id,
+                    size_label="320w",
+                    format="original",
+                    storage_key="1" * 64,
+                    content_type="image/png",
+                    width=320,
+                    height=240,
+                    bytes_size=64,
+                    status="done",
+                ),
+                AttachmentRendition(
+                    attachment_id=attachment.id,
+                    size_label="800w",
+                    format="original",
+                    storage_key="2" * 64,
+                    content_type="image/png",
+                    width=800,
+                    height=600,
+                    bytes_size=128,
+                    status="done",
+                ),
+            ]
+        )
+        db.commit()
+        attachment = db.execute(select(Attachment)).scalar_one()
 
     from bragi.contrib.attachments.plugin import srcset_for
 
@@ -1149,8 +1293,7 @@ def test_srcset_helper_emits_ordered_parts(
     with delivery_app.test_request_context("/"):
         value = srcset_for(attachment)
     parts = [p.strip() for p in value.split(",")]
-    # Widths: 320, 800 (1600 skipped because source is 1200), then
-    # the original at 1200w.
+    # Widths: 320, 800, then the original at 1200w.
     descriptors = [p.split()[-1] for p in parts]
     assert descriptors == ["320w", "800w", "1200w"]
 
@@ -1383,7 +1526,15 @@ def test_reindex_cli_skips_existing_slots(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
-    """A second invocation is a no-op (idempotent)."""
+    """A second invocation is a no-op (idempotent).
+
+    Post Task 6 the upload enqueues 9 pending rows (3 widths × 3
+    formats); the reindex CLI's existing-label check sees the
+    ladder labels are already present and adds nothing. Task 8
+    will rewrite the CLI to regenerate-missing semantics; until
+    then this test asserts the row count is preserved across a
+    redundant invocation.
+    """
     site_id = _blog_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
@@ -1400,7 +1551,7 @@ def test_reindex_cli_skips_existing_slots(
     )
     with db_session_factory() as db:
         rendition_count_before = len(db.execute(select(AttachmentRendition)).scalars().all())
-    assert rendition_count_before == 3
+    assert rendition_count_before == 9
 
     runner = admin_app.test_cli_runner()
     result = runner.invoke(args=["cms", "media", "reindex"])
@@ -1814,3 +1965,45 @@ def test_storage_remove_drops_rendition_file(tmp_attachments_root: Path) -> None
     remove_rendition("blog", sha, width=320, format_slug="webp")
     expected = tmp_attachments_root / "blog" / "cc" / sha / "320" / "webp"
     assert not expected.exists()
+
+
+def test_upload_enqueues_pending_renditions(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """A fresh upload inserts N pending rendition rows per active
+    theme widths * 3 formats. No sync resize runs at upload time;
+    the rows are status='pending' and waiting for the worker.
+    """
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
+
+    data = _make_png(width=2000, height=1000)
+    client.post(
+        "/admin/sites/blog/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+
+    # No theme is set in the test fixture (Site.theme=None) and the
+    # default theme registers content_width=800 → ladder
+    # [400, 800, 1600]. Each width gets 3 formats (avif, webp, original).
+    # If theme_default isn't loaded by the test app or doesn't set
+    # content_width, the fallback Settings.attachment_rendition_widths
+    # = [320, 800, 1600] applies (still 3 widths * 3 formats = 9 rows).
+    assert len(rows) == 9
+    assert all(r.status == "pending" for r in rows)
+    assert sorted({r.format for r in rows}) == ["avif", "original", "webp"]
+    assert len({r.size_label for r in rows}) == 3
