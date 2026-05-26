@@ -1801,7 +1801,11 @@ def test_pictureify_expands_attachment_img(
             g.site = real_blog
         rendered = pictureify(html)
 
-    assert "<picture>" in rendered
+    # Only original-format renditions exist here, so the srcset
+    # lives on a bare <img> and no <picture> wrapper is emitted
+    # (avif / webp <source> blocks would trigger the wrapper).
+    assert "<picture>" not in rendered
+    assert "<source" not in rendered
     assert "320w" in rendered
     assert f"/attachments/{'f' * 64}" in rendered
     assert f"/attachments/{'0' * 64} 320w" in rendered
@@ -2402,3 +2406,103 @@ def test_picker_thumbnail_falls_back_to_original_when_no_done_rendition(
     # And the rendered URL does NOT include the "/320/webp" suffix
     # since no done rendition exists.
     assert f"{('b' * 64)}/320/webp" not in body
+
+
+def test_pictureify_emits_avif_webp_img_tiers(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """An `/attachments/<sha>` `<img>` becomes a `<picture>` with
+    `<source type=image/avif>` first, `<source type=image/webp>`
+    second, and the original-format `<img>` fallback."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="d" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        for fmt in ("avif", "webp", "original"):
+            for w in (320, 800):
+                db.add(
+                    AttachmentRendition(
+                        attachment_id=att.id,
+                        size_label=f"{w}w",
+                        format=fmt,
+                        content_type={
+                            "avif": "image/avif",
+                            "webp": "image/webp",
+                            "original": "image/jpeg",
+                        }[fmt],
+                        status="done",
+                        storage_key=f"{att.storage_key}/{w}/{fmt}",
+                        width=w,
+                        height=w // 2,
+                        bytes_size=10,
+                    )
+                )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = f'<p><img src="/attachments/{att_storage_key}" alt="x"></p>'
+    with delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}):
+        with db_session_factory() as db:
+            g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    # AVIF source first, WebP second, img fallback last.
+    avif_idx = out.index("image/avif")
+    webp_idx = out.index("image/webp")
+    img_idx = out.index("<img")
+    assert avif_idx < webp_idx < img_idx
+    # The img's `srcset` is the original-format ladder, not the
+    # avif or webp one.
+    assert f"/attachments/{att_storage_key}/320/original 320w" in out
+    assert f"/attachments/{att_storage_key}/800/original 800w" in out
+
+
+def test_pictureify_falls_back_to_bare_img_with_no_renditions(
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """When no done rendition rows exist, pictureify emits a bare
+    `<img>` (no `<picture>` wrapper, no `<source>`)."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="e" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = f'<p><img src="/attachments/{att_storage_key}" alt="x"></p>'
+    with delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}):
+        with db_session_factory() as db:
+            g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    # Bare img, no <picture> wrapper.
+    assert "<picture>" not in out
+    assert "<source" not in out
+    assert "<img " in out

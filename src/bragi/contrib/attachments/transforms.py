@@ -124,14 +124,49 @@ def pictureify(html: str) -> str:
         renditions = [r for r in renditions if r.storage_key is not None and r.width]
         if not renditions or not attachment.width:
             return img_tag  # nothing to srcset; keep the bare img
-        parts = [f"/attachments/{r.storage_key} {r.width}w" for r in renditions]
-        parts.append(f"/attachments/{attachment.storage_key} {attachment.width}w")
-        srcset = ", ".join(parts)
+
+        # Group by format slug and build per-format srcset strings.
+        by_format: dict[str, list[AttachmentRendition]] = {}
+        for r in renditions:
+            by_format.setdefault(r.format, []).append(r)
+
+        def _srcset_for(format_slug: str) -> str:
+            ladder = by_format.get(format_slug) or []
+            if not ladder:
+                return ""
+            parts = [f"/attachments/{r.storage_key} {r.width}w" for r in ladder]
+            return ", ".join(parts)
+
+        avif_srcset = _srcset_for("avif")
+        webp_srcset = _srcset_for("webp")
+        orig_srcset = _srcset_for("original")
+
         # `sizes` default targets one column at narrow viewports,
-        # 800px maximum content width on wider screens. Themes can
-        # override by editing post HTML, but the default covers the
-        # blog use-case.
+        # 800px maximum content width on wider screens.
         sizes = "(min-width: 800px) 800px, 100vw"
-        return f'<picture><source srcset="{srcset}" sizes="{sizes}">' f"{img_tag}" f"</picture>"
+
+        sources: list[str] = []
+        if avif_srcset:
+            sources.append(f'<source type="image/avif" srcset="{avif_srcset}" sizes="{sizes}">')
+        if webp_srcset:
+            sources.append(f'<source type="image/webp" srcset="{webp_srcset}" sizes="{sizes}">')
+
+        # The img fallback uses the original-format srcset when one
+        # exists, plus the upload's full-size as the largest slot.
+        # Browsers that don't understand any of the <source> blocks
+        # fall through to this <img>.
+        img_srcset_parts = [orig_srcset] if orig_srcset else []
+        img_srcset_parts.append(f"/attachments/{attachment.storage_key} {attachment.width}w")
+        img_srcset = ", ".join(img_srcset_parts)
+        attrs["srcset"] = img_srcset
+        attrs["sizes"] = sizes
+        img_tag_with_srcset = f"<img {_attr_str(attrs)}>"
+
+        if not sources:
+            # Only original-format renditions (or none); the img tag
+            # already carries the srcset. Skip the <picture> wrapper
+            # to keep the HTML lean.
+            return img_tag_with_srcset
+        return f"<picture>{''.join(sources)}{img_tag_with_srcset}</picture>"
 
     return _IMG_TAG_RE.sub(_replace, html)
