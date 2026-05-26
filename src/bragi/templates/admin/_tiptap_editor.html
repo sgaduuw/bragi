@@ -109,6 +109,16 @@
   import { Editor } from 'https://esm.sh/@tiptap/core@2.6';
   import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2.6';
   import Link from 'https://esm.sh/@tiptap/extension-link@2.6';
+  // Image is not part of StarterKit. Without an Image node in the
+  // schema, the picker's `insertContent('![alt](url)')` would land
+  // as a plain text node whose markdown chars get escaped on save,
+  // and pasted / drag-dropped `<img>` tags coerce to literal text
+  // that gets HTML-escaped on save. The result either way: stored
+  // markdown like `\!\[alt\]\(url\)` or `&lt;img ...&gt;`, both
+  // rendering as visible text instead of images (#270). With this
+  // extension installed, tiptap-markdown serializes Image nodes
+  // straight to `![alt](src)`.
+  import Image from 'https://esm.sh/@tiptap/extension-image@2.6';
   import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
 
   const textarea = document.getElementById('body_markdown');
@@ -123,6 +133,7 @@
       extensions: [
         StarterKit,
         Link.configure({ openOnClick: false, autolink: false }),
+        Image,
         Markdown.configure({
           html: false,
           linkify: true,
@@ -244,10 +255,15 @@
         const filename = card.dataset.filename || '';
         const alt = card.dataset.altText || filename || 'image';
         if (!key) return;
+        // setImage inserts a proper Image node into the document so
+        // tiptap-markdown serializes it as `![alt](src)`. The
+        // previous `insertContent('![alt](url)')` shape inserted the
+        // markdown as plain text, which then got its special chars
+        // escaped on save (#270).
         editor
           .chain()
           .focus()
-          .insertContent(`![${alt}](/attachments/${key})\n\n`)
+          .setImage({ src: `/attachments/${key}`, alt: alt })
           .run();
         pickerDialog.close();
       });

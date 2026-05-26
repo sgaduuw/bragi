@@ -31,6 +31,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   today). Closes #266.
 
 ### Fixed
+- **TipTap editor inserts images as markdown, not escaped HTML.**
+  The editor's schema (`StarterKit` + `Link`) had no `Image` node,
+  so the image-picker's `insertContent('![alt](url)')` landed as a
+  plain text node whose markdown special characters were escaped
+  on save (`\!\[alt\]\(url\)`); pasted or drag-dropped `<img>`
+  tags coerced to text and got HTML-escaped (`&lt;img ...&gt;`).
+  Either way the rendered post page showed the markup as visible
+  text instead of an image. Adding `@tiptap/extension-image` to
+  the editor and switching the picker to `setImage({src, alt})`
+  produces a proper Image node that tiptap-markdown serializes to
+  `![alt](src)`. Drag/paste paths benefit too. Existing
+  already-corrupted bodies need a manual edit to fix; no
+  automated repair migration. Closes #270.
 - **Admin image-picker preview thumbnails no longer 302 to the
   login page.** The attachment-delivery blueprint is mounted on
   the admin app so the picker dialog can render
