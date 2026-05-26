@@ -118,6 +118,10 @@ def pictureify(html: str) -> str:
         img_tag = f"<img {_attr_str(attrs)}>"
 
         renditions = renditions_by_attachment.get(attachment.id, [])
+        # Filter out pending / failed rows (storage_key is None until
+        # the worker writes the file). Without this, a pending row
+        # would emit `/attachments/None None w` into the srcset.
+        renditions = [r for r in renditions if r.storage_key is not None and r.width]
         if not renditions or not attachment.width:
             return img_tag  # nothing to srcset; keep the bare img
         parts = [f"/attachments/{r.storage_key} {r.width}w" for r in renditions]

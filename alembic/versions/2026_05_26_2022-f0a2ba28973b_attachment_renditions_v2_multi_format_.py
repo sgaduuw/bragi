@@ -4,6 +4,13 @@ Revision ID: f0a2ba28973b
 Revises: e8e90e4b4afc
 Create Date: 2026-05-26 20:22:24.231022+00:00
 
+WARNING for operators: this migration ships paired with the
+storage-layer change that teaches `LocalDiskStorage.read()` the
+new `<sha>/original.<ext>` layout. Running this migration on its
+own (against an older deploy that still reads `<sha>` as a flat
+file) breaks every attachment read (delivery, picker, refcount,
+upload dedup, CLI reindex). Deploy the full release tagged with
+this migration; never partial-apply.
 """
 
 from __future__ import annotations
@@ -81,14 +88,22 @@ def upgrade() -> None:
             if site_slug is None or not storage_key:
                 continue
             old = root / site_slug / storage_key[:2] / storage_key
+            ext = (guess_extension(content_type or "") or ".bin").lstrip(".")
+            new_dir = old
+            tmp = old.with_suffix(".__migrating__")
+            # Crash recovery: if a previous run died between steps 1
+            # and 3 of the two-step rename, the file is at `tmp` and
+            # `old` is either missing or an empty dir. Finish the
+            # move idempotently on the next attempt.
+            if tmp.exists() and tmp.is_file():
+                new_dir.mkdir(parents=True, exist_ok=True)
+                tmp.rename(new_dir / f"original.{ext}")
+                continue
             if not (old.exists() and old.is_file()):
                 continue
-            ext = (guess_extension(content_type or "") or ".bin").lstrip(".")
             # Two-step rename: take the file out of the way so the
             # parent directory can be created at the same path, then
             # move the file in.
-            new_dir = old
-            tmp = old.with_suffix(".__migrating__")
             old.rename(tmp)
             new_dir.mkdir(parents=True, exist_ok=True)
             tmp.rename(new_dir / f"original.{ext}")
