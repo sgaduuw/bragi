@@ -957,3 +957,166 @@ def test_resaving_same_home_page_id_does_not_churn_redirects(
     with db_session_factory() as db:
         second = db.execute(select(Redirect).where(Redirect.source_path == "/about/")).scalar_one()
     assert second.updated_at == first_updated_at
+
+
+# ============================================================
+# Theme-switch hook (Task 9: enqueue / drop renditions)
+# ============================================================
+
+
+def test_theme_switch_enqueues_missing_renditions(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Changing Site.theme enqueues pending renditions for the
+    new theme's widths and deletes rows + files for widths the
+    new theme no longer wants. Original is untouched."""
+    import jinja2
+
+    from bragi.api import ThemeSpec
+    from bragi.core.models.attachment import Attachment
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    # Register a fresh theme with content_width=600 (=> ladder [300, 600, 1200]).
+    registry = admin_app.extensions["registry"]
+    registry.add_theme(
+        ThemeSpec(
+            slug="custom",
+            display_name="Custom",
+            template_loader=jinja2.DictLoader({}),
+            content_width=600,
+        )
+    )
+
+    # Seed an attachment with renditions at the OLD widths
+    # (= settings default [320, 800, 1600], all status='done').
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.theme = None
+        attachment = Attachment(
+            site_id=site.id,
+            filename="x.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="c" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(attachment)
+        db.flush()
+        for w in (320, 800, 1600):
+            for fmt in ("avif", "webp", "original"):
+                db.add(
+                    AttachmentRendition(
+                        attachment_id=attachment.id,
+                        size_label=f"{w}w",
+                        format=fmt,
+                        content_type=(f"image/{fmt}" if fmt != "original" else "image/png"),
+                        status="done",
+                        storage_key=f"{attachment.storage_key}/{w}/{fmt}",
+                        width=w,
+                        height=w // 2,
+                        bytes_size=10,
+                    )
+                )
+        site_id = site.id
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    resp = client.post(
+        f"/admin/sites/{site_id}/edit",
+        data={
+            "slug": "blog",
+            "hostname": "blog.example.com",
+            "title": "Blog",
+            "locale": "en",
+            "timezone": "UTC",
+            "canonical_url": "https://blog.example.com",
+            "theme": "custom",
+            "home_page_id": "",
+            "default_featured_image_id": "",
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302, resp.data
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+    new_targets = {(f"{w}w", fmt) for w in (300, 600, 1200) for fmt in ("avif", "webp", "original")}
+    have_pending = {(r.size_label, r.format) for r in rows if r.status == "pending"}
+    assert new_targets == have_pending, (
+        f"missing pending rows: {new_targets - have_pending}; "
+        f"extra: {have_pending - new_targets}"
+    )
+    old_labels = {"320w", "800w", "1600w"}
+    leftover = {(r.size_label, r.format) for r in rows if r.size_label in old_labels}
+    assert leftover == set(), f"stale renditions not removed: {leftover}"
+
+
+def test_theme_same_save_is_idempotent_for_renditions(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Saving the site without changing the theme does NOT enqueue
+    any rendition rows or delete existing ones."""
+    from bragi.core.models.attachment import Attachment
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.theme = None
+        attachment = Attachment(
+            site_id=site.id,
+            filename="x.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="e" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(attachment)
+        db.flush()
+        for w in (320, 800, 1600):
+            for fmt in ("avif", "webp", "original"):
+                db.add(
+                    AttachmentRendition(
+                        attachment_id=attachment.id,
+                        size_label=f"{w}w",
+                        format=fmt,
+                        content_type=(f"image/{fmt}" if fmt != "original" else "image/png"),
+                        status="done",
+                        storage_key=f"{attachment.storage_key}/{w}/{fmt}",
+                        width=w,
+                        height=w // 2,
+                        bytes_size=10,
+                    )
+                )
+        site_id = site.id
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    client.post(
+        f"/admin/sites/{site_id}/edit",
+        data={
+            "slug": "blog",
+            "hostname": "blog.example.com",
+            "title": "Blog",
+            "locale": "en",
+            "timezone": "UTC",
+            "canonical_url": "https://blog.example.com",
+            "theme": "",
+            "home_page_id": "",
+            "default_featured_image_id": "",
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+    # 9 done rows, no pending - same as before.
+    assert len(rows) == 9
+    assert all(r.status == "done" for r in rows)

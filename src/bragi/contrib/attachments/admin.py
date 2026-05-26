@@ -45,7 +45,7 @@ from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
 from bragi.core.storage import store_original
-from bragi.core.themes import resolved_widths
+from bragi.core.themes import rendition_target_content_type, resolved_widths
 from bragi.settings import settings
 
 # Allowlist of MIME types accepted at upload time. Anything not
@@ -84,21 +84,6 @@ _ATTACHMENT_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
         "text/plain",
     }
 )
-
-
-def _rendition_target_content_type(format_slug: str, source_content_type: str) -> str:
-    """Content-type to record on a pending rendition row.
-
-    `'avif'` → `image/avif`, `'webp'` → `image/webp`, `'original'`
-    → the source's own content_type so the worker re-encodes in
-    the same format the upload arrived as. Kept at module scope
-    so the worker / backfill CLI can reuse without re-deriving.
-    """
-    if format_slug == "avif":
-        return "image/avif"
-    if format_slug == "webp":
-        return "image/webp"
-    return source_content_type
 
 
 bp = Blueprint(
@@ -364,7 +349,7 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
                             attachment_id=new_id,
                             size_label=f"{target_width}w",
                             format=format_slug,
-                            content_type=_rendition_target_content_type(format_slug, content_type),
+                            content_type=rendition_target_content_type(format_slug, content_type),
                             status="pending",
                         )
                     )

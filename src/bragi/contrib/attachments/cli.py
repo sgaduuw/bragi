@@ -19,11 +19,6 @@ from PIL import Image
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select, update
 
-# Importing the helper from admin keeps one source of truth for the
-# upload-vs-regenerate target-content-type rule. The admin module is
-# already loaded eagerly by the plugin factory, so this import adds
-# no extra cost.
-from bragi.contrib.attachments.admin import _rendition_target_content_type
 from bragi.core.db import SessionLocal
 from bragi.core.image_processor import resize_and_encode
 from bragi.core.models.attachment import Attachment
@@ -32,7 +27,7 @@ from bragi.core.models.site import Site
 from bragi.core.storage import read_bytes as storage_read_bytes
 from bragi.core.storage import resolve as resolve_storage
 from bragi.core.storage import store_rendition
-from bragi.core.themes import resolved_widths
+from bragi.core.themes import rendition_target_content_type, resolved_widths
 from bragi.core.time import naive_utcnow
 from bragi.settings import settings
 
@@ -334,7 +329,7 @@ def regenerate_missing(site_slug: str) -> None:
                         attachment_id=attachment.id,
                         size_label=size_label,
                         format=fmt,
-                        content_type=_rendition_target_content_type(fmt, attachment.content_type),
+                        content_type=rendition_target_content_type(fmt, attachment.content_type),
                         status="pending",
                     )
                 )

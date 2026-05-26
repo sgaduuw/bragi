@@ -199,3 +199,21 @@ def resolved_widths(theme: ThemeSpec | None) -> list[int]:
         w = theme.content_width
         return [w // 2, w, w * 2]
     return list(_settings.attachment_rendition_widths)
+
+
+def rendition_target_content_type(format_slug: str, source_content_type: str) -> str:
+    """Content-type to record on a pending rendition row.
+
+    `'avif'` -> `image/avif`, `'webp'` -> `image/webp`, `'original'`
+    -> the source's own content_type so the worker re-encodes in
+    the same format the upload arrived as. Lives in
+    `bragi.core.themes` because three callers (the attachments
+    admin upload path, the `cms media` CLI, and the sites admin
+    theme-switch hook) all need it and the contrib boundary
+    forbids them sharing through one of the contrib plugins.
+    """
+    if format_slug == "avif":
+        return "image/avif"
+    if format_slug == "webp":
+        return "image/webp"
+    return source_content_type
