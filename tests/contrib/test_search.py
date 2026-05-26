@@ -192,9 +192,8 @@ def test_index_and_search_returns_published_post(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     post = _published_post(
         db_session,
@@ -221,10 +220,9 @@ def test_search_excludes_drafts(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """A row that's in the FTS index but draft-status in posts must not surface."""
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     post = _published_post(
         db_session,
@@ -248,9 +246,8 @@ def test_search_cross_site_isolation(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, other, user = seeded_site
     p_blog = _published_post(db_session, blog, user, slug="a", title="A", body="unique-word-blog")
     p_other = _published_post(
@@ -268,9 +265,8 @@ def test_search_indexes_page(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     page = _published_page(
         db_session, blog, user, slug="about", title="About", body="this is a unique-pagey body"
@@ -287,11 +283,10 @@ def test_search_strips_code_fences_before_indexing(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """An identifier inside a code block is searchable, but the
     `python` language hint isn't (it landed on a fence line we stripped)."""
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     post = _published_post(
         db_session,
@@ -311,9 +306,8 @@ def test_remove_unindexes_post(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     post = _published_post(db_session, blog, user, slug="a", title="A", body="rare-word-zzqq")
     index_post(post)
@@ -325,9 +319,8 @@ def test_search_empty_query_returns_empty(
     fts_tables_present: None,
     seeded_site: tuple[Site, Site, User],
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, _ = seeded_site
     results = SQLiteFTS5SearchBackend.search(blog.id, "", 1, 10)
     assert results.total == 0
@@ -339,13 +332,12 @@ def test_search_safe_query_rejects_operators(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """An FTS5 reserved char (here, `:` for column filter) in the
     raw query mustn't reach the backend; it gets replaced with
     whitespace by `_safe_query` so the surrounding text becomes
     plain tokens instead of an operator expression."""
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     post = _published_post(db_session, blog, user, slug="a", title="Title Page", body="hello world")
     index_post(post)
@@ -362,9 +354,8 @@ def test_reindex_all_walks_published(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     _published_post(db_session, blog, user, slug="a", title="A", body="alpha")
     _published_post(db_session, blog, user, slug="b", title="B", body="beta")
@@ -386,9 +377,8 @@ def test_reindex_all_site_filter(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, other, user = seeded_site
     _published_post(db_session, blog, user, slug="a", title="A", body="alpha")
     _published_post(db_session, other, user, slug="a", title="A", body="alpha")
@@ -405,7 +395,7 @@ def test_search_paginates_at_sql_level(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """page=1 / page=2 with page_size=2 across 5 matching posts.
 
@@ -413,7 +403,6 @@ def test_search_paginates_at_sql_level(
     by bm25 ASC (lower is better, by convention). Hardens the SQL
     LIMIT/OFFSET path that replaced the in-memory slice.
     """
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     for i in range(5):
         post = _published_post(
@@ -448,10 +437,9 @@ def test_search_mixes_posts_and_pages_under_sql_pagination(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """`total` sums both scopes; a paged hit list can include both."""
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     blog, _, user = seeded_site
     for i in range(3):
         post = _published_post(
@@ -476,7 +464,7 @@ def test_search_total_is_cached_within_ttl(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """`total` survives a TTL window: a row added after the first
     search shows up in the hit list immediately, but `total` stays
@@ -484,7 +472,6 @@ def test_search_total_is_cached_within_ttl(
     that staleness."""
     from bragi.contrib.search import backend as backend_mod
 
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     backend_mod._SEARCH_TOTAL_CACHE.clear()
     blog, _, user = seeded_site
 
@@ -510,13 +497,12 @@ def test_search_total_refreshes_after_cache_expiry(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """After the TTL elapses (simulated by ageing the cache entry),
     the next search recomputes `total`."""
     from bragi.contrib.search import backend as backend_mod
 
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     backend_mod._SEARCH_TOTAL_CACHE.clear()
     blog, _, user = seeded_site
 
@@ -548,9 +534,8 @@ def test_on_post_published_indexes_post(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     from bragi.contrib.search.plugin import on_post_published
 
     blog, _, user = seeded_site
@@ -566,9 +551,8 @@ def test_on_post_updated_removes_when_unpublished(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     from bragi.contrib.search.plugin import on_post_updated
 
     blog, _, user = seeded_site
@@ -586,9 +570,8 @@ def test_on_post_deleted_removes(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     from bragi.contrib.search.plugin import on_post_deleted
 
     blog, _, user = seeded_site
@@ -603,13 +586,12 @@ def test_lifecycle_hookimpls_invalidate_total_cache(
     seeded_site: tuple[Site, Site, User],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """A publish event must drop the cached total so a freshly
     indexed row appears in the next search's count immediately,
     not after a 30s TTL window. Regression for the pass-4 finding
     that the total cache was never invalidated."""
-    monkeypatch.setattr("bragi.contrib.search.backend.SessionLocal", db_session_factory)
     from bragi.contrib.search import backend as backend_mod
     from bragi.contrib.search.plugin import on_post_published
 
