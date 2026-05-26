@@ -34,7 +34,7 @@ PASSWORD = "correct-horse-battery-staple"
 def admin_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     """Admin app with one seeded user and one seeded site.
 
@@ -59,17 +59,9 @@ def admin_app(
     )
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
     # P1 / #77: the sites list / nav-visibility checks went through
     # `accessible_sites_for` in `bragi.core.permissions`, which has
     # its own SessionLocal binding.
-    monkeypatch.setattr("bragi.core.permissions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.sites.admin.SessionLocal", db_session_factory)
 
     yield create_admin_app()
 

@@ -33,7 +33,7 @@ ATOM_NS = "{http://www.w3.org/2005/Atom}"
 def delivery_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     author = User(email="ada@example.com", display_name="Ada Lovelace", is_active=True)
     db_session.add(author)
@@ -106,11 +106,6 @@ def delivery_app(
         ]
     )
     db_session.commit()
-
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.seo.feed.SessionLocal", db_session_factory)
 
     yield create_delivery_app()
 

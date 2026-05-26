@@ -15,15 +15,16 @@ from tests.conftest import make_test_user
 
 
 @pytest.fixture(autouse=True)
-def _patch_session_local(
-    monkeypatch: pytest.MonkeyPatch, db_session_factory: sessionmaker[Session]
-) -> None:
-    monkeypatch.setattr("bragi.contrib.sites.cli.SessionLocal", db_session_factory)
-    # The transfer subcommand emits an audit row via core.audit, which
-    # opens its own SessionLocal. Patch it too so the row lands in the
-    # test DB (failing this only logs and is swallowed, but routing it
-    # correctly lets the row show up if a future test asserts on it).
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
+def _patch_session_local(patched_session_locals: sessionmaker[Session]) -> None:
+    """Bind every SessionLocal in this module to the test factory.
+
+    Pre-proxy this used to enumerate `bragi.contrib.sites.cli` and
+    `bragi.core.audit` (the transfer subcommand emits an audit row,
+    which opens its own SessionLocal); since the proxy refactor the
+    shared `patched_session_locals` fixture covers both via one
+    `_factory` rebind. The autouse wrapper stays so the module's
+    tests don't all need to declare the dependency individually.
+    """
 
 
 @pytest.fixture(autouse=True)

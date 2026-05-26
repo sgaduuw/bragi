@@ -27,7 +27,7 @@ from tests.conftest import make_test_user
 def delivery_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     owner = make_test_user(db_session)
     db_session.add(
@@ -41,10 +41,6 @@ def delivery_app(
     )
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
     yield create_delivery_app()
 
 

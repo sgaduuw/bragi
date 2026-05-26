@@ -16,7 +16,7 @@ from bragi.core.permissions import has_role
 def app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Flask:
     plain = User(email="plain@example.com", display_name="Plain", is_active=True)
     sup = User(email="sup@example.com", display_name="Sup", is_active=True, is_superuser=True)
@@ -41,9 +41,6 @@ def app(
     db_session.add(UserSiteRole(user_id=plain.id, site_id=blog.id, role="editor"))
     db_session.add(UserSiteRole(user_id=plain.id, site_id=other.id, role="author"))
     db_session.commit()
-
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.permissions.SessionLocal", db_session_factory)
 
     app = Flask(__name__)
     app.config["SECRET_KEY"] = "test"

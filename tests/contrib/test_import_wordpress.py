@@ -202,7 +202,7 @@ def test_plan_warns_on_shortcodes_and_comments(tmp_path: Path) -> None:
 def site_id(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[int]:
     # Importer needs at least one user as the fallback author. The
     # first user doubles as the site owner.
@@ -226,7 +226,6 @@ def site_id(
     # helper's SessionLocal so it hits the same in-memory DB the
     # test session writes to.
     seed_blog_index(db_session, site, slug="posts")
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id
 
 

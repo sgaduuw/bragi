@@ -50,7 +50,6 @@ def admin_app(
     tmp_attachments_root: Path,
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
     user = User(email=EMAIL, display_name="Ada", is_active=True)
     db_session.add(user)
@@ -76,14 +75,6 @@ def admin_app(
     )
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.attachments.admin.SessionLocal", db_session_factory)
-
     yield create_admin_app()
 
 
@@ -93,7 +84,6 @@ def delivery_app(
     tmp_attachments_root: Path,
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
     # Seed only if no Site exists yet; tests that also use the admin
     # app fixture share `db_session` and the admin fixture seeds the
@@ -119,11 +109,6 @@ def delivery_app(
             ]
         )
         db_session.commit()
-
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.attachments.delivery.SessionLocal", db_session_factory)
 
     yield create_delivery_app()
 
