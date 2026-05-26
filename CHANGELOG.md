@@ -7,6 +7,32 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Theme-aware multi-format image renditions.** Themes declare
+  a `content_width` (the helper derives a retina-aware ladder
+  `[w/2, w, w*2]`) or an explicit `rendition_widths` list; both
+  set is an error at registration. Each width is encoded as
+  AVIF, WebP, and the original format. Delivery emits `<picture>`
+  with format-tiered `<source>` blocks so modern browsers pull
+  the smallest format they understand and older ones fall
+  through to the `<img>` fallback. Rendition generation moves
+  off the upload critical path onto the existing outbox-pattern
+  scheduler. New `cms media` sub-commands:
+  `process-renditions` (worker, runs every 60s),
+  `regenerate-missing --site <slug>` (enqueue any gaps),
+  `regenerate-all --site <slug> --yes` (purge + re-enqueue).
+  Theme switches enqueue missing renditions and delete files
+  for widths the new theme no longer wants. The admin picker
+  thumbnails now use the smallest available WebP, falling back
+  to the original when a rendition isn't ready yet. Adds
+  `pillow-avif-plugin` as a runtime dep. New settings:
+  `attachment_rendition_quality_jpeg=85`,
+  `attachment_rendition_quality_webp=80`,
+  `attachment_rendition_quality_avif=60`,
+  `attachment_rendition_worker_batch=20`,
+  `attachment_rendition_max_attempts=3`. Failed rendition rows
+  surface as a banner on the attachments list page with a
+  remediation hint.
+
 - **Pinned posts on the index landing page.** Editor-chosen
   posts surface in a CSS scroll-snap carousel above the
   chronological recency list. Schema: `posts.is_pinned`
@@ -87,6 +113,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   styling still works. Closes #267.
 
 ### Changed
+- **Attachment storage layout.** Originals move from
+  `<site>/<sha[:2]>/<sha>` to `<site>/<sha[:2]>/<sha>/original.<ext>`,
+  and renditions live alongside at
+  `<site>/<sha[:2]>/<sha>/<width>/<format>`. The migration
+  renames existing files in place (no byte copies). Rendition
+  generation is no longer synchronous on upload: the worker
+  drains pending rows on the 60s scheduler cadence. Operators
+  upgrading should run `cms media regenerate-missing --site <slug>`
+  per site once the upgrade lands to populate WebP / AVIF
+  renditions for existing originals.
+
 - **`og_image` collapsed into `featured_image` everywhere.** The
   social-share image and the featured image were two parallel
   attachment FKs on `posts` (`og_image_id`) and a separate field
