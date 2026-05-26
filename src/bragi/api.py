@@ -400,12 +400,19 @@ class ThemeSpec:
     Database-stored templates were explicitly rejected
     (CONTEXT.md "Deferred surfaces") so themes ARE filesystem
     packages, full stop.
+
+    `content_width` and `rendition_widths` are mutually-exclusive
+    declarations for the per-theme image-rendition target set
+    (see `bragi.core.themes.resolved_widths`). A theme that sets
+    neither falls back to `Settings.attachment_rendition_widths`.
     """
 
     slug: str  # 'minimal', 'fediverse', operator-installable name
     display_name: str  # human-readable label for the admin dropdown
     template_loader: jinja2.BaseLoader
     static_dir: Path | None = None
+    content_width: int | None = None
+    rendition_widths: list[int] | None = None
 
 
 # ============================================================
