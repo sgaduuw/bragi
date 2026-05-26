@@ -68,6 +68,14 @@
     // The card whose offsetLeft is closest to (and not greater
     // than) the strip's scrollLeft is the currently snapped one.
     const sl = strip.scrollLeft;
+    // End-of-strip pin: when the strip can't fully scroll the last
+    // card to its own left edge (its offsetLeft exceeds the strip's
+    // maxScrollLeft), the heuristic below would never select it,
+    // and ping-pong never flips direction. Treat "scrolled to the
+    // end" as "viewing the last card" so the reversal fires.
+    if (sl + strip.clientWidth >= strip.scrollWidth - 1) {
+      return cards.length - 1;
+    }
     let best = 0;
     for (let i = 0; i < cards.length; i++) {
       if (cards[i].offsetLeft - strip.offsetLeft <= sl + 4) {
