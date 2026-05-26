@@ -169,7 +169,7 @@ def test_plan_skips_section_index(tmp_path: Path) -> None:
 def site_and_author(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[tuple[int, int]]:
     user = User(email="ada@example.com", display_name="Ada", is_active=True)
     db_session.add(user)
@@ -191,7 +191,6 @@ def site_and_author(
     # `bragi.core.url.SessionLocal` so the url helper hits the
     # same in-memory DB the test session writes to.
     seed_blog_index(db_session, site, slug="posts")
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id, user.id
 
 

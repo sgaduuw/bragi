@@ -18,7 +18,7 @@ from bragi.core.models.site_alias import SiteAlias
 def delivery_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     owner = make_test_user(db_session)
     site = Site(
@@ -34,10 +34,6 @@ def delivery_app(
     db_session.add(SiteAlias(site_id=site.id, hostname="legacy.example.com"))
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
     yield create_delivery_app()
 
 

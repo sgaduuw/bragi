@@ -154,7 +154,7 @@ def test_plan_warns_on_missing_slug(tmp_path: Path) -> None:
 def site_id(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[int]:
     # Importer needs at least one user for the author fallback; the
     # same user doubles as the site owner.
@@ -177,7 +177,6 @@ def site_id(
     # `post_url_for` reads from the same in-memory DB the test
     # session writes to.
     seed_blog_index(db_session, site, slug="posts")
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id
 
 

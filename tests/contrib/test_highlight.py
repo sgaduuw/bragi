@@ -129,7 +129,6 @@ def delivery_app_with_post(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
     user = User(email="ada@example.com", display_name="Ada", is_active=True)
     db_session.add(user)
@@ -166,10 +165,6 @@ def delivery_app_with_post(
         )
     )
     db_session.commit()
-
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
 
     yield app
 

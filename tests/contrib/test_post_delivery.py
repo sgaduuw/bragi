@@ -26,7 +26,6 @@ def delivery_app(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
     """Delivery app with a Site, an author, and three Posts seeded:
     one published, one draft, one published on a different site.
@@ -97,10 +96,6 @@ def delivery_app(
         )
     )
     db_session.commit()
-
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
 
     yield create_delivery_app()
 
