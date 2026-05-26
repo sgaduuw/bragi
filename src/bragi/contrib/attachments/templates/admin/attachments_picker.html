@@ -41,7 +41,11 @@
              route resolves the site from the Host header, which
              doesn't match on the admin host. attachment_admin's
              /file/<key> reads the site from the URL path. #}
-          <img src="{{ url_for('attachment_admin.serve_attachment_bytes', site_slug=request.view_args['site_slug'], storage_key=r.storage_key) }}"
+          <img src="{{ url_for(
+                 'attachment_admin.serve_attachment_bytes',
+                 site_slug=request.view_args['site_slug'],
+                 storage_key=(thumb_storage_key_by_id.get(r.id) or r.storage_key)
+               ) }}"
                alt="{{ r.alt_text or '' }}"
                loading="lazy"
                style="width: 100%; height: 120px; object-fit: cover;

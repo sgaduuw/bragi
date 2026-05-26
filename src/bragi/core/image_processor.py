@@ -105,3 +105,123 @@ PillowImageProcessor = ImageProcessorSpec(
     probe=_probe,
     resize=_resize,
 )
+
+
+# AVIF support: importing the plugin registers the codec with Pillow
+# at process startup. The dep is pinned in pyproject.toml so absence
+# is a deploy error; we WARN on missing-import so an operator sees
+# the misconfiguration on startup rather than discovering it via
+# stuck-pending AVIF renditions hours later. `pillow-avif-plugin`
+# ships no stubs / `py.typed`, hence the mypy ignore.
+try:
+    import pillow_avif  # type: ignore[import-untyped]  # noqa: F401  -- registers PIL.AvifImagePlugin
+except ImportError:
+    LOG.warning(
+        "pillow_avif not installed; AVIF rendition encoding will fail. "
+        "Install pillow-avif-plugin."
+    )
+
+
+_PIL_FORMAT_BY_TARGET = {
+    "avif": "AVIF",
+    "webp": "WEBP",
+}
+
+
+def resize_and_encode(
+    data: bytes,
+    *,
+    target_width: int,
+    target_format: str,
+    source_content_type: str | None = None,
+) -> bytes | None:
+    """Rescale `data` to `target_width` and encode as `target_format`.
+
+    `target_format` is one of `'avif'`, `'webp'`, `'original'`. The
+    `'original'` case re-encodes in the source's own format. When
+    `source_content_type` is supplied (the canonical Attachment
+    `content_type` the caller stored on upload), it takes
+    precedence over Pillow's in-bytes format probe so a JPEG
+    stored under `image/jpeg` re-encodes as JPEG (with the RGBA →
+    RGB downconvert) even if the bytes were mislabelled on the
+    way in. Without an explicit content type, we fall back to
+    whatever Pillow infers from the bytes.
+
+    Quality knobs come from `Settings`:
+    `attachment_rendition_quality_{jpeg,webp,avif}`.
+
+    Animated GIFs are intentionally treated as stills: Pillow's
+    default `save()` writes the first frame and drops the rest.
+    Same applies to multi-frame WebP. v1 scope; if animation
+    fidelity matters, add an `is_animated` branch with
+    `save_all=True` later.
+
+    Returns `None` if:
+    - The source can't be decoded.
+    - The source's width is already <= `target_width` (no upscaling).
+    - The encoder fails for the chosen format.
+
+    Aspect ratio is preserved (Pillow `thumbnail()`, LANCZOS).
+    JPEG output downconverts an RGBA source to RGB so the encoder
+    doesn't refuse the alpha channel.
+    """
+    from bragi.settings import settings as _settings
+
+    if target_width <= 0:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            if img.width <= target_width:
+                return None
+            target_height = round(img.height * target_width / img.width)
+            resized = img.copy()
+            resized.thumbnail((target_width, target_height))
+
+            if target_format == "original":
+                # The Attachment's stored `content_type` is bragi's
+                # canonical truth for what the file is; Pillow's
+                # in-bytes probe is the fallback for callers that
+                # don't have a content_type to hand.
+                save_format = _format_for_content_type(source_content_type) or img.format
+            else:
+                save_format = _PIL_FORMAT_BY_TARGET.get(target_format)
+            if save_format is None:
+                return None
+
+            save_kwargs: dict[str, int | bool] = {}
+            if save_format == "JPEG":
+                save_kwargs["quality"] = _settings.attachment_rendition_quality_jpeg
+                save_kwargs["optimize"] = True
+                if resized.mode in ("RGBA", "LA", "P"):
+                    resized = resized.convert("RGB")
+            elif save_format == "WEBP":
+                save_kwargs["quality"] = _settings.attachment_rendition_quality_webp
+            elif save_format == "AVIF":
+                save_kwargs["quality"] = _settings.attachment_rendition_quality_avif
+
+            out = io.BytesIO()
+            resized.save(out, format=save_format, **save_kwargs)
+            return out.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        LOG.info(
+            "Pillow resize_and_encode to %dw %s failed: %s",
+            target_width,
+            target_format,
+            exc,
+        )
+        return None
+
+
+def _format_for_content_type(content_type: str | None) -> str | None:
+    if content_type is None:
+        return None
+    mapping = {
+        "image/jpeg": "JPEG",
+        "image/png": "PNG",
+        "image/gif": "GIF",
+        "image/webp": "WEBP",
+        "image/tiff": "TIFF",
+        "image/bmp": "BMP",
+        "image/avif": "AVIF",
+    }
+    return mapping.get(content_type.lower())

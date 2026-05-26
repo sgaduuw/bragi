@@ -24,12 +24,15 @@ from sqlalchemy import select
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
+from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
 from bragi.core.security import current_user, is_superuser
+from bragi.core.storage import remove_rendition
+from bragi.core.themes import rendition_target_content_type, resolved_widths
 from bragi.core.url import page_url_for
 
 bp = Blueprint(
@@ -278,6 +281,81 @@ def _sync_home_page_redirect(
                 )
 
 
+def _sync_renditions_for_theme(
+    db: Any, *, site_id: int, new_theme_slug: str | None, app: Any
+) -> None:
+    """Enqueue / delete renditions to match the new theme's widths.
+
+    Called inside the site-edit transaction so the rendition-table
+    change lands atomically with the theme switch. For every image
+    attachment on the site, missing `(width, format)` slots the
+    new theme wants get a `status='pending'` row (the worker picks
+    them up later), and rows + on-disk files at widths the new
+    theme no longer wants are removed. The stored original at
+    `<sha>/original.<ext>` is never touched: only the per-width
+    rendition variants are. Non-image attachments (no `width`)
+    are skipped.
+    """
+    registry = app.extensions.get("registry") if app is not None else None
+    new_theme = registry.theme(new_theme_slug) if registry is not None and new_theme_slug else None
+    new_widths = set(resolved_widths(new_theme))
+    new_size_labels = {f"{w}w" for w in new_widths}
+
+    site = db.get(Site, site_id)
+    if site is None:
+        return
+    attachments = (
+        db.execute(select(Attachment).where(Attachment.site_id == site_id)).scalars().all()
+    )
+    for attachment in attachments:
+        if attachment.width is None:
+            continue
+        rows = (
+            db.execute(
+                select(AttachmentRendition).where(
+                    AttachmentRendition.attachment_id == attachment.id
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        # Delete rows + files for widths the new theme no longer wants.
+        for row in rows:
+            if row.size_label not in new_size_labels:
+                if row.storage_key:
+                    try:
+                        width_int = int(row.size_label.rstrip("w"))
+                    except ValueError:
+                        width_int = 0
+                    if width_int:
+                        remove_rendition(
+                            site.slug,
+                            attachment.storage_key,
+                            width=width_int,
+                            format_slug=row.format,
+                        )
+                db.delete(row)
+
+        # Enqueue missing (width, format) combinations.
+        have = {(r.size_label, r.format) for r in rows if r.size_label in new_size_labels}
+        target = {(f"{w}w", fmt) for w in new_widths for fmt in ("avif", "webp", "original")}
+        for size_label, fmt in target - have:
+            width_px = int(size_label.rstrip("w"))
+            if width_px >= attachment.width:
+                # Skip widths the source can't satisfy.
+                continue
+            db.add(
+                AttachmentRendition(
+                    attachment_id=attachment.id,
+                    size_label=size_label,
+                    format=fmt,
+                    content_type=rendition_target_content_type(fmt, attachment.content_type),
+                    status="pending",
+                )
+            )
+
+
 @bp.route("/", methods=["GET"])
 def list_sites() -> ResponseReturnValue:
     """List sites the active user can act on.
@@ -516,6 +594,14 @@ def edit_site(site_id: int) -> ResponseReturnValue:
         site.locale = form["locale"]
         site.timezone = form["timezone"]
         site.canonical_url = form["canonical_url"] or f"https://{form['hostname']}"
+        # Theme-switch hook: enqueue pending renditions for any
+        # (width, format) the new theme wants but doesn't have, and
+        # delete rendition rows + files for widths the new theme
+        # no longer wants. Original is untouched.
+        if theme_value != site.theme:
+            _sync_renditions_for_theme(
+                db, site_id=site.id, new_theme_slug=theme_value, app=current_app
+            )
         site.theme = theme_value
         site.home_page_id = home_page_value
         site.default_featured_image_id = default_featured_image_value

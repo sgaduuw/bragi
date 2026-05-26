@@ -44,6 +44,8 @@ from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
+from bragi.core.storage import store_original
+from bragi.core.themes import rendition_target_content_type, resolved_widths
 from bragi.settings import settings
 
 # Allowlist of MIME types accepted at upload time. Anything not
@@ -82,6 +84,7 @@ _ATTACHMENT_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
         "text/plain",
     }
 )
+
 
 bp = Blueprint(
     "attachment_admin",
@@ -134,6 +137,22 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
             )
         ).scalar_one()
 
+        # Failed renditions are sticky: the worker retries up to
+        # max_attempts then parks the row at status='failed' so an
+        # operator notices and can re-enqueue via
+        # `cms media regenerate-missing` after fixing the root cause
+        # (corrupt source bytes, encoder bug, etc.). Surfacing the
+        # count here is the nag.
+        failed_rendition_count = db.execute(
+            select(func.count())
+            .select_from(AttachmentRendition)
+            .join(Attachment, AttachmentRendition.attachment_id == Attachment.id)
+            .where(
+                Attachment.site_id == site.id,
+                AttachmentRendition.status == "failed",
+            )
+        ).scalar_one()
+
     return render_template(
         "admin/attachments_list.html",
         rows=rows,
@@ -141,6 +160,7 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         has_more=has_more,
         missing_alt=missing_alt,
         missing_alt_count=missing_alt_count,
+        failed_rendition_count=failed_rendition_count,
     )
 
 
@@ -199,11 +219,42 @@ def picker(site_slug: str) -> ResponseReturnValue:
         peek = db.execute(peek_query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
         has_more = peek is not None
 
+        # Map each attachment id to its smallest done WebP
+        # rendition's storage_key. The picker template uses this
+        # to render thumbnail src URLs; if an attachment has no
+        # done rendition yet (just uploaded), the mapping yields
+        # None and the template falls back to the original
+        # storage_key.
+        thumb_storage_key_by_id: dict[int, str] = {}
+        if rows:
+            rendition_rows = (
+                db.execute(
+                    select(AttachmentRendition)
+                    .where(
+                        AttachmentRendition.status == "done",
+                        AttachmentRendition.format == "webp",
+                        AttachmentRendition.attachment_id.in_([r.id for r in rows]),
+                    )
+                    .order_by(
+                        AttachmentRendition.attachment_id,
+                        AttachmentRendition.width.asc(),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for rr in rendition_rows:
+                # The first row per attachment_id is the smallest
+                # width (ORDER BY ... width ASC). Subsequent rows
+                # for the same attachment are skipped.
+                thumb_storage_key_by_id.setdefault(rr.attachment_id, rr.storage_key or "")
+
     return render_template(
         "admin/attachments_picker.html",
         rows=rows,
         page=page,
         has_more=has_more,
+        thumb_storage_key_by_id=thumb_storage_key_by_id,
     )
 
 
@@ -214,6 +265,9 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
         require_role("author", site.id)
         site_id = site.id
         site_slug_for_storage = site.slug
+        # Carry the theme slug across the session boundary so the
+        # enqueue block below doesn't have to re-load the Site row.
+        site_theme_slug = site.theme
 
     if request.method == "GET":
         return render_template("admin/attachments_new.html")
@@ -251,8 +305,15 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
         # Store first so the row's storage_key matches the backend
         # location. Idempotent: a duplicate upload reuses the file.
+        # `store_original` lands at <sha>/original.<ext> (the
+        # rendition-aware layout); `backend.remove` below knows to
+        # walk that path on rollback. The backend handle is still
+        # used for the rollback so a non-local backend stays
+        # consistent on the cleanup path.
         backend = resolve_storage(current_app)
-        storage_key, size = backend.store(site_slug_for_storage, data)
+        storage_key, size = store_original(
+            site_slug_for_storage, content_type=content_type, data=data
+        )
         existing = db.execute(
             select(Attachment).where(
                 Attachment.site_id == site_id,
@@ -310,40 +371,37 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
         db.flush()  # populate attachment.id for the rendition FKs
         new_id = attachment.id
 
-        # Rendition ladder: generate one rendition per configured
-        # width below the source. Synchronous on upload per #41's
-        # phase 2 design note ("start synchronous, revisit if it
-        # hurts"). Failures are logged and skipped so a single bad
-        # decode never blocks the upload.
+        # Enqueue pending rendition rows per the active theme's
+        # widths × {avif, webp, original}. The worker
+        # (`cms media process-renditions`) drains them on the
+        # scheduler cadence; upload returns fast with the original
+        # only. Skips enqueue when the upload isn't an image (no
+        # width recorded by the probe) so PDFs / text never end
+        # up with a phantom ladder.
         rendition_count = 0
-        if (
-            processor is not None
-            and processor.resize is not None
-            and width is not None
-            and height is not None
-        ):
-            for target_width in settings.attachment_rendition_widths:
+        if width is not None and height is not None:
+            registry = current_app.extensions.get("registry")
+            active_theme = (
+                registry.theme(site_theme_slug)
+                if registry is not None and site_theme_slug
+                else None
+            )
+            widths = resolved_widths(active_theme)
+            for target_width in widths:
                 if target_width >= width:
+                    # Skip slots the source can't satisfy (no upscaling).
                     continue
-                resized = processor.resize(data, target_width)
-                if resized is None:
-                    continue
-                resized_meta = processor.probe(resized)
-                if resized_meta is None:
-                    continue
-                resized_key, resized_size = backend.store(site_slug_for_storage, resized)
-                db.add(
-                    AttachmentRendition(
-                        attachment_id=new_id,
-                        size_label=f"{target_width}w",
-                        storage_key=resized_key,
-                        content_type=content_type,
-                        width=resized_meta.width,
-                        height=resized_meta.height,
-                        bytes_size=resized_size,
+                for format_slug in ("avif", "webp", "original"):
+                    db.add(
+                        AttachmentRendition(
+                            attachment_id=new_id,
+                            size_label=f"{target_width}w",
+                            format=format_slug,
+                            content_type=rendition_target_content_type(format_slug, content_type),
+                            status="pending",
+                        )
                     )
-                )
-                rendition_count += 1
+                    rendition_count += 1
 
         db.commit()
 
@@ -503,11 +561,14 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
         # already ran before we acquired the lock) is acknowledged
         # as out-of-scope: closing it requires the upload path to
         # re-store inside its insert txn, tracked separately.
+        # Pending renditions (status='pending'/'processing') have
+        # storage_key=None and contribute no on-disk file to refcount.
         rendition_keys = [
             r.storage_key
             for r in db.execute(
                 select(AttachmentRendition).where(AttachmentRendition.attachment_id == row.id)
             ).scalars()
+            if r.storage_key is not None
         ]
         db.delete(row)
         db.flush()  # apply cascade so refcount sees post-delete state

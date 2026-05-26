@@ -80,9 +80,16 @@ def srcset_for(attachment: Attachment | None) -> str:
                 .order_by(AttachmentRendition.width)
             ).scalars()
         )
-    if not renditions:
+    # Pending renditions (status='pending'/'processing') have
+    # storage_key=None and aren't ready to serve yet; skip them so
+    # the srcset only references bytes the storage backend has.
+    parts = [
+        f"{_serve_url(r.storage_key)} {r.width}w"
+        for r in renditions
+        if r.storage_key is not None and r.width is not None
+    ]
+    if not parts:
         return ""
-    parts = [f"{_serve_url(r.storage_key)} {r.width}w" for r in renditions]
     parts.append(f"{_serve_url(attachment.storage_key)} {attachment.width}w")
     return ", ".join(parts)
 

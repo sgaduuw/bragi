@@ -1,6 +1,13 @@
 {% extends "admin/base.html" %}
 {% block title %}Attachments &middot; bragi admin{% endblock %}
 {% block content %}
+{% if failed_rendition_count and failed_rendition_count > 0 %}
+<div class="banner banner--warning">
+  <p><strong>{{ failed_rendition_count }} renditions failed</strong> processing.
+  Run <code>cms media regenerate-missing --site {{ request.view_args['site_slug'] }}</code>
+  to retry after fixing the root cause.</p>
+</div>
+{% endif %}
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
   <h1 style="margin: 0;">Attachments</h1>
   <a href="{{ url_for('attachment_admin.upload_attachment') }}" class="btn">Upload</a>

@@ -13,12 +13,13 @@
 # and every `cms` invocation exits rc=2.
 #
 # Cadences (env-overridable, all in seconds):
-#   SCHEDULED_PUBLISH_EVERY  default 60      ; flip due drafts to published
-#   EMBEDS_RERENDER_EVERY    default 600     ; retry pending embed cards
-#   WEBMENTIONS_SEND_EVERY   default 300     ; ship pending outbound webmentions
-#   ACTIVITYPUB_SEND_EVERY   default 60      ; sign + deliver pending AP outbox rows
-#   ANALYZE_EVERY            default 86400   ; refresh sqlite_stat1 (daily)
-#   VACUUM_EVERY             default 604800  ; compact DB + collapse WAL (weekly)
+#   SCHEDULED_PUBLISH_EVERY      default 60      ; flip due drafts to published
+#   EMBEDS_RERENDER_EVERY        default 600     ; retry pending embed cards
+#   WEBMENTIONS_SEND_EVERY       default 300     ; ship pending outbound webmentions
+#   ACTIVITYPUB_SEND_EVERY       default 60      ; sign + deliver pending AP outbox rows
+#   RENDITIONS_PROCESS_EVERY     default 60      ; drain pending image-rendition rows
+#   ANALYZE_EVERY                default 86400   ; refresh sqlite_stat1 (daily)
+#   VACUUM_EVERY                 default 604800  ; compact DB + collapse WAL (weekly)
 #
 # Timing is relative to container start, not wall-clock; fine for a
 # personal-CMS workload. Sleeps 10s between ticks, tighter than the
@@ -35,6 +36,7 @@ SCHEDULED_PUBLISH_EVERY=${SCHEDULED_PUBLISH_EVERY:-60}
 EMBEDS_RERENDER_EVERY=${EMBEDS_RERENDER_EVERY:-600}
 WEBMENTIONS_SEND_EVERY=${WEBMENTIONS_SEND_EVERY:-300}
 ACTIVITYPUB_SEND_EVERY=${ACTIVITYPUB_SEND_EVERY:-60}
+RENDITIONS_PROCESS_EVERY=${RENDITIONS_PROCESS_EVERY:-60}
 ANALYZE_EVERY=${ANALYZE_EVERY:-86400}
 VACUUM_EVERY=${VACUUM_EVERY:-604800}
 
@@ -142,6 +144,7 @@ last_scheduled_publish=$now
 last_embeds_rerender=$now
 last_webmentions_send=$now
 last_activitypub_send=$now
+last_renditions_process=$now
 last_analyze=$now
 last_vacuum=$now
 
@@ -166,6 +169,11 @@ while true; do
     if [ $((now - last_activitypub_send)) -ge "$ACTIVITYPUB_SEND_EVERY" ]; then
         run "activitypub-send" flask --app 'bragi.apps.admin:create_admin_app' cms activitypub send-pending
         last_activitypub_send=$(date +%s)
+    fi
+
+    if [ $((now - last_renditions_process)) -ge "$RENDITIONS_PROCESS_EVERY" ]; then
+        run "renditions-process" flask --app 'bragi.apps.admin:create_admin_app' cms media process-renditions
+        last_renditions_process=$(date +%s)
     fi
 
     if [ $((now - last_analyze)) -ge "$ANALYZE_EVERY" ]; then

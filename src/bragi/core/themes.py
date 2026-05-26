@@ -38,10 +38,18 @@ themes in the admin appears to do nothing.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import jinja2
 from flask import current_app, g
+
+if TYPE_CHECKING:
+    # Quoted parameter annotation on `resolved_widths` below; resolving
+    # the name at type-check time only keeps runtime free of a
+    # `bragi.api` import here. `bragi.api` doesn't import from
+    # `bragi.core` today, but the asymmetry is worth preserving: the
+    # public surface should stay imported by callers, not by core.
+    from bragi.api import ThemeSpec
 
 
 class ThemeAwareLoader(jinja2.BaseLoader):
@@ -170,3 +178,42 @@ class ThemeAwareLoader(jinja2.BaseLoader):
         # paths, not by rendering. Returning the fallback's list is
         # accurate enough: themes shadow names that already exist.
         return self.fallback.list_templates()
+
+
+def resolved_widths(theme: ThemeSpec | None) -> list[int]:
+    """Final width list for a theme.
+
+    Explicit `rendition_widths` wins; otherwise `content_width`
+    derives a three-tier retina ladder
+    [content_width // 2, content_width, content_width * 2]. With
+    neither set (or `theme is None`), falls back to the global
+    `Settings.attachment_rendition_widths`.
+    """
+    from bragi.settings import settings as _settings
+
+    if theme is None:
+        return list(_settings.attachment_rendition_widths)
+    if theme.rendition_widths is not None:
+        return list(theme.rendition_widths)
+    if theme.content_width is not None:
+        w = theme.content_width
+        return [w // 2, w, w * 2]
+    return list(_settings.attachment_rendition_widths)
+
+
+def rendition_target_content_type(format_slug: str, source_content_type: str) -> str:
+    """Content-type to record on a pending rendition row.
+
+    `'avif'` -> `image/avif`, `'webp'` -> `image/webp`, `'original'`
+    -> the source's own content_type so the worker re-encodes in
+    the same format the upload arrived as. Lives in
+    `bragi.core.themes` because three callers (the attachments
+    admin upload path, the `cms media` CLI, and the sites admin
+    theme-switch hook) all need it and the contrib boundary
+    forbids them sharing through one of the contrib plugins.
+    """
+    if format_slug == "avif":
+        return "image/avif"
+    if format_slug == "webp":
+        return "image/webp"
+    return source_content_type

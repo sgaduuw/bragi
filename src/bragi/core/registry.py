@@ -137,6 +137,10 @@ class Registry:
         self.search_backends.append(spec)
 
     def add_theme(self, spec: ThemeSpec) -> None:
+        if spec.content_width is not None and spec.rendition_widths is not None:
+            raise ValueError(
+                f"theme {spec.slug!r}: set content_width OR rendition_widths, not both"
+            )
         for existing in self.themes:
             if existing.slug == spec.slug:
                 raise DuplicateRegistration("theme", spec.slug)
