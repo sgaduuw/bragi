@@ -9,18 +9,24 @@ source that didn't carry renditions.
 
 from __future__ import annotations
 
+import io
 import sys
 
 import click
 from flask import current_app
 from flask.cli import with_appcontext
-from sqlalchemy import select
+from PIL import Image
+from sqlalchemy import select, update
 
 from bragi.core.db import SessionLocal
+from bragi.core.image_processor import resize_and_encode
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.site import Site
+from bragi.core.storage import read_bytes as storage_read_bytes
 from bragi.core.storage import resolve as resolve_storage
+from bragi.core.storage import store_rendition
+from bragi.core.time import naive_utcnow
 from bragi.settings import settings
 
 
@@ -156,3 +162,110 @@ def reindex(site_slug: str | None, dry_run: bool) -> None:
     click.echo(f"{label} complete:")
     for k, v in counts.items():
         click.echo(f"  {k}: {v}")
+
+
+@media_group.command("process-renditions")
+@click.option(
+    "--limit",
+    type=int,
+    default=None,
+    help="Maximum rows to claim per pass (default: Settings.attachment_rendition_worker_batch).",
+)
+@with_appcontext
+def process_renditions(limit: int | None) -> None:
+    """Drain pending attachment rendition rows.
+
+    Claims up to `--limit` rows with `status='pending'` in a single
+    UPDATE, reads the parent attachment's original bytes, calls
+    `resize_and_encode(...)` per row's `(width, format)`, writes
+    the file via `store_rendition(...)`, then marks the row
+    `done`. Encoder / IO failures bump `attempts` and re-pend
+    until `Settings.attachment_rendition_max_attempts` (default 3),
+    after which the row is `failed`.
+    """
+    batch = limit if limit is not None else settings.attachment_rendition_worker_batch
+    max_attempts = settings.attachment_rendition_max_attempts
+
+    with SessionLocal() as db:
+        # Two-step claim: select ids of pending rows, then UPDATE
+        # them to `processing` in one statement so a parallel
+        # worker can't pick them up. SQLite has no SKIP LOCKED so
+        # the gap between SELECT and UPDATE is the small window
+        # the dev scheduler's single-worker assumption rests on;
+        # production can run multiple workers if the conditional
+        # UPDATE is honest about its WHERE.
+        pending_ids = list(
+            db.execute(
+                select(AttachmentRendition.id)
+                .where(AttachmentRendition.status == "pending")
+                .order_by(AttachmentRendition.id)
+                .limit(batch)
+            ).scalars()
+        )
+        if not pending_ids:
+            click.echo("no pending renditions")
+            return
+        db.execute(
+            update(AttachmentRendition)
+            .where(
+                AttachmentRendition.id.in_(pending_ids),
+                AttachmentRendition.status == "pending",
+            )
+            .values(status="processing")
+        )
+        db.commit()
+
+        rows = (
+            db.execute(
+                select(AttachmentRendition)
+                .where(AttachmentRendition.id.in_(pending_ids))
+                .order_by(AttachmentRendition.id)
+            )
+            .scalars()
+            .all()
+        )
+
+        done_count = 0
+        failed_count = 0
+        for row in rows:
+            try:
+                attachment = db.get(Attachment, row.attachment_id)
+                if attachment is None:
+                    raise RuntimeError("parent attachment missing")
+                site = db.get(Site, attachment.site_id)
+                if site is None:
+                    raise RuntimeError("parent site missing")
+                original = storage_read_bytes(site.slug, attachment.storage_key)
+                width = int(row.size_label.rstrip("w"))
+                rendition_bytes = resize_and_encode(
+                    original,
+                    target_width=width,
+                    target_format=row.format,
+                    source_content_type=attachment.content_type,
+                )
+                if rendition_bytes is None:
+                    raise RuntimeError(f"encoder returned None for {width}w / {row.format}")
+                with Image.open(io.BytesIO(rendition_bytes)) as img:
+                    actual_width, actual_height = img.width, img.height
+                store_rendition(
+                    site.slug,
+                    attachment.storage_key,
+                    width=width,
+                    format_slug=row.format,
+                    data=rendition_bytes,
+                )
+                row.storage_key = f"{attachment.storage_key}/{width}/{row.format}"
+                row.width = actual_width
+                row.height = actual_height
+                row.bytes_size = len(rendition_bytes)
+                row.status = "done"
+                row.processed_at = naive_utcnow()
+                done_count += 1
+            except Exception as exc:  # noqa: BLE001 -- worker resilience
+                row.attempts += 1
+                row.last_error = str(exc)
+                row.status = "failed" if row.attempts >= max_attempts else "pending"
+                failed_count += 1
+        db.commit()
+
+    click.echo(f"processed {done_count} rendition(s); {failed_count} failed/re-pended")

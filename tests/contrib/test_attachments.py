@@ -2007,3 +2007,164 @@ def test_upload_enqueues_pending_renditions(
     assert all(r.status == "pending" for r in rows)
     assert sorted({r.format for r in rows}) == ["avif", "original", "webp"]
     assert len({r.size_label for r in rows}) == 3
+
+
+def test_process_renditions_drains_pending_rows(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """After an upload enqueues 9 pending rows for a 2000w image,
+    running the worker fills them: bytes on disk, status='done'.
+    """
+    from click.testing import CliRunner
+
+    from bragi.contrib.attachments.cli import media_group
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
+    data = _make_png(width=2000, height=1000)
+    client.post(
+        "/admin/sites/blog/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    runner = CliRunner()
+    with admin_app.app_context():
+        result = runner.invoke(media_group, ["process-renditions"])
+    assert result.exit_code == 0, result.output
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+
+    done = [r for r in rows if r.status == "done"]
+    # 3 widths × 3 formats = 9. Source is 2000w so 320/800/1600
+    # all fit. Each `done` row has a populated storage_key,
+    # width/height/bytes_size, and processed_at.
+    assert len(done) == 9
+    assert all(r.storage_key for r in done)
+    assert all(r.width for r in done)
+    assert all(r.bytes_size for r in done)
+    assert all(r.processed_at for r in done)
+
+
+def test_process_renditions_retries_then_marks_failed(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_attachments_root: Path,
+) -> None:
+    """A row that fails three times stays `failed` with `attempts=3`
+    and a non-empty `last_error`. The worker does not retry it
+    once it's reached max attempts.
+    """
+    from click.testing import CliRunner
+
+    from bragi.contrib.attachments.cli import media_group
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    # Force every encode to return None (the resize helper's
+    # "encoder failed" signal). The worker treats that as a
+    # caught failure, increments attempts, drops back to pending.
+    monkeypatch.setattr(
+        "bragi.contrib.attachments.cli.resize_and_encode",
+        lambda *a, **kw: None,
+    )
+
+    site_id = _blog_id(db_session_factory)
+    with db_session_factory() as db:
+        attachment = Attachment(
+            site_id=site_id,
+            filename="x.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="d" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(attachment)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=attachment.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="pending",
+            )
+        )
+        db.commit()
+        row_id = db.execute(select(AttachmentRendition.id)).scalar_one()
+
+    # Plant a fake original file so the read step doesn't fail
+    # before the resize step does.
+    sha_dir = tmp_attachments_root / "blog" / "dd" / ("d" * 64)
+    sha_dir.mkdir(parents=True, exist_ok=True)
+    (sha_dir / "original.png").write_bytes(b"not real png bytes")
+
+    runner = CliRunner()
+    for _ in range(3):
+        with admin_app.app_context():
+            runner.invoke(media_group, ["process-renditions"])
+
+    with db_session_factory() as db:
+        row = db.get(AttachmentRendition, row_id)
+        assert row is not None
+        assert row.status == "failed"
+        assert row.attempts == 3
+        assert row.last_error  # non-empty
+
+
+def test_process_renditions_respects_batch_limit(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """--limit N caps how many rows one pass claims.
+    The remaining rows stay pending."""
+    from click.testing import CliRunner
+
+    from bragi.contrib.attachments.cli import media_group
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
+    data = _make_png(width=2000, height=1000)
+    client.post(
+        "/admin/sites/blog/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    runner = CliRunner()
+    with admin_app.app_context():
+        result = runner.invoke(media_group, ["process-renditions", "--limit", "2"])
+    assert result.exit_code == 0, result.output
+
+    with db_session_factory() as db:
+        done = (
+            db.execute(select(AttachmentRendition).where(AttachmentRendition.status == "done"))
+            .scalars()
+            .all()
+        )
+        pending = (
+            db.execute(select(AttachmentRendition).where(AttachmentRendition.status == "pending"))
+            .scalars()
+            .all()
+        )
+    assert len(done) == 2
+    assert len(pending) == 7
