@@ -15,7 +15,6 @@ Pillow without any per-call wiring at the call site.
 
 from __future__ import annotations
 
-import contextlib
 import io
 import logging
 
@@ -109,13 +108,18 @@ PillowImageProcessor = ImageProcessorSpec(
 
 
 # AVIF support: importing the plugin registers the codec with Pillow
-# at process startup. Wrapped so the absence of the dep degrades to
-# "AVIF rendition returns None" rather than crashing every import
-# site (the plugin is pinned in pyproject so absence is a deploy
-# error, but defensive ImportError is cheap). `pillow-avif-plugin`
+# at process startup. The dep is pinned in pyproject.toml so absence
+# is a deploy error; we WARN on missing-import so an operator sees
+# the misconfiguration on startup rather than discovering it via
+# stuck-pending AVIF renditions hours later. `pillow-avif-plugin`
 # ships no stubs / `py.typed`, hence the mypy ignore.
-with contextlib.suppress(ImportError):
+try:
     import pillow_avif  # type: ignore[import-untyped]  # noqa: F401  -- registers PIL.AvifImagePlugin
+except ImportError:
+    LOG.warning(
+        "pillow_avif not installed; AVIF rendition encoding will fail. "
+        "Install pillow-avif-plugin."
+    )
 
 
 _PIL_FORMAT_BY_TARGET = {
@@ -145,6 +149,12 @@ def resize_and_encode(
 
     Quality knobs come from `Settings`:
     `attachment_rendition_quality_{jpeg,webp,avif}`.
+
+    Animated GIFs are intentionally treated as stills: Pillow's
+    default `save()` writes the first frame and drops the rest.
+    Same applies to multi-frame WebP. v1 scope; if animation
+    fidelity matters, add an `is_animated` branch with
+    `save_all=True` later.
 
     Returns `None` if:
     - The source can't be decoded.
