@@ -121,6 +121,23 @@ class Settings(BaseSettings):
     # with `BRAGI_ATTACHMENT_RENDITION_WIDTHS='[256,640,1280]'`.
     attachment_rendition_widths: list[int] = [320, 800, 1600]
 
+    # Per-format encoder quality for rendition output. JPEG/WebP use
+    # Pillow's standard 0-100 quality scale; AVIF runs through
+    # pillow-avif-plugin where ~60 is the conventional visually-lossless
+    # sweet spot (AVIF compresses harder than WebP at equivalent quality
+    # numbers, so the default is lower).
+    attachment_rendition_quality_jpeg: int = 85
+    attachment_rendition_quality_webp: int = 80
+    attachment_rendition_quality_avif: int = 60
+
+    # Rendition worker knobs. `worker_batch` caps how many pending
+    # rendition rows one worker pass claims and encodes per
+    # invocation; `max_attempts` is the retry ceiling before a row
+    # is marked permanently failed (so a corrupt source doesn't
+    # spin the worker forever).
+    attachment_rendition_worker_batch: int = 20
+    attachment_rendition_max_attempts: int = 3
+
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake
     # contact. Format: `mailto:...` or `https://...` per RFC 9116.
