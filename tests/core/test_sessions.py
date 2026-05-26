@@ -157,10 +157,8 @@ def test_expired_session_is_not_loaded(
 
 def test_purge_expired_sessions_removes_old_rows(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-
     now_naive = datetime.now(UTC).replace(tzinfo=None)
     with db_session_factory() as db:
         db.add(
@@ -191,11 +189,9 @@ def test_purge_expired_sessions_removes_old_rows(
 
 def test_purge_cli_command(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """`cms session purge` reports the count of removed rows."""
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-
     now_naive = datetime.now(UTC).replace(tzinfo=None)
     with db_session_factory() as db:
         for i in range(3):
@@ -243,7 +239,7 @@ def test_session_cookie_is_httponly(admin_app: Flask) -> None:
 
 def test_last_seen_at_throttled_within_window(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """A read-only load within `LAST_SEEN_BUMP_INTERVAL` of the row's
     existing last_seen_at must not rewrite the column. The first
@@ -252,8 +248,6 @@ def test_last_seen_at_throttled_within_window(
         LAST_SEEN_BUMP_INTERVAL,
         BragiSessionInterface,
     )
-
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
 
     sid = "c" * 32
     now = datetime.now(UTC).replace(tzinfo=None)

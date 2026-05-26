@@ -70,7 +70,7 @@ def test_key_file_404s_on_wrong_key(delivery_app: Flask) -> None:
 def test_key_file_404s_when_unconfigured(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """No key in extra_settings: even the right URL pattern 404s."""
     owner = make_test_user(db_session)
@@ -84,12 +84,6 @@ def test_key_file_404s_when_unconfigured(
         )
     )
     db_session.commit()
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
 
     app = create_delivery_app()
     resp = app.test_client().get(f"/{KEY}.txt", headers={"Host": "blog.example.com"})
@@ -322,6 +316,7 @@ def test_delete_fires_indexnow_post_with_pre_delete_url(
 def test_no_key_means_no_post(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A site without an IndexNow key configured does NOT fire."""
@@ -352,16 +347,6 @@ def test_no_key_means_no_post(
         )
     )
     db_session.commit()
-
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.plugin.SessionLocal", db_session_factory)
 
     calls = _captured_post(monkeypatch)
 
@@ -431,9 +416,8 @@ def test_http_failure_swallowed(
 
 def test_cli_setup_writes_key_into_extra_settings(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         owner = make_test_user(db)
         db.add(
@@ -460,9 +444,8 @@ def test_cli_setup_writes_key_into_extra_settings(
 
 def test_cli_setup_accepts_explicit_key(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         owner = make_test_user(db)
         db.add(
@@ -488,9 +471,8 @@ def test_cli_setup_accepts_explicit_key(
 
 def test_cli_setup_rejects_invalid_key(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         owner = make_test_user(db)
         db.add(
@@ -511,9 +493,8 @@ def test_cli_setup_rejects_invalid_key(
 
 def test_cli_setup_rejects_unknown_site(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.indexnow.cli.SessionLocal", db_session_factory)
     runner = CliRunner()
     result = runner.invoke(indexnow_group, ["setup", "--site", "nope"])
     assert result.exit_code == 1

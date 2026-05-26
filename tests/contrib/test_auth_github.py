@@ -327,16 +327,10 @@ def test_callback_fires_on_user_login_hook(
 def test_login_returns_503_when_credentials_unset(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No client id -> the OAuth flow can't even start."""
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_github.views.SessionLocal", db_session_factory)
     monkeypatch.setattr("bragi.contrib.auth_github.views.settings.github_client_id", None)
     monkeypatch.setattr("bragi.contrib.auth_github.views.settings.github_client_secret", None)
 
