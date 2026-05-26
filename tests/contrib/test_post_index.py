@@ -493,3 +493,44 @@ def test_pinned_section_falls_back_when_extra_settings_value_is_garbage(
     resp = client.get("/posts/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert 'data-autoadvance-seconds="7"' in resp.data.decode()
+
+
+def test_pinned_section_includes_carousel_script_when_multi_pin(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The behaviour script is loaded only when the carousel
+    actually renders dots (2+ pinned posts). Single-pin and
+    no-pin pages don't get the script."""
+    with db_session_factory() as db:
+        for slug in ("published-11", "published-10"):
+            p = db.execute(select(Post).where(Post.slug == slug)).scalar_one()
+            p.is_pinned = True
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert "/static/pinned-carousel.js" in body
+
+
+def test_pinned_section_omits_carousel_script_when_single_pin(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        p = db.execute(select(Post).where(Post.slug == "published-11")).scalar_one()
+        p.is_pinned = True
+        db.commit()
+
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert "/static/pinned-carousel.js" not in body
+
+
+def test_pinned_section_omits_carousel_script_when_no_pin(
+    delivery_app: Flask,
+) -> None:
+    client = delivery_app.test_client()
+    resp = client.get("/posts/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert "/static/pinned-carousel.js" not in body

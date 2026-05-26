@@ -37,6 +37,10 @@
       }
       {% endfor %}
     </style>
+    {# Carousel-only enhancement: fixes the dot-nav vertical-jump
+       bug (#267) and runs auto-advance (#266). Loaded only here
+       so single-pin and no-pin pages stay JS-free. #}
+    <script src="{{ url_for('page_delivery.static', filename='pinned-carousel.js') }}" defer></script>
   {% endif %}
 </section>
 {% endif %}
