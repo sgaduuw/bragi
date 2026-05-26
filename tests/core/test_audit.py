@@ -77,9 +77,8 @@ def _login(client: FlaskClient, email: str = EMAIL, password: str = PASSWORD) ->
 
 def test_audit_outside_request_context_writes_with_no_actor(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
     audit("cli.smoke", extra={"note": "no request context here"})
     with db_session_factory() as db:
         row = db.execute(select(AuditLog).where(AuditLog.action == "cli.smoke")).scalar_one()
@@ -92,7 +91,15 @@ def test_audit_outside_request_context_writes_with_no_actor(
 def test_audit_failure_is_swallowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A broken SessionLocal must NOT raise out of audit()."""
+    """A broken SessionLocal must NOT raise out of audit().
+
+    Deliberate per-module patch: this test replaces the module-
+    level `SessionLocal` reference in `bragi.core.audit` with a
+    callable that raises. The proxy refactor (#256) made
+    `patched_session_locals` the standard test fixture, but this
+    test wants the opposite: a knowingly-broken factory, not the
+    test factory. The per-module setattr stays.
+    """
 
     class _Broken:
         def __call__(self) -> object:
