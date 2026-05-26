@@ -133,11 +133,16 @@ def reindex(site_slug: str | None, dry_run: bool) -> None:
                     AttachmentRendition(
                         attachment_id=att.id,
                         size_label=f"{target_width}w",
+                        # Backfill CLI still produces a single
+                        # format per row; the worker-driven
+                        # multi-format path lands in a later task.
+                        format=att.content_type,
                         storage_key=resized_key,
                         content_type=att.content_type,
                         width=resized_meta.width,
                         height=resized_meta.height,
                         bytes_size=resized_size,
+                        status="done",
                     )
                 )
                 counts["added"] += 1

@@ -1627,11 +1627,13 @@ def test_pictureify_expands_attachment_img(
             AttachmentRendition(
                 attachment_id=att.id,
                 size_label="320w",
+                format="image/png",
                 storage_key="0" * 64,
                 content_type="image/png",
                 width=320,
                 height=213,
                 bytes_size=64,
+                status="done",
             )
         )
         db.commit()

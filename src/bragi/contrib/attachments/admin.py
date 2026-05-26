@@ -336,11 +336,16 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
                     AttachmentRendition(
                         attachment_id=new_id,
                         size_label=f"{target_width}w",
+                        # Synchronous-resize path still produces a
+                        # single format per row; the worker-driven
+                        # multi-format path lands in a later task.
+                        format=content_type,
                         storage_key=resized_key,
                         content_type=content_type,
                         width=resized_meta.width,
                         height=resized_meta.height,
                         bytes_size=resized_size,
+                        status="done",
                     )
                 )
                 rendition_count += 1
@@ -503,11 +508,14 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
         # already ran before we acquired the lock) is acknowledged
         # as out-of-scope: closing it requires the upload path to
         # re-store inside its insert txn, tracked separately.
+        # Pending renditions (status='pending'/'processing') have
+        # storage_key=None and contribute no on-disk file to refcount.
         rendition_keys = [
             r.storage_key
             for r in db.execute(
                 select(AttachmentRendition).where(AttachmentRendition.attachment_id == row.id)
             ).scalars()
+            if r.storage_key is not None
         ]
         db.delete(row)
         db.flush()  # apply cascade so refcount sees post-delete state
