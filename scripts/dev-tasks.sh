@@ -31,5 +31,6 @@ while true; do
     run_cmd cms embeds rerender-pending
     run_cmd cms webmentions send-pending
     run_cmd cms activitypub send-pending
+    run_cmd cms media process-renditions
     sleep "$SLEEP_BETWEEN_PASSES"
 done
