@@ -77,8 +77,22 @@
     return best;
   }
 
+  // Direction state for ping-pong traversal: at the last card we
+  // flip to backward, at the first card we flip back to forward.
+  // This means every card gets visited on every pass instead of the
+  // jarring jump-to-start that wrap-around would produce.
+  let direction = 1;
+
   function advance() {
-    const next = (currentIndex() + 1) % cards.length;
+    const cur = currentIndex();
+    let next = cur + direction;
+    if (next >= cards.length) {
+      direction = -1;
+      next = cur - 1;
+    } else if (next < 0) {
+      direction = 1;
+      next = cur + 1;
+    }
     scrollToCard(cards[next]);
   }
 
