@@ -27,16 +27,6 @@ PUBLIC_ENDPOINTS: frozenset[str] = frozenset(
         # and an unhealthy worker can't be distinguished from an
         # authenticated 200 on /auth/login.
         "_healthz",
-        # The attachment-delivery blueprint is mounted on the admin
-        # app so the image-picker dialog and other in-admin previews
-        # can render `<img src="/attachments/<key>">` against the
-        # admin host (#269). The bytes themselves are CDN-style
-        # public content (same path on delivery serves anonymously),
-        # so the same path on admin needs the same posture; without
-        # this exemption every preview `<img>` 302s to /auth/login
-        # and the browser renders the login HTML in place of the
-        # bytes. See #273.
-        "attachment_delivery.serve_attachment",
     }
 )
 

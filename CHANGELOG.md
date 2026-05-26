@@ -31,6 +31,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   today). Closes #266.
 
 ### Fixed
+- **Admin image previews load on a host that isn't a site
+  hostname.** PR #271 mounted the public `/attachments/<key>`
+  blueprint on the admin app, then #275 carved it out of the
+  auth gate. Both fixes left the real problem standing: the
+  public route resolves the site from the Host header, which on
+  the admin host (`admin.example.com` in production,
+  `127.0.0.1` locally) doesn't match any site, so the lookup
+  404s. The image-picker dialog grid, the inline featured-image
+  thumbnail on every edit form, and the TipTap editor preview
+  of inserted images all relied on this URL and all broke on
+  any admin host that wasn't the same string as a site
+  hostname. New admin route
+  `attachment_admin.serve_attachment_bytes` at
+  `/admin/sites/<slug>/attachments/file/<key>` reads the site
+  from the URL path instead. The picker template, image-picker
+  macro, and TipTap editor now use the admin-scoped URL; the
+  editor applies a load/save transform between admin-scoped
+  (for in-editor preview) and public-scoped (for stored
+  markdown, so delivery still renders). The cross-mount of
+  `attachment_delivery_bp` on admin and the `PUBLIC_ENDPOINTS`
+  carve-out from #275 are removed; both became dead code.
 - **TipTap editor inserts images as markdown, not escaped HTML.**
   The editor's schema (`StarterKit` + `Link`) had no `Image` node,
   so the image-picker's `insertContent('![alt](url)')` landed as a

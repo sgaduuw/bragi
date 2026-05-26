@@ -8,17 +8,23 @@
 
    Use via {% from "admin/_image_picker_field.html" import image_picker_field %}
    then `{{ image_picker_field(name=..., value=..., attachment=...,
-   label=..., picker_url=..., helper=...) }}`. One form-field per page
-   expected; the dialog id is derived from `name` so multiple fields
-   could coexist in principle.
+   label=..., picker_url=..., site_slug=..., helper=...) }}`. One
+   form-field per page expected; the dialog id is derived from `name`
+   so multiple fields could coexist in principle.
 
    `picker_url` is the fully-built attachments-picker URL (site_slug
    already substituted by the caller). The macro can't build it
    itself because the site-edit page has no `site_slug` in its view
    args — only post/page edit views do.
+
+   `site_slug` lets the macro build the site-scoped attachment-bytes
+   URLs for the inline thumbnail and for the after-pick preview swap.
+   The delivery `/attachments/<key>` route resolves the site from
+   the Host header, which doesn't match on the admin host, so the
+   macro must use the path-scoped admin route instead.
 #}
 
-{% macro image_picker_field(name, value, attachment, label, picker_url, helper="") %}
+{% macro image_picker_field(name, value, attachment, label, picker_url, site_slug, helper="") %}
 {%- set dialog_id = "image-picker-dialog--" ~ name -%}
 {%- set field_id = "image-picker-field--" ~ name -%}
 <fieldset class="image-picker-field" id="{{ field_id }}" data-field="{{ name }}">
@@ -31,7 +37,7 @@
                 align-items: center; gap: 0.75rem;">
       {% if attachment %}
       <img class="image-picker-thumb"
-           src="/attachments/{{ attachment.storage_key }}"
+           src="{{ url_for('attachment_admin.serve_attachment_bytes', site_slug=site_slug, storage_key=attachment.storage_key) }}"
            alt="{{ attachment.alt_text or attachment.filename }}"
            style="max-width: 160px; max-height: 120px; object-fit: cover;
                   border: 1px solid #ddd; border-radius: 4px;">
@@ -72,10 +78,16 @@
   const dialogId = {{ dialog_id | tojson }};
   const fieldId = {{ field_id | tojson }};
   const pickerUrl = {{ picker_url | tojson }};
-  // CDN URL prefix for attachment bytes. Both admin and delivery
-  // serve at the same path now (#269 fix); admin mounts the
-  // attachment-delivery blueprint alongside the admin blueprints.
-  const attachmentPrefix = "/attachments/";
+  // Site-scoped admin URL prefix for attachment bytes. The
+  // delivery `/attachments/<key>` route resolves the site from
+  // the Host header, which doesn't match on the admin host; the
+  // path-scoped admin route does. Concatenating storage_key here
+  // yields the same URL Jinja's url_for would produce.
+  const attachmentPrefix = {{ url_for(
+      "attachment_admin.serve_attachment_bytes",
+      site_slug=site_slug,
+      storage_key="__STORAGE_KEY__",
+  ) | tojson }}.replace("__STORAGE_KEY__", "");
 
   const fieldRoot = document.getElementById(fieldId);
   const dialog = document.getElementById(dialogId);

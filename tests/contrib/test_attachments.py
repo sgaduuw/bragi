@@ -1429,6 +1429,86 @@ def test_picker_requires_auth(admin_app: Flask) -> None:
     assert "/auth/login" in resp.headers["Location"]
 
 
+# ----------------- admin-scoped attachment bytes endpoint -----------------
+
+
+def test_admin_serve_attachment_bytes_returns_image(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """The admin-scoped bytes route serves the attachment from the
+    site identified by the URL path (not the Host header), so the
+    image-picker dialog, the inline thumbnails on the edit form,
+    and the TipTap editor preview all resolve on the admin host.
+    """
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+
+    # Upload through the normal admin path so the DB row + on-disk
+    # bytes are written by the same code path that operators use.
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
+    data = _make_png(width=8, height=8)
+    expected_key = hashlib.sha256(data).hexdigest()
+    client.post(
+        "/admin/sites/blog/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    resp = client.get(f"/admin/sites/blog/attachments/file/{expected_key}")
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"].startswith("image/png")
+    assert resp.data == data
+
+
+def test_admin_serve_attachment_bytes_requires_auth(admin_app: Flask) -> None:
+    resp = admin_app.test_client().get(
+        "/admin/sites/blog/attachments/file/0" * 64, follow_redirects=False
+    )
+    assert resp.status_code == 302
+    assert "/auth/login" in resp.headers["Location"]
+
+
+def test_admin_serve_attachment_bytes_rejects_cross_site(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """A storage_key uploaded to `other` must 404 when requested
+    via the `blog` URL: the site_slug in the path is the scope and
+    the DB join enforces it. Otherwise an editor on `blog` could
+    surface another tenant's bytes through a crafted URL.
+    """
+    client = admin_app.test_client()
+    _login(client)
+
+    # Upload to `other`, then hit the bytes route at `blog`.
+    with db_session_factory() as db:
+        other = db.execute(select(Site).where(Site.slug == "other")).scalar_one()
+        other_id = other.id
+    token = csrf_token(client, path="/admin/sites/other/attachments/new")
+    data = _make_png(width=8, height=8)
+    expected_key = hashlib.sha256(data).hexdigest()
+    client.post(
+        "/admin/sites/other/attachments/new",
+        data={
+            "site_id": str(other_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    resp = client.get(f"/admin/sites/blog/attachments/file/{expected_key}")
+    assert resp.status_code == 404
+
+
 def test_picker_lists_image_attachments(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],

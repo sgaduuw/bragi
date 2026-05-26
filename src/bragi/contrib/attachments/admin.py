@@ -36,6 +36,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
 from werkzeug.utils import secure_filename
 
+from bragi.contrib.attachments.delivery import build_attachment_response
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
@@ -141,6 +142,28 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         missing_alt=missing_alt,
         missing_alt_count=missing_alt_count,
     )
+
+
+@bp.route("/file/<storage_key>", methods=["GET"])
+def serve_attachment_bytes(site_slug: str, storage_key: str) -> ResponseReturnValue:
+    """Site-scoped attachment bytes for admin previews.
+
+    The delivery-side `/attachments/<key>` route resolves the site
+    from the Host header, which on the admin host doesn't match
+    any site row. The picker grid, the image-picker macro's
+    inline thumbnails, and the TipTap editor's inserted images
+    all need a working preview URL on the admin app; this route
+    is that URL.
+
+    Auth piggybacks on the admin login_required guard installed
+    on the app at boot. The site_slug in the path is the source
+    of truth; `resolve_site_or_abort` 404s on an unknown slug
+    and 403s on a non-member, matching the rest of the admin
+    surface.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+    return build_attachment_response(site, storage_key)
 
 
 @bp.route("/picker", methods=["GET"])

@@ -72,6 +72,7 @@
        attachment=featured_image,
        label="Featured image",
        picker_url=url_for("attachment_admin.picker"),
+       site_slug=request.view_args["site_slug"],
        helper="Optional. Used as og:image / twitter:image, the landing-page card thumbnail, and the post-detail hero. Falls back to the site's default featured image when unset."
      ) }}
 
