@@ -556,6 +556,16 @@
     if (imageBubbleMenu) {
       const SIZE_CLASSES = new Set(['size-small', 'size-medium', 'size-full']);
       const ALIGN_CLASSES = new Set(['align-left', 'align-center', 'align-right']);
+      // Prevent the button from stealing focus on mousedown.
+      // Without this, clicking a bubble-menu button blurs the
+      // image node selection; `updateAttributes('image', ...)`
+      // then operates on the caret's surrounding text node and
+      // the image's class doesn't change.
+      imageBubbleMenu.addEventListener('mousedown', (e) => {
+        if (e.target.closest('button[data-size], button[data-align]')) {
+          e.preventDefault();
+        }
+      });
       imageBubbleMenu.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-size], button[data-align]');
         if (!btn) return;
