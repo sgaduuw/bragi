@@ -563,6 +563,7 @@
       }
     });
     document.body.addEventListener('click', (e) => {
+      console.log('[bragi-editor] body click; target:', e.target, 'closest match:', e.target.closest(BUBBLE_BTN_SELECTOR));
       const btn = e.target.closest(BUBBLE_BTN_SELECTOR);
       if (!btn) return;
       e.preventDefault();
