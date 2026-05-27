@@ -157,7 +157,6 @@
   // BubbleMenu floats a small toolbar above the focused Image node
   // so the operator can change size + alignment without leaving the
   // editor. Admin-only; delivery ships none of this.
-  import BubbleMenu from 'https://esm.sh/@tiptap/extension-bubble-menu@2.6';
   // markdown-it plugin enabling `{.class}` attribute syntax on
   // images. The Python-side renderer wires `mdit-py-plugins`'s
   // `attrs_plugin` already; this JS-side counterpart keeps the
@@ -271,10 +270,6 @@
         StarterKit,
         Link.configure({ openOnClick: false, autolink: false }),
         ClassedImage,
-        BubbleMenu.configure({
-          element: document.getElementById('tiptap-image-bubble-menu'),
-          shouldShow: ({ editor }) => editor.isActive('image'),
-        }),
         Markdown.configure({
           html: false,
           linkify: true,
@@ -301,8 +296,18 @@
     document.body.classList.add('has-tiptap-editor');
     mount.hidden = false;
     toolbar.hidden = false;
+    // Image bubble menu: we manage visibility + positioning
+    // ourselves rather than via @tiptap/extension-bubble-menu
+    // (Tippy.js). Tippy was clobbering the element in our setup
+    // (the DOM was empty after init), so we keep the menu in its
+    // template position, hide it by default, and `position:
+    // absolute` it above the focused image on selectionUpdate.
     const imageBubbleMenu = document.getElementById('tiptap-image-bubble-menu');
-    if (imageBubbleMenu) imageBubbleMenu.hidden = false;
+    if (imageBubbleMenu) {
+      imageBubbleMenu.style.position = 'absolute';
+      imageBubbleMenu.style.zIndex = '50';
+      imageBubbleMenu.hidden = true;
+    }
 
     // Prefixes that map to bragi internal-link content types. v1
     // ships post + page in-tree; this list is the JS-side mirror of
@@ -536,60 +541,78 @@
       });
     }
 
-    // Image bubble menu: clicking a size or align button updates
-    // the focused Image node's class. The vocabulary is the fixed
-    // six-class set; classes in the same group (size or align) are
-    // mutually exclusive so we strip the existing one before adding
-    // the incoming one. Unknown classes the operator added by hand
-    // pass through untouched.
-    // Bubble menu wiring uses event delegation on document.body
-    // because TipTap's BubbleMenu (Tippy.js under the hood) moves
-    // the menu element into its own portal at body level;
-    // listeners attached to the original DOM node never see
-    // clicks on the moved copy. Delegated listeners match on
-    // selector regardless of where the element lives.
-    const SIZE_CLASSES = new Set(['size-small', 'size-medium', 'size-full']);
-    const ALIGN_CLASSES = new Set(['align-left', 'align-center', 'align-right']);
-    const BUBBLE_BTN_SELECTOR =
-      '#tiptap-image-bubble-menu button[data-size], #tiptap-image-bubble-menu button[data-align]';
-    // Prevent the button from stealing focus on mousedown. Without
-    // this, clicking a bubble-menu button blurs the image node
-    // selection; `updateAttributes('image', ...)` then operates on
-    // the caret's surrounding text node and the image's class
-    // doesn't change.
-    document.body.addEventListener('mousedown', (e) => {
-      if (e.target.closest(BUBBLE_BTN_SELECTOR)) {
-        e.preventDefault();
-      }
-    });
-    document.body.addEventListener('click', (e) => {
-      console.log('[bragi-editor] body click; target:', e.target, 'closest match:', e.target.closest(BUBBLE_BTN_SELECTOR));
-      const btn = e.target.closest(BUBBLE_BTN_SELECTOR);
-      if (!btn) return;
-      e.preventDefault();
-      const current = (editor.getAttributes('image').class || '')
-        .split(/\s+/).filter(Boolean);
-      const isSize = btn.dataset.size != null;
-      const incoming = isSize ? btn.dataset.size : btn.dataset.align;
-      const group = isSize ? SIZE_CLASSES : ALIGN_CLASSES;
-      const next = current.filter((c) => !group.has(c));
-      next.push(incoming);
-      editor.chain().focus().updateAttributes('image', {
-        class: next.join(' '),
-      }).run();
-    });
-    // Mark the active size + align buttons so the operator sees
-    // the current state at a glance. Re-run on every selection
-    // change (covers click-to-focus on a different image). The
-    // querySelectorAll runs against document so the buttons get
-    // found whether Tippy left them in-place or moved them.
-    editor.on('selectionUpdate', () => {
-      const active = (editor.getAttributes('image').class || '').split(/\s+/);
-      document.querySelectorAll(BUBBLE_BTN_SELECTOR).forEach((b) => {
-        const slug = b.dataset.size || b.dataset.align;
-        b.classList.toggle('is-active', active.includes(slug));
+    // Image bubble menu — hand-rolled.
+    //
+    // We tried `@tiptap/extension-bubble-menu` (Tippy.js) first;
+    // Tippy yanked the menu element out of the DOM in this setup
+    // and never put it back. Rolling our own keeps the element
+    // where the template puts it, in our control: hide by default,
+    // `position: absolute` it above the focused image on
+    // selectionUpdate, listen for clicks directly on the menu.
+    if (imageBubbleMenu) {
+      const SIZE_CLASSES = new Set(['size-small', 'size-medium', 'size-full']);
+      const ALIGN_CLASSES = new Set(['align-left', 'align-center', 'align-right']);
+      // Prevent the button from stealing focus on mousedown.
+      // Without this, clicking a bubble-menu button blurs the
+      // image node selection; `updateAttributes('image', ...)`
+      // then operates on the caret's surrounding text node and
+      // the image's class doesn't change.
+      imageBubbleMenu.addEventListener('mousedown', (e) => {
+        if (e.target.closest('button[data-size], button[data-align]')) {
+          e.preventDefault();
+        }
       });
-    });
+      imageBubbleMenu.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-size], button[data-align]');
+        if (!btn) return;
+        e.preventDefault();
+        const current = (editor.getAttributes('image').class || '')
+          .split(/\s+/).filter(Boolean);
+        const isSize = btn.dataset.size != null;
+        const incoming = isSize ? btn.dataset.size : btn.dataset.align;
+        const group = isSize ? SIZE_CLASSES : ALIGN_CLASSES;
+        const next = current.filter((c) => !group.has(c));
+        next.push(incoming);
+        editor.chain().focus().updateAttributes('image', {
+          class: next.join(' '),
+        }).run();
+      });
+      // Position + show the menu above the focused image whenever
+      // the selection lands on one. Hide otherwise. Active-state
+      // styling on the size + align buttons mirrors the node's
+      // current class.
+      editor.on('selectionUpdate', () => {
+        if (!editor.isActive('image')) {
+          imageBubbleMenu.hidden = true;
+          return;
+        }
+        // Find the actual <img> element in the editor mount —
+        // it's the rendered ProseMirror node for the current
+        // selection. There's only one selected image at a time.
+        const selectedImg = mount.querySelector('img.ProseMirror-selectednode')
+          || mount.querySelector('img');
+        if (!selectedImg) {
+          imageBubbleMenu.hidden = true;
+          return;
+        }
+        const rect = selectedImg.getBoundingClientRect();
+        const menuRect = imageBubbleMenu.getBoundingClientRect();
+        // Position in viewport coords (position: absolute relative
+        // to the page since the menu's offsetParent is the body
+        // mount root). Offset by scrollX/Y to convert.
+        const top = rect.top + window.scrollY - menuRect.height - 8;
+        const left = rect.left + window.scrollX + (rect.width - menuRect.width) / 2;
+        imageBubbleMenu.style.top = `${Math.max(8, top)}px`;
+        imageBubbleMenu.style.left = `${Math.max(8, left)}px`;
+        imageBubbleMenu.hidden = false;
+        // Active-state buttons.
+        const active = (editor.getAttributes('image').class || '').split(/\s+/);
+        imageBubbleMenu.querySelectorAll('button').forEach((b) => {
+          const slug = b.dataset.size || b.dataset.align;
+          b.classList.toggle('is-active', active.includes(slug));
+        });
+      });
+    }
 
     // Belt-and-braces: even if onUpdate hasn't fired yet (rare race
     // when submitting immediately after typing), serialize one more
