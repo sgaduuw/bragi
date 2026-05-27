@@ -100,11 +100,26 @@ def _render_page(page: Any, _request: Any) -> str:
         from bragi.contrib.page.resume import ResumeData
 
         resume = ResumeData.model_validate(page.resume_data or {})
+        path = _effective_url_for_page(page)
+        canonical = page.canonical_url or (
+            f"{site.canonical_url}{path}" if site and site.canonical_url else None
+        )
+        author_name: str | None = None
+        if page.author_id:
+            with SessionLocal() as db:
+                author = db.get(User, page.author_id)
+                if author is not None:
+                    author_name = author.display_name
         return render_template(
             "delivery/resume.html",
             page=page,
             resume=resume,
             site=site,
+            author_name=author_name,
+            meta_description=page.meta_description or page.body_excerpt or None,
+            canonical_url=canonical,
+            noindex=page.noindex,
+            og_image_url=featured_image_url_for(item=page, site=site),
         )
     if page.kind == PageKind.POST_INDEX and site is not None:
         # The listing helper returns a full Response; the Spec
@@ -117,7 +132,7 @@ def _render_page(page: Any, _request: Any) -> str:
     canonical = page.canonical_url or (
         f"{site.canonical_url}{path}" if site and site.canonical_url else None
     )
-    author_name: str | None = None
+    author_name = None
     if page.author_id:
         with SessionLocal() as db:
             author = db.get(User, page.author_id)

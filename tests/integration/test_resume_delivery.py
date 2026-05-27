@@ -216,3 +216,28 @@ def test_resume_with_dangling_linked_position_id_skips_annotation(
     # No "at X" annotation; no broken anchor
     assert "at does-not-exist" not in body
     assert 'href="#position-does-not-exist"' not in body
+
+
+def test_resume_emits_social_meta_and_canonical(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A published resume page emits og:title, twitter:card, and canonical.
+
+    Parity with page.html: resume pages are not SEO-second-class.
+    The Site fixture has canonical_url set, so the canonical link
+    should surface for any page under that site.
+    """
+    with db_session_factory() as db:
+        _seed_resume_page(db, slug="seo-cv", resume_data={"highlights": ["one"]})
+
+    resp = delivery_app.test_client().get("/seo-cv/", headers={"Host": "blog.example.com"})
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    # OG title surfaces page.title (no meta_title set on the seed)
+    assert 'property="og:title"' in body
+    # Twitter card type
+    assert 'name="twitter:card"' in body
+    # Canonical link (the site has canonical_url="https://blog.example.com")
+    assert 'rel="canonical"' in body
+    # Title format includes site title
+    assert "CV Site" in body
