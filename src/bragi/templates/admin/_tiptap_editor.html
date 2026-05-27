@@ -553,7 +553,9 @@
     // mutually exclusive so we strip the existing one before adding
     // the incoming one. Unknown classes the operator added by hand
     // pass through untouched.
+    console.log('[bragi-editor] imageBubbleMenu element:', imageBubbleMenu);
     if (imageBubbleMenu) {
+      console.log('[bragi-editor] wiring bubble menu listeners');
       const SIZE_CLASSES = new Set(['size-small', 'size-medium', 'size-full']);
       const ALIGN_CLASSES = new Set(['align-left', 'align-center', 'align-right']);
       // Prevent the button from stealing focus on mousedown.
@@ -567,6 +569,7 @@
         }
       });
       imageBubbleMenu.addEventListener('click', (e) => {
+        console.log('[bragi-editor] bubble menu click; target:', e.target);
         const btn = e.target.closest('button[data-size], button[data-align]');
         if (!btn) return;
         e.preventDefault();
@@ -577,6 +580,7 @@
         const group = isSize ? SIZE_CLASSES : ALIGN_CLASSES;
         const next = current.filter((c) => !group.has(c));
         next.push(incoming);
+        console.log('[bragi-editor] updating image class to', next.join(' '));
         editor.chain().focus().updateAttributes('image', {
           class: next.join(' '),
         }).run();
