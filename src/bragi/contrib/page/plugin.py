@@ -92,8 +92,35 @@ def _render_page(page: Any, _request: Any) -> str:
     (which queries posts and applies cache validators), then we
     drop the validators and return the body string per the
     `ContentTypeSpec.render` contract (callers attach their own).
+    RESUME pages render the structured resume template with inline
+    microdata and a JSON-LD block.
     """
     site = g.get("site")
+    if page.kind == PageKind.RESUME:
+        from bragi.contrib.page.resume import ResumeData
+
+        resume = ResumeData.model_validate(page.resume_data or {})
+        path = _effective_url_for_page(page)
+        canonical = page.canonical_url or (
+            f"{site.canonical_url}{path}" if site and site.canonical_url else None
+        )
+        author_name: str | None = None
+        if page.author_id:
+            with SessionLocal() as db:
+                author = db.get(User, page.author_id)
+                if author is not None:
+                    author_name = author.display_name
+        return render_template(
+            "delivery/resume.html",
+            page=page,
+            resume=resume,
+            site=site,
+            author_name=author_name,
+            meta_description=page.meta_description or page.body_excerpt or None,
+            canonical_url=canonical,
+            noindex=page.noindex,
+            og_image_url=featured_image_url_for(item=page, site=site),
+        )
     if page.kind == PageKind.POST_INDEX and site is not None:
         # The listing helper returns a full Response; the Spec
         # contract is a string body, so unwrap. Cache validators
@@ -105,7 +132,7 @@ def _render_page(page: Any, _request: Any) -> str:
     canonical = page.canonical_url or (
         f"{site.canonical_url}{path}" if site and site.canonical_url else None
     )
-    author_name: str | None = None
+    author_name = None
     if page.author_id:
         with SessionLocal() as db:
             author = db.get(User, page.author_id)
@@ -155,9 +182,76 @@ def register_delivery_blueprint() -> Blueprint:
 
 @hookimpl
 def register_template_globals(env: jinja2.Environment) -> None:
-    """Expose `url_for_page(page)` to templates so they don't need
-    to call `page.slug` directly. Picks up the promoted-home shadow."""
+    """Expose `url_for_page(page)` and resume-related helpers to templates.
+
+    Globals registered here:
+    - `url_for_page(page)`: resolve a Page to its canonical public URL,
+      accounting for home-page promotion.
+    - `build_resume_jsonld(page_title, resume)`: build the schema.org
+      Person JSON-LD dict for a resume page.
+    - `active_theme_slug()`: return the active site's theme slug
+      (defaults to "default") for use in theme-relative static paths.
+
+    Filters registered here:
+    - `linked_position(resume, position_id)`: look up a Position by id
+      within a ResumeData's experience list. Returns None for unset or
+      dangling ids so templates gracefully skip annotation rendering.
+    - `render_markdown(text)`: render a markdown string to HTML. Used
+      in the resume template for per-entry description fields.
+    """
     env.globals["url_for_page"] = _effective_url_for_page
+
+    from bragi.contrib.page.resume_jsonld import build_jsonld
+    from bragi.core.render.markdown import render_markdown
+
+    def _build_resume_jsonld(page_title: str, resume: Any) -> dict[str, Any]:
+        return build_jsonld(page_title=page_title, resume=resume)
+
+    env.globals["build_resume_jsonld"] = _build_resume_jsonld
+
+    def _active_theme_slug() -> str:
+        """Resolved theme slug for the current request, defaulting to 'default'.
+
+        Mirrors `ThemeAwareLoader._active_theme_slug` but exposed as a
+        Jinja global so templates can reference theme-relative static
+        paths (e.g. resume.css) without hard-coding the slug.
+
+        Falls back to "default" when:
+        - no site is attached to the request,
+        - the site has no theme set, or
+        - the site's theme slug isn't registered in the plugin registry.
+
+        The third check ensures the stylesheet URL always resolves to an
+        actual file rather than a 404, matching ThemeAwareLoader's own
+        fallback behaviour.
+        """
+        site = g.get("site")
+        if site is None or not getattr(site, "theme", None):
+            return "default"
+
+        slug = str(site.theme)
+        registry = current_app.extensions.get("registry")
+        if registry is None or registry.theme(slug) is None:
+            return "default"
+        return slug
+
+    env.globals["active_theme_slug"] = _active_theme_slug
+
+    def _linked_position(resume: Any, position_id: str | None) -> Any:
+        """Look up a Position by id within a ResumeData's experience list.
+
+        Returns None for unset or dangling ids so templates can
+        gracefully skip annotation rendering without raising errors.
+        """
+        if not position_id:
+            return None
+        for p in resume.experience:
+            if p.id == position_id:
+                return p
+        return None
+
+    env.filters["linked_position"] = _linked_position
+    env.filters["render_markdown"] = render_markdown
 
 
 @hookimpl(tryfirst=True)

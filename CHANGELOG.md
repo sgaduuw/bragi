@@ -6,6 +6,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-05-27
+
+### Added
+- **Resume / CV page type (`PageKind.RESUME`).** New page kind for
+  structured CV authoring. Pages with `kind=resume` render through
+  a dedicated `delivery/resume.html` template (themes shadow by
+  file name); structured data lives in `pages.resume_data` as JSON,
+  validated by a Pydantic `ResumeData` model. Nine sections, all
+  optional: Header (tagline / location / profile links), Summary
+  (uses `body_markdown`), Highlights, Experience, Projects,
+  Education, Skills (grouped), Certifications, Languages. Dates
+  are month-precision (`YYYY-MM`); `end_date=None` means "Present".
+  Projects can optionally link to a Position via a stable `id`;
+  the rendered page shows "at <company>" with an anchor link to
+  the linked position. Admin form uses a new repeating-field
+  Jinja macro (drag-to-reorder, add/remove per row, client-side
+  JSON serialisation on submit). Delivery emits semantic HTML
+  with inline schema.org `itemprop` microdata plus a JSON-LD
+  `<script>` for the structured-data pipeline. All four in-tree
+  themes ship a baseline `resume.css` with screen + print rules
+  (single-column print, hidden profile links, `page-break-inside:
+  avoid` on each position / project). No PDF export in tree;
+  browser print-to-PDF is the v1 story. Closes #278.
+
 ## [1.15.0] - 2026-05-27
 
 ### Added

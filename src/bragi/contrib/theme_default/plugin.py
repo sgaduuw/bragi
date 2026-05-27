@@ -9,6 +9,8 @@ site shell every public page extends, plus the
 
 from __future__ import annotations
 
+from importlib.resources import files
+from pathlib import Path
 from typing import Any
 
 import jinja2
@@ -17,21 +19,25 @@ from werkzeug.wrappers import Response
 
 from bragi.api import ThemeSpec, hookimpl
 
+# Resolve the package's static/ directory at import time so the path is
+# stable even when the package is installed as a zip-imported wheel.
+_STATIC_DIR: Path = Path(str(files("bragi.contrib.theme_default"))) / "static"
+
 
 @hookimpl
 def register_theme() -> ThemeSpec:
     """Return the default ThemeSpec.
 
-    `template_loader` is a `PackageLoader` rooted at this
-    package's `templates/` directory so theme paths mirror the
-    plugin layout (`delivery/base.html`, etc.). No `static_dir`:
-    the default theme's CSS is inlined in `base.html`.
+    `template_loader` is a `PackageLoader` rooted at this package's
+    `templates/` directory. `static_dir` points to `static/` so the
+    delivery app can serve theme-relative static assets (e.g.
+    `resume.css`) at `/theme/default/static/<path>`.
     """
     return ThemeSpec(
         slug="default",
         display_name="Default",
         template_loader=jinja2.PackageLoader("bragi.contrib.theme_default", "templates"),
-        static_dir=None,
+        static_dir=_STATIC_DIR,
     )
 
 

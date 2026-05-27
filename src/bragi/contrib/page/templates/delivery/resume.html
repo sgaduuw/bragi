@@ -1,0 +1,190 @@
+{# Resume page delivery template.
+
+   Renders the validated ResumeData (passed as `resume`) as semantic
+   HTML with inline schema.org microdata (itemscope / itemprop)
+   plus a JSON-LD <script> block in the jsonld block. The two are
+   redundant by design: inline for older / heuristic crawlers,
+   JSON-LD for Google's structured-data pipeline.
+
+   Themes override by shipping their own `delivery/resume.html`.
+   The page plugin's default is the fallback. #}
+
+{% extends "delivery/base.html" %}
+
+{% block title %}{{ page.meta_title or page.title }} &middot; {{ site.title }}{% endblock %}
+{% block social_meta %}
+  {%- set _title = page.meta_title or page.title -%}
+  <meta property="og:title" content="{{ _title }}">
+  <meta property="og:type" content="website">
+  {% if canonical_url %}<meta property="og:url" content="{{ canonical_url }}">{% endif %}
+  {% if meta_description %}<meta property="og:description" content="{{ meta_description }}">{% endif %}
+  {% if site %}<meta property="og:site_name" content="{{ site.title }}">{% endif %}
+  {% if og_image_url %}<meta property="og:image" content="{{ og_image_url }}">{% endif %}
+  <meta name="twitter:card" content="{{ 'summary_large_image' if og_image_url else 'summary' }}">
+  <meta name="twitter:title" content="{{ _title }}">
+  {% if meta_description %}<meta name="twitter:description" content="{{ meta_description }}">{% endif %}
+  {% if og_image_url %}<meta name="twitter:image" content="{{ og_image_url }}">{% endif %}
+{% endblock %}
+
+{% block jsonld %}
+  {% set resume_jsonld = build_resume_jsonld(page.title, resume) %}
+  <script type="application/ld+json">{{ resume_jsonld | tojson }}</script>
+  <link rel="stylesheet" href="/theme/{{ active_theme_slug() }}/static/resume.css">
+{% endblock %}
+
+{% block content %}
+<article class="resume" itemscope itemtype="https://schema.org/Person">
+  <header>
+    <h1 itemprop="name">{{ page.title }}</h1>
+    {% if resume.header.tagline %}
+      <p class="tagline" itemprop="jobTitle">{{ resume.header.tagline }}</p>
+    {% endif %}
+    {% if resume.header.location %}
+      <p class="location" itemprop="address">{{ resume.header.location }}</p>
+    {% endif %}
+    {% if resume.header.profile_links %}
+      <ul class="profile-links">
+        {% for link in resume.header.profile_links %}
+          <li><a href="{{ link.url }}" itemprop="sameAs" rel="me">{{ link.label }}</a></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </header>
+
+  {% if page.body_html %}
+    <section class="summary">
+      <h2>Summary</h2>
+      {{ page.body_html | internal_link_rewrite | pictureify | safe }}
+    </section>
+  {% endif %}
+
+  {% if resume.highlights %}
+    <section class="highlights">
+      <h2>Highlights</h2>
+      <ul>{% for h in resume.highlights %}<li>{{ h }}</li>{% endfor %}</ul>
+    </section>
+  {% endif %}
+
+  {% if resume.experience %}
+    <section class="experience">
+      <h2>Experience</h2>
+      {% for pos in resume.experience %}
+        <article class="position" id="position-{{ pos.id }}"
+                 itemprop="worksFor" itemscope itemtype="https://schema.org/Organization">
+          <h3>
+            <span itemprop="name">{{ pos.company }}</span> —
+            <span class="role">{{ pos.role }}</span>
+          </h3>
+          <p class="meta">
+            {% if pos.location %}<span itemprop="location">{{ pos.location }}</span> · {% endif %}
+            {% if pos.start_date %}<time datetime="{{ pos.start_date }}">{{ pos.start_date }}</time>{% endif %}
+            {% if pos.start_date or pos.end_date %} – {% endif %}
+            {% if pos.end_date %}
+              <time datetime="{{ pos.end_date }}">{{ pos.end_date }}</time>
+            {% elif pos.start_date %}
+              <span>Present</span>
+            {% endif %}
+          </p>
+          {% if pos.description_markdown %}
+            {{ pos.description_markdown | render_markdown | safe }}
+          {% endif %}
+          {% if pos.impacts %}
+            <ul class="impacts">{% for i in pos.impacts %}<li>{{ i }}</li>{% endfor %}</ul>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {% if resume.projects %}
+    <section class="projects">
+      <h2>Projects</h2>
+      {% for proj in resume.projects %}
+        <article class="project" itemscope itemtype="https://schema.org/CreativeWork">
+          <h3>
+            <span itemprop="name">{% if proj.url %}<a href="{{ proj.url }}" itemprop="url">{{ proj.name }}</a>{% else %}{{ proj.name }}{% endif %}</span>
+            {% set linked = resume | linked_position(proj.linked_position_id) %}
+            {% if linked %}
+              <span class="at"> — <a href="#position-{{ linked.id }}">at {{ linked.company }}</a></span>
+            {% endif %}
+          </h3>
+          {% if proj.role or proj.location or proj.start_date or proj.end_date %}
+            <p class="meta">
+              {% if proj.role %}{{ proj.role }} · {% endif %}
+              {% if proj.location %}{{ proj.location }} · {% endif %}
+              {% if proj.start_date %}<time datetime="{{ proj.start_date }}">{{ proj.start_date }}</time>{% endif %}
+              {% if proj.start_date or proj.end_date %} – {% endif %}
+              {% if proj.end_date %}<time datetime="{{ proj.end_date }}">{{ proj.end_date }}</time>
+              {% elif proj.start_date %}<span>Present</span>{% endif %}
+            </p>
+          {% endif %}
+          {% if proj.description_markdown %}
+            {{ proj.description_markdown | render_markdown | safe }}
+          {% endif %}
+          {% if proj.impacts %}
+            <ul class="impacts">{% for i in proj.impacts %}<li>{{ i }}</li>{% endfor %}</ul>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {% if resume.education %}
+    <section class="education">
+      <h2>Education</h2>
+      {% for edu in resume.education %}
+        <article class="education-item"
+                 itemprop="alumniOf" itemscope itemtype="https://schema.org/EducationalOrganization">
+          <h3><span itemprop="name">{{ edu.institution }}</span> — {{ edu.degree }}</h3>
+          {% if edu.location or edu.start_date or edu.end_date %}
+            <p class="meta">
+              {% if edu.location %}{{ edu.location }}{% endif %}
+              {% if edu.start_date %}{% if edu.location %} · {% endif %}<time datetime="{{ edu.start_date }}">{{ edu.start_date }}</time>{% endif %}
+              {% if edu.start_date or edu.end_date %} – {% endif %}
+              {% if edu.end_date %}<time datetime="{{ edu.end_date }}">{{ edu.end_date }}</time>{% endif %}
+            </p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {% if resume.skills %}
+    <section class="skills">
+      <h2>Skills</h2>
+      <dl>
+        {% for group in resume.skills %}
+          <dt>{{ group.group_label }}</dt>
+          <dd>{{ group.items | join(', ') }}</dd>
+        {% endfor %}
+      </dl>
+    </section>
+  {% endif %}
+
+  {% if resume.certifications %}
+    <section class="certifications">
+      <h2>Certifications</h2>
+      <ul>
+        {% for cert in resume.certifications %}
+          <li itemprop="hasCredential" itemscope itemtype="https://schema.org/EducationalOccupationalCredential">
+            <span itemprop="name">{% if cert.url %}<a href="{{ cert.url }}">{{ cert.name }}</a>{% else %}{{ cert.name }}{% endif %}</span>
+            {% if cert.issuer %} — <span itemprop="recognizedBy">{{ cert.issuer }}</span>{% endif %}
+            {% if cert.year %} ({{ cert.year }}){% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
+  {% if resume.languages %}
+    <section class="languages">
+      <h2>Languages</h2>
+      <ul>
+        {% for lang in resume.languages %}
+          <li><span itemprop="knowsLanguage">{{ lang.name }}</span> <span class="level">— {{ lang.level }}</span></li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+</article>
+{% endblock %}
