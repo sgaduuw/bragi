@@ -17,6 +17,12 @@
 
 {% set resume = resume_data_for_form %}
 
+{# flatpickr stylesheet — paired with the monthSelect plugin loaded
+   in the inline <script> below. Without this <link>, the picker
+   renders unstyled and the calendar dropdown is unreadable. CDN
+   pin matches the JS version (4.x). #}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4/dist/flatpickr.min.css">
+
 <fieldset id="resume-fieldset">
   <legend>Resume content</legend>
   <input type="hidden" name="resume_data" id="resume-data-hidden" value="">
@@ -181,6 +187,15 @@
 </fieldset>
 
 <script type="module">
+  // flatpickr in month mode: gives every browser a calendar UI for
+  // the <input type="month"> fields, since Firefox and Safari ship
+  // no native month picker (they fall back to plain text inputs).
+  // Loaded from esm.sh, same CDN pattern as the TipTap editor's
+  // admin imports. Author-facing dateFormat is "Y-m" (matches the
+  // YearMonth Pydantic pattern); altFormat shows "Apr 2024".
+  import flatpickr from 'https://esm.sh/flatpickr@4';
+  import monthSelectPlugin from 'https://esm.sh/flatpickr@4/dist/plugins/monthSelect/index.js';
+
   // Generates a 12-char hex stable id for new rows. Matches
   // bragi.contrib.page.resume._new_id() on the server side.
   const newId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
@@ -188,6 +203,25 @@
   const fieldset = document.getElementById('resume-fieldset');
   if (fieldset) {
     const hiddenInput = document.getElementById('resume-data-hidden');
+
+    // Wire flatpickr month picker on any <input type="month"> inside
+    // the given root that hasn't been wired yet. The wired marker
+    // (`data-flatpickr-wired`) prevents double-init when this is
+    // called on a freshly-cloned row that the initial sweep already
+    // skipped (it's idempotent either way).
+    const wireMonthPickers = (root) => {
+      root.querySelectorAll('input[type=month]:not([data-flatpickr-wired])').forEach((input) => {
+        flatpickr(input, {
+          plugins: [monthSelectPlugin({
+            shorthand: true,
+            dateFormat: 'Y-m',
+            altFormat: 'M Y',
+          })],
+        });
+        input.dataset.flatpickrWired = '1';
+      });
+    };
+    wireMonthPickers(fieldset);
 
     // ---- Add row: clone template, give it a new id ----
     fieldset.querySelectorAll('.repeating-field__add').forEach((btn) => {
@@ -198,6 +232,10 @@
         const clone = template.content.firstElementChild.cloneNode(true);
         clone.dataset.id = newId();
         rows.appendChild(clone);
+        // Wire the new row's month inputs (flatpickr only attaches
+        // to elements actually in the live DOM; template content
+        // is skipped above).
+        wireMonthPickers(clone);
         syncLinkedPositionOptions();
       });
     });
