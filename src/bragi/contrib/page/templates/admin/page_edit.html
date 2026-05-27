@@ -113,6 +113,7 @@
        name="featured_image_id",
        value=form.get("featured_image_id"),
        attachment=featured_image,
+       thumb_storage_key=featured_image_thumb_key,
        label="Featured image",
        picker_url=url_for("attachment_admin.picker"),
        site_slug=request.view_args["site_slug"],

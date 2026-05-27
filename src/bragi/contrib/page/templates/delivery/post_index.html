@@ -19,7 +19,7 @@
 </header>
 {% if page.body_html %}
 <div class="intro">
-  {{ page.body_html | internal_link_rewrite | safe }}
+  {{ page.body_html | internal_link_rewrite | pictureify | safe }}
 </div>
 {% endif %}
 {% include "delivery/_pinned_carousel.html" %}
