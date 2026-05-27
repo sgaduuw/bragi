@@ -37,7 +37,10 @@ from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from werkzeug.utils import secure_filename
 
-from bragi.contrib.attachments.cli import _enqueue_missing_renditions
+from bragi.contrib.attachments.cli import (
+    _enqueue_missing_renditions,
+    _purge_renditions,
+)
 from bragi.contrib.attachments.delivery import build_attachment_response
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
@@ -213,6 +216,29 @@ def regenerate_missing(site_slug: str) -> ResponseReturnValue:
         added = _enqueue_missing_renditions(db, site, current_app)
         db.commit()
     flash(f"Enqueued {added} pending rendition(s).", "success")
+    return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))
+
+
+@bp.route("/regenerate-all", methods=["POST"])
+def regenerate_all(site_slug: str) -> ResponseReturnValue:
+    """Operator-triggered destructive purge + re-enqueue.
+
+    Drops every rendition row for the site and re-enqueues from
+    scratch under the active theme. Same shape as the CLI's
+    `regenerate-all --yes`. The template-side button confirms
+    via a JS prompt before submitting; this view assumes the POST
+    is intentional. Useful when legacy renditions need to be
+    re-minted in a consistent layout (e.g. after the
+    sync-resize-to-async-worker switch left some rows with
+    SHA-style storage_keys instead of path-style).
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        _purge_renditions(db, site)
+        added = _enqueue_missing_renditions(db, site, current_app)
+        db.commit()
+    flash(f"Purged + enqueued {added} pending rendition(s).", "success")
     return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))
 
 

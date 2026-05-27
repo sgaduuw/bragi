@@ -275,6 +275,25 @@ def process_renditions(limit: int | None) -> None:
     click.echo(f"processed {done_count} rendition(s); {failed_count} failed/re-pended")
 
 
+def _purge_renditions(db: Session, site: Site) -> int:
+    """Delete every rendition row for `site`. Returns the count.
+
+    Shared between the `cms media regenerate-all` CLI and the
+    admin POST endpoint. The on-disk rendition files are left
+    behind; the worker will overwrite them on the next pass.
+    Caller owns the transaction commit.
+    """
+    attachment_ids = [
+        a.id for a in db.execute(select(Attachment).where(Attachment.site_id == site.id)).scalars()
+    ]
+    if not attachment_ids:
+        return 0
+    result = db.execute(
+        sa_delete(AttachmentRendition).where(AttachmentRendition.attachment_id.in_(attachment_ids))
+    )
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
 def _enqueue_missing_renditions(db: Session, site: Site, app: Any) -> int:
     """Enqueue pending renditions for any gaps under the active theme.
 
@@ -381,18 +400,7 @@ def regenerate_all(site_slug: str, yes: bool) -> None:
         if site is None:
             click.echo(f"No site with slug {site_slug!r}.", err=True)
             raise click.exceptions.Exit(1)
-        attachment_ids = [
-            a.id
-            for a in db.execute(select(Attachment).where(Attachment.site_id == site.id)).scalars()
-        ]
-        if attachment_ids:
-            db.execute(
-                sa_delete(AttachmentRendition).where(
-                    AttachmentRendition.attachment_id.in_(attachment_ids)
-                )
-            )
+        _purge_renditions(db, site)
+        added = _enqueue_missing_renditions(db, site, current_app)
         db.commit()
-
-    # Re-enqueue using the same path as regenerate-missing.
-    ctx = click.get_current_context()
-    ctx.invoke(regenerate_missing, site_slug=site_slug)
+    click.echo(f"Enqueued {added} pending rendition(s) for site {site_slug!r}.")
