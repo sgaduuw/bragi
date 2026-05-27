@@ -81,7 +81,6 @@ packages = [{include = "bragi", from = "src"}]
 pytest = "^8.0"
 ruff = "^0.5"
 mypy = "^1.10"
-honcho = "^1.1"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
