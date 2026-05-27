@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-05-27
+
 ### Added
 - **Resume / CV page type (`PageKind.RESUME`).** New page kind for
   structured CV authoring. Pages with `kind=resume` render through
