@@ -3054,3 +3054,211 @@ def test_post_regenerate_all_purges_and_re_enqueues(
     # Default ladder × 3 formats = 9 pending rows.
     assert len(rows) == 9
     assert all(r.status == "pending" for r in rows)
+
+
+def test_pictureify_preserves_class_attribute(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """An <img> with a class lands inside <picture> with the
+    class still on the inner <img>. Regression net so a future
+    refactor of pictureify can't silently drop it."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="p" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="done",
+                storage_key=f"{att.storage_key}/320/webp",
+                width=320,
+                height=160,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = (
+        f'<p><img src="/attachments/{att_storage_key}" '
+        f'alt="x" class="size-medium align-center"></p>'
+    )
+    with (
+        delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    assert "<picture>" in out
+    assert 'class="size-medium align-center"' in out
+
+
+def test_pictureify_emits_per_class_sizes_for_size_small(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """`size-small` → sizes="(min-width: 800px) 264px, 33vw"."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="q" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="done",
+                storage_key=f"{att.storage_key}/320/webp",
+                width=320,
+                height=160,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = (
+        f'<p><img src="/attachments/{att_storage_key}" '
+        f'alt="x" class="size-small align-left"></p>'
+    )
+    with (
+        delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    assert 'sizes="(min-width: 800px) 264px, 33vw"' in out
+
+
+def test_pictureify_emits_per_class_sizes_for_size_medium(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """`size-medium` → sizes="(min-width: 800px) 528px, 66vw"."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="r" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="done",
+                storage_key=f"{att.storage_key}/320/webp",
+                width=320,
+                height=160,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = (
+        f'<p><img src="/attachments/{att_storage_key}" '
+        f'alt="x" class="size-medium align-center"></p>'
+    )
+    with (
+        delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    assert 'sizes="(min-width: 800px) 528px, 66vw"' in out
+
+
+def test_pictureify_emits_default_sizes_without_size_class(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """No `size-*` class → existing default sizes (800px / 100vw)."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="s" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="done",
+                storage_key=f"{att.storage_key}/320/webp",
+                width=320,
+                height=160,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = f'<p><img src="/attachments/{att_storage_key}" alt="x"></p>'
+    with (
+        delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    assert 'sizes="(min-width: 800px) 800px, 100vw"' in out

@@ -141,9 +141,19 @@ def pictureify(html: str) -> str:
         webp_srcset = _srcset_for("webp")
         orig_srcset = _srcset_for("original")
 
-        # `sizes` default targets one column at narrow viewports,
-        # 800px maximum content width on wider screens.
-        sizes = "(min-width: 800px) 800px, 100vw"
+        # `sizes` defaults to the article-column width (800px on wide
+        # viewports). For images embedded smaller via the size-class
+        # system (see _claude/specs/2026-05-27-image-size-classes-design.md),
+        # tighten `sizes` so the browser picks the smaller srcset entry
+        # instead of fetching a 1600w image to render a 264px thumbnail.
+        img_class = attrs.get("class", "")
+        img_classes = set(img_class.split())
+        if "size-small" in img_classes:
+            sizes = "(min-width: 800px) 264px, 33vw"
+        elif "size-medium" in img_classes:
+            sizes = "(min-width: 800px) 528px, 66vw"
+        else:
+            sizes = "(min-width: 800px) 800px, 100vw"
 
         sources: list[str] = []
         if avif_srcset:
