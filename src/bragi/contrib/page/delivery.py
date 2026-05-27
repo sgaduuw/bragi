@@ -427,7 +427,7 @@ def show_page(slug_path: str) -> ResponseReturnValue:
         else:
             kind = None
 
-    if page is not None and kind == PageKind.STATIC:
+    if page is not None and kind in (PageKind.STATIC, PageKind.RESUME):
         return _render_static_page(page)
     if page is not None and kind == PageKind.POST_INDEX:
         return render_post_index_page(site, page)
