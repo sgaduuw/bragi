@@ -343,9 +343,15 @@ def picker(site_slug: str) -> ResponseReturnValue:
                 )
 
         # Derive the per-size mapping the template renders into the
-        # picker card data-* attributes. Picks from done WebP renditions
-        # actually present: smallest, middle (biased larger on even
-        # lengths), largest. Falls back to "" when no WebP exists yet.
+        # picker card data-* attributes:
+        #   - thumb / small → smallest done WebP rendition
+        #   - medium → middle done WebP (biased larger on even-length ladders)
+        #   - full → empty; the editor renderHTML falls back to the
+        #     original `src` for size-full so the largest tier is
+        #     always the original bytes (the largest WebP may be
+        #     smaller than the source when the no-upscale guard
+        #     skipped the top ladder tier).
+        # Falls back to "" when no WebP exists yet.
         thumb_storage_key_by_id: dict[int, str] = {}
         small_key_by_id: dict[int, str] = {}
         medium_key_by_id: dict[int, str] = {}
@@ -355,7 +361,8 @@ def picker(site_slug: str) -> ResponseReturnValue:
             thumb_storage_key_by_id[att_id] = ladder[0][1]
             small_key_by_id[att_id] = ladder[0][1]
             medium_key_by_id[att_id] = ladder[len(ladder) // 2][1]
-            full_key_by_id[att_id] = ladder[-1][1]
+            # Intentionally left unset for `full`; renderHTML in the
+            # editor falls back to attrs.src (the original).
 
     return render_template(
         "admin/attachments_picker.html",
