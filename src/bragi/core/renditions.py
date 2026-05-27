@@ -20,6 +20,48 @@ from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 
 
+def social_card_storage_key(db: Session, attachment: Attachment | None) -> str | None:
+    """Return the storage_key of the middle-tier WebP rendition for
+    `attachment`, or None when no done WebP exists yet.
+
+    Used for OG / Twitter Card meta image URLs. These tags carry a
+    single URL — no `<picture>` or `srcset` — so we need one bytes-
+    sensible choice. The middle of the theme's WebP ladder is the
+    sweet spot: large enough to render crisply in the dominant card
+    layouts (typical preview thumbnails are 400-600 CSS px), small
+    enough that social crawlers aren't pulling the full original.
+
+    The "middle" is picked from what's actually done, not from the
+    theme's declared widths: if only the small and large tiers have
+    landed, this returns the larger of the two; if only the small
+    has landed, this returns the small (better than nothing).
+
+    For a 3-tier ladder (the default `[320, 800, 1600]` → renditions
+    at 320w / 800w / 1600w), this returns the 800w. For a 5-tier
+    ladder, the 3rd. For a 2-tier ladder, the larger.
+
+    Falls through to None when no done WebP rendition exists yet;
+    the caller falls back to the original attachment URL.
+    """
+    if attachment is None:
+        return None
+
+    keys = list(
+        db.execute(
+            select(AttachmentRendition.storage_key)
+            .where(
+                AttachmentRendition.attachment_id == attachment.id,
+                AttachmentRendition.status == "done",
+                AttachmentRendition.format == "webp",
+            )
+            .order_by(AttachmentRendition.width.asc())
+        ).scalars()
+    )
+    if not keys:
+        return None
+    return keys[len(keys) // 2]
+
+
 def smallest_webp_storage_key(db: Session, attachment: Attachment | None) -> str | None:
     """Return the storage_key of the smallest done WebP rendition
     for `attachment`, or None when no done WebP exists yet.

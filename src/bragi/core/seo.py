@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
+from bragi.core.renditions import social_card_storage_key
 
 
 def featured_image_url_for(
@@ -55,7 +56,15 @@ def featured_image_url_for(
         attachment = session.get(Attachment, attachment_id)
         if attachment is None or not attachment.storage_key:
             return None
-        return f"{site.canonical_url}/attachments/{attachment.storage_key}"
+        # Prefer the middle-tier WebP rendition: it's a small,
+        # universally-decodable variant sized for the dominant
+        # social-card layouts (400-600 CSS px). Falls back to the
+        # original when no done WebP rendition exists yet (just-
+        # uploaded attachment, or an upload predating the rendition
+        # pipeline).
+        social_key = social_card_storage_key(session, attachment)
+        bytes_key = social_key or attachment.storage_key
+        return f"{site.canonical_url}/attachments/{bytes_key}"
 
     if db is not None:
         return _resolve(db)

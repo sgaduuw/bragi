@@ -57,6 +57,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   today). Closes #266.
 
 ### Fixed
+- **OG and Twitter Card meta point at the middle-tier WebP
+  rendition.** PR #279 left `og:image` and `twitter:image` URLs
+  pointing at the upload's original bytes, so every social-card
+  crawl pulled the full-size original (typically a multi-MB JPEG)
+  for what renders as a 400-600 px card. Switched
+  `featured_image_url_for` to use the middle WebP rendition: for
+  a 3-tier ladder it's the 800w slot (typically 50-80 KB), for a
+  themed `content_width=600` ladder it's the 600w slot, etc.
+  Selection picks from done WebP renditions actually present, so
+  a partial backfill still yields a sensible URL. Falls back to
+  the original storage_key when no WebP rendition has landed yet.
 - **Pictureify runs at delivery render time, not save time.**
   PR #279 registered `pictureify` as a save-time
   `register_html_transform`, which short-circuited because the
