@@ -63,13 +63,19 @@ def test_explicit_id_is_preserved() -> None:
     assert p.id == "abc123def456"
 
 
-def test_all_repeating_types_carry_stable_ids() -> None:
-    assert Position(company="x", role="y").id
-    assert Project(name="x").id
-    assert Education(institution="x", degree="y").id
-    assert SkillGroup(group_label="x", items=["y"]).id
-    assert Certification(name="x").id
-    assert Language(name="x", level="y").id
+@pytest.mark.parametrize(
+    "model,kwargs",
+    [
+        (Position, {"company": "x", "role": "y"}),
+        (Project, {"name": "x"}),
+        (Education, {"institution": "x", "degree": "y"}),
+        (SkillGroup, {"group_label": "x", "items": ["y"]}),
+        (Certification, {"name": "x"}),
+        (Language, {"name": "x", "level": "y"}),
+    ],
+)
+def test_all_repeating_types_carry_stable_ids(model: type, kwargs: dict[str, object]) -> None:
+    assert model(**kwargs).id
 
 
 # ============================================================
