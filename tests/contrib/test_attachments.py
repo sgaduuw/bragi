@@ -3262,3 +3262,84 @@ def test_pictureify_emits_default_sizes_without_size_class(
         g.site = db.get(Site, site_id)
         out = pictureify(html_in)
     assert 'sizes="(min-width: 800px) 800px, 100vw"' in out
+
+
+def test_delivery_renders_image_with_size_class(
+    admin_app: Flask,
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """Save a post with `![alt](url){.size-medium .align-center}`,
+    render via delivery: the inner <img> of <picture> carries the
+    class through the full pipeline (markdown parse → pictureify →
+    template emit).
+    """
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        seed_blog_index(db, site)
+        att = Attachment(
+            site_id=site.id,
+            filename="hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="t" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        for fmt in ("avif", "webp", "original"):
+            for w in (320, 800):
+                db.add(
+                    AttachmentRendition(
+                        attachment_id=att.id,
+                        size_label=f"{w}w",
+                        format=fmt,
+                        content_type={
+                            "avif": "image/avif",
+                            "webp": "image/webp",
+                            "original": "image/jpeg",
+                        }[fmt],
+                        status="done",
+                        storage_key=f"{att.storage_key}/{w}/{fmt}",
+                        width=w,
+                        height=w // 2,
+                        bytes_size=10,
+                    )
+                )
+        db.commit()
+        att_storage_key = att.storage_key
+        site_slug = site.slug
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_slug}/posts/new")
+    client.post(
+        f"/admin/sites/{site_slug}/posts/new",
+        data={
+            "title": "Hero post",
+            "slug": "hero-class",
+            "body_markdown": (
+                f"![hero](/attachments/{att_storage_key})"
+                "{.size-medium .align-center}"
+            ),
+            "status": "published",
+            "tags": "",
+            "featured_image_id": "",
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+
+    resp = delivery_app.test_client().get(
+        "/posts/hero-class/", headers={"Host": "blog.example.com"}
+    )
+    body = resp.data.decode()
+    assert "<picture>" in body
+    # The inner <img> carries the class through pictureify.
+    assert 'class="size-medium align-center"' in body
+    # And `sizes` reflects size-medium (528px / 66vw).
+    assert 'sizes="(min-width: 800px) 528px, 66vw"' in body
