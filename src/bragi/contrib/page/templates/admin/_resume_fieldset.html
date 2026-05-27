@@ -17,11 +17,15 @@
 
 {% set resume = resume_data_for_form %}
 
-{# flatpickr stylesheet — paired with the monthSelect plugin loaded
-   in the inline <script> below. Without this <link>, the picker
-   renders unstyled and the calendar dropdown is unreadable. CDN
-   pin matches the JS version (4.x). #}
+{# flatpickr stylesheets — both files needed. The base stylesheet
+   styles the calendar chrome (header, year-nav arrows, focus rings);
+   the monthSelect plugin's own stylesheet sizes the month-button
+   grid. Without the plugin stylesheet, the year-nav arrows sit on
+   top of the Jan/Feb/Nov/Dec month buttons and clicking those
+   cells changes the year instead of selecting the month. CDN pin
+   matches the JS version (4.x). #}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4/dist/plugins/monthSelect/style.css">
 
 <fieldset id="resume-fieldset">
   <legend>Resume content</legend>
