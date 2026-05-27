@@ -338,9 +338,7 @@ def picker(site_slug: str) -> ResponseReturnValue:
             for rr in rendition_rows:
                 if rr.storage_key is None or rr.width is None:
                     continue
-                webp_keys_by_id.setdefault(rr.attachment_id, []).append(
-                    (rr.width, rr.storage_key)
-                )
+                webp_keys_by_id.setdefault(rr.attachment_id, []).append((rr.width, rr.storage_key))
 
         # Derive the per-size mapping the template renders into the
         # picker card data-* attributes:
