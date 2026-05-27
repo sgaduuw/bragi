@@ -137,6 +137,7 @@
 </style>
 
 <script type="module">
+  console.log('[bragi-editor] module load: start');
   // TipTap + Markdown via CDN ESM. Self-hosted bundle + Subresource
   // Integrity is a follow-up; admin is behind auth so the surface
   // is the operator's own browser.
@@ -233,6 +234,10 @@
       }
       return ['img', HTMLAttributes];
     },
+  });
+  console.log('[bragi-editor] imports + ClassedImage construction OK');
+  window.addEventListener('error', (e) => {
+    console.log('[bragi-editor] window error event:', e.message, e.filename, e.lineno);
   });
 
   // Site-scoped admin URL for attachment bytes. The stored
