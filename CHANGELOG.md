@@ -7,6 +7,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Image size + alignment classes in the editor.** The TipTap
+  image picker now inserts images with a default class of
+  `size-medium align-center`. Clicking an inserted image in the
+  editor reveals a floating bubble menu with size (small /
+  medium / full) and alignment (left / center / right) buttons;
+  the choice round-trips through markdown as
+  `![alt](url){.size-medium .align-center}` via
+  `mdit-py-plugins`'s `attrs_plugin` on the Python renderer and
+  `markdown-it-attrs` on the TipTap side. `pictureify` preserves
+  the class through its `<picture>` wrap and emits a per-class
+  `sizes` attribute so the browser picks bytes-appropriate
+  srcset entries (small → 264px / 33vw, medium → 528px / 66vw,
+  full → 800px / 100vw). All four in-tree themes ship the
+  baseline CSS for the six classes plus a catch-all so legacy
+  posts without classes render at full width as before.
+
 - **Renditions status panel + manual triggers in the admin.**
   The attachments list page now shows pending / done / failed
   rendition counts at the top, plus a "Generate missing
