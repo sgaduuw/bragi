@@ -7,6 +7,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Renditions status panel + manual triggers in the admin.**
+  The attachments list page now shows pending / done / failed
+  rendition counts at the top, plus a "Generate missing
+  renditions" button (POST equivalent of
+  `cms media regenerate-missing`) and a "Retry failed" button
+  shown when failed > 0 (resets failed rows back to pending so
+  the worker picks them up again). The previous standalone
+  failed-renditions warning banner is folded into the new panel.
+  Closes #285.
+
 - **Theme-aware multi-format image renditions.** Themes declare
   a `content_width` (the helper derives a retina-aware ladder
   `[w/2, w, w*2]`) or an explicit `rendition_widths` list; both

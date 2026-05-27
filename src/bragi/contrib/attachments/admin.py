@@ -34,8 +34,10 @@ from flask import (
 )
 from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from werkzeug.utils import secure_filename
 
+from bragi.contrib.attachments.cli import _enqueue_missing_renditions
 from bragi.contrib.attachments.delivery import build_attachment_response
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
@@ -137,21 +139,27 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
             )
         ).scalar_one()
 
-        # Failed renditions are sticky: the worker retries up to
-        # max_attempts then parks the row at status='failed' so an
-        # operator notices and can re-enqueue via
-        # `cms media regenerate-missing` after fixing the root cause
-        # (corrupt source bytes, encoder bug, etc.). Surfacing the
-        # count here is the nag.
-        failed_rendition_count = db.execute(
-            select(func.count())
-            .select_from(AttachmentRendition)
-            .join(Attachment, AttachmentRendition.attachment_id == Attachment.id)
-            .where(
-                Attachment.site_id == site.id,
-                AttachmentRendition.status == "failed",
-            )
-        ).scalar_one()
+        # Three counts feed the status panel at the top of the
+        # list view: pending (worker hasn't drained yet) +
+        # processing (in-flight on the current worker tick) roll
+        # up into one "Pending" tile, done is the steady-state
+        # count, and failed is sticky after `max_attempts` retries.
+        # One GROUP BY query so we pay one round-trip regardless
+        # of how many statuses the table currently has rows in.
+        rendition_status_counts: dict[str, int] = {
+            status: count
+            for status, count in db.execute(
+                select(AttachmentRendition.status, func.count())
+                .join(Attachment, AttachmentRendition.attachment_id == Attachment.id)
+                .where(Attachment.site_id == site.id)
+                .group_by(AttachmentRendition.status)
+            ).all()
+        }
+        pending_rendition_count = rendition_status_counts.get(
+            "pending", 0
+        ) + rendition_status_counts.get("processing", 0)
+        done_rendition_count = rendition_status_counts.get("done", 0)
+        failed_rendition_count = rendition_status_counts.get("failed", 0)
 
     return render_template(
         "admin/attachments_list.html",
@@ -160,6 +168,8 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         has_more=has_more,
         missing_alt=missing_alt,
         missing_alt_count=missing_alt_count,
+        pending_rendition_count=pending_rendition_count,
+        done_rendition_count=done_rendition_count,
         failed_rendition_count=failed_rendition_count,
     )
 
@@ -184,6 +194,58 @@ def serve_attachment_bytes(site_slug: str, storage_key: str) -> ResponseReturnVa
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
     return build_attachment_response(site, storage_key)
+
+
+@bp.route("/regenerate-missing", methods=["POST"])
+def regenerate_missing(site_slug: str) -> ResponseReturnValue:
+    """Operator-triggered version of the `cms media regenerate-missing` CLI.
+
+    Enqueues pending rows for every (attachment, width, format)
+    gap under the active theme. Mirrors the CLI logic via the
+    shared `_enqueue_missing_renditions` helper so both call
+    sites behave identically; the response 302s back to the
+    attachments list with a flash. Same auth posture as the rest
+    of this Blueprint (admin login gate + per-site editor role).
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        added = _enqueue_missing_renditions(db, site, current_app)
+        db.commit()
+    flash(f"Enqueued {added} pending rendition(s).", "success")
+    return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))
+
+
+@bp.route("/retry-failed", methods=["POST"])
+def retry_failed(site_slug: str) -> ResponseReturnValue:
+    """Reset failed rendition rows for this site back to pending.
+
+    The worker picks them up on its next tick; if the underlying
+    cause hasn't been fixed they'll fail again and re-land in
+    `failed` after `attachment_rendition_max_attempts`. Cheap to
+    spam, so no extra confirmation gate beyond CSRF and role.
+    Done rows are left untouched.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        result = db.execute(
+            sa_update(AttachmentRendition)
+            .where(
+                AttachmentRendition.attachment_id.in_(
+                    select(Attachment.id).where(Attachment.site_id == site.id)
+                ),
+                AttachmentRendition.status == "failed",
+            )
+            .values(status="pending", attempts=0, last_error=None)
+        )
+        db.commit()
+        # CursorResult exposes rowcount; the static return type from
+        # session.execute() is the broader Result, so a getattr pins
+        # it (same idiom as `core.middleware.sessions.purge_expired`).
+        reset_count = int(getattr(result, "rowcount", 0) or 0)
+    flash(f"Reset {reset_count} failed rendition(s) to pending.", "success")
+    return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))
 
 
 @bp.route("/picker", methods=["GET"])

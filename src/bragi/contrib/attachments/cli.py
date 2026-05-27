@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import sys
+from typing import Any
 
 import click
 from flask import current_app
@@ -18,6 +19,7 @@ from flask.cli import with_appcontext
 from PIL import Image
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 
 from bragi.core.db import SessionLocal
 from bragi.core.image_processor import resize_and_encode
@@ -273,6 +275,62 @@ def process_renditions(limit: int | None) -> None:
     click.echo(f"processed {done_count} rendition(s); {failed_count} failed/re-pended")
 
 
+def _enqueue_missing_renditions(db: Session, site: Site, app: Any) -> int:
+    """Enqueue pending renditions for any gaps under the active theme.
+
+    Shared between the `cms media regenerate-missing` CLI and the
+    admin POST endpoint so both call sites enqueue identically.
+    The caller owns the transaction commit; this helper only
+    `db.add()`s the new rows.
+
+    Why a separate helper instead of `ctx.invoke()` from the view:
+    a Flask view doesn't have a click context, and synthesising one
+    just to share a few lines of gap-detection logic would be
+    higher friction than a plain function call. Returns the count
+    of pending rows added so the caller can flash / echo it.
+    """
+    registry = app.extensions.get("registry")
+    theme = registry.theme(site.theme) if registry and site.theme else None
+    widths = resolved_widths(theme)
+    formats = ("avif", "webp", "original")
+    target = {(f"{w}w", f) for w in widths for f in formats}
+
+    attachments = (
+        db.execute(select(Attachment).where(Attachment.site_id == site.id)).scalars().all()
+    )
+    added = 0
+    for attachment in attachments:
+        if attachment.width is None:
+            continue
+        existing = {
+            (r.size_label, r.format)
+            for r in db.execute(
+                select(AttachmentRendition).where(
+                    AttachmentRendition.attachment_id == attachment.id
+                )
+            ).scalars()
+        }
+        for size_label, fmt in target - existing:
+            # Don't enqueue widths larger than the source: the
+            # encoder's no-upscale check would skip them anyway,
+            # but we'd churn the worker and accumulate `failed`
+            # rows on every regenerate-missing call.
+            width_px = int(size_label.rstrip("w"))
+            if width_px >= attachment.width:
+                continue
+            db.add(
+                AttachmentRendition(
+                    attachment_id=attachment.id,
+                    size_label=size_label,
+                    format=fmt,
+                    content_type=rendition_target_content_type(fmt, attachment.content_type),
+                    status="pending",
+                )
+            )
+            added += 1
+    return added
+
+
 @media_group.command("regenerate-missing")
 @click.option("--site", "site_slug", required=True, help="Site slug to scan.")
 @with_appcontext
@@ -294,46 +352,7 @@ def regenerate_missing(site_slug: str) -> None:
         if site is None:
             click.echo(f"No site with slug {site_slug!r}.", err=True)
             raise click.exceptions.Exit(1)
-
-        registry = current_app.extensions.get("registry")
-        theme = registry.theme(site.theme) if registry and site.theme else None
-        widths = resolved_widths(theme)
-        formats = ("avif", "webp", "original")
-        target = {(f"{w}w", f) for w in widths for f in formats}
-
-        attachments = (
-            db.execute(select(Attachment).where(Attachment.site_id == site.id)).scalars().all()
-        )
-        added = 0
-        for attachment in attachments:
-            if attachment.width is None:
-                continue
-            existing = {
-                (r.size_label, r.format)
-                for r in db.execute(
-                    select(AttachmentRendition).where(
-                        AttachmentRendition.attachment_id == attachment.id
-                    )
-                ).scalars()
-            }
-            for size_label, fmt in target - existing:
-                # Don't enqueue widths larger than the source: the
-                # encoder's no-upscale check would skip them anyway,
-                # but we'd churn the worker and accumulate `failed`
-                # rows on every regenerate-missing call.
-                width_px = int(size_label.rstrip("w"))
-                if width_px >= attachment.width:
-                    continue
-                db.add(
-                    AttachmentRendition(
-                        attachment_id=attachment.id,
-                        size_label=size_label,
-                        format=fmt,
-                        content_type=rendition_target_content_type(fmt, attachment.content_type),
-                        status="pending",
-                    )
-                )
-                added += 1
+        added = _enqueue_missing_renditions(db, site, current_app)
         db.commit()
     click.echo(f"Enqueued {added} pending rendition(s) for site {site_slug!r}.")
 
