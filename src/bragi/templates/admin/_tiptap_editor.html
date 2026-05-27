@@ -198,6 +198,7 @@
       return {
         markdown: {
           serialize(state, node) {
+            console.log('[bragi-editor] ClassedImage serialize; node.attrs:', node.attrs);
             const alt = state.esc(node.attrs.alt || '');
             const src = state.esc(node.attrs.src || '');
             const cls = node.attrs.class
