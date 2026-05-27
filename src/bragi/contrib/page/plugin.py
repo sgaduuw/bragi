@@ -200,11 +200,25 @@ def register_template_globals(env: jinja2.Environment) -> None:
         Mirrors `ThemeAwareLoader._active_theme_slug` but exposed as a
         Jinja global so templates can reference theme-relative static
         paths (e.g. resume.css) without hard-coding the slug.
+
+        Falls back to "default" when:
+        - no site is attached to the request,
+        - the site has no theme set, or
+        - the site's theme slug isn't registered in the plugin registry.
+
+        The third check ensures the stylesheet URL always resolves to an
+        actual file rather than a 404, matching ThemeAwareLoader's own
+        fallback behaviour.
         """
         site = g.get("site")
-        if site is None or getattr(site, "theme", None) is None:
+        if site is None or not getattr(site, "theme", None):
             return "default"
-        return str(site.theme)
+
+        slug = str(site.theme)
+        registry = current_app.extensions.get("registry")
+        if registry is None or registry.theme(slug) is None:
+            return "default"
+        return slug
 
     env.globals["active_theme_slug"] = _active_theme_slug
 

@@ -16,6 +16,7 @@
 {% block jsonld %}
   {% set resume_jsonld = build_resume_jsonld(page.title, resume) %}
   <script type="application/ld+json">{{ resume_jsonld | tojson }}</script>
+  <link rel="stylesheet" href="/theme/{{ active_theme_slug() }}/static/resume.css">
 {% endblock %}
 
 {% block content %}
