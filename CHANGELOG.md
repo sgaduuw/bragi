@@ -57,6 +57,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   today). Closes #266.
 
 ### Fixed
+- **Pictureify runs at delivery render time, not save time.**
+  PR #279 registered `pictureify` as a save-time
+  `register_html_transform`, which short-circuited because the
+  admin's request context doesn't set `g.site` (admin is single-
+  host, no site_resolver middleware in front of the write path).
+  Post and page `body_html` got cached without the `<picture>`
+  expansion, so the delivery side served the bare `<img>` and
+  none of the AVIF / WebP rendition tiers were emitted. Moved to
+  a Jinja filter that runs on the delivery side where `g.site`
+  is populated; the three delivery templates (`post.html`,
+  `page.html`, `post_index.html`) pipe `body_html` through
+  `internal_link_rewrite | pictureify | safe`. Closes #280.
+- **Featured-image picker thumbnails use the smallest WebP
+  rendition.** The admin form's inline preview thumbnail loaded
+  `attachment.storage_key` directly (the original SHA, often
+  >1 MB) to fill a 160x120 thumbnail slot. Threaded a
+  `thumb_storage_key` parameter through the macro and its three
+  callers (post / page / sites admin); views compute it via the
+  new `bragi.core.renditions.smallest_webp_storage_key` helper
+  and fall back to the original when no done WebP rendition
+  exists yet. Closes #281.
 - **Admin image previews load on a host that isn't a site
   hostname.** PR #271 mounted the public `/attachments/<key>`
   blueprint on the admin app, then #275 carved it out of the

@@ -45,6 +45,7 @@ from bragi.core.permissions import (
     resolve_site_or_abort,
 )
 from bragi.core.render.markdown import make_excerpt, render_markdown
+from bragi.core.renditions import smallest_webp_storage_key
 from bragi.core.security import current_user
 from bragi.core.text import slugify
 from bragi.core.time import naive_utcnow
@@ -118,6 +119,18 @@ def _load_featured_image(db: Session, raw: str | None, site_id: int) -> Attachme
     if attachment is None or attachment.site_id != site_id:
         return None
     return attachment
+
+
+def _featured_image_thumb_key(db: Session, raw: str | None, site_id: int) -> str | None:
+    """Compute the macro's `thumb_storage_key` for the form's preview.
+
+    The macro falls back to the original's storage_key when this
+    returns None, so a brand-new attachment without processed
+    renditions still shows the preview (just slightly heavier than
+    necessary). Once the worker emits the smallest WebP rendition
+    the form picks it up on the next render.
+    """
+    return smallest_webp_storage_key(db, _load_featured_image(db, raw, site_id))
 
 
 def _parse_pinned_until(raw: str) -> tuple[datetime | None, str | None]:
@@ -249,7 +262,13 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         site_id = site.id
 
         if request.method == "GET":
-            return render_template("admin/edit.html", post=None, form={}, featured_image=None)
+            return render_template(
+                "admin/edit.html",
+                post=None,
+                form={},
+                featured_image=None,
+                featured_image_thumb_key=None,
+            )
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
@@ -259,6 +278,9 @@ def new_post(site_slug: str) -> ResponseReturnValue:
                 post=None,
                 form=form,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
             )
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], site_id
@@ -270,6 +292,9 @@ def new_post(site_slug: str) -> ResponseReturnValue:
                 post=None,
                 form=form,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
             )
 
         pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
@@ -280,6 +305,9 @@ def new_post(site_slug: str) -> ResponseReturnValue:
                 post=None,
                 form=form,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
             )
 
         body_markdown = form["body_markdown"]
@@ -366,6 +394,9 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), post.site_id
                 ),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), post.site_id
+                ),
             )
 
         form = _form_from_request()
@@ -376,6 +407,9 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                 post=post,
                 form=form,
                 featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), post.site_id
+                ),
+                featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), post.site_id
                 ),
             )
@@ -389,6 +423,9 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                 post=post,
                 form=form,
                 featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), post.site_id
+                ),
+                featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), post.site_id
                 ),
             )
@@ -423,6 +460,9 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                 post=post,
                 form=form,
                 featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), post.site_id
+                ),
+                featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), post.site_id
                 ),
             )

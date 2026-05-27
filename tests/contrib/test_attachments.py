@@ -31,7 +31,7 @@ from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from tests.conftest import csrf_token, make_test_user
+from tests.conftest import csrf_token, make_test_user, seed_blog_index
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -1884,10 +1884,21 @@ def test_pictureify_no_renditions_returns_bare_img(
     assert 'loading="lazy"' in out
 
 
-def test_pictureify_registered_via_html_transform_hook(delivery_app: Flask) -> None:
-    """The transform is in the delivery-app pipeline at priority 150."""
+def test_pictureify_registered_as_delivery_jinja_filter(delivery_app: Flask) -> None:
+    """`pictureify` is wired in as a Jinja filter on the delivery
+    app, not as a save-time html_transform.
+
+    Save-time registration was wrong: pictureify needs `g.site` to
+    scope its rendition lookup, and admin's request context (where
+    body_html gets cached on save) doesn't set one. The filter
+    form runs at delivery render time where `g.site` is populated
+    by the site_resolver middleware.
+    """
+    assert "pictureify" in delivery_app.jinja_env.filters
+    # And conversely: nothing under that name is registered on the
+    # save-time html_transforms registry.
     html_transforms = delivery_app.extensions["html_transforms"]
-    assert "pictureify-attachments" in html_transforms.names()
+    assert "pictureify-attachments" not in html_transforms.names()
 
 
 def test_srcset_helper_returns_empty_for_non_image(
@@ -2556,3 +2567,144 @@ def test_attachments_list_surfaces_failed_rendition_count(
     resp = client.get("/admin/sites/blog/attachments/")
     body = resp.data.decode()
     assert "2 renditions failed" in body
+
+
+def test_pictureify_runs_at_delivery_render_time(
+    admin_app: Flask,
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """End-to-end: save a post with a markdown image referencing
+    an attachment that has done renditions; the rendered post page
+    on delivery should emit a <picture> with format tiers, even
+    though body_html was cached at admin save time (no g.site).
+    """
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    # Seed an attachment + done renditions on the blog site, plus
+    # a POST_INDEX page so post URLs are reachable on delivery.
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        seed_blog_index(db, site)
+        att = Attachment(
+            site_id=site.id,
+            filename="hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="f" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        for fmt in ("avif", "webp", "original"):
+            for w in (320, 800):
+                db.add(
+                    AttachmentRendition(
+                        attachment_id=att.id,
+                        size_label=f"{w}w",
+                        format=fmt,
+                        content_type={
+                            "avif": "image/avif",
+                            "webp": "image/webp",
+                            "original": "image/jpeg",
+                        }[fmt],
+                        status="done",
+                        storage_key=f"{att.storage_key}/{w}/{fmt}",
+                        width=w,
+                        height=w // 2,
+                        bytes_size=10,
+                    )
+                )
+        db.commit()
+        att_storage_key = att.storage_key
+        site_slug = site.slug
+
+    # Save a post on the admin app — body_html gets cached.
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_slug}/posts/new")
+    client.post(
+        f"/admin/sites/{site_slug}/posts/new",
+        data={
+            "title": "Hero post",
+            "slug": "hero-post",
+            "body_markdown": f"![hero](/attachments/{att_storage_key})",
+            "status": "published",
+            "tags": "",
+            "featured_image_id": "",
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+
+    # Render through delivery — g.site IS set here. The
+    # post_index page seeded above (slug "posts") puts the post at
+    # /posts/<slug>/.
+    delivery_client = delivery_app.test_client()
+    resp = delivery_client.get("/posts/hero-post/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    assert "<picture>" in body
+    assert "image/avif" in body
+    assert "image/webp" in body
+
+
+def test_image_picker_inline_thumb_uses_smallest_webp(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """The featured-image picker macro's inline preview thumbnail
+    uses the smallest done WebP rendition, not the original."""
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+    from bragi.core.models.post import Post, PostStatus
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="a" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        for w in (320, 800):
+            db.add(
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label=f"{w}w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="done",
+                    storage_key=f"{att.storage_key}/{w}/webp",
+                    width=w,
+                    height=w // 2,
+                    bytes_size=10,
+                )
+            )
+        owner_id = db.execute(select(Site.owner_user_id).where(Site.id == site.id)).scalar_one()
+        post = Post(
+            site_id=site.id,
+            slug="hero",
+            title="Hero",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=owner_id,
+            status=PostStatus.DRAFT,
+            featured_image_id=att.id,
+        )
+        db.add(post)
+        db.commit()
+        post_id = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
+    body = resp.data.decode()
+    # Inline preview uses the smallest webp's storage_key.
+    assert f"{('a' * 64)}/320/webp" in body

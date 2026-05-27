@@ -30,6 +30,7 @@ from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
 from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
+from bragi.core.renditions import smallest_webp_storage_key
 from bragi.core.security import current_user, is_superuser
 from bragi.core.storage import remove_rendition
 from bragi.core.themes import rendition_target_content_type, resolved_widths
@@ -164,6 +165,12 @@ def _load_default_featured_image(db: Any, raw: str | None, site_id: int) -> Atta
     if attachment is None or attachment.site_id != site_id:
         return None
     return attachment
+
+
+def _default_featured_image_thumb_key(db: Any, raw: str | None, site_id: int) -> str | None:
+    """Compute the picker macro's `thumb_storage_key` for the form's
+    preview. Mirrors the post / page admin helper of the same name."""
+    return smallest_webp_storage_key(db, _load_default_featured_image(db, raw, site_id))
 
 
 def _home_page_id_or_error(db: Any, raw: str, site_id: int) -> tuple[int | None, str | None]:
@@ -539,6 +546,9 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 default_featured_image=_load_default_featured_image(
                     db, form["default_featured_image_id"], site.id
                 ),
+                default_featured_image_thumb_key=_default_featured_image_thumb_key(
+                    db, form["default_featured_image_id"], site.id
+                ),
             )
 
         form = _form_from_request()
@@ -567,6 +577,9 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 default_featured_image=_load_default_featured_image(
                     db, form["default_featured_image_id"], site.id
                 ),
+                default_featured_image_thumb_key=_default_featured_image_thumb_key(
+                    db, form["default_featured_image_id"], site.id
+                ),
             )
 
         # Uniqueness checks excluding the row being edited.
@@ -583,6 +596,9 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                     themes=themes,
                     home_pages=home_pages,
                     default_featured_image=_load_default_featured_image(
+                        db, form["default_featured_image_id"], site.id
+                    ),
+                    default_featured_image_thumb_key=_default_featured_image_thumb_key(
                         db, form["default_featured_image_id"], site.id
                     ),
                 )

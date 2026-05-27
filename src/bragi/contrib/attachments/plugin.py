@@ -29,7 +29,6 @@ from bragi.core.db import SessionLocal
 from bragi.core.image_processor import PillowImageProcessor
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
-from bragi.core.render.transforms import TransformRegistry
 from bragi.core.storage import LocalStorageBackend
 
 
@@ -141,29 +140,28 @@ def register_image_processor() -> ImageProcessorSpec:
 
 @hookimpl
 def register_template_globals(env: jinja2.Environment) -> None:
-    """Expose `srcset_for(attachment)` to delivery templates so a
-    theme can render responsive `<img srcset>` from the rendition
-    ladder without pulling in plugin internals.
+    """Expose attachments helpers to delivery templates.
+
+    `srcset_for` / `attachment_url` are globals so themes can call
+    them from anywhere. `pictureify` is registered as a filter,
+    mirroring `internal_link_rewrite`: the delivery templates pipe
+    `body_html` through it at render time.
+
+    Pictureify *cannot* run at save time (its previous home as a
+    `register_html_transform` hookimpl): it needs `g.site` to scope
+    the rendition lookup, and the admin's request context doesn't
+    set one (admin is single-host, no site_resolver middleware in
+    front of the write path). Filter form runs on the delivery
+    side where the site_resolver middleware has set `g.site` for
+    every request, so `body_html` cached at save time still expands
+    to `<picture>` blocks on render.
     """
     env.globals["srcset_for"] = srcset_for
     env.globals["attachment_url"] = attachment_url
+    env.filters["pictureify"] = pictureify
 
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
     """Add `cms media reindex` for backfilling rendition slots."""
     group.add_command(media_group)
-
-
-@hookimpl
-def register_html_transform(registry: TransformRegistry) -> None:
-    """Register `pictureify` so post / page bodies that reference
-    `/attachments/<key>` get expanded to `<picture>` with the
-    rendition ladder as `srcset` at render time.
-
-    Priority 150 keeps this between the Pygments highlighter (50)
-    and the heading-anchor injector (200): neither touches images,
-    but a fixed slot makes the rendering pipeline easier to reason
-    about as more transforms accrue.
-    """
-    registry.add(pictureify, name="pictureify-attachments", priority=150)

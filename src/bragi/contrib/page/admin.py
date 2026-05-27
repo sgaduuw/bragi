@@ -39,6 +39,7 @@ from bragi.core.models.page_revision import PageRevision
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.render.markdown import make_excerpt, render_markdown
+from bragi.core.renditions import smallest_webp_storage_key
 
 bp = Blueprint(
     "page_admin",
@@ -103,6 +104,17 @@ def _load_featured_image(db: Session, raw: str | None, site_id: int) -> Attachme
     if attachment is None or attachment.site_id != site_id:
         return None
     return attachment
+
+
+def _featured_image_thumb_key(db: Session, raw: str | None, site_id: int) -> str | None:
+    """Compute the macro's `thumb_storage_key` for the form's preview.
+
+    Mirrors the post-admin helper of the same name: the macro falls
+    back to the original storage_key when this returns None, so the
+    preview still works for a brand-new attachment whose renditions
+    haven't processed yet.
+    """
+    return smallest_webp_storage_key(db, _load_featured_image(db, raw, site_id))
 
 
 def _existing_post_index(
@@ -240,7 +252,12 @@ def new_page(site_slug: str) -> ResponseReturnValue:
         if request.method == "GET":
             parents = _all_pages_for_picker(db, site_id)
             return render_template(
-                "admin/page_edit.html", page=None, form={}, parents=parents, featured_image=None
+                "admin/page_edit.html",
+                page=None,
+                form={},
+                parents=parents,
+                featured_image=None,
+                featured_image_thumb_key=None,
             )
 
         form = _form_from_request()
@@ -253,6 +270,9 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
             )
 
         new_kind = str(form["kind"])
@@ -264,6 +284,9 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
             )
 
         parent_id = _normalized_parent_id(form["parent_id"])
@@ -276,6 +299,9 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
             )
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
@@ -289,6 +315,9 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
             )
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], site_id
@@ -301,6 +330,9 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
             )
 
         # Promotion to POST_INDEX swaps any existing POST_INDEX page
@@ -317,6 +349,9 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
                 swap_pending=True,
                 swap_target=existing_index,
             )
@@ -418,6 +453,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
             )
 
         form = _form_from_request()
@@ -431,6 +469,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
             )
         new_kind = str(form["kind"])
         if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
@@ -441,6 +482,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+                featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
             )
@@ -458,6 +502,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
             )
         slug = str(form["slug"])
         if _slug_in_use(db, page.site_id, parent_id, slug, exclude_page_id=page.id):
@@ -473,6 +520,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
             )
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], page.site_id
@@ -485,6 +535,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+                featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
             )
@@ -505,6 +558,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 form=form,
                 parents=parents,
                 featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+                featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
                 swap_pending=True,
@@ -536,6 +592,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                     form=form,
                     parents=parents,
                     featured_image=_load_featured_image(
+                        db, form.get("featured_image_id"), page.site_id
+                    ),
+                    featured_image_thumb_key=_featured_image_thumb_key(
                         db, form.get("featured_image_id"), page.site_id
                     ),
                     demotion_pending=True,

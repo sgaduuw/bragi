@@ -8,9 +8,10 @@
 
    Use via {% from "admin/_image_picker_field.html" import image_picker_field %}
    then `{{ image_picker_field(name=..., value=..., attachment=...,
-   label=..., picker_url=..., site_slug=..., helper=...) }}`. One
-   form-field per page expected; the dialog id is derived from `name`
-   so multiple fields could coexist in principle.
+   label=..., picker_url=..., site_slug=..., helper=...,
+   thumb_storage_key=...) }}`. One form-field per page expected; the
+   dialog id is derived from `name` so multiple fields could coexist
+   in principle.
 
    `picker_url` is the fully-built attachments-picker URL (site_slug
    already substituted by the caller). The macro can't build it
@@ -22,9 +23,17 @@
    The delivery `/attachments/<key>` route resolves the site from
    the Host header, which doesn't match on the admin host, so the
    macro must use the path-scoped admin route instead.
+
+   `thumb_storage_key` (optional) overrides the storage key used for
+   the inline preview image. The caller passes the smallest done
+   WebP rendition's storage_key so the form doesn't drag the full
+   original (often >1 MB) over the wire to render a 160x120
+   thumbnail. Falls back to `attachment.storage_key` when None,
+   which keeps the macro working for attachments whose renditions
+   haven't processed yet.
 #}
 
-{% macro image_picker_field(name, value, attachment, label, picker_url, site_slug, helper="") %}
+{% macro image_picker_field(name, value, attachment, label, picker_url, site_slug, helper="", thumb_storage_key=None) %}
 {%- set dialog_id = "image-picker-dialog--" ~ name -%}
 {%- set field_id = "image-picker-field--" ~ name -%}
 <fieldset class="image-picker-field" id="{{ field_id }}" data-field="{{ name }}">
@@ -37,7 +46,7 @@
                 align-items: center; gap: 0.75rem;">
       {% if attachment %}
       <img class="image-picker-thumb"
-           src="{{ url_for('attachment_admin.serve_attachment_bytes', site_slug=site_slug, storage_key=attachment.storage_key) }}"
+           src="{{ url_for('attachment_admin.serve_attachment_bytes', site_slug=site_slug, storage_key=(thumb_storage_key or attachment.storage_key)) }}"
            alt="{{ attachment.alt_text or attachment.filename }}"
            style="max-width: 160px; max-height: 120px; object-fit: cover;
                   border: 1px solid #ddd; border-radius: 4px;">
