@@ -1,0 +1,506 @@
+{# Resume content fieldset. Included by post/page edit.html only
+   when kind=resume. Each section is a collapsible <details>; the
+   repeating sections use the _repeating_field macro for drag /
+   add / remove chrome. Client-side JS at the bottom of this file:
+     - Generates stable IDs on new rows (crypto.randomUUID).
+     - Wires drag-to-reorder via HTML5 DnD.
+     - Keeps the Project "Linked position" dropdown in sync with
+       the current Experience rows.
+     - On form submit, walks the DOM and serialises all sections
+       into the hidden resume_data input that POSTs to the server.
+
+   The actual JSON shape it produces matches
+   bragi.contrib.page.resume.ResumeData. Pydantic validation runs
+   server-side; this JS is purely a form-to-JSON marshaller. #}
+
+{% from "admin/_repeating_field.html" import repeating_field %}
+
+{% set resume = resume_data_for_form %}
+
+{# flatpickr stylesheets — both files needed. The base stylesheet
+   styles the calendar chrome (header, year-nav arrows, focus rings);
+   the monthSelect plugin's own stylesheet sizes the month-button
+   grid. Without the plugin stylesheet, the year-nav arrows sit on
+   top of the Jan/Feb/Nov/Dec month buttons and clicking those
+   cells changes the year instead of selecting the month. CDN pin
+   matches the JS version (4.x). #}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4/dist/plugins/monthSelect/style.css">
+
+<fieldset id="resume-fieldset">
+  <legend>Resume content</legend>
+  <input type="hidden" name="resume_data" id="resume-data-hidden" value="">
+
+  {# HEADER #}
+  <details {% if resume.header.tagline or resume.header.location or resume.header.profile_links %}open{% endif %}>
+    <summary>Header</summary>
+    <div class="resume-section" data-section="header">
+      <label for="resume-header-tagline">Tagline</label>
+      <input type="text" id="resume-header-tagline"
+             value="{{ resume.header.tagline or '' }}"
+             placeholder="e.g. Platform Engineer · SRE">
+
+      <label for="resume-header-location">Location</label>
+      <input type="text" id="resume-header-location"
+             value="{{ resume.header.location or '' }}"
+             placeholder="e.g. Den Haag, NL">
+
+      <label>Profile links</label>
+      {% call(item, idx) repeating_field("header.profile_links", resume.header.profile_links, "+ Add link") %}
+        <label>Label</label>
+        <input type="text" data-field="label" value="{{ (item.label or '') if item else '' }}" placeholder="LinkedIn">
+        <label>URL</label>
+        <input type="url" data-field="url" value="{{ (item.url or '') if item else '' }}" placeholder="https://...">
+      {% endcall %}
+    </div>
+  </details>
+
+  {# HIGHLIGHTS (simple string list — uses repeating_field but body is just one input) #}
+  <details {% if resume.highlights %}open{% endif %}>
+    <summary>Highlights ({{ resume.highlights | length }})</summary>
+    <div class="resume-section" data-section="highlights">
+      {% call(item, idx) repeating_field("highlights", resume.highlights, "+ Add highlight") %}
+        {# highlights are flat strings; use a synthetic 'text' field #}
+        <input type="text" data-field="text" value="{{ (item if item else '') }}"
+               placeholder="One quantified achievement">
+      {% endcall %}
+    </div>
+  </details>
+
+  {# EXPERIENCE #}
+  <details {% if resume.experience %}open{% endif %}>
+    <summary>Experience ({{ resume.experience | length }})</summary>
+    <div class="resume-section" data-section="experience">
+      {% call(item, idx) repeating_field("experience", resume.experience, "+ Add experience") %}
+        <label>Company</label>
+        <input type="text" data-field="company" value="{{ (item.company or '') if item else '' }}" required>
+        <label>Role</label>
+        <input type="text" data-field="role" value="{{ (item.role or '') if item else '' }}" required>
+        <label>Location</label>
+        <input type="text" data-field="location" value="{{ (item.location or '') if item else '' }}">
+        <label>Start</label>
+        <input type="month" data-field="start_date" value="{{ (item.start_date or '') if item else '' }}">
+        <label>End (leave empty for "Present")</label>
+        <input type="month" data-field="end_date" value="{{ (item.end_date or '') if item else '' }}">
+        <label>Description (markdown)</label>
+        <textarea data-field="description_markdown" rows="4">{{ (item.description_markdown or '') if item else '' }}</textarea>
+        <label>Impacts (one per line)</label>
+        <textarea data-field="impacts" rows="3" data-multiline="1">{% if item %}{{ item.impacts | join('\n') }}{% endif %}</textarea>
+      {% endcall %}
+    </div>
+  </details>
+
+  {# PROJECTS #}
+  <details {% if resume.projects %}open{% endif %}>
+    <summary>Projects ({{ resume.projects | length }})</summary>
+    <div class="resume-section" data-section="projects">
+      {% call(item, idx) repeating_field("projects", resume.projects, "+ Add project") %}
+        <label>Name</label>
+        <input type="text" data-field="name" value="{{ (item.name or '') if item else '' }}" required>
+        <label>Role (optional, leave empty for solo)</label>
+        <input type="text" data-field="role" value="{{ (item.role or '') if item else '' }}">
+        <label>URL (optional)</label>
+        <input type="url" data-field="url" value="{{ (item.url or '') if item else '' }}">
+        <label>Linked position (optional)</label>
+        <select data-field="linked_position_id" class="js-linked-position" data-current="{{ (item.linked_position_id or '') if item else '' }}">
+          <option value="">— Not linked / personal project —</option>
+          {# Options populated client-side from the Experience rows. #}
+        </select>
+        <label>Location</label>
+        <input type="text" data-field="location" value="{{ (item.location or '') if item else '' }}">
+        <label>Start</label>
+        <input type="month" data-field="start_date" value="{{ (item.start_date or '') if item else '' }}">
+        <label>End</label>
+        <input type="month" data-field="end_date" value="{{ (item.end_date or '') if item else '' }}">
+        <label>Description (markdown)</label>
+        <textarea data-field="description_markdown" rows="3">{{ (item.description_markdown or '') if item else '' }}</textarea>
+        <label>Impacts (one per line)</label>
+        <textarea data-field="impacts" rows="2" data-multiline="1">{% if item %}{{ item.impacts | join('\n') }}{% endif %}</textarea>
+      {% endcall %}
+    </div>
+  </details>
+
+  {# EDUCATION #}
+  <details {% if resume.education %}open{% endif %}>
+    <summary>Education ({{ resume.education | length }})</summary>
+    <div class="resume-section" data-section="education">
+      {% call(item, idx) repeating_field("education", resume.education, "+ Add education") %}
+        <label>Institution</label>
+        <input type="text" data-field="institution" value="{{ (item.institution or '') if item else '' }}" required>
+        <label>Degree</label>
+        <input type="text" data-field="degree" value="{{ (item.degree or '') if item else '' }}" required>
+        <label>Location</label>
+        <input type="text" data-field="location" value="{{ (item.location or '') if item else '' }}">
+        <label>Start</label>
+        <input type="month" data-field="start_date" value="{{ (item.start_date or '') if item else '' }}">
+        <label>End</label>
+        <input type="month" data-field="end_date" value="{{ (item.end_date or '') if item else '' }}">
+        <label>Description (markdown)</label>
+        <textarea data-field="description_markdown" rows="2">{{ (item.description_markdown or '') if item else '' }}</textarea>
+      {% endcall %}
+    </div>
+  </details>
+
+  {# SKILLS #}
+  <details {% if resume.skills %}open{% endif %}>
+    <summary>Skills ({{ resume.skills | length }} groups)</summary>
+    <div class="resume-section" data-section="skills">
+      {% call(item, idx) repeating_field("skills", resume.skills, "+ Add skill group") %}
+        <label>Group label</label>
+        <input type="text" data-field="group_label" value="{{ (item.group_label or '') if item else '' }}"
+               placeholder="e.g. Platform Engineering / SRE / IaC" required>
+        <label>Items (comma-separated)</label>
+        <input type="text" data-field="items" data-split="comma"
+               value="{% if item %}{{ item.items | join(', ') }}{% endif %}"
+               placeholder="Terraform, Kubernetes, ArgoCD">
+      {% endcall %}
+    </div>
+  </details>
+
+  {# CERTIFICATIONS #}
+  <details {% if resume.certifications %}open{% endif %}>
+    <summary>Certifications ({{ resume.certifications | length }})</summary>
+    <div class="resume-section" data-section="certifications">
+      {% call(item, idx) repeating_field("certifications", resume.certifications, "+ Add certification") %}
+        <label>Name</label>
+        <input type="text" data-field="name" value="{{ (item.name or '') if item else '' }}" required>
+        <label>Issuer</label>
+        <input type="text" data-field="issuer" value="{{ (item.issuer or '') if item else '' }}">
+        <label>Year</label>
+        <input type="number" data-field="year" value="{{ (item.year or '') if item else '' }}"
+               min="1900" max="2100" step="1">
+        <label>URL</label>
+        <input type="url" data-field="url" value="{{ (item.url or '') if item else '' }}">
+      {% endcall %}
+    </div>
+  </details>
+
+  {# LANGUAGES #}
+  <details {% if resume.languages %}open{% endif %}>
+    <summary>Languages ({{ resume.languages | length }})</summary>
+    <div class="resume-section" data-section="languages">
+      {% call(item, idx) repeating_field("languages", resume.languages, "+ Add language") %}
+        <label>Name</label>
+        <input type="text" data-field="name" value="{{ (item.name or '') if item else '' }}" required>
+        <label>Level</label>
+        <input type="text" data-field="level" value="{{ (item.level or '') if item else '' }}"
+               placeholder="e.g. Native, C1, Conversational" required>
+      {% endcall %}
+    </div>
+  </details>
+</fieldset>
+
+<script type="module">
+  // flatpickr in month mode: gives every browser a calendar UI for
+  // the <input type="month"> fields, since Firefox and Safari ship
+  // no native month picker (they fall back to plain text inputs).
+  // Loaded from esm.sh, same CDN pattern as the TipTap editor's
+  // admin imports. Author-facing dateFormat is "Y-m" (matches the
+  // YearMonth Pydantic pattern); altFormat shows "Apr 2024".
+  import flatpickr from 'https://esm.sh/flatpickr@4';
+  import monthSelectPlugin from 'https://esm.sh/flatpickr@4/dist/plugins/monthSelect/index.js';
+
+  // Generates a 12-char hex stable id for new rows. Matches
+  // bragi.contrib.page.resume._new_id() on the server side.
+  const newId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+
+  const fieldset = document.getElementById('resume-fieldset');
+  if (fieldset) {
+    const hiddenInput = document.getElementById('resume-data-hidden');
+
+    // Wire flatpickr month picker on any <input type="month"> inside
+    // the given root that hasn't been wired yet. The wired marker
+    // (`data-flatpickr-wired`) prevents double-init when this is
+    // called on a freshly-cloned row that the initial sweep already
+    // skipped (it's idempotent either way).
+    const wireMonthPickers = (root) => {
+      root.querySelectorAll('input[type=month]:not([data-flatpickr-wired])').forEach((input) => {
+        flatpickr(input, {
+          plugins: [monthSelectPlugin({
+            shorthand: true,
+            dateFormat: 'Y-m',
+            altFormat: 'M Y',
+          })],
+        });
+        input.dataset.flatpickrWired = '1';
+      });
+    };
+    wireMonthPickers(fieldset);
+
+    // ---- Add row: clone template, give it a new id ----
+    fieldset.querySelectorAll('.repeating-field__add').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const container = btn.closest('.repeating-field');
+        const template = container.querySelector('.repeating-field__template');
+        const rows = container.querySelector('.repeating-field__rows');
+        const clone = template.content.firstElementChild.cloneNode(true);
+        clone.dataset.id = newId();
+        rows.appendChild(clone);
+        // Wire the new row's month inputs (flatpickr only attaches
+        // to elements actually in the live DOM; template content
+        // is skipped above).
+        wireMonthPickers(clone);
+        syncLinkedPositionOptions();
+      });
+    });
+
+    // ---- Remove row (delegated) ----
+    fieldset.addEventListener('click', (e) => {
+      const btn = e.target.closest('.repeating-field__remove');
+      if (!btn) return;
+      e.preventDefault();
+      btn.closest('.repeating-field__row').remove();
+      syncLinkedPositionOptions();
+    });
+
+    // ---- Drag-to-reorder via HTML5 DnD ----
+    let dragged = null;
+    fieldset.addEventListener('dragstart', (e) => {
+      const row = e.target.closest('.repeating-field__row');
+      if (!row) return;
+      dragged = row;
+      row.classList.add('repeating-field__row--dragging');
+    });
+    fieldset.addEventListener('dragend', () => {
+      if (dragged) dragged.classList.remove('repeating-field__row--dragging');
+      dragged = null;
+    });
+    fieldset.addEventListener('dragover', (e) => {
+      const row = e.target.closest('.repeating-field__row');
+      if (!row || !dragged || row === dragged) return;
+      // Only allow reorder within the same field container.
+      if (row.parentElement !== dragged.parentElement) return;
+      e.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > rect.height / 2;
+      row.parentElement.insertBefore(dragged, after ? row.nextSibling : row);
+    });
+
+    // ---- Linked-position dropdown sync ----
+    // Watches the Experience section's rows; rebuilds <option>s in
+    // every Project row's `select.js-linked-position` to reflect
+    // current company/role/start_date labels. Re-runs on add /
+    // remove / blur (so edits to company name propagate).
+    function syncLinkedPositionOptions() {
+      const expRows = fieldset.querySelectorAll(
+        '[data-section="experience"] .repeating-field__row'
+      );
+      const options = [];
+      expRows.forEach((row) => {
+        const id = row.dataset.id;
+        const company = row.querySelector('[data-field="company"]').value || '(unnamed)';
+        const role = row.querySelector('[data-field="role"]').value || '';
+        const start = row.querySelector('[data-field="start_date"]').value || '';
+        options.push({
+          id,
+          label: `${company} — ${role}${start ? ` (${start})` : ''}`,
+        });
+      });
+      fieldset.querySelectorAll('select.js-linked-position').forEach((sel) => {
+        const current = sel.value || sel.dataset.current || '';
+        sel.innerHTML =
+          '<option value="">— Not linked / personal project —</option>' +
+          options
+            .map(
+              (o) =>
+                `<option value="${o.id}"${o.id === current ? ' selected' : ''}>` +
+                `${o.label}</option>`
+            )
+            .join('');
+      });
+    }
+    fieldset.addEventListener('input', (e) => {
+      const inExperience = e.target.closest('[data-section="experience"]');
+      if (inExperience) syncLinkedPositionOptions();
+    });
+    syncLinkedPositionOptions();
+
+    // ---- Form submit: serialise sections to JSON, set hidden input ----
+    const form = fieldset.closest('form');
+    if (form) {
+      form.addEventListener('submit', () => {
+        const data = serializeResumeData();
+        hiddenInput.value = JSON.stringify(data);
+      });
+    }
+
+    function rowToObject(row) {
+      // Reads every input/textarea/select with data-field; returns
+      // an object keyed by field name. Includes the row's stable id.
+      const obj = { id: row.dataset.id };
+      row.querySelectorAll('[data-field]').forEach((el) => {
+        const field = el.dataset.field;
+        const raw = el.value;
+        if (el.dataset.multiline === '1') {
+          // Newline-separated array, trimmed, empty lines dropped.
+          obj[field] = raw
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        } else if (el.dataset.split === 'comma') {
+          obj[field] = raw
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+        } else if (el.type === 'number') {
+          obj[field] = raw === '' ? null : Number(raw);
+        } else {
+          obj[field] = raw === '' ? null : raw;
+        }
+      });
+      return obj;
+    }
+
+    function serializeResumeData() {
+      const data = {
+        header: { tagline: null, location: null, profile_links: [] },
+        highlights: [],
+        experience: [],
+        projects: [],
+        education: [],
+        skills: [],
+        certifications: [],
+        languages: [],
+      };
+
+      // Header singletons
+      data.header.tagline =
+        document.getElementById('resume-header-tagline').value || null;
+      data.header.location =
+        document.getElementById('resume-header-location').value || null;
+
+      // Header.profile_links (repeating)
+      const hdrLinks = fieldset.querySelectorAll(
+        '[data-section="header"] .repeating-field__row'
+      );
+      hdrLinks.forEach((row) => {
+        const item = rowToObject(row);
+        if (item.label || item.url) data.header.profile_links.push(item);
+      });
+
+      // Highlights — flat strings (the row's only data-field is "text")
+      const hlRows = fieldset.querySelectorAll(
+        '[data-section="highlights"] .repeating-field__row'
+      );
+      hlRows.forEach((row) => {
+        const text = row.querySelector('[data-field="text"]').value.trim();
+        if (text) data.highlights.push(text);
+      });
+
+      // Generic per-section serialiser for the structured types
+      const SECTIONS = [
+        'experience',
+        'projects',
+        'education',
+        'skills',
+        'certifications',
+        'languages',
+      ];
+      SECTIONS.forEach((section) => {
+        const rows = fieldset.querySelectorAll(
+          `[data-section="${section}"] .repeating-field__row`
+        );
+        rows.forEach((row) => {
+          data[section].push(rowToObject(row));
+        });
+      });
+
+      return data;
+    }
+  }
+</script>
+
+<style>
+  /* Scoped to the resume fieldset. Restyles the repeating-field
+     component for the admin form (lives in this template rather
+     than a shared admin.css since this is the first consumer). */
+  #resume-fieldset > details {
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    margin-bottom: 0.5rem;
+    background: white;
+  }
+  #resume-fieldset > details > summary {
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    font-weight: 600;
+    background: #f0f0f0;
+    user-select: none;
+  }
+  #resume-fieldset .resume-section { padding: 0.75rem; }
+  #resume-fieldset .repeating-field__row {
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 0.6rem 0.75rem 0.75rem 1.5rem;
+    margin-bottom: 0.5rem;
+    background: #fcfcfc;
+    position: relative;
+  }
+  #resume-fieldset .repeating-field__handle {
+    position: absolute;
+    left: 0.25rem;
+    top: 0.6rem;
+    color: #aaa;
+    cursor: grab;
+    user-select: none;
+  }
+  #resume-fieldset .repeating-field__remove {
+    position: absolute;
+    right: 0.5rem;
+    top: 0.5rem;
+    background: none;
+    border: 0;
+    color: #999;
+    font-size: 1.3em;
+    cursor: pointer;
+    line-height: 1;
+  }
+  #resume-fieldset .repeating-field__remove:hover { color: #c33; }
+  #resume-fieldset .repeating-field__row--dragging { opacity: 0.5; }
+  #resume-fieldset .repeating-field__add {
+    background: white;
+    border: 1px dashed #aaa;
+    border-radius: 3px;
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+  }
+  #resume-fieldset .repeating-field__add:hover {
+    background: #eee;
+    border-color: #888;
+  }
+  /* Per-row form elements. Without these, labels render inline with
+     their inputs and the row's grid of fields collapses into a
+     left-to-right flow that's unreadable. Mirrors the base admin
+     form style (block labels above block inputs) but scoped to the
+     resume fieldset so it doesn't leak to other forms. */
+  #resume-fieldset .repeating-field__body label,
+  #resume-fieldset .resume-section > label {
+    display: block;
+    font-size: 0.85em;
+    color: #555;
+    margin: 0.5rem 0 0.2rem;
+    font-weight: 500;
+  }
+  #resume-fieldset .repeating-field__body input[type=text],
+  #resume-fieldset .repeating-field__body input[type=url],
+  #resume-fieldset .repeating-field__body input[type=month],
+  #resume-fieldset .repeating-field__body input[type=number],
+  #resume-fieldset .repeating-field__body select,
+  #resume-fieldset .repeating-field__body textarea,
+  #resume-fieldset .resume-section > input[type=text] {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+    font: inherit;
+    background: white;
+  }
+  #resume-fieldset .repeating-field__body textarea {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    min-height: 4rem;
+    resize: vertical;
+  }
+</style>

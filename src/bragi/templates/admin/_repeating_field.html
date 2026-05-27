@@ -1,0 +1,46 @@
+{# Reusable repeating-field component for structured-list admin
+   forms. Caller passes a list of items plus a body block (via
+   `{% call %}`) that renders one row's fields. Macro provides
+   the chrome: drag handle, remove button, the hidden <template>
+   for new-row insertion, and the "Add" button.
+
+   Client-side JS (loaded by `_resume_fieldset.html` for the
+   resume case) wires:
+     - The "Add" button: clones `.repeating-field__template`,
+       generates a new 12-char hex id, appends to the rows
+       container.
+     - The "Remove" button (delegated): removes the row.
+     - HTML5 drag/drop on the handle: reorders rows in-place.
+     - Form submit: serialises all rows into the hidden JSON
+       input that POSTs to the server.
+
+   First consumer: `_resume_fieldset.html` for the resume page
+   kind. Designed to be reusable for any future structured-list
+   admin need (e.g. nav menu builder, custom redirects bulk
+   editor). #}
+
+{% macro repeating_field(field_name, items, add_label, item_id_attr="id") %}
+<div class="repeating-field" data-field-name="{{ field_name }}">
+  <div class="repeating-field__rows">
+    {% for item in items %}
+      <div class="repeating-field__row" data-id="{{ item[item_id_attr] }}" draggable="true">
+        <span class="repeating-field__handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+        <button type="button" class="repeating-field__remove" title="Remove">&times;</button>
+        <div class="repeating-field__body">
+          {{ caller(item, loop.index0) }}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+  <template class="repeating-field__template">
+    <div class="repeating-field__row" data-id="__NEW__" draggable="true">
+      <span class="repeating-field__handle" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+      <button type="button" class="repeating-field__remove" title="Remove">&times;</button>
+      <div class="repeating-field__body">
+        {{ caller(none, "__INDEX__") }}
+      </div>
+    </div>
+  </template>
+  <button type="button" class="repeating-field__add">{{ add_label }}</button>
+</div>
+{% endmacro %}

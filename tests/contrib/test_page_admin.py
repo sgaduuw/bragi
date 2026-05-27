@@ -16,7 +16,7 @@ from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, make_test_site, make_test_user
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -517,3 +517,266 @@ def test_skip_redirect_suppresses_on_post_updated(
         pm.unregister(rec)
 
     assert [c for c in calls if c["hook"] == "updated"] == []
+
+
+def test_page_resume_kind_constant_and_data_column_exist(
+    db_session: Session,
+) -> None:
+    """PageKind.RESUME is defined; pages.resume_data accepts dict or None."""
+    from bragi.core.models.page import Page, PageKind, PageStatus
+
+    assert PageKind.RESUME == "resume"
+
+    site = make_test_site(
+        db_session,
+        slug="cv-site",
+        hostname="cv.example.test",
+        title="CV Site",
+        canonical_url="https://cv.example.test",
+    )
+    page = Page(
+        site_id=site.id,
+        slug="my-cv",
+        title="My CV",
+        author_id=make_test_user(db_session, email="r@example.test").id,
+        status=PageStatus.PUBLISHED,
+        kind=PageKind.RESUME,
+        resume_data={"highlights": ["one"]},
+    )
+    db_session.add(page)
+    db_session.commit()
+
+    loaded = db_session.get(Page, page.id)
+    assert loaded is not None
+    assert loaded.kind == "resume"
+    assert loaded.resume_data == {"highlights": ["one"]}
+
+
+def test_resume_kind_round_trip_through_edit_form(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """POST a resume_data JSON, GET the edit page, verify all fields survive
+    save -> load. Covers the happy-path serialisation contract."""
+    import json
+
+    client = admin_app.test_client()
+    _login(client)
+
+    resume_payload = {
+        "header": {
+            "tagline": "Platform Engineer",
+            "location": "Den Haag, NL",
+            "profile_links": [
+                {"id": "abc111", "label": "LinkedIn", "url": "https://linkedin.test/x"},
+            ],
+        },
+        "highlights": ["Cut deploy time 70%", "Led team of 4"],
+        "experience": [
+            {
+                "id": "pos001234567",
+                "company": "Logius",
+                "role": "Platform Engineer",
+                "location": "Den Haag",
+                "start_date": "2024-04",
+                "end_date": None,
+                "description_markdown": "- built things\n- shipped things",
+                "impacts": ["impact 1"],
+            }
+        ],
+        "projects": [
+            {
+                "id": "prj001234567",
+                "name": "GitOps deploy",
+                "role": "Tech lead",
+                "url": "https://example.test/repo",
+                "linked_position_id": "pos001234567",
+                "location": None,
+                "start_date": None,
+                "end_date": None,
+                "description_markdown": "",
+                "impacts": [],
+            }
+        ],
+        "education": [],
+        "skills": [{"id": "skl001234567", "group_label": "Stack", "items": ["Python", "Go"]}],
+        "certifications": [],
+        "languages": [],
+    }
+
+    # Create the resume page via POST
+    token = csrf_token(client)
+    resp = client.post(
+        "/admin/sites/blog/pages/new",
+        data={
+            "title": "My CV",
+            "slug": "cv",
+            "kind": "resume",
+            "status": "published",
+            "parent_id": "",
+            "body_markdown": "Pragmatic engineer doing pragmatic things.",
+            "featured_image_id": "",
+            "resume_data": json.dumps(resume_payload),
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303), resp.data[:500]
+
+    # Read it back
+    with db_session_factory() as db:
+        from bragi.core.models.page import Page
+
+        page = db.execute(select(Page).where(Page.slug == "cv", Page.kind == "resume")).scalar_one()
+        assert page.body_markdown == "Pragmatic engineer doing pragmatic things."
+        assert page.resume_data is not None
+        assert page.resume_data["header"]["tagline"] == "Platform Engineer"
+        assert page.resume_data["experience"][0]["company"] == "Logius"
+        assert page.resume_data["projects"][0]["linked_position_id"] == "pos001234567"
+        page_id = page.id
+
+    # GET the edit page, verify the resume_data is reflected back into the form
+    resp = client.get(f"/admin/sites/blog/pages/{page_id}/edit")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert 'value="Platform Engineer"' in body  # tagline
+    assert "Logius" in body
+    assert "GitOps deploy" in body
+    assert "pos001234567" in body  # linked_position_id
+
+
+def test_resume_kind_invalid_payload_re_renders_with_flash(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Pydantic ValidationError -> form re-renders with a flash + posted
+    data preserved (no silent data loss on validation failure)."""
+    import json
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client)
+
+    bad_payload = {
+        "header": {},
+        "highlights": [],
+        "experience": [
+            {
+                "id": "bad000000001",
+                "company": "Acme",
+                "role": "SRE",
+                "start_date": "not-a-date",  # invalid; should reject
+                "end_date": None,
+                "description_markdown": "",
+                "impacts": [],
+            }
+        ],
+        "projects": [],
+        "education": [],
+        "skills": [],
+        "certifications": [],
+        "languages": [],
+    }
+    resp = client.post(
+        "/admin/sites/blog/pages/new",
+        data={
+            "title": "Bad CV",
+            "slug": "bad-cv",
+            "kind": "resume",
+            "status": "draft",
+            "parent_id": "",
+            "body_markdown": "",
+            "featured_image_id": "",
+            "resume_data": json.dumps(bad_payload),
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    # Not a redirect: validation failed, form re-renders
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    # Flash mentions the failing field path
+    assert "resume_data" in body.lower() or "start_date" in body.lower()
+    # Posted title survives the re-render (no data loss)
+    assert "Bad CV" in body
+
+
+def test_resume_kind_revisions_snapshot_resume_data(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Editing a resume page snapshots the prior resume_data to
+    page_revisions, mirroring how body_markdown / featured_image_id
+    are already snapshotted."""
+    import json
+
+    client = admin_app.test_client()
+    _login(client)
+
+    # Create the page (revision 1 = initial state)
+    token = csrf_token(client)
+    initial = {
+        "header": {},
+        "highlights": ["v1"],
+        "experience": [],
+        "projects": [],
+        "education": [],
+        "skills": [],
+        "certifications": [],
+        "languages": [],
+    }
+    resp = client.post(
+        "/admin/sites/blog/pages/new",
+        data={
+            "title": "CV",
+            "slug": "cv2",
+            "kind": "resume",
+            "status": "draft",
+            "parent_id": "",
+            "body_markdown": "",
+            "featured_image_id": "",
+            "resume_data": json.dumps(initial),
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+    with db_session_factory() as db:
+        from bragi.core.models.page import Page
+
+        page_id = db.execute(select(Page).where(Page.slug == "cv2")).scalar_one().id
+
+    # Edit it (revision 2 = snapshot of v1)
+    token = csrf_token(client)
+    updated = dict(initial)
+    updated["highlights"] = ["v2"]
+    resp = client.post(
+        f"/admin/sites/blog/pages/{page_id}/edit",
+        data={
+            "title": "CV",
+            "slug": "cv2",
+            "kind": "resume",
+            "status": "draft",
+            "parent_id": "",
+            "body_markdown": "",
+            "featured_image_id": "",
+            "resume_data": json.dumps(updated),
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+
+    # Page now has v2; revision 1 (most-recent snapshot) holds v1
+    with db_session_factory() as db:
+        from bragi.core.models.page import Page
+        from bragi.core.models.page_revision import PageRevision
+
+        page = db.get(Page, page_id)
+        assert page.resume_data["highlights"] == ["v2"]
+        revision = db.execute(
+            select(PageRevision)
+            .where(PageRevision.page_id == page_id)
+            .order_by(PageRevision.id.desc())
+            .limit(1)
+        ).scalar_one()
+        assert revision.resume_data == {"highlights": ["v1"]} or revision.resume_data[
+            "highlights"
+        ] == ["v1"]

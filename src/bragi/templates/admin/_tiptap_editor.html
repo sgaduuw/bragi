@@ -142,6 +142,14 @@
     border: 1px solid #bbb; border-radius: 4px;
     box-shadow: 0 2px 6px rgba(0,0,0,0.1);
   }
+  /* `.tiptap-bubble-menu` above sets `display: flex`, which beats
+     the UA default `[hidden] { display: none }`. Without this
+     override the menu shows at its natural-flow position (bottom-
+     left of <body> after the init reparent) whenever
+     `imageBubbleMenu.hidden = true` runs — i.e. on every page edit
+     view that doesn't have a focused image. Class+attribute
+     specificity (0,2,0) trumps the bare class (0,1,0). */
+  .tiptap-bubble-menu[hidden] { display: none; }
   .tiptap-bubble-menu__group { display: flex; gap: 0.15rem; }
   .tiptap-bubble-menu__group button {
     background: white; color: #222; border: 1px solid #ccc;

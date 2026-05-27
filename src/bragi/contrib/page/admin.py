@@ -15,6 +15,8 @@ need an explicit query.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from flask import (
     Blueprint,
     abort,
@@ -41,6 +43,9 @@ from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.renditions import smallest_webp_storage_key
 
+if TYPE_CHECKING:
+    from bragi.contrib.page.resume import ResumeData
+
 bp = Blueprint(
     "page_admin",
     __name__,
@@ -55,6 +60,8 @@ def _form_from_request() -> dict[str, str]:
     `parent_id` is kept as a string (the empty string means "root"),
     so this dict cleanly threads through template re-rendering on
     validation failure without a None-vs-empty-string fork.
+    `resume_data` is kept as a raw JSON string; parsing and Pydantic
+    validation happen later in `_validate_resume_data`.
     """
     return {
         "title": (request.form.get("title") or "").strip(),
@@ -64,7 +71,71 @@ def _form_from_request() -> dict[str, str]:
         "kind": (request.form.get("kind") or PageKind.STATIC).strip(),
         "parent_id": (request.form.get("parent_id") or "").strip(),
         "featured_image_id": (request.form.get("featured_image_id") or "").strip(),
+        "resume_data": request.form.get("resume_data") or "",
     }
+
+
+def _validate_resume_data(raw: str) -> tuple[dict[str, object] | None, str | None]:
+    """Parse + validate the resume_data JSON submitted by the resume
+    fieldset's client-side serialiser.
+
+    Returns `(parsed_dict, None)` on success or `(None, error_message)`
+    on JSON-decode failure / Pydantic ValidationError. Empty string
+    is treated as "no resume_data" (returns `(None, None)`); the
+    caller should write None to the column in that case.
+    """
+    import json
+
+    from pydantic import ValidationError
+
+    from bragi.contrib.page.resume import ResumeData
+
+    if not raw.strip():
+        return None, None
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, f"resume_data is not valid JSON: {exc}"
+
+    try:
+        data = ResumeData.model_validate(parsed)
+    except ValidationError as exc:
+        # Map the first error's location path to a human-friendly
+        # field reference. The admin form re-renders with this
+        # message as a flash.
+        first = exc.errors()[0]
+        loc = ".".join(str(p) for p in first["loc"])
+        return None, f"resume_data validation failed at {loc}: {first['msg']}"
+
+    return data.model_dump(mode="json", exclude_defaults=True), None
+
+
+def _resume_data_for_form(page: Page | None, form: dict[str, str]) -> ResumeData:
+    """Build the typed ResumeData object the resume fieldset template
+    consumes. On GET-edit: from `page.resume_data` (or empty if NULL).
+    On POST-rerender (validation error): from the raw JSON in `form`
+    so the author's edits aren't lost. Falls back to an empty
+    ResumeData if any decode fails (the form just shows empty rows).
+    """
+    import json
+
+    from pydantic import ValidationError
+
+    from bragi.contrib.page.resume import ResumeData
+
+    raw = form.get("resume_data") or ""
+    if raw.strip():
+        try:
+            return ResumeData.model_validate(json.loads(raw))
+        except (json.JSONDecodeError, ValidationError):
+            pass
+    if page is not None and page.resume_data:
+        try:
+            return ResumeData.model_validate(page.resume_data)
+        except ValidationError:
+            pass
+    return ResumeData()
 
 
 def _resolve_featured_image_id(
@@ -210,6 +281,7 @@ def _snapshot_page(
             body_excerpt=page.body_excerpt,
             meta_description=page.meta_description,
             featured_image_id=page.featured_image_id,
+            resume_data=page.resume_data,
         )
     )
 
@@ -258,6 +330,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 parents=parents,
                 featured_image=None,
                 featured_image_thumb_key=None,
+                resume_data_for_form=_resume_data_for_form(None, {}),
             )
 
         form = _form_from_request()
@@ -273,11 +346,12 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(None, form),
             )
 
         new_kind = str(form["kind"])
-        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
-            flash("Kind must be 'static' or 'post_index'.", "error")
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
+            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
             return render_template(
                 "admin/page_edit.html",
                 page=None,
@@ -287,6 +361,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(None, form),
             )
 
         parent_id = _normalized_parent_id(form["parent_id"])
@@ -302,6 +377,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(None, form),
             )
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
@@ -318,6 +394,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(None, form),
             )
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], site_id
@@ -333,6 +410,24 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(None, form),
+            )
+
+        # Validate resume_data when kind is resume. This runs after all
+        # the structural validations so the form error message has context.
+        resume_data_dict, resume_err = _validate_resume_data(form["resume_data"])
+        if resume_err is not None:
+            flash(resume_err, "error")
+            return render_template(
+                "admin/page_edit.html",
+                page=None,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), site_id
+                ),
+                resume_data_for_form=_resume_data_for_form(None, form),
             )
 
         # Promotion to POST_INDEX swaps any existing POST_INDEX page
@@ -352,6 +447,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(None, form),
                 swap_pending=True,
                 swap_target=existing_index,
             )
@@ -376,6 +472,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             status=new_status,
             kind=new_kind,
             featured_image_id=featured_image_id,
+            resume_data=resume_data_dict,
         )
         db.add(page_row)
         db.commit()
@@ -444,6 +541,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "kind": page.kind,
                 "parent_id": str(page.parent_id) if page.parent_id else "",
                 "featured_image_id": str(page.featured_image_id) if page.featured_image_id else "",
+                "resume_data": "",
             }
             return render_template(
                 "admin/page_edit.html",
@@ -456,6 +554,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(page, form),
             )
 
         form = _form_from_request()
@@ -472,10 +571,11 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(page, form),
             )
         new_kind = str(form["kind"])
-        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX}:
-            flash("Kind must be 'static' or 'post_index'.", "error")
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
+            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
             return render_template(
                 "admin/page_edit.html",
                 page=page,
@@ -487,6 +587,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(page, form),
             )
         parent_id = _normalized_parent_id(form["parent_id"])
         parent_id, parent_err = _validated_parent_id_or_error(
@@ -505,6 +606,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(page, form),
             )
         slug = str(form["slug"])
         if _slug_in_use(db, page.site_id, parent_id, slug, exclude_page_id=page.id):
@@ -523,6 +625,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(page, form),
             )
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], page.site_id
@@ -540,6 +643,26 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(page, form),
+            )
+
+        # Validate resume_data when kind is resume. This runs after all
+        # the structural validations so the form error message has context.
+        resume_data_dict, resume_err = _validate_resume_data(form["resume_data"])
+        if resume_err is not None:
+            flash(resume_err, "error")
+            return render_template(
+                "admin/page_edit.html",
+                page=page,
+                form=form,
+                parents=parents,
+                featured_image=_load_featured_image(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+                featured_image_thumb_key=_featured_image_thumb_key(
+                    db, form.get("featured_image_id"), page.site_id
+                ),
+                resume_data_for_form=_resume_data_for_form(page, form),
             )
 
         # Promotion-to-POST_INDEX swap requires explicit confirmation.
@@ -563,6 +686,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 featured_image_thumb_key=_featured_image_thumb_key(
                     db, form.get("featured_image_id"), page.site_id
                 ),
+                resume_data_for_form=_resume_data_for_form(page, form),
                 swap_pending=True,
                 swap_target=existing_index,
             )
@@ -597,6 +721,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                     featured_image_thumb_key=_featured_image_thumb_key(
                         db, form.get("featured_image_id"), page.site_id
                     ),
+                    resume_data_for_form=_resume_data_for_form(page, form),
                     demotion_pending=True,
                     demotion_post_count=published_count,
                 )
@@ -629,6 +754,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page.status = str(form["status"])
         page.kind = new_kind
         page.featured_image_id = featured_image_id
+        page.resume_data = resume_data_dict
 
         db.commit()
         updated_id = page.id
@@ -816,6 +942,7 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
         page.body_excerpt = revision.body_excerpt
         page.meta_description = revision.meta_description
         page.featured_image_id = revision.featured_image_id
+        page.resume_data = revision.resume_data
         db.commit()
         restored_id = page.id
         site_id_for_audit = page.site_id

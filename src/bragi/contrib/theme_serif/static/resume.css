@@ -1,0 +1,165 @@
+/* Resume page styles for theme_default. Loaded conditionally by
+   delivery/resume.html's jsonld block. Other themes ship their own
+   variants of this file. */
+
+/* === Screen === */
+.resume {
+  max-width: 48rem;
+  margin: 0 auto;
+}
+.resume header {
+  margin-bottom: 1.5rem;
+}
+.resume header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+.resume .tagline {
+  font-size: 1.1em;
+  color: #444;
+  margin: 0.25rem 0 0;
+}
+.resume .location {
+  font-size: 0.95em;
+  color: #666;
+  margin: 0.25rem 0 0.5rem;
+}
+.resume .profile-links {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 1rem;
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.95em;
+}
+.resume .profile-links a {
+  color: #06569e;
+  text-decoration: none;
+}
+.resume section {
+  margin: 1.5rem 0;
+}
+.resume h2 {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #444;
+  margin: 1.5rem 0 0.5rem;
+  border-bottom: 1px solid #ccc;
+  padding-bottom: 0.25rem;
+}
+.resume .summary {
+  /* prose styles inherit from base */
+}
+.resume .highlights ul {
+  margin: 0.5rem 0;
+  padding-left: 1.2rem;
+}
+.resume .experience .position,
+.resume .projects .project {
+  margin: 1rem 0;
+}
+.resume .position h3,
+.resume .project h3 {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+}
+.resume .position h3 .role {
+  color: #555;
+  font-weight: 500;
+}
+.resume .project .at a {
+  color: #06569e;
+  font-size: 0.9em;
+  text-decoration: none;
+}
+.resume .meta {
+  font-size: 0.85em;
+  color: #777;
+  margin: 0 0 0.4rem;
+}
+.resume .position ul,
+.resume .project ul {
+  margin: 0.3rem 0;
+  padding-left: 1.4rem;
+}
+.resume .impacts {
+  font-size: 0.92em;
+}
+.resume .impacts li::marker {
+  color: #06569e;
+}
+.resume .skills dl {
+  margin: 0;
+}
+.resume .skills dt {
+  font-weight: 600;
+  font-size: 0.9em;
+  margin: 0.4rem 0 0.15rem;
+  color: #333;
+}
+.resume .skills dd {
+  margin: 0 0 0.25rem;
+  padding: 0;
+  font-size: 0.92em;
+}
+.resume .certifications ul,
+.resume .languages ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  columns: 2;
+  column-gap: 1.5rem;
+}
+.resume .certifications li,
+.resume .languages li {
+  font-size: 0.92em;
+  margin: 0.2rem 0;
+  break-inside: avoid;
+}
+.resume .languages .level {
+  color: #777;
+}
+
+/* === Print: single column, hide chrome, optimise for A4 === */
+@media print {
+  /* Hide site chrome that's irrelevant in print. */
+  body > nav,
+  body > footer,
+  .resume .profile-links {
+    display: none !important;
+  }
+  body {
+    font-size: 10pt;
+    color: #000;
+    background: white;
+  }
+  .resume {
+    max-width: 100%;
+    color: #000;
+  }
+  .resume header h1 {
+    font-size: 16pt;
+  }
+  .resume h2 {
+    font-size: 11pt;
+    border-bottom: 1px solid #000;
+    color: #000;
+  }
+  .resume .position h3 .role,
+  .resume .project .at a {
+    color: #000;
+  }
+  .resume .impacts li::marker {
+    color: #000;
+  }
+  .resume .certifications ul,
+  .resume .languages ul {
+    columns: 1;
+  }
+  .resume .position,
+  .resume .project,
+  .resume .education-item {
+    page-break-inside: avoid;
+  }
+}
