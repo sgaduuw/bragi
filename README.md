@@ -6,16 +6,18 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.14.1 (2026-05-20). `develop` is ahead with
-the pinned-posts feature (#125) and the SessionLocal lazy-proxy
-refactor; both ride on the next release.
+**Latest release:** 1.15.0 (2026-05-27).
 
 **Functional surface today:** multisite CMS with markdown source-
-of-truth, TipTap editor, GitHub OAuth + local bootstrap, redirects
-as a first-class subsystem, importers for Hugo / Ghost / WordPress,
-attachments + media library, ActivityPub + webmentions, four
-in-tree themes with auto light/dark, sitemap / feed / JSON-LD,
-audit-driven hardening from v1.12 through v1.14.
+of-truth, TipTap editor (with image size / alignment classes and
+a bubble menu for inline picks), GitHub OAuth + local bootstrap,
+redirects as a first-class subsystem, importers for Hugo / Ghost /
+WordPress, attachments + media library with theme-aware multi-format
+multi-width renditions (`<picture>` with AVIF / WebP / fallback
+tiers and per-class `sizes`), pinned posts on the landing page,
+ActivityPub + webmentions, four in-tree themes with auto
+light/dark, sitemap / feed / JSON-LD, audit-driven hardening from
+v1.12 through v1.15.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 
@@ -254,7 +256,7 @@ wal_checkpoint(TRUNCATE)` is SQLite-only); on Postgres use
 ```sh
 poetry install
 poetry run alembic upgrade head
-make dev    # runs bragi-admin on :8001 and bragi-delivery on :8002 via honcho
+make dev    # runs bragi-admin on :8001 and bragi-delivery on :8002 via the in-repo Procfile supervisor
 ```
 
 Then:
@@ -279,7 +281,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.14.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.15.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start

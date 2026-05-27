@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-05-27
+
 ### Added
 - **Image size + alignment classes in the editor.** The TipTap
   image picker now inserts images with a default class of
@@ -22,6 +24,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   full → 800px / 100vw). All four in-tree themes ship the
   baseline CSS for the six classes plus a catch-all so legacy
   posts without classes render at full width as before.
+  Reloading a post hydrates the in-editor preview with the
+  size-appropriate WebP rendition via a server-injected rendition
+  map (attachments plugin's `editor_image_renditions` Jinja
+  global), so `size-small` / `size-medium` images don't fall back
+  to the multi-MB original after reload.
 
 - **Renditions status panel + manual triggers in the admin.**
   The attachments list page now shows pending / done / failed
