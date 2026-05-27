@@ -3323,8 +3323,7 @@ def test_delivery_renders_image_with_size_class(
             "title": "Hero post",
             "slug": "hero-class",
             "body_markdown": (
-                f"![hero](/attachments/{att_storage_key})"
-                "{.size-medium .align-center}"
+                f"![hero](/attachments/{att_storage_key})" "{.size-medium .align-center}"
             ),
             "status": "published",
             "tags": "",
