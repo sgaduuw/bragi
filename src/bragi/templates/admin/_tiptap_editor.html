@@ -154,6 +154,12 @@
   // straight to `![alt](src)`.
   import Image from 'https://esm.sh/@tiptap/extension-image@2.6';
   import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
+  // markdown-it attrs plugin — same syntax as mdit-py-plugins'
+  // attrs_plugin on the Python side. Needed in the editor's
+  // markdown parser so `{.class}` on a reloaded body round-trips
+  // back into the Image node's `class` attribute. Without this,
+  // class survives save but is dropped on reload.
+  import markdownItAttrs from 'https://esm.sh/markdown-it-attrs@4';
   // BubbleMenu floats a small toolbar above the focused Image node
   // so the operator can change size + alignment without leaving the
   // editor. Admin-only; delivery ships none of this.
@@ -198,7 +204,6 @@
       return {
         markdown: {
           serialize(state, node) {
-            console.log('[bragi-editor] ClassedImage serialize; node.attrs:', node.attrs);
             const alt = state.esc(node.attrs.alt || '');
             const src = state.esc(node.attrs.src || '');
             const cls = node.attrs.class
@@ -206,7 +211,17 @@
               : '';
             state.write(`![${alt}](${src})${cls}`);
           },
-          parse: {},
+          parse: {
+            // setup(md) is invoked by tiptap-markdown's parser with
+            // its internal markdown-it instance at parse time. We
+            // register the attrs plugin so `{.class}` on a reloaded
+            // body round-trips back into the <img>'s class
+            // attribute, which ClassedImage.addAttributes.class
+            // then captures.
+            setup(md) {
+              md.use(markdownItAttrs);
+            },
+          },
         },
       };
     },
@@ -316,8 +331,6 @@
       },
       onSelectionUpdate: ({ editor }) => updateToolbarActive(editor),
     });
-
-    window._editor = editor;
 
     document.body.classList.add('has-tiptap-editor');
     mount.hidden = false;
