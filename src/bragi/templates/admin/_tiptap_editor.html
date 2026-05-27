@@ -186,6 +186,29 @@
     'size-full': 'renditionFull',
   };
   const ClassedImage = Image.extend({
+    // tiptap-markdown reads `storage.markdown.serialize` off each
+    // node's extension and uses it when emitting markdown. Without
+    // this, the default Image serializer emits `![alt](src)` with
+    // no class, so save → reload drops the class on every cycle.
+    // The parse half (markdown → editor) is handled by the
+    // Python-side attrs_plugin which converts `{.class}` into a
+    // `class="..."` attribute on the <img>; ClassedImage's
+    // `parseHTML` for the class attribute then captures it.
+    addStorage() {
+      return {
+        markdown: {
+          serialize(state, node) {
+            const alt = state.esc(node.attrs.alt || '');
+            const src = state.esc(node.attrs.src || '');
+            const cls = node.attrs.class
+              ? ` {.${node.attrs.class.split(' ').filter(Boolean).join(' .')}}`
+              : '';
+            state.write(`![${alt}](${src})${cls}`);
+          },
+          parse: {},
+        },
+      };
+    },
     addAttributes() {
       return {
         ...this.parent?.(),
