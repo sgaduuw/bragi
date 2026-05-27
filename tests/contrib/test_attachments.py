@@ -3342,3 +3342,72 @@ def test_delivery_renders_image_with_size_class(
     assert 'class="size-medium align-center"' in body
     # And `sizes` reflects size-medium (528px / 66vw).
     assert 'sizes="(min-width: 800px) 528px, 66vw"' in body
+
+
+# --------------------- editor_image_renditions Jinja global ---------------------
+
+
+def test_editor_image_renditions_global_returns_map_for_body_images(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The attachments plugin registers `editor_image_renditions`
+    as a Jinja global; the post / page edit partial calls it to
+    emit a `{sha: {small, medium, full}}` map for the TipTap editor
+    to hydrate per-image rendition URLs on reload.
+
+    Wires:
+      - global is registered on the admin app's Jinja env.
+      - call with a body referencing an attachment returns the
+        bucketed ladder for that sha.
+      - empty body / missing site_slug return {} (defensive — the
+        partial calls this on every edit-page render including
+        brand-new posts).
+    """
+    sha = "9" * 64
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key=sha,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        for width in (320, 800):
+            db.add(
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label=f"{width}w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="done",
+                    storage_key=f"{sha}/{width}/webp",
+                    width=width,
+                    height=int(width / 2),
+                    bytes_size=10,
+                )
+            )
+        db.commit()
+
+    fn = admin_app.jinja_env.globals.get("editor_image_renditions")
+    assert callable(fn), "Jinja global not registered by attachments plugin"
+
+    # Defensive shapes the partial relies on: empty body / no slug → {}.
+    assert fn("", "blog") == {}
+    assert fn(f"![alt](/attachments/{sha})", None) == {}
+    assert fn(f"![alt](/attachments/{sha})", "no-such-site") == {}
+
+    # Happy path: body has the image; map carries the bucketed ladder.
+    body = f"![alt](/attachments/{sha}){{.size-medium}}"
+    result = fn(body, "blog")
+    assert result == {
+        sha: {
+            "small": f"{sha}/320/webp",
+            "medium": f"{sha}/800/webp",
+            "full": None,
+        }
+    }

@@ -63,6 +63,25 @@
 </dialog>
 <div id="tiptap-editor" class="editor-mount" hidden></div>
 
+{# Rendition lookup for the in-editor image preview. Registered by
+   the attachments plugin as a Jinja global; emits a map of
+   {sha: {small, medium, full}} for images referenced in the
+   body so the editor JS can hydrate per-image rendition URLs on
+   reload. The markdown body itself stays pristine — only the
+   class survives the save→reload round-trip; renditions are
+   computed server-side per request and re-applied to the editor
+   nodes during initial parse via ClassedImage.parseHTML. #}
+<script id="image-renditions" type="application/json">
+{%- if editor_image_renditions is defined -%}
+{{ editor_image_renditions(
+     form.get("body_markdown", ""),
+     request.view_args.get("site_slug")
+   ) | tojson }}
+{%- else -%}
+{}
+{%- endif -%}
+</script>
+
 <div id="tiptap-image-bubble-menu" class="tiptap-bubble-menu" hidden>
   <div class="tiptap-bubble-menu__group" role="radiogroup" aria-label="Image size">
     <button type="button" data-size="size-small"  title="Small">S</button>
@@ -191,6 +210,36 @@
     'size-medium': 'renditionMedium',
     'size-full': 'renditionFull',
   };
+
+  // Server-injected rendition lookup so reloading a post keeps the
+  // in-editor `<img src>` pointing at the right-sized WebP instead
+  // of falling back to the multi-MB original. Only the `class` is
+  // stored in the markdown body — rendition URLs are editor-only
+  // and would otherwise vanish on round-trip. The map is keyed by
+  // sha (extracted from the image src); see attachments plugin's
+  // `editor_image_renditions` Jinja global.
+  let renditionMap = {};
+  try {
+    const renditionScript = document.getElementById('image-renditions');
+    if (renditionScript && renditionScript.textContent.trim()) {
+      renditionMap = JSON.parse(renditionScript.textContent);
+    }
+  } catch (e) {
+    console.warn('[bragi-editor] failed to parse rendition map', e);
+  }
+
+  // src may be either the public path (`/attachments/<sha>`) or
+  // the admin-rewritten path (`/admin/sites/<slug>/attachments/file/<sha>`).
+  // Optional `file/` segment handles both.
+  const SHA_FROM_SRC_RE = /\/attachments\/(?:file\/)?([a-f0-9]{64})/;
+  const renditionUrlForSrc = (src, size) => {
+    const match = (src || '').match(SHA_FROM_SRC_RE);
+    if (!match) return null;
+    const tiers = renditionMap[match[1]];
+    if (!tiers) return null;
+    const key = tiers[size];
+    return key ? ADMIN_ATTACHMENT_PREFIX + key : null;
+  };
   const ClassedImage = Image.extend({
     // tiptap-markdown reads `storage.markdown.serialize` off each
     // node's extension and uses it when emitting markdown. Without
@@ -246,20 +295,23 @@
         // renderHTML below to pick the visible `<img src>`; never
         // serialized to markdown. `renderHTML: () => ({})` is the
         // TipTap idiom for "don't put this in the rendered HTML
-        // attributes".
+        // attributes". parseHTML looks the URL up in the server-
+        // injected rendition map (keyed by sha extracted from the
+        // image src), so reloading a post hydrates the same
+        // rendition URLs the picker set at insert time.
         renditionSmall: {
           default: null,
-          parseHTML: () => null,
+          parseHTML: (el) => renditionUrlForSrc(el.getAttribute('src'), 'small'),
           renderHTML: () => ({}),
         },
         renditionMedium: {
           default: null,
-          parseHTML: () => null,
+          parseHTML: (el) => renditionUrlForSrc(el.getAttribute('src'), 'medium'),
           renderHTML: () => ({}),
         },
         renditionFull: {
           default: null,
-          parseHTML: () => null,
+          parseHTML: (el) => renditionUrlForSrc(el.getAttribute('src'), 'full'),
           renderHTML: () => ({}),
         },
       };
@@ -320,15 +372,13 @@
           linkify: true,
           breaks: false,
           tightLists: true,
-          // Note: tiptap-markdown@0.8 doesn't expose a stable
-          // hook for adding a markdown-it plugin or overriding a
-          // node's markdown serializer, so the editor-side class
-          // round-trip (load + save) is a known gap. Server-side
-          // the class still works (Python attrs_plugin parses
-          // `{.class}` on render). Fresh inserts via the picker
-          // get the class on the node; the class survives within
-          // a single edit session but may not survive a
-          // save→reload cycle. To be revisited.
+          // The save / load class round-trip is plumbed via
+          // ClassedImage's `addStorage.markdown.serialize` and
+          // `addStorage.markdown.parse.setup` — both are read by
+          // tiptap-markdown@0.8.10 (`MarkdownSerializer`'s
+          // `getMarkdownSpec(node).serialize`, `MarkdownParser`'s
+          // per-parse `parse.setup(md)` walk), so no overrides
+          // here.
         }),
       ],
       content: publicToAdmin(textarea.value),
@@ -349,6 +399,12 @@
     // absolute` it above the focused image on selectionUpdate.
     const imageBubbleMenu = document.getElementById('tiptap-image-bubble-menu');
     if (imageBubbleMenu) {
+      // Reparent to <body> so the menu is free of any positioned
+      // ancestor in the host form scaffolding. Without this the
+      // `position: absolute` math is off by the offsetParent's
+      // document-relative offset, which is what the "menu lands
+      // at the top-left of the editor" bug was.
+      document.body.appendChild(imageBubbleMenu);
       imageBubbleMenu.style.position = 'absolute';
       imageBubbleMenu.style.zIndex = '50';
       imageBubbleMenu.hidden = true;
@@ -622,41 +678,65 @@
           class: next.join(' '),
         }).run();
       });
-      // Position + show the menu above the focused image whenever
-      // the selection lands on one. Hide otherwise. Active-state
-      // styling on the size + align buttons mirrors the node's
-      // current class.
-      editor.on('selectionUpdate', () => {
+      // Position + active-state for the bubble menu. Fires on:
+      //   - selectionUpdate (the user moved the caret onto/off an image)
+      //   - update          (the active image's attrs or layout changed
+      //                      — e.g. clicking S re-renders the <img> at
+      //                      a smaller width, so the menu must
+      //                      reposition AND the active-state buttons
+      //                      must reflect the new class)
+      // updateAttributes('image', ...) fires `update` but NOT
+      // `selectionUpdate` (selection didn't move, just attrs
+      // changed); without the update binding, the "M is still
+      // highlighted after clicking S" bug returns.
+      const refreshBubbleMenu = () => {
         if (!editor.isActive('image')) {
           imageBubbleMenu.hidden = true;
           return;
         }
-        // Find the actual <img> element in the editor mount —
-        // it's the rendered ProseMirror node for the current
-        // selection. There's only one selected image at a time.
         const selectedImg = mount.querySelector('img.ProseMirror-selectednode')
           || mount.querySelector('img');
         if (!selectedImg) {
           imageBubbleMenu.hidden = true;
           return;
         }
+        // Show before measuring: a `hidden`/`display: none` element
+        // returns zeros from getBoundingClientRect, so on the first
+        // show the menuRect was 0×0 and the centering math was off
+        // by half the (true) menu width.
+        imageBubbleMenu.style.visibility = 'hidden';
+        imageBubbleMenu.hidden = false;
         const rect = selectedImg.getBoundingClientRect();
         const menuRect = imageBubbleMenu.getBoundingClientRect();
-        // Position in viewport coords (position: absolute relative
-        // to the page since the menu's offsetParent is the body
-        // mount root). Offset by scrollX/Y to convert.
+        // Menu is reparented to <body> at init, so `position:
+        // absolute` resolves against the initial containing block.
+        // Document coords = viewport coords + scrollX/Y.
         const top = rect.top + window.scrollY - menuRect.height - 8;
         const left = rect.left + window.scrollX + (rect.width - menuRect.width) / 2;
         imageBubbleMenu.style.top = `${Math.max(8, top)}px`;
         imageBubbleMenu.style.left = `${Math.max(8, left)}px`;
-        imageBubbleMenu.hidden = false;
-        // Active-state buttons.
+        imageBubbleMenu.style.visibility = '';
+        // Active-state buttons mirror the node's current class.
         const active = (editor.getAttributes('image').class || '').split(/\s+/);
         imageBubbleMenu.querySelectorAll('button').forEach((b) => {
           const slug = b.dataset.size || b.dataset.align;
           b.classList.toggle('is-active', active.includes(slug));
         });
-      });
+        // Re-fire once the new src finishes loading. Clicking a
+        // size button swaps the `<img src>` to a different
+        // rendition URL (per ClassedImage.renderHTML); for the
+        // brief window between src-changed and bytes-loaded the
+        // <img> has placeholder dimensions, so the rect we
+        // measured above can be wildly off (centering math
+        // collapses to the Math.max(8, ...) clamp). When load
+        // fires, re-measure with the real dimensions. `{once:
+        // true}` so we don't stack listeners across clicks.
+        if (!selectedImg.complete) {
+          selectedImg.addEventListener('load', refreshBubbleMenu, { once: true });
+        }
+      };
+      editor.on('selectionUpdate', refreshBubbleMenu);
+      editor.on('update', refreshBubbleMenu);
     }
 
     // Belt-and-braces: even if onUpdate hasn't fired yet (rare race
