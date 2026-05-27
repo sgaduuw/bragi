@@ -9,7 +9,9 @@ page to its original spot in the tree.
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, String, Text
+from typing import Any
+
+from sqlalchemy import JSON, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
@@ -36,3 +38,7 @@ class PageRevision(IdMixin, TimestampsMixin, Base):
     # so the attachment may have been deleted between snapshot and
     # restore; the post's live FK is SET NULL in that case.
     featured_image_id: Mapped[int | None] = mapped_column(default=None)
+    # Structured resume data snapshot; mirrors Page.resume_data so
+    # a rollback restores the full resume content alongside the
+    # narrative body.
+    resume_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None, nullable=True)

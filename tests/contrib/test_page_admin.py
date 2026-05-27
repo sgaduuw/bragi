@@ -16,7 +16,7 @@ from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, make_test_site, make_test_user
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
@@ -517,3 +517,36 @@ def test_skip_redirect_suppresses_on_post_updated(
         pm.unregister(rec)
 
     assert [c for c in calls if c["hook"] == "updated"] == []
+
+
+def test_page_resume_kind_constant_and_data_column_exist(
+    db_session: Session,
+) -> None:
+    """PageKind.RESUME is defined; pages.resume_data accepts dict or None."""
+    from bragi.core.models.page import Page, PageKind, PageStatus
+
+    assert PageKind.RESUME == "resume"
+
+    site = make_test_site(
+        db_session,
+        slug="cv-site",
+        hostname="cv.example.test",
+        title="CV Site",
+        canonical_url="https://cv.example.test",
+    )
+    page = Page(
+        site_id=site.id,
+        slug="my-cv",
+        title="My CV",
+        author_id=make_test_user(db_session, email="r@example.test").id,
+        status=PageStatus.PUBLISHED,
+        kind=PageKind.RESUME,
+        resume_data={"highlights": ["one"]},
+    )
+    db_session.add(page)
+    db_session.commit()
+
+    loaded = db_session.get(Page, page.id)
+    assert loaded is not None
+    assert loaded.kind == "resume"
+    assert loaded.resume_data == {"highlights": ["one"]}

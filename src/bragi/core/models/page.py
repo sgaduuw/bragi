@@ -59,10 +59,18 @@ class PageKind:
         are still honoured (used as intro copy above the listing),
         but the listing is what makes the page useful. At most one
         per site, enforced by a partial unique index.
+    RESUME: structured CV page. body_markdown holds the narrative
+        Summary; structured sections (Experience, Projects,
+        Education, Skills, Certifications, Languages, Highlights,
+        Header metadata) live in the `resume_data` JSON column.
+        No uniqueness constraint: multiple resumes per site are
+        allowed (e.g. consulting CV + speaking bio + tailored
+        variants per role).
     """
 
     STATIC = "static"
     POST_INDEX = "post_index"
+    RESUME = "resume"
 
 
 class Page(IdMixin, TimestampsMixin, Base):
@@ -126,3 +134,9 @@ class Page(IdMixin, TimestampsMixin, Base):
     # GUID).
     source_id: Mapped[str | None] = mapped_column(String(255), default=None, index=True)
     source_meta: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+
+    # Structured resume data; populated only when kind == "resume".
+    # Validated by bragi.contrib.page.resume.ResumeData. NULL means
+    # "no structured resume sections" — the page still renders, with
+    # only the header and Summary (from body_markdown) visible.
+    resume_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None, nullable=True)
