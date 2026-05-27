@@ -137,7 +137,6 @@
 </style>
 
 <script type="module">
-  console.log('[bragi-editor] module load: start');
   // TipTap + Markdown via CDN ESM. Self-hosted bundle + Subresource
   // Integrity is a follow-up; admin is behind auth so the surface
   // is the operator's own browser.
@@ -234,10 +233,6 @@
       }
       return ['img', HTMLAttributes];
     },
-  });
-  console.log('[bragi-editor] imports + ClassedImage construction OK');
-  window.addEventListener('error', (e) => {
-    console.log('[bragi-editor] window error event:', e.message, e.filename, e.lineno);
   });
 
   // Site-scoped admin URL for attachment bytes. The stored
@@ -547,49 +542,53 @@
     // mutually exclusive so we strip the existing one before adding
     // the incoming one. Unknown classes the operator added by hand
     // pass through untouched.
-    console.log('[bragi-editor] imageBubbleMenu element:', imageBubbleMenu);
-    if (imageBubbleMenu) {
-      console.log('[bragi-editor] wiring bubble menu listeners');
-      const SIZE_CLASSES = new Set(['size-small', 'size-medium', 'size-full']);
-      const ALIGN_CLASSES = new Set(['align-left', 'align-center', 'align-right']);
-      // Prevent the button from stealing focus on mousedown.
-      // Without this, clicking a bubble-menu button blurs the
-      // image node selection; `updateAttributes('image', ...)`
-      // then operates on the caret's surrounding text node and
-      // the image's class doesn't change.
-      imageBubbleMenu.addEventListener('mousedown', (e) => {
-        if (e.target.closest('button[data-size], button[data-align]')) {
-          e.preventDefault();
-        }
-      });
-      imageBubbleMenu.addEventListener('click', (e) => {
-        console.log('[bragi-editor] bubble menu click; target:', e.target);
-        const btn = e.target.closest('button[data-size], button[data-align]');
-        if (!btn) return;
+    // Bubble menu wiring uses event delegation on document.body
+    // because TipTap's BubbleMenu (Tippy.js under the hood) moves
+    // the menu element into its own portal at body level;
+    // listeners attached to the original DOM node never see
+    // clicks on the moved copy. Delegated listeners match on
+    // selector regardless of where the element lives.
+    const SIZE_CLASSES = new Set(['size-small', 'size-medium', 'size-full']);
+    const ALIGN_CLASSES = new Set(['align-left', 'align-center', 'align-right']);
+    const BUBBLE_BTN_SELECTOR =
+      '#tiptap-image-bubble-menu button[data-size], #tiptap-image-bubble-menu button[data-align]';
+    // Prevent the button from stealing focus on mousedown. Without
+    // this, clicking a bubble-menu button blurs the image node
+    // selection; `updateAttributes('image', ...)` then operates on
+    // the caret's surrounding text node and the image's class
+    // doesn't change.
+    document.body.addEventListener('mousedown', (e) => {
+      if (e.target.closest(BUBBLE_BTN_SELECTOR)) {
         e.preventDefault();
-        const current = (editor.getAttributes('image').class || '')
-          .split(/\s+/).filter(Boolean);
-        const isSize = btn.dataset.size != null;
-        const incoming = isSize ? btn.dataset.size : btn.dataset.align;
-        const group = isSize ? SIZE_CLASSES : ALIGN_CLASSES;
-        const next = current.filter((c) => !group.has(c));
-        next.push(incoming);
-        console.log('[bragi-editor] updating image class to', next.join(' '));
-        editor.chain().focus().updateAttributes('image', {
-          class: next.join(' '),
-        }).run();
+      }
+    });
+    document.body.addEventListener('click', (e) => {
+      const btn = e.target.closest(BUBBLE_BTN_SELECTOR);
+      if (!btn) return;
+      e.preventDefault();
+      const current = (editor.getAttributes('image').class || '')
+        .split(/\s+/).filter(Boolean);
+      const isSize = btn.dataset.size != null;
+      const incoming = isSize ? btn.dataset.size : btn.dataset.align;
+      const group = isSize ? SIZE_CLASSES : ALIGN_CLASSES;
+      const next = current.filter((c) => !group.has(c));
+      next.push(incoming);
+      editor.chain().focus().updateAttributes('image', {
+        class: next.join(' '),
+      }).run();
+    });
+    // Mark the active size + align buttons so the operator sees
+    // the current state at a glance. Re-run on every selection
+    // change (covers click-to-focus on a different image). The
+    // querySelectorAll runs against document so the buttons get
+    // found whether Tippy left them in-place or moved them.
+    editor.on('selectionUpdate', () => {
+      const active = (editor.getAttributes('image').class || '').split(/\s+/);
+      document.querySelectorAll(BUBBLE_BTN_SELECTOR).forEach((b) => {
+        const slug = b.dataset.size || b.dataset.align;
+        b.classList.toggle('is-active', active.includes(slug));
       });
-      // Mark the active size + align buttons so the operator sees
-      // the current state at a glance. Re-run on every selection
-      // change (covers click-to-focus on a different image).
-      editor.on('selectionUpdate', () => {
-        const active = (editor.getAttributes('image').class || '').split(/\s+/);
-        imageBubbleMenu.querySelectorAll('button').forEach((b) => {
-          const slug = b.dataset.size || b.dataset.align;
-          b.classList.toggle('is-active', active.includes(slug));
-        });
-      });
-    }
+    });
 
     // Belt-and-braces: even if onUpdate hasn't fired yet (rare race
     // when submitting immediately after typing), serialize one more
