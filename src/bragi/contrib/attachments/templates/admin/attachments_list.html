@@ -29,6 +29,16 @@
     <button type="submit">Retry failed</button>
   </form>
   {% endif %}
+  {# Destructive: drops every rendition row and re-enqueues from
+     scratch. The JS confirm() guards a misclick; the server view
+     trusts the POST is intentional. #}
+  <form method="post"
+        action="{{ url_for('attachment_admin.regenerate_all', site_slug=request.view_args['site_slug']) }}"
+        style="display: inline;"
+        onsubmit="return confirm('Regenerate ALL renditions for this site? Existing rendition rows will be dropped and re-queued.');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn secondary">Regenerate all renditions</button>
+  </form>
 </section>
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
   <h1 style="margin: 0;">Attachments</h1>

@@ -2979,3 +2979,78 @@ def test_post_retry_failed_resets_failed_rows_to_pending(
     assert by_label["320w"].last_error is None
     # Done row untouched.
     assert by_label["800w"].status == "done"
+
+
+def test_attachments_list_shows_regenerate_all_button(
+    admin_app: Flask,
+) -> None:
+    """The status panel includes a destructive "Regenerate all
+    renditions" button (always shown; the JS confirm guards a
+    misclick).
+    """
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/")
+    body = resp.data.decode()
+    assert 'action="/admin/sites/blog/attachments/regenerate-all"' in body
+    assert "Regenerate all renditions" in body
+    # JS confirm guard is present so a misclick doesn't fire the
+    # destructive op.
+    assert "confirm(" in body
+
+
+def test_post_regenerate_all_purges_and_re_enqueues(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """`POST /regenerate-all` drops every existing rendition row
+    for the site and re-enqueues pending rows for the active
+    theme's ladder × {avif, webp, original}."""
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="x.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="w" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        # Pre-existing stale rendition row (e.g. sha-style legacy).
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="999w",
+                format="bogus",
+                content_type="image/bogus",
+                status="done",
+                storage_key="legacy-sha-style-key",
+                width=999,
+                height=500,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/")
+    resp = client.post(
+        "/admin/sites/blog/attachments/regenerate-all",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/admin/sites/blog/attachments/")
+
+    with db_session_factory() as db:
+        rows = db.execute(select(AttachmentRendition)).scalars().all()
+    # Stale row purged; the 999w/bogus is gone.
+    assert all(r.format in {"avif", "webp", "original"} for r in rows)
+    # Default ladder × 3 formats = 9 pending rows.
+    assert len(rows) == 9
+    assert all(r.status == "pending" for r in rows)
