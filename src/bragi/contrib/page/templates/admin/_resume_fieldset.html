@@ -426,4 +426,39 @@
     background: #eee;
     border-color: #888;
   }
+  /* Per-row form elements. Without these, labels render inline with
+     their inputs and the row's grid of fields collapses into a
+     left-to-right flow that's unreadable. Mirrors the base admin
+     form style (block labels above block inputs) but scoped to the
+     resume fieldset so it doesn't leak to other forms. */
+  #resume-fieldset .repeating-field__body label,
+  #resume-fieldset .resume-section > label {
+    display: block;
+    font-size: 0.85em;
+    color: #555;
+    margin: 0.5rem 0 0.2rem;
+    font-weight: 500;
+  }
+  #resume-fieldset .repeating-field__body input[type=text],
+  #resume-fieldset .repeating-field__body input[type=url],
+  #resume-fieldset .repeating-field__body input[type=month],
+  #resume-fieldset .repeating-field__body input[type=number],
+  #resume-fieldset .repeating-field__body select,
+  #resume-fieldset .repeating-field__body textarea,
+  #resume-fieldset .resume-section > input[type=text] {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+    font: inherit;
+    background: white;
+  }
+  #resume-fieldset .repeating-field__body textarea {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    min-height: 4rem;
+    resize: vertical;
+  }
 </style>
