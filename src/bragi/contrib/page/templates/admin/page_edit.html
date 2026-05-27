@@ -52,6 +52,9 @@
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   {% if swap_pending %}<input type="hidden" name="acknowledge_swap" value="1">{% endif %}
   {% if demotion_pending %}<input type="hidden" name="acknowledge_demotion" value="1">{% endif %}
+  {# Hoist current_kind before the resume-fieldset guard below so the comparison
+     doesn't evaluate against Jinja's Undefined and silently return False. #}
+  {% set current_kind = form.get('kind', 'static') %}
 
   <fieldset>
     <label for="title">Title</label>
@@ -102,7 +105,6 @@
   <fieldset>
     <label for="kind">Kind</label>
     <select name="kind" id="kind">
-      {% set current_kind = form.get('kind', 'static') %}
       <option value="static" {% if current_kind == 'static' %}selected{% endif %}>Static page</option>
       <option value="post_index" {% if current_kind == 'post_index' %}selected{% endif %}>Post index (hosts blog listing)</option>
       <option value="resume" {% if current_kind == 'resume' %}selected{% endif %}>Resume / CV (structured content)</option>
