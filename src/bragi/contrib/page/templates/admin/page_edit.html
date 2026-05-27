@@ -85,6 +85,10 @@
     <textarea name="body_markdown" id="body_markdown" rows="15">{{ form.get('body_markdown', '') }}</textarea>
   </fieldset>
 
+  {% if current_kind == 'resume' %}
+    {% include "admin/_resume_fieldset.html" %}
+  {% endif %}
+
   <fieldset>
     <label for="status">Status</label>
     <select name="status" id="status">
@@ -101,6 +105,7 @@
       {% set current_kind = form.get('kind', 'static') %}
       <option value="static" {% if current_kind == 'static' %}selected{% endif %}>Static page</option>
       <option value="post_index" {% if current_kind == 'post_index' %}selected{% endif %}>Post index (hosts blog listing)</option>
+      <option value="resume" {% if current_kind == 'resume' %}selected{% endif %}>Resume / CV (structured content)</option>
     </select>
     <small>
       A site can have at most one post_index page. Promoting another
