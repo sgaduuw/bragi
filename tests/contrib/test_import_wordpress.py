@@ -202,7 +202,7 @@ def test_plan_warns_on_shortcodes_and_comments(tmp_path: Path) -> None:
 def site_id(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[int]:
     # Importer needs at least one user as the fallback author. The
     # first user doubles as the site owner.
@@ -226,7 +226,6 @@ def site_id(
     # helper's SessionLocal so it hits the same in-memory DB the
     # test session writes to.
     seed_blog_index(db_session, site, slug="posts")
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id
 
 
@@ -242,9 +241,8 @@ def test_apply_creates_post_with_markdown_body(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_wordpress.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -277,9 +275,8 @@ def test_apply_creates_page_with_parent(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_wordpress.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -306,9 +303,8 @@ def test_apply_inserts_permalink_redirects(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_wordpress.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -346,10 +342,9 @@ def test_apply_is_idempotent_via_source_id(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """Re-running apply on the same export updates rows, not duplicates."""
-    monkeypatch.setattr("bragi.contrib.import_wordpress.importer.SessionLocal", db_session_factory)
     items = [
         _item(post_id="1", slug="alpha", title="Alpha"),
         _item(post_id="2", slug="about", post_type="page", title="About"),
@@ -384,10 +379,9 @@ def test_apply_collapses_categories_with_prefix(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """Categories land in Tag with a `category:` slug prefix."""
-    monkeypatch.setattr("bragi.contrib.import_wordpress.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -415,9 +409,8 @@ def test_apply_strips_shortcodes_from_body(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_wordpress.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -442,9 +435,8 @@ def test_apply_resolves_author_by_email(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_wordpress.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [_item(post_id="1", slug="alpha", creator="grace")],
@@ -461,9 +453,8 @@ def test_apply_warns_on_comments_attachments_and_shortcodes(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_wordpress.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [

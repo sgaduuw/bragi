@@ -154,7 +154,7 @@ def test_plan_warns_on_missing_slug(tmp_path: Path) -> None:
 def site_id(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[int]:
     # Importer needs at least one user for the author fallback; the
     # same user doubles as the site owner.
@@ -177,7 +177,6 @@ def site_id(
     # `post_url_for` reads from the same in-memory DB the test
     # session writes to.
     seed_blog_index(db_session, site, slug="posts")
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id
 
 
@@ -193,9 +192,8 @@ def test_apply_creates_post_with_markdown_body(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -229,9 +227,8 @@ def test_apply_inserts_permalink_redirect_for_published(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -263,9 +260,8 @@ def test_apply_is_idempotent_via_source_id(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [{"id": "gp1", "slug": "x", "title": "First", "html": "<p>A</p>", "status": "published"}],
@@ -292,9 +288,8 @@ def test_apply_attaches_tags(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [{"id": "gp1", "slug": "a", "title": "A", "html": "<p>A</p>", "status": "published"}],
@@ -321,11 +316,10 @@ def test_apply_matches_author_by_email(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """Ghost author with email 'ada@example.com' matches the seeded
     User row; the post lands attributed to Ada."""
-    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -352,9 +346,8 @@ def test_apply_falls_back_to_first_user_when_author_unmatched(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [
@@ -381,9 +374,8 @@ def test_apply_skips_pages_for_now(
     tmp_path: Path,
     site_id: int,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_ghost.importer.SessionLocal", db_session_factory)
     p = _make_export(
         tmp_path,
         [

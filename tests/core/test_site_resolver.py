@@ -18,7 +18,7 @@ from bragi.core.models.site_alias import SiteAlias
 def delivery_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     owner = make_test_user(db_session)
     site = Site(
@@ -34,10 +34,6 @@ def delivery_app(
     db_session.add(SiteAlias(site_id=site.id, hostname="legacy.example.com"))
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
     yield create_delivery_app()
 
 
@@ -87,7 +83,7 @@ def test_alias_lookup_is_case_insensitive(delivery_app: Flask) -> None:
 def test_deactivated_canonical_does_not_resolve(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """A site flagged `active=False` must NOT resolve. The admin
     "Deactivate" toggle is purely cosmetic if the resolver ignores
@@ -104,11 +100,6 @@ def test_deactivated_canonical_does_not_resolve(
         )
     )
     db_session.commit()
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
-
     app = create_delivery_app()
     assert _probe(app, "parked.example.com") is None
 
@@ -116,7 +107,7 @@ def test_deactivated_canonical_does_not_resolve(
 def test_deactivated_site_aliases_also_do_not_resolve(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """Aliases inherit the parent Site's active flag: if the site is
     deactivated, requests via its aliases must also 404."""
@@ -133,11 +124,6 @@ def test_deactivated_site_aliases_also_do_not_resolve(
     db_session.flush()
     db_session.add(SiteAlias(site_id=site.id, hostname="parked-alias.example.com"))
     db_session.commit()
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
-
     app = create_delivery_app()
     assert _probe(app, "parked-alias.example.com") is None
 
@@ -145,7 +131,7 @@ def test_deactivated_site_aliases_also_do_not_resolve(
 def test_reactivating_a_site_makes_it_resolve_again(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """Toggle round-trip: a deactivated then reactivated site
     resolves again (no cached stale state)."""
@@ -160,11 +146,6 @@ def test_reactivating_a_site_makes_it_resolve_again(
     )
     db_session.add(site)
     db_session.commit()
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
-
     # First leg: deactivated.
     app_off = create_delivery_app()
     assert _probe(app_off, "cycle.example.com") is None

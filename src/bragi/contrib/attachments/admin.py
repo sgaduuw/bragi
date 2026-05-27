@@ -34,8 +34,14 @@ from flask import (
 )
 from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from werkzeug.utils import secure_filename
 
+from bragi.contrib.attachments.cli import (
+    _enqueue_missing_renditions,
+    _purge_renditions,
+)
+from bragi.contrib.attachments.delivery import build_attachment_response
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
@@ -43,6 +49,8 @@ from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
+from bragi.core.storage import store_original
+from bragi.core.themes import rendition_target_content_type, resolved_widths
 from bragi.settings import settings
 
 # Allowlist of MIME types accepted at upload time. Anything not
@@ -81,6 +89,7 @@ _ATTACHMENT_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
         "text/plain",
     }
 )
+
 
 bp = Blueprint(
     "attachment_admin",
@@ -133,6 +142,28 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
             )
         ).scalar_one()
 
+        # Three counts feed the status panel at the top of the
+        # list view: pending (worker hasn't drained yet) +
+        # processing (in-flight on the current worker tick) roll
+        # up into one "Pending" tile, done is the steady-state
+        # count, and failed is sticky after `max_attempts` retries.
+        # One GROUP BY query so we pay one round-trip regardless
+        # of how many statuses the table currently has rows in.
+        rendition_status_counts: dict[str, int] = {
+            status: count
+            for status, count in db.execute(
+                select(AttachmentRendition.status, func.count())
+                .join(Attachment, AttachmentRendition.attachment_id == Attachment.id)
+                .where(Attachment.site_id == site.id)
+                .group_by(AttachmentRendition.status)
+            ).all()
+        }
+        pending_rendition_count = rendition_status_counts.get(
+            "pending", 0
+        ) + rendition_status_counts.get("processing", 0)
+        done_rendition_count = rendition_status_counts.get("done", 0)
+        failed_rendition_count = rendition_status_counts.get("failed", 0)
+
     return render_template(
         "admin/attachments_list.html",
         rows=rows,
@@ -140,7 +171,107 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         has_more=has_more,
         missing_alt=missing_alt,
         missing_alt_count=missing_alt_count,
+        pending_rendition_count=pending_rendition_count,
+        done_rendition_count=done_rendition_count,
+        failed_rendition_count=failed_rendition_count,
     )
+
+
+@bp.route("/file/<path:storage_key>", methods=["GET"])
+def serve_attachment_bytes(site_slug: str, storage_key: str) -> ResponseReturnValue:
+    """Site-scoped attachment bytes for admin previews.
+
+    The delivery-side `/attachments/<key>` route resolves the site
+    from the Host header, which on the admin host doesn't match
+    any site row. The picker grid, the image-picker macro's
+    inline thumbnails, and the TipTap editor's inserted images
+    all need a working preview URL on the admin app; this route
+    is that URL.
+
+    Auth piggybacks on the admin login_required guard installed
+    on the app at boot. The site_slug in the path is the source
+    of truth; `resolve_site_or_abort` 404s on an unknown slug
+    and 403s on a non-member, matching the rest of the admin
+    surface.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+    return build_attachment_response(site, storage_key)
+
+
+@bp.route("/regenerate-missing", methods=["POST"])
+def regenerate_missing(site_slug: str) -> ResponseReturnValue:
+    """Operator-triggered version of the `cms media regenerate-missing` CLI.
+
+    Enqueues pending rows for every (attachment, width, format)
+    gap under the active theme. Mirrors the CLI logic via the
+    shared `_enqueue_missing_renditions` helper so both call
+    sites behave identically; the response 302s back to the
+    attachments list with a flash. Same auth posture as the rest
+    of this Blueprint (admin login gate + per-site editor role).
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        added = _enqueue_missing_renditions(db, site, current_app)
+        db.commit()
+    flash(f"Enqueued {added} pending rendition(s).", "success")
+    return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))
+
+
+@bp.route("/regenerate-all", methods=["POST"])
+def regenerate_all(site_slug: str) -> ResponseReturnValue:
+    """Operator-triggered destructive purge + re-enqueue.
+
+    Drops every rendition row for the site and re-enqueues from
+    scratch under the active theme. Same shape as the CLI's
+    `regenerate-all --yes`. The template-side button confirms
+    via a JS prompt before submitting; this view assumes the POST
+    is intentional. Useful when legacy renditions need to be
+    re-minted in a consistent layout (e.g. after the
+    sync-resize-to-async-worker switch left some rows with
+    SHA-style storage_keys instead of path-style).
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        _purge_renditions(db, site)
+        added = _enqueue_missing_renditions(db, site, current_app)
+        db.commit()
+    flash(f"Purged + enqueued {added} pending rendition(s).", "success")
+    return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))
+
+
+@bp.route("/retry-failed", methods=["POST"])
+def retry_failed(site_slug: str) -> ResponseReturnValue:
+    """Reset failed rendition rows for this site back to pending.
+
+    The worker picks them up on its next tick; if the underlying
+    cause hasn't been fixed they'll fail again and re-land in
+    `failed` after `attachment_rendition_max_attempts`. Cheap to
+    spam, so no extra confirmation gate beyond CSRF and role.
+    Done rows are left untouched.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        result = db.execute(
+            sa_update(AttachmentRendition)
+            .where(
+                AttachmentRendition.attachment_id.in_(
+                    select(Attachment.id).where(Attachment.site_id == site.id)
+                ),
+                AttachmentRendition.status == "failed",
+            )
+            .values(status="pending", attempts=0, last_error=None)
+        )
+        db.commit()
+        # CursorResult exposes rowcount; the static return type from
+        # session.execute() is the broader Result, so a getattr pins
+        # it (same idiom as `core.middleware.sessions.purge_expired`).
+        reset_count = int(getattr(result, "rowcount", 0) or 0)
+    flash(f"Reset {reset_count} failed rendition(s) to pending.", "success")
+    return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))
 
 
 @bp.route("/picker", methods=["GET"])
@@ -176,11 +307,70 @@ def picker(site_slug: str) -> ResponseReturnValue:
         peek = db.execute(peek_query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
         has_more = peek is not None
 
+        # Per-attachment WebP rendition map. The picker template
+        # uses these to drive:
+        #   - the card thumbnail src (smallest WebP)
+        #   - the inserted Image node's per-class rendition data
+        #     attrs, so the editor preview at size-small / medium /
+        #     full shows the right bytes instead of the multi-MB
+        #     original.
+        # An attachment with no done WebP yet (just uploaded) gets
+        # an empty mapping; the template falls back to the original
+        # storage_key for the thumbnail and the editor preview.
+        webp_keys_by_id: dict[int, list[tuple[int, str]]] = {}
+        if rows:
+            rendition_rows = (
+                db.execute(
+                    select(AttachmentRendition)
+                    .where(
+                        AttachmentRendition.status == "done",
+                        AttachmentRendition.format == "webp",
+                        AttachmentRendition.attachment_id.in_([r.id for r in rows]),
+                    )
+                    .order_by(
+                        AttachmentRendition.attachment_id,
+                        AttachmentRendition.width.asc(),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for rr in rendition_rows:
+                if rr.storage_key is None or rr.width is None:
+                    continue
+                webp_keys_by_id.setdefault(rr.attachment_id, []).append((rr.width, rr.storage_key))
+
+        # Derive the per-size mapping the template renders into the
+        # picker card data-* attributes:
+        #   - thumb / small → smallest done WebP rendition
+        #   - medium → middle done WebP (biased larger on even-length ladders)
+        #   - full → empty; the editor renderHTML falls back to the
+        #     original `src` for size-full so the largest tier is
+        #     always the original bytes (the largest WebP may be
+        #     smaller than the source when the no-upscale guard
+        #     skipped the top ladder tier).
+        # Falls back to "" when no WebP exists yet.
+        thumb_storage_key_by_id: dict[int, str] = {}
+        small_key_by_id: dict[int, str] = {}
+        medium_key_by_id: dict[int, str] = {}
+        full_key_by_id: dict[int, str] = {}
+        for att_id, ladder in webp_keys_by_id.items():
+            # ladder is ordered by width ASC.
+            thumb_storage_key_by_id[att_id] = ladder[0][1]
+            small_key_by_id[att_id] = ladder[0][1]
+            medium_key_by_id[att_id] = ladder[len(ladder) // 2][1]
+            # Intentionally left unset for `full`; renderHTML in the
+            # editor falls back to attrs.src (the original).
+
     return render_template(
         "admin/attachments_picker.html",
         rows=rows,
         page=page,
         has_more=has_more,
+        thumb_storage_key_by_id=thumb_storage_key_by_id,
+        small_key_by_id=small_key_by_id,
+        medium_key_by_id=medium_key_by_id,
+        full_key_by_id=full_key_by_id,
     )
 
 
@@ -191,6 +381,9 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
         require_role("author", site.id)
         site_id = site.id
         site_slug_for_storage = site.slug
+        # Carry the theme slug across the session boundary so the
+        # enqueue block below doesn't have to re-load the Site row.
+        site_theme_slug = site.theme
 
     if request.method == "GET":
         return render_template("admin/attachments_new.html")
@@ -228,8 +421,15 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
         # Store first so the row's storage_key matches the backend
         # location. Idempotent: a duplicate upload reuses the file.
+        # `store_original` lands at <sha>/original.<ext> (the
+        # rendition-aware layout); `backend.remove` below knows to
+        # walk that path on rollback. The backend handle is still
+        # used for the rollback so a non-local backend stays
+        # consistent on the cleanup path.
         backend = resolve_storage(current_app)
-        storage_key, size = backend.store(site_slug_for_storage, data)
+        storage_key, size = store_original(
+            site_slug_for_storage, content_type=content_type, data=data
+        )
         existing = db.execute(
             select(Attachment).where(
                 Attachment.site_id == site_id,
@@ -287,40 +487,37 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
         db.flush()  # populate attachment.id for the rendition FKs
         new_id = attachment.id
 
-        # Rendition ladder: generate one rendition per configured
-        # width below the source. Synchronous on upload per #41's
-        # phase 2 design note ("start synchronous, revisit if it
-        # hurts"). Failures are logged and skipped so a single bad
-        # decode never blocks the upload.
+        # Enqueue pending rendition rows per the active theme's
+        # widths × {avif, webp, original}. The worker
+        # (`cms media process-renditions`) drains them on the
+        # scheduler cadence; upload returns fast with the original
+        # only. Skips enqueue when the upload isn't an image (no
+        # width recorded by the probe) so PDFs / text never end
+        # up with a phantom ladder.
         rendition_count = 0
-        if (
-            processor is not None
-            and processor.resize is not None
-            and width is not None
-            and height is not None
-        ):
-            for target_width in settings.attachment_rendition_widths:
+        if width is not None and height is not None:
+            registry = current_app.extensions.get("registry")
+            active_theme = (
+                registry.theme(site_theme_slug)
+                if registry is not None and site_theme_slug
+                else None
+            )
+            widths = resolved_widths(active_theme)
+            for target_width in widths:
                 if target_width >= width:
+                    # Skip slots the source can't satisfy (no upscaling).
                     continue
-                resized = processor.resize(data, target_width)
-                if resized is None:
-                    continue
-                resized_meta = processor.probe(resized)
-                if resized_meta is None:
-                    continue
-                resized_key, resized_size = backend.store(site_slug_for_storage, resized)
-                db.add(
-                    AttachmentRendition(
-                        attachment_id=new_id,
-                        size_label=f"{target_width}w",
-                        storage_key=resized_key,
-                        content_type=content_type,
-                        width=resized_meta.width,
-                        height=resized_meta.height,
-                        bytes_size=resized_size,
+                for format_slug in ("avif", "webp", "original"):
+                    db.add(
+                        AttachmentRendition(
+                            attachment_id=new_id,
+                            size_label=f"{target_width}w",
+                            format=format_slug,
+                            content_type=rendition_target_content_type(format_slug, content_type),
+                            status="pending",
+                        )
                     )
-                )
-                rendition_count += 1
+                    rendition_count += 1
 
         db.commit()
 
@@ -480,11 +677,14 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
         # already ran before we acquired the lock) is acknowledged
         # as out-of-scope: closing it requires the upload path to
         # re-store inside its insert txn, tracked separately.
+        # Pending renditions (status='pending'/'processing') have
+        # storage_key=None and contribute no on-disk file to refcount.
         rendition_keys = [
             r.storage_key
             for r in db.execute(
                 select(AttachmentRendition).where(AttachmentRendition.attachment_id == row.id)
             ).scalars()
+            if r.storage_key is not None
         ]
         db.delete(row)
         db.flush()  # apply cascade so refcount sees post-delete state

@@ -29,7 +29,8 @@ from bragi.core.db import SessionLocal
 from bragi.core.image_processor import PillowImageProcessor
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
-from bragi.core.render.transforms import TransformRegistry
+from bragi.core.models.site import Site
+from bragi.core.renditions import editor_renditions_for_body
 from bragi.core.storage import LocalStorageBackend
 
 
@@ -45,6 +46,13 @@ def _serve_url(storage_key: str) -> str:
         return url_for("attachment_delivery.serve_attachment", storage_key=storage_key)
     except Exception:  # noqa: BLE001 -- defensive: outside-request-context fallback
         return f"/attachments/{storage_key}"
+
+
+def attachment_url(attachment: Attachment | None) -> str:
+    """Public URL for a single attachment. Returns "" on None."""
+    if attachment is None:
+        return ""
+    return _serve_url(attachment.storage_key)
 
 
 def srcset_for(attachment: Attachment | None) -> str:
@@ -73,16 +81,30 @@ def srcset_for(attachment: Attachment | None) -> str:
                 .order_by(AttachmentRendition.width)
             ).scalars()
         )
-    if not renditions:
+    # Pending renditions (status='pending'/'processing') have
+    # storage_key=None and aren't ready to serve yet; skip them so
+    # the srcset only references bytes the storage backend has.
+    parts = [
+        f"{_serve_url(r.storage_key)} {r.width}w"
+        for r in renditions
+        if r.storage_key is not None and r.width is not None
+    ]
+    if not parts:
         return ""
-    parts = [f"{_serve_url(r.storage_key)} {r.width}w" for r in renditions]
     parts.append(f"{_serve_url(attachment.storage_key)} {attachment.width}w")
     return ", ".join(parts)
 
 
 @hookimpl
 def register_admin_blueprint() -> Blueprint:
-    """Mount the attachment admin Blueprint at /admin/attachments."""
+    """Mount the attachment admin Blueprint at /admin/sites/<slug>/attachments.
+
+    Includes the site-scoped bytes route
+    `attachment_admin.serve_attachment_bytes` for admin previews;
+    the delivery `/attachments/<key>` route is intentionally NOT
+    cross-mounted here because it resolves the site from the Host
+    header and the admin's Host won't match any site.
+    """
     return attachment_admin_bp
 
 
@@ -120,28 +142,54 @@ def register_image_processor() -> ImageProcessorSpec:
 
 @hookimpl
 def register_template_globals(env: jinja2.Environment) -> None:
-    """Expose `srcset_for(attachment)` to delivery templates so a
-    theme can render responsive `<img srcset>` from the rendition
-    ladder without pulling in plugin internals.
+    """Expose attachments helpers to delivery templates.
+
+    `srcset_for` / `attachment_url` are globals so themes can call
+    them from anywhere. `pictureify` is registered as a filter,
+    mirroring `internal_link_rewrite`: the delivery templates pipe
+    `body_html` through it at render time.
+
+    Pictureify *cannot* run at save time (its previous home as a
+    `register_html_transform` hookimpl): it needs `g.site` to scope
+    the rendition lookup, and the admin's request context doesn't
+    set one (admin is single-host, no site_resolver middleware in
+    front of the write path). Filter form runs on the delivery
+    side where the site_resolver middleware has set `g.site` for
+    every request, so `body_html` cached at save time still expands
+    to `<picture>` blocks on render.
     """
     env.globals["srcset_for"] = srcset_for
+    env.globals["attachment_url"] = attachment_url
+    env.globals["editor_image_renditions"] = _editor_image_renditions_json
+    env.filters["pictureify"] = pictureify
+
+
+def _editor_image_renditions_json(
+    body_markdown: str | None, site_slug: str | None
+) -> dict[str, dict[str, str | None]]:
+    """Jinja global: rendition map for images referenced in `body_markdown`.
+
+    Called from the shared `_tiptap_editor.html` partial so the
+    editor JS can hydrate per-image rendition URLs on reload (the
+    markdown body only carries the original `<sha>` and the size
+    class; the rendition URLs are editor-only and not serialized).
+    Returns `{sha: {small_key, medium_key, full_key}}`.
+
+    Opens its own short-lived DB session because the calling view's
+    session is local to that function and isn't threaded through to
+    Jinja globals. One extra read query per edit-page render; the
+    view's hot path is unaffected.
+    """
+    if not body_markdown or not site_slug:
+        return {}
+    with SessionLocal() as db:
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+        if site is None:
+            return {}
+        return editor_renditions_for_body(db, site_id=site.id, body_markdown=body_markdown)
 
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
     """Add `cms media reindex` for backfilling rendition slots."""
     group.add_command(media_group)
-
-
-@hookimpl
-def register_html_transform(registry: TransformRegistry) -> None:
-    """Register `pictureify` so post / page bodies that reference
-    `/attachments/<key>` get expanded to `<picture>` with the
-    rendition ladder as `srcset` at render time.
-
-    Priority 150 keeps this between the Pygments highlighter (50)
-    and the heading-anchor injector (200): neither touches images,
-    but a fixed slot makes the rendering pipeline easier to reason
-    about as more transforms accrue.
-    """
-    registry.add(pictureify, name="pictureify-attachments", priority=150)

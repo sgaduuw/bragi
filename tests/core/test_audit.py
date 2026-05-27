@@ -41,7 +41,7 @@ PASSWORD = "correct-horse-battery-staple"
 def admin_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     user = User(email=EMAIL, display_name="Ada", is_active=True)
     db_session.add(user)
@@ -61,16 +61,6 @@ def admin_app(
     db_session.add(UserSiteRole(user_id=user.id, site_id=site.id, role="editor"))
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.audit.admin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.permissions.SessionLocal", db_session_factory)
-
     yield create_admin_app()
 
 
@@ -87,9 +77,8 @@ def _login(client: FlaskClient, email: str = EMAIL, password: str = PASSWORD) ->
 
 def test_audit_outside_request_context_writes_with_no_actor(
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
     audit("cli.smoke", extra={"note": "no request context here"})
     with db_session_factory() as db:
         row = db.execute(select(AuditLog).where(AuditLog.action == "cli.smoke")).scalar_one()
@@ -102,7 +91,15 @@ def test_audit_outside_request_context_writes_with_no_actor(
 def test_audit_failure_is_swallowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A broken SessionLocal must NOT raise out of audit()."""
+    """A broken SessionLocal must NOT raise out of audit().
+
+    Deliberate per-module patch: this test replaces the module-
+    level `SessionLocal` reference in `bragi.core.audit` with a
+    callable that raises. The proxy refactor (#256) made
+    `patched_session_locals` the standard test fixture, but this
+    test wants the opposite: a knowingly-broken factory, not the
+    test factory. The per-module setattr stays.
+    """
 
     class _Broken:
         def __call__(self) -> object:
@@ -410,6 +407,13 @@ def test_audit_nav_entry_only_for_superuser(admin_app: Flask) -> None:
     _login(client)  # not superuser
     resp = client.get("/admin/account/sessions")
     assert b"Audit log" not in resp.data
+
+
+def test_audit_action_has_pin_constants() -> None:
+    from bragi.core.audit import AuditAction
+
+    assert AuditAction.POST_PINNED == "post.pinned"
+    assert AuditAction.POST_UNPINNED == "post.unpinned"
 
 
 # Sanity: helper does NOT explode when SessionLocal is broken even

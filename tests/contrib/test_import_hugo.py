@@ -169,7 +169,7 @@ def test_plan_skips_section_index(tmp_path: Path) -> None:
 def site_and_author(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[tuple[int, int]]:
     user = User(email="ada@example.com", display_name="Ada", is_active=True)
     db_session.add(user)
@@ -191,7 +191,6 @@ def site_and_author(
     # `bragi.core.url.SessionLocal` so the url helper hits the
     # same in-memory DB the test session writes to.
     seed_blog_index(db_session, site, slug="posts")
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     yield site.id, user.id
 
 
@@ -199,9 +198,8 @@ def test_apply_creates_posts_and_redirects(
     tmp_path: Path,
     site_and_author: tuple[int, int],
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_hugo.importer.SessionLocal", db_session_factory)
     site_id, _user_id = site_and_author
 
     root = _make_hugo_tree(tmp_path)
@@ -257,9 +255,8 @@ def test_apply_is_idempotent_via_source_id(
     tmp_path: Path,
     site_and_author: tuple[int, int],
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_hugo.importer.SessionLocal", db_session_factory)
     site_id, _user_id = site_and_author
 
     root = _make_hugo_tree(tmp_path)
@@ -287,7 +284,7 @@ def test_alias_redirect_targets_site_post_index_slug(
     tmp_path: Path,
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
     """Regression: alias targets must match the site's post_index slug.
 
@@ -296,8 +293,6 @@ def test_alias_redirect_targets_site_post_index_slug(
     site with `slug="blog"` (the new-site default) and imports a
     Hugo post; the alias target must come out as `/blog/<slug>/`.
     """
-    monkeypatch.setattr("bragi.contrib.import_hugo.importer.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
     user = User(email="b@example.com", display_name="B", is_active=True)
     db_session.add(user)
     db_session.flush()
@@ -336,9 +331,8 @@ def test_apply_skips_draft_status_for_drafts(
     tmp_path: Path,
     site_and_author: tuple[int, int],
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_hugo.importer.SessionLocal", db_session_factory)
     site_id, _user_id = site_and_author
 
     root = _make_hugo_tree(tmp_path)
@@ -360,9 +354,8 @@ def test_apply_no_users_returns_friendly_error(
     tmp_path: Path,
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> None:
-    monkeypatch.setattr("bragi.contrib.import_hugo.importer.SessionLocal", db_session_factory)
     # P1 / #77: every Site needs an owner User. To preserve the
     # "no users in DB except the owner" scenario, seed an owner that
     # the importer's fallback-author scan can deliberately skip.

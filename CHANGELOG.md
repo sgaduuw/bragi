@@ -6,6 +6,237 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-05-27
+
+### Added
+- **Image size + alignment classes in the editor.** The TipTap
+  image picker now inserts images with a default class of
+  `size-medium align-center`. Clicking an inserted image in the
+  editor reveals a floating bubble menu with size (small /
+  medium / full) and alignment (left / center / right) buttons;
+  the choice round-trips through markdown as
+  `![alt](url){.size-medium .align-center}` via
+  `mdit-py-plugins`'s `attrs_plugin` on the Python renderer and
+  `markdown-it-attrs` on the TipTap side. `pictureify` preserves
+  the class through its `<picture>` wrap and emits a per-class
+  `sizes` attribute so the browser picks bytes-appropriate
+  srcset entries (small → 264px / 33vw, medium → 528px / 66vw,
+  full → 800px / 100vw). All four in-tree themes ship the
+  baseline CSS for the six classes plus a catch-all so legacy
+  posts without classes render at full width as before.
+  Reloading a post hydrates the in-editor preview with the
+  size-appropriate WebP rendition via a server-injected rendition
+  map (attachments plugin's `editor_image_renditions` Jinja
+  global), so `size-small` / `size-medium` images don't fall back
+  to the multi-MB original after reload.
+
+- **Renditions status panel + manual triggers in the admin.**
+  The attachments list page now shows pending / done / failed
+  rendition counts at the top, plus a "Generate missing
+  renditions" button (POST equivalent of
+  `cms media regenerate-missing`) and a "Retry failed" button
+  shown when failed > 0 (resets failed rows back to pending so
+  the worker picks them up again). The previous standalone
+  failed-renditions warning banner is folded into the new panel.
+  Closes #285.
+
+- **Theme-aware multi-format image renditions.** Themes declare
+  a `content_width` (the helper derives a retina-aware ladder
+  `[w/2, w, w*2]`) or an explicit `rendition_widths` list; both
+  set is an error at registration. Each width is encoded as
+  AVIF, WebP, and the original format. Delivery emits `<picture>`
+  with format-tiered `<source>` blocks so modern browsers pull
+  the smallest format they understand and older ones fall
+  through to the `<img>` fallback. Rendition generation moves
+  off the upload critical path onto the existing outbox-pattern
+  scheduler. New `cms media` sub-commands:
+  `process-renditions` (worker, runs every 60s),
+  `regenerate-missing --site <slug>` (enqueue any gaps),
+  `regenerate-all --site <slug> --yes` (purge + re-enqueue).
+  Theme switches enqueue missing renditions and delete files
+  for widths the new theme no longer wants. The admin picker
+  thumbnails now use the smallest available WebP, falling back
+  to the original when a rendition isn't ready yet. Adds
+  `pillow-avif-plugin` as a runtime dep. New settings:
+  `attachment_rendition_quality_jpeg=85`,
+  `attachment_rendition_quality_webp=80`,
+  `attachment_rendition_quality_avif=60`,
+  `attachment_rendition_worker_batch=20`,
+  `attachment_rendition_max_attempts=3`. Failed rendition rows
+  surface as a banner on the attachments list page with a
+  remediation hint.
+
+- **Pinned posts on the index landing page.** Editor-chosen
+  posts surface in a CSS scroll-snap carousel above the
+  chronological recency list. Schema: `posts.is_pinned`
+  (boolean) + optional `posts.pinned_until` (auto-clear
+  datetime), mirrored on `post_revisions` so revision restore
+  brings the pin state back. Admin edit form gains a checkbox
+  + datetime input near the status select (visible only when
+  status is `published`); the post list gets a per-row
+  Pin/Unpin button backed by an htmx-friendly endpoint.
+  Pinned posts are removed from the page-1 recency list and
+  reappear in their natural date position on page 2+.
+  Single-pin renders as a plain card with no carousel chrome.
+  Closes #125.
+- **Pinned-posts carousel auto-advance.** When two or more posts
+  are pinned, the carousel now rotates to the next card on a
+  timer (default every 7 seconds). Per-site override via
+  `Site.extra_settings.pinned_autoadvance_seconds` (int, 0
+  disables). Pauses on hover, on `focus-within`, when the
+  section leaves the viewport, and when the user has
+  `prefers-reduced-motion: reduce` set. The carousel still works
+  fully without JavaScript (manual swipe + anchor-link dots, as
+  today). Closes #266.
+
+### Fixed
+- **OG and Twitter Card meta point at the middle-tier WebP
+  rendition.** PR #279 left `og:image` and `twitter:image` URLs
+  pointing at the upload's original bytes, so every social-card
+  crawl pulled the full-size original (typically a multi-MB JPEG)
+  for what renders as a 400-600 px card. Switched
+  `featured_image_url_for` to use the middle WebP rendition: for
+  a 3-tier ladder it's the 800w slot (typically 50-80 KB), for a
+  themed `content_width=600` ladder it's the 600w slot, etc.
+  Selection picks from done WebP renditions actually present, so
+  a partial backfill still yields a sensible URL. Falls back to
+  the original storage_key when no WebP rendition has landed yet.
+- **Pictureify runs at delivery render time, not save time.**
+  PR #279 registered `pictureify` as a save-time
+  `register_html_transform`, which short-circuited because the
+  admin's request context doesn't set `g.site` (admin is single-
+  host, no site_resolver middleware in front of the write path).
+  Post and page `body_html` got cached without the `<picture>`
+  expansion, so the delivery side served the bare `<img>` and
+  none of the AVIF / WebP rendition tiers were emitted. Moved to
+  a Jinja filter that runs on the delivery side where `g.site`
+  is populated; the three delivery templates (`post.html`,
+  `page.html`, `post_index.html`) pipe `body_html` through
+  `internal_link_rewrite | pictureify | safe`. Closes #280.
+- **Featured-image picker thumbnails use the smallest WebP
+  rendition.** The admin form's inline preview thumbnail loaded
+  `attachment.storage_key` directly (the original SHA, often
+  >1 MB) to fill a 160x120 thumbnail slot. Threaded a
+  `thumb_storage_key` parameter through the macro and its three
+  callers (post / page / sites admin); views compute it via the
+  new `bragi.core.renditions.smallest_webp_storage_key` helper
+  and fall back to the original when no done WebP rendition
+  exists yet. Closes #281.
+- **Admin image previews load on a host that isn't a site
+  hostname.** PR #271 mounted the public `/attachments/<key>`
+  blueprint on the admin app, then #275 carved it out of the
+  auth gate. Both fixes left the real problem standing: the
+  public route resolves the site from the Host header, which on
+  the admin host (`admin.example.com` in production,
+  `127.0.0.1` locally) doesn't match any site, so the lookup
+  404s. The image-picker dialog grid, the inline featured-image
+  thumbnail on every edit form, and the TipTap editor preview
+  of inserted images all relied on this URL and all broke on
+  any admin host that wasn't the same string as a site
+  hostname. New admin route
+  `attachment_admin.serve_attachment_bytes` at
+  `/admin/sites/<slug>/attachments/file/<key>` reads the site
+  from the URL path instead. The picker template, image-picker
+  macro, and TipTap editor now use the admin-scoped URL; the
+  editor applies a load/save transform between admin-scoped
+  (for in-editor preview) and public-scoped (for stored
+  markdown, so delivery still renders). The cross-mount of
+  `attachment_delivery_bp` on admin and the `PUBLIC_ENDPOINTS`
+  carve-out from #275 are removed; both became dead code.
+- **TipTap editor inserts images as markdown, not escaped HTML.**
+  The editor's schema (`StarterKit` + `Link`) had no `Image` node,
+  so the image-picker's `insertContent('![alt](url)')` landed as a
+  plain text node whose markdown special characters were escaped
+  on save (`\!\[alt\]\(url\)`); pasted or drag-dropped `<img>`
+  tags coerced to text and got HTML-escaped (`&lt;img ...&gt;`).
+  Either way the rendered post page showed the markup as visible
+  text instead of an image. Adding `@tiptap/extension-image` to
+  the editor and switching the picker to `setImage({src, alt})`
+  produces a proper Image node that tiptap-markdown serializes to
+  `![alt](src)`. Drag/paste paths benefit too. Existing
+  already-corrupted bodies need a manual edit to fix; no
+  automated repair migration. Closes #270.
+- **Admin image-picker preview thumbnails no longer 302 to the
+  login page.** The attachment-delivery blueprint is mounted on
+  the admin app so the picker dialog can render
+  `<img src="/attachments/<key>">` against the admin host (#269);
+  the admin auth gate was redirecting those bytes to
+  `/auth/login`, so the browser rendered the login HTML in place
+  of the image and every preview appeared broken even for a
+  logged-in operator. The `attachment_delivery.serve_attachment`
+  endpoint is now in `PUBLIC_ENDPOINTS` alongside `static` and
+  `_healthz`. No auth elevation — the same path on the delivery
+  app already serves anonymously. Closes #273.
+- **Pinned-posts carousel dot navigation no longer vertically
+  jumps the page.** Clicking a dot used to scroll the page so
+  the targeted card sat at the top of the viewport; on readers
+  who had scrolled past the carousel into the recency list, that
+  was jarring. The dots now scroll the strip horizontally
+  in-place via a small JavaScript handler, preserving the
+  document's scroll position. `history.replaceState` keeps the
+  URL fragment in sync so the `:target`-driven active-dot
+  styling still works. Closes #267.
+
+### Changed
+- **Attachment storage layout.** Originals move from
+  `<site>/<sha[:2]>/<sha>` to `<site>/<sha[:2]>/<sha>/original.<ext>`,
+  and renditions live alongside at
+  `<site>/<sha[:2]>/<sha>/<width>/<format>`. The migration
+  renames existing files in place (no byte copies). Rendition
+  generation is no longer synchronous on upload: the worker
+  drains pending rows on the 60s scheduler cadence. Operators
+  upgrading should run `cms media regenerate-missing --site <slug>`
+  per site once the upgrade lands to populate WebP / AVIF
+  renditions for existing originals.
+
+- **`og_image` collapsed into `featured_image` everywhere.** The
+  social-share image and the featured image were two parallel
+  attachment FKs on `posts` (`og_image_id`) and a separate field
+  on `sites` (`default_og_image_id`); pages had neither.
+  Authors had to set the same image twice to get both the social
+  preview and the landing-page card. The new shape: a single
+  `featured_image_id` on `posts`, `pages`, and `sites`
+  (renamed from `default_og_image_id`), backfilled from the
+  prior `og_image_id` on save-through, mirrored on
+  `post_revisions` / `page_revisions` so restore brings the
+  image back. The admin edit form replaces the bare numeric-id
+  input with an attachment picker that opens the existing
+  attachments grid in a `<dialog>` and renders an inline
+  thumbnail of the current selection. The migration backfills
+  legacy `og_image_id` values into `featured_image_id` for any
+  post where the latter was unset; data is preserved and the
+  drop of `og_image_id` is final. Frontmatter import readers
+  read the `featured_image` key (was `og_image`). Closes #268,
+  #269.
+- **`bragi.core.db.SessionLocal` is now a lazy proxy.** Previously
+  it was a `sessionmaker` bound directly at import time, which
+  meant every `from bragi.core.db import SessionLocal` captured
+  the binding and tests had to enumerate every importer in a
+  56-entry `_SESSION_LOCAL_IMPORTERS` list to monkey-patch them
+  all (drifted silently when new modules added the import,
+  masked by the local `bragi.db` dev file but red in CI). The
+  proxy is a singleton callable that delegates to a swappable
+  `_factory` field; `with SessionLocal() as db:` keeps its
+  exact semantics. The conftest fixture now patches one place,
+  and the `__all__ = ["SessionLocal", "bp"]` re-export in
+  `bragi/contrib/post/delivery.py` (which existed only to
+  satisfy 19 stale test patches) is gone; those tests now
+  patch the canonical `bragi.core.db.SessionLocal._factory`
+  path.
+- **CI actions bumped to latest majors.** The v1.14.0 docker
+  build surfaced GitHub's Node.js 20 deprecation warning on
+  every `actions/*` and `docker/*` action used in the workflows
+  (forced to Node.js 24 default starting 2026-06-02; Node.js 20
+  removed from runners 2026-09-16). Both `ci.yml` and
+  `docker.yml` now pin the current major of each action:
+  `actions/checkout@v6`, `actions/setup-python@v6`,
+  `docker/setup-qemu-action@v4`, `docker/setup-buildx-action@v4`,
+  `docker/login-action@v4`, `docker/metadata-action@v6`,
+  `docker/build-push-action@v7`. Input shapes are unchanged
+  across all bumps (verified by re-running CI on the bumps PR);
+  the only runtime delta is that each action now runs under
+  Node.js 24, which the runners ship by default.
+
 ## [1.14.1] - 2026-05-20
 
 ### Fixed

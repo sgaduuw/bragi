@@ -162,76 +162,6 @@ def db_session(db_session_factory: sessionmaker[Session]) -> Iterator[Session]:
         yield session
 
 
-# Every module that does `from bragi.core.db import SessionLocal`
-# binds the name at import time, so monkey-patching
-# `bragi.core.db.SessionLocal` later does NOT propagate. Each
-# importer must be patched individually. Listing them here once
-# keeps per-test fixtures from drifting out of sync (which is
-# what made CI go red on PR #46: local dev DBs hid the gaps).
-#
-# If a fresh module starts importing SessionLocal at module level,
-# add its dotted path here. The patcher swallows AttributeError
-# so retired paths can stay listed without breaking the fixture.
-_SESSION_LOCAL_IMPORTERS: tuple[str, ...] = (
-    "bragi.contrib.analytics.admin.SessionLocal",
-    "bragi.contrib.analytics.plugin.SessionLocal",
-    "bragi.contrib.api_tokens.admin.SessionLocal",
-    "bragi.contrib.api_tokens.api.SessionLocal",
-    "bragi.contrib.api_tokens.auth.SessionLocal",
-    "bragi.contrib.webmentions.admin.SessionLocal",
-    "bragi.contrib.webmentions.cli.SessionLocal",
-    "bragi.contrib.webmentions.plugin.SessionLocal",
-    "bragi.contrib.webmentions.receiver.SessionLocal",
-    "bragi.contrib.activitypub.cli.SessionLocal",
-    "bragi.contrib.activitypub.views.SessionLocal",
-    "bragi.contrib.attachments.admin.SessionLocal",
-    "bragi.contrib.attachments.cli.SessionLocal",
-    "bragi.contrib.attachments.delivery.SessionLocal",
-    "bragi.contrib.attachments.plugin.SessionLocal",
-    "bragi.contrib.attachments.transforms.SessionLocal",
-    "bragi.cli.SessionLocal",
-    "bragi.contrib.embeds.rerender.SessionLocal",
-    "bragi.contrib.audit.admin.SessionLocal",
-    "bragi.contrib.auth_github.views.SessionLocal",
-    "bragi.contrib.auth_local.cli.SessionLocal",
-    "bragi.contrib.auth_local.views.SessionLocal",
-    "bragi.contrib.import_ghost.cli.SessionLocal",
-    "bragi.contrib.import_ghost.importer.SessionLocal",
-    "bragi.contrib.import_hugo.cli.SessionLocal",
-    "bragi.contrib.import_hugo.importer.SessionLocal",
-    "bragi.contrib.import_wordpress.cli.SessionLocal",
-    "bragi.contrib.import_wordpress.importer.SessionLocal",
-    "bragi.contrib.indexnow.cli.SessionLocal",
-    "bragi.contrib.internal_links.admin.SessionLocal",
-    "bragi.contrib.page.admin.SessionLocal",
-    "bragi.contrib.page.archive.SessionLocal",
-    "bragi.contrib.page.delivery.SessionLocal",
-    "bragi.contrib.page.plugin.SessionLocal",
-    "bragi.contrib.post.admin.SessionLocal",
-    "bragi.contrib.post.cli.SessionLocal",
-    "bragi.contrib.post.delivery.SessionLocal",
-    "bragi.contrib.post.plugin.SessionLocal",
-    "bragi.contrib.redirects.admin.SessionLocal",
-    "bragi.contrib.redirects.plugin.SessionLocal",
-    "bragi.contrib.seo.feed.SessionLocal",
-    "bragi.contrib.seo.sitemap.SessionLocal",
-    "bragi.contrib.sessions.admin.SessionLocal",
-    "bragi.contrib.sites.admin.SessionLocal",
-    "bragi.contrib.team.admin.SessionLocal",
-    "bragi.contrib.search.backend.SessionLocal",
-    "bragi.contrib.search.cli.SessionLocal",
-    "bragi.contrib.sites.cli.SessionLocal",
-    "bragi.core.audit.SessionLocal",
-    "bragi.core.healthz.SessionLocal",
-    "bragi.core.middleware.sessions.SessionLocal",
-    "bragi.core.middleware.site_resolver.SessionLocal",
-    "bragi.core.permissions.SessionLocal",
-    "bragi.core.security.SessionLocal",
-    "bragi.core.seo.SessionLocal",
-    "bragi.core.url.SessionLocal",
-)
-
-
 @pytest.fixture(autouse=True)
 def _bypass_ssrf_dns_check(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip `bragi.core.http`'s DNS / private-IP guard in tests.
@@ -256,21 +186,18 @@ def patched_session_locals(
     db_session_factory: sessionmaker[Session],
     monkeypatch: pytest.MonkeyPatch,
 ) -> sessionmaker[Session]:
-    """Monkey-patch every module that imported `SessionLocal`.
+    """Bind the test session factory at the single proxy callsite.
+
+    `bragi.core.db.SessionLocal` is a `_SessionFactoryProxy` shared
+    by every `from bragi.core.db import SessionLocal` importer.
+    Rebinding `_factory` on it propagates to every call site, so
+    one patch covers what used to require a 56-entry enumeration.
 
     Depend on this fixture from any app-building fixture (admin or
-    delivery) so the in-process DB queries land on the test
-    in-memory engine. Returns the factory so the calling fixture
-    can pass it to additional `monkeypatch.setattr` calls if
-    needed (e.g. when a brand-new module path isn't yet listed
-    above).
+    delivery) so in-process DB queries land on the test in-memory
+    engine. Returns the factory so callers can reuse it.
     """
-    for path in _SESSION_LOCAL_IMPORTERS:
-        try:
-            monkeypatch.setattr(path, db_session_factory)
-        except AttributeError:
-            # Module exists but hasn't (yet) imported SessionLocal,
-            # or the path was retired. Skip silently; this fixture
-            # is best-effort coverage, not a strict invariant.
-            continue
+    from bragi.core import db
+
+    monkeypatch.setattr(db.SessionLocal, "_factory", db_session_factory)
     return db_session_factory

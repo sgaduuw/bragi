@@ -32,9 +32,15 @@ PASSWORD = "correct-horse-battery-staple"
 def admin_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
-    """Admin app with one Site, one User, one Post pre-seeded."""
+    """Admin app with one Site, one User, one Post pre-seeded.
+
+    The `patched_session_locals` dependency points the shared
+    `_SessionFactoryProxy` at the test factory. The per-importer
+    monkeypatch list that used to live here is no longer needed
+    after the proxy refactor (#256).
+    """
     user = User(email=EMAIL, display_name="Ada Lovelace", is_active=True, is_superuser=True)
     db_session.add(user)
     db_session.flush()
@@ -62,14 +68,6 @@ def admin_app(
         )
     )
     db_session.commit()
-
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
 
     yield create_admin_app()
 
@@ -293,6 +291,18 @@ def test_delete_post_removes_row(
         assert db.get(Post, post_id) is None
 
 
+def test_post_defaults_for_pinning_fields(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    # Tests Python-layer column defaults on the ORM model; the
+    # migration's server_default path is exercised by the
+    # up-down-up smoke documented in the plan's Task 1 Step 7.
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        assert post.is_pinned is False
+        assert post.pinned_until is None
+
+
 def test_posts_nav_entry_registered(admin_app: Flask) -> None:
     """The post plugin contributes a 'Posts' entry to the admin nav."""
     registry = admin_app.extensions["registry"]
@@ -449,3 +459,419 @@ def test_on_post_deleted_fires_with_row_still_in_session(
     )
     assert len(lifecycle_recorder.deleted) == 1
     assert lifecycle_recorder.deleted[0]["slug"] == "hello"
+
+
+# ============================================================
+# Pinning fields round-trip (#125)
+# ============================================================
+
+
+def test_edit_post_form_round_trips_pinning_fields(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        post_id = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "_csrf_token": token,
+            "title": "Hello World",
+            "slug": "hello",
+            "body_markdown": "Hello!",
+            "status": "published",
+            "tags": "",
+            "featured_image_id": "",
+            "is_pinned": "1",
+            "pinned_until": "2026-12-31T12:00",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        reloaded = db.get(Post, post_id)
+        assert reloaded.is_pinned is True
+        assert reloaded.pinned_until == datetime(2026, 12, 31, 12, 0)
+
+
+def test_edit_post_form_clears_pinned_until_when_empty(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        post.is_pinned = True
+        post.pinned_until = datetime(2026, 12, 31, 12, 0)
+        db.commit()
+        post_id = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "_csrf_token": token,
+            "title": "Hello World",
+            "slug": "hello",
+            "body_markdown": "Hello!",
+            "status": "published",
+            "tags": "",
+            "featured_image_id": "",
+            "is_pinned": "1",
+            "pinned_until": "",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        reloaded = db.get(Post, post_id)
+        assert reloaded.is_pinned is True
+        assert reloaded.pinned_until is None
+
+
+def test_pin_toggle_htmx_returns_updated_cell(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert f'id="pinned-cell-{pid}"' in body
+    assert "Unpin" in body
+
+    with db_session_factory() as db:
+        assert db.get(Post, pid).is_pinned is True
+
+
+def test_pin_toggle_writes_audit_log(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    from bragi.core.models.audit_log import AuditLog
+
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+
+    with db_session_factory() as db:
+        row = db.execute(
+            select(AuditLog)
+            .where(AuditLog.target_type == "post", AuditLog.target_id == pid)
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        ).scalar_one()
+    assert row.action == "post.pinned"
+
+
+def test_pin_toggle_non_htmx_redirects_to_list(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+    assert "/admin/sites/blog/posts" in resp.headers["Location"]
+
+
+def test_pin_toggle_cross_site_404(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Toggling a post that belongs to a different site under the
+    URL of site `blog` 404s, mirroring edit/delete behaviour."""
+    with db_session_factory() as db:
+        owner = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        other = Site(
+            slug="other",
+            hostname="other.example.com",
+            title="Other",
+            canonical_url="https://other.example.com",
+            owner_user_id=owner.id,
+        )
+        db.add(other)
+        db.flush()
+        foreign = Post(
+            site_id=other.id,
+            slug="z",
+            title="Z",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=owner.id,
+            status=PostStatus.PUBLISHED,
+            published_at=datetime(2026, 5, 1, 12, 0),
+        )
+        db.add(foreign)
+        db.commit()
+        foreign_id = foreign.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{foreign_id}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 404
+
+
+def test_pin_toggle_writes_unpin_audit_log(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Unpinning an already-pinned post writes POST_UNPINNED."""
+    from bragi.core.models.audit_log import AuditLog
+
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        post.is_pinned = True
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+
+    with db_session_factory() as db:
+        row = db.execute(
+            select(AuditLog)
+            .where(AuditLog.target_type == "post", AuditLog.target_id == pid)
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        ).scalar_one()
+        assert row.action == "post.unpinned"
+        # Reloaded post is no longer pinned.
+        assert db.get(Post, pid).is_pinned is False
+
+
+def test_pin_toggle_forbidden_for_non_member(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A logged-in user with no role on the site gets 403."""
+    from bragi.contrib.auth_local.passwords import hash_password
+    from bragi.core.models.local_credential import LocalCredential
+
+    outsider_email = "outsider@example.com"
+    outsider_pw = "outsider-password-xyzzy"
+
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        db.commit()
+        pid = post.id
+
+        outsider = User(
+            email=outsider_email,
+            display_name="Outsider",
+            is_active=True,
+            is_superuser=False,
+        )
+        db.add(outsider)
+        db.flush()
+        db.add(LocalCredential(user_id=outsider.id, password_hash=hash_password(outsider_pw)))
+        db.commit()
+
+    client = admin_app.test_client()
+    # Manually authenticate as the outsider (skipping the _login helper
+    # which logs in as the seeded superuser ada@example.com).
+    token = csrf_token(client, path="/auth/login")
+    client.post(
+        "/auth/login",
+        data={"email": outsider_email, "password": outsider_pw, "_csrf_token": token},
+    )
+
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{pid}/pin-toggle",
+        data={"_csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 403
+
+
+def test_post_list_renders_pinned_column(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        owner = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        # Promote the seeded draft to published + pinned.
+        pinned = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        pinned.status = PostStatus.PUBLISHED
+        pinned.published_at = datetime(2026, 5, 1, 12, 0)
+        pinned.is_pinned = True
+        # Add a second published-but-unpinned row.
+        unpinned = Post(
+            site_id=site_id,
+            slug="b",
+            title="Unpinned B",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=owner.id,
+            status=PostStatus.PUBLISHED,
+            published_at=datetime(2026, 5, 2, 12, 0),
+        )
+        db.add(unpinned)
+        db.commit()
+        pinned_id, unpinned_id = pinned.id, unpinned.id
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/posts/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert f'id="pinned-cell-{pinned_id}"' in body
+    assert f'id="pinned-cell-{unpinned_id}"' in body
+    pinned_idx = body.index(f"pinned-cell-{pinned_id}")
+    assert "Unpin" in body[pinned_idx : pinned_idx + 500]
+    unpinned_idx = body.index(f"pinned-cell-{unpinned_id}")
+    assert "Pin" in body[unpinned_idx : unpinned_idx + 500]
+
+
+def test_edit_form_shows_pin_fieldset_for_published_post(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        post.is_pinned = True
+        post.pinned_until = datetime(2026, 12, 31, 12, 0)
+        db.commit()
+        pid = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{pid}/edit")
+    body = resp.get_data(as_text=True)
+    assert 'name="is_pinned"' in body
+    assert "checked" in body
+    assert 'name="pinned_until"' in body
+    assert "2026-12-31T12:00" in body
+
+
+def test_edit_form_hides_pin_fieldset_for_draft_post(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    # The seeded "hello" post starts as DRAFT; verify the fieldset
+    # is absent for that case.
+    with db_session_factory() as db:
+        pid = db.execute(select(Post.id).where(Post.slug == "hello")).scalar_one()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{pid}/edit")
+    body = resp.get_data(as_text=True)
+    assert 'name="is_pinned"' not in body
+
+
+def test_edit_get_loads_for_pinned_post(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """GET-then-save round-trip must not silently clear pin state.
+
+    The template renders the pin fieldset in Task 6; this test proves
+    the GET does not error on a pinned post and that a subsequent POST
+    carrying the prefilled values preserves the pin state. If the GET
+    form dict were missing the pin keys the template would have nothing
+    to pre-fill, and a re-save would clear is_pinned and pinned_until.
+    """
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        post.published_at = datetime(2026, 5, 1, 12, 0)
+        post.is_pinned = True
+        post.pinned_until = datetime(2026, 12, 31, 12, 0)
+        db.commit()
+        post_id = post.id
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
+    assert resp.status_code == 200
+
+    # Simulate a re-save of the form with the prefilled pin values as
+    # the browser will send them once Task 6's template ships. If the
+    # GET form dict were missing the pin keys the template would not
+    # have anything to render into the form, so the POST below would
+    # represent the user submitting an empty checkbox and blank date
+    # (i.e. a silent clear). Sending the values explicitly here proves
+    # the POST path round-trips them correctly; the GET form dict fix
+    # is what makes that round-trip possible end-to-end.
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "_csrf_token": token,
+            "title": "Hello World",
+            "slug": "hello",
+            "body_markdown": "Hello!",
+            "status": "published",
+            "tags": "",
+            "featured_image_id": "",
+            "is_pinned": "1",
+            "pinned_until": "2026-12-31T12:00",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        reloaded = db.get(Post, post_id)
+        assert reloaded.is_pinned is True
+        assert reloaded.pinned_until == datetime(2026, 12, 31, 12, 0)

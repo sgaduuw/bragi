@@ -11,6 +11,9 @@ future deploy, see this handler as a no-op):
                                  `database is locked`; the sidecar
                                  + admin + delivery workers contend
                                  on the same file)
+
+`SessionLocal` is a proxy, not a `sessionmaker` directly. See
+`_SessionFactoryProxy` below for the rationale.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from typing import Any
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.settings import settings
 
@@ -35,5 +38,32 @@ def _sqlite_pragmas(dbapi_connection: Any, _connection_record: Any) -> None:
         cursor.close()
 
 
+class _SessionFactoryProxy:
+    """Lazy proxy in front of the production `sessionmaker`.
+
+    Every `from bragi.core.db import SessionLocal` across the
+    codebase binds a reference to *this* single instance at
+    import time. The actual `sessionmaker` lives on
+    `self._factory` and is consulted at every `__call__`. Tests
+    rebind `_factory` once and the new factory takes effect at
+    every callsite without per-importer monkeypatching, which
+    is what the conftest's `_SESSION_LOCAL_IMPORTERS` list used
+    to enumerate (and silently drift from).
+
+    `SessionLocal()` returns a real `Session`, so the
+    `with SessionLocal() as db:` idiom is unchanged.
+    """
+
+    def __init__(self) -> None:
+        self._factory: sessionmaker[Session] | None = None
+
+    def __call__(self, **kwargs: Any) -> Session:
+        factory = self._factory
+        if factory is None:
+            raise RuntimeError("bragi.core.db.SessionLocal not initialised")
+        return factory(**kwargs)
+
+
 engine = create_engine(settings.database_url, future=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+SessionLocal = _SessionFactoryProxy()
+SessionLocal._factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)

@@ -56,7 +56,7 @@ def test_parse_tag_csv_ignores_empty_and_unsluggable() -> None:
 def admin_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
     db_session.add(user)
@@ -85,13 +85,6 @@ def admin_app(
     )
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
     yield create_admin_app()
 
 
@@ -200,7 +193,7 @@ def test_edit_post_removing_tag_detaches_it(
 def delivery_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     user = User(email="ada@example.com", display_name="Ada", is_active=True)
     db_session.add(user)
@@ -258,12 +251,6 @@ def delivery_app(
     draft.tags = [tag]
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.url.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
     yield create_delivery_app()
 
 

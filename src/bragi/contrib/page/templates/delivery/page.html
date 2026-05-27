@@ -32,7 +32,7 @@
     <h1>{{ page.title }}</h1>
   </header>
   <div class="body">
-    {{ page.body_html | internal_link_rewrite | safe }}
+    {{ page.body_html | internal_link_rewrite | pictureify | safe }}
   </div>
 </article>
 {% endblock %}

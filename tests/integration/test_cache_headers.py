@@ -37,7 +37,6 @@ def delivery_app(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
     user = User(email=EMAIL, display_name="Ada", is_active=True)
     db_session.add(user)
@@ -79,11 +78,6 @@ def delivery_app(
     )
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.page.delivery.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.analytics.plugin.SessionLocal", db_session_factory)
     yield create_delivery_app()
 
 
@@ -167,7 +161,6 @@ def admin_app(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
     user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
     db_session.add(user)
@@ -184,12 +177,6 @@ def admin_app(
     )
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     yield create_admin_app()
 
 

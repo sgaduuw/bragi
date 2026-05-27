@@ -5,7 +5,7 @@ cached HTML render (`body_html`) regenerated on save. The
 `body_excerpt` field is the first N words used for previews and
 the default OG description.
 
-`featured_image_id` and `og_image_id` are FKs into `attachments`
+`featured_image_id` is an FK into `attachments`
 populated by the attachments subsystem. Both are nullable; the
 admin form picks an existing Attachment or leaves them blank.
 """
@@ -13,7 +13,7 @@ admin form picks an existing Attachment or leaves them blank.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,6 +21,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from bragi.core.models._base import Base
 from bragi.core.models._mixins import IdMixin, TimestampsMixin
 from bragi.core.models.tag import Tag, post_tags
+
+if TYPE_CHECKING:
+    from bragi.core.models.attachment import Attachment
 
 
 class PostStatus:
@@ -59,16 +62,34 @@ class Post(IdMixin, TimestampsMixin, Base):
     canonical_url: Mapped[str | None] = mapped_column(String(255), default=None)
     noindex: Mapped[bool] = mapped_column(default=False)
 
-    # Featured / OG image FKs into `attachments`. Nullable so a post
-    # without media works; the delivery template falls back to
-    # `(site.canonical_url)` social previews when og_image is unset.
-    # SET NULL so removing an attachment doesn't cascade-delete the
-    # post or leave a dangling FK; the post just loses its image.
+    # Editorial pin: surfaces the post above the recency list on
+    # the site's post-index page. `pinned_until` is an optional
+    # auto-expiry (NULL = pinned indefinitely); "currently pinned"
+    # is evaluated at query time as
+    # `is_pinned AND (pinned_until IS NULL OR pinned_until > now)`.
+    # `pinned_until` is naive UTC (matching `published_at`,
+    # `scheduled_for`, and `naive_utcnow()` everywhere else on
+    # the model) so the comparison is naive-vs-naive.
+    is_pinned: Mapped[bool] = mapped_column(default=False)
+    pinned_until: Mapped[datetime | None] = mapped_column(default=None)
+
+    # Featured image FK into `attachments`. Nullable so a post
+    # without media works; the OG meta-tag renderer falls back to
+    # `Site.default_featured_image_id` and then `(site.canonical_url)`
+    # social previews when unset. SET NULL so removing an attachment
+    # doesn't cascade-delete the post or leave a dangling FK; the
+    # post just loses its image. Used by: OG / Twitter Card meta
+    # tags, landing-page pinned carousel, post-detail hero.
     featured_image_id: Mapped[int | None] = mapped_column(
         ForeignKey("attachments.id", ondelete="SET NULL"), default=None
     )
-    og_image_id: Mapped[int | None] = mapped_column(
-        ForeignKey("attachments.id", ondelete="SET NULL"), default=None
+
+    # Loaded relationship for template helpers. `lazy="joined"`
+    # because the typical access is "post about to render -> its
+    # image" -- one query that joins the attachment is cheaper than
+    # the N+1 alternative.
+    featured_image: Mapped[Attachment | None] = relationship(
+        "Attachment", foreign_keys=[featured_image_id], lazy="joined"
     )
 
     # Import provenance: `(site_id, source_id)` is unique enough

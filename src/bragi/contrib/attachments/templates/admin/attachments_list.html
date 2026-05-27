@@ -1,6 +1,45 @@
 {% extends "admin/base.html" %}
 {% block title %}Attachments &middot; bragi admin{% endblock %}
 {% block content %}
+<section class="rendition-status-panel">
+  <div class="rendition-counts">
+    <span class="rendition-count rendition-count--pending">
+      Pending: <strong>{{ pending_rendition_count }}</strong>
+    </span>
+    <span class="rendition-count rendition-count--done">
+      Done: <strong>{{ done_rendition_count }}</strong>
+    </span>
+    {% if failed_rendition_count > 0 %}
+    <span class="rendition-count rendition-count--failed">
+      Failed: <strong>{{ failed_rendition_count }}</strong>
+    </span>
+    {% endif %}
+  </div>
+  <form method="post"
+        action="{{ url_for('attachment_admin.regenerate_missing', site_slug=request.view_args['site_slug']) }}"
+        style="display: inline;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Generate missing renditions</button>
+  </form>
+  {% if failed_rendition_count > 0 %}
+  <form method="post"
+        action="{{ url_for('attachment_admin.retry_failed', site_slug=request.view_args['site_slug']) }}"
+        style="display: inline;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Retry failed</button>
+  </form>
+  {% endif %}
+  {# Destructive: drops every rendition row and re-enqueues from
+     scratch. The JS confirm() guards a misclick; the server view
+     trusts the POST is intentional. #}
+  <form method="post"
+        action="{{ url_for('attachment_admin.regenerate_all', site_slug=request.view_args['site_slug']) }}"
+        style="display: inline;"
+        onsubmit="return confirm('Regenerate ALL renditions for this site? Existing rendition rows will be dropped and re-queued.');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn secondary">Regenerate all renditions</button>
+  </form>
+</section>
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
   <h1 style="margin: 0;">Attachments</h1>
   <a href="{{ url_for('attachment_admin.upload_attachment') }}" class="btn">Upload</a>

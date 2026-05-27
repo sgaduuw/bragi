@@ -2,7 +2,7 @@
 {% block title %}{{ post.meta_title or post.title }} &middot; {{ site.title }}{% endblock %}
 {% block social_meta %}
   {# Open Graph + Twitter Card. og:image / twitter:image are
-     omitted when no image is set (post.og_image_id, site default,
+     omitted when no image is set (post.featured_image_id, site default,
      or absent canonical_url upstream). When omitted, the
      twitter:card type degrades from `summary_large_image` to
      `summary` so the link still previews. #}
@@ -63,7 +63,7 @@
   </aside>
   {% endif %}
   <div class="body">
-    {{ post.body_html | internal_link_rewrite | safe }}
+    {{ post.body_html | internal_link_rewrite | pictureify | safe }}
   </div>
   {% if author_bio %}
   <aside class="author-bio">

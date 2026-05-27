@@ -21,8 +21,8 @@ SET NULL on user delete (history preservation):
       post_revisions.editor_user_id
 
 SET NULL on attachment delete:
-    - posts.featured_image_id, posts.og_image_id,
-      pages.og_image_id, sites.default_og_image_id
+    - posts.featured_image_id, posts.featured_image_id,
+      pages.featured_image_id, sites.default_featured_image_id
 
 SET NULL on page delete (self-ref):
     - pages.parent_id
@@ -297,7 +297,6 @@ def test_attachment_delete_sets_image_fks_null(db_session: Session) -> None:
         author_id=user.id,
         status=PostStatus.DRAFT,
         featured_image_id=att.id,
-        og_image_id=att.id,
     )
     page = Page(
         site_id=site.id,
@@ -309,9 +308,9 @@ def test_attachment_delete_sets_image_fks_null(db_session: Session) -> None:
         author_id=user.id,
         status=PageStatus.PUBLISHED,
         kind=PageKind.STATIC,
-        og_image_id=att.id,
+        featured_image_id=att.id,
     )
-    site.default_og_image_id = att.id
+    site.default_featured_image_id = att.id
     db_session.add_all([post, page])
     db_session.commit()
     db_session.delete(att)
@@ -321,9 +320,9 @@ def test_attachment_delete_sets_image_fks_null(db_session: Session) -> None:
     pg = db_session.execute(select(Page)).scalar_one()
     s = db_session.execute(select(Site)).scalar_one()
     assert p.featured_image_id is None
-    assert p.og_image_id is None
-    assert pg.og_image_id is None
-    assert s.default_og_image_id is None
+    assert p.featured_image_id is None
+    assert pg.featured_image_id is None
+    assert s.default_featured_image_id is None
 
 
 def test_page_parent_delete_promotes_children_to_root(db_session: Session) -> None:

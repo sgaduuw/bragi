@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 
 import pytest
 from flask import Flask
@@ -29,7 +30,7 @@ PASSWORD = "correct-horse-battery-staple"
 def admin_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     user = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
     db_session.add(user)
@@ -70,14 +71,6 @@ def admin_app(
     )
     db_session.commit()
 
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.post.admin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.page.admin.SessionLocal", db_session_factory)
     yield create_admin_app()
 
 
@@ -432,3 +425,114 @@ def test_restore_page_refuses_cross_site_parent_id(
     assert page.parent_id is None
     assert page.title == "About"
     assert page.body_markdown == "v1 page"
+
+
+# ============================================================
+# Pin-state capture and restore (#125 spec edge-case)
+# ============================================================
+
+
+def test_post_edit_captures_pin_state_in_revision(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Saving a pinned post emits a revision that carries the pin
+    state, so a future restore brings it back."""
+    post_id = _post_id(db_session_factory)
+    expiry = datetime(2026, 12, 31, 12, 0)
+
+    # Make the seeded post pinned (with an expiry).
+    with db_session_factory() as db:
+        post = db.get(Post, post_id)
+        post.is_pinned = True
+        post.pinned_until = expiry
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "title": "Hello",
+            "slug": "hello",
+            "body_markdown": "edited body",
+            "status": "published",
+            "is_pinned": "1",
+            "pinned_until": expiry.strftime("%Y-%m-%dT%H:%M"),
+            "_csrf_token": token,
+        },
+    )
+
+    with db_session_factory() as db:
+        rev = db.execute(select(PostRevision)).scalar_one()
+    assert rev.is_pinned is True
+    assert rev.pinned_until == expiry
+
+
+def test_restore_revision_reapplies_pin_state(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Restoring a revision brings back the snapshotted pin state,
+    even after an intermediate unpin."""
+    post_id = _post_id(db_session_factory)
+    pinned_expiry = datetime(2026, 12, 31, 12, 0)
+
+    with db_session_factory() as db:
+        post = db.get(Post, post_id)
+        post.is_pinned = True
+        post.pinned_until = pinned_expiry
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+
+    # Edit 1: bumps the post body; revision captures the still-pinned state.
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "title": "Hello",
+            "slug": "hello",
+            "body_markdown": "v2 body",
+            "status": "published",
+            "is_pinned": "1",
+            "pinned_until": pinned_expiry.strftime("%Y-%m-%dT%H:%M"),
+            "_csrf_token": token,
+        },
+    )
+    with db_session_factory() as db:
+        pinned_rev_id = db.execute(select(PostRevision.id)).scalar_one()
+
+    # Edit 2: unpin the post. The post-row is now unpinned; the
+    # first revision still remembers the pinned state.
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "title": "Hello",
+            "slug": "hello",
+            "body_markdown": "v3 body",
+            "status": "published",
+            "_csrf_token": token,
+            # No is_pinned / pinned_until: the form omits both.
+        },
+    )
+    with db_session_factory() as db:
+        assert db.get(Post, post_id).is_pinned is False
+        assert db.get(Post, post_id).pinned_until is None
+
+    # Restore the first revision: pin state must come back too.
+    restore_token = csrf_token(
+        client, path=f"/admin/sites/blog/posts/{post_id}/revisions/{pinned_rev_id}"
+    )
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/revisions/{pinned_rev_id}/restore",
+        data={"_csrf_token": restore_token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        post = db.get(Post, post_id)
+    assert post.is_pinned is True
+    assert post.pinned_until == pinned_expiry

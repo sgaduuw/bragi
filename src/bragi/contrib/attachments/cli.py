@@ -9,18 +9,28 @@ source that didn't carry renditions.
 
 from __future__ import annotations
 
+import io
 import sys
+from typing import Any
 
 import click
 from flask import current_app
 from flask.cli import with_appcontext
-from sqlalchemy import select
+from PIL import Image
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 
 from bragi.core.db import SessionLocal
+from bragi.core.image_processor import resize_and_encode
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.site import Site
+from bragi.core.storage import read_bytes as storage_read_bytes
 from bragi.core.storage import resolve as resolve_storage
+from bragi.core.storage import store_rendition
+from bragi.core.themes import rendition_target_content_type, resolved_widths
+from bragi.core.time import naive_utcnow
 from bragi.settings import settings
 
 
@@ -133,11 +143,16 @@ def reindex(site_slug: str | None, dry_run: bool) -> None:
                     AttachmentRendition(
                         attachment_id=att.id,
                         size_label=f"{target_width}w",
+                        # Backfill CLI still produces a single
+                        # format per row; the worker-driven
+                        # multi-format path lands in a later task.
+                        format="original",
                         storage_key=resized_key,
                         content_type=att.content_type,
                         width=resized_meta.width,
                         height=resized_meta.height,
                         bytes_size=resized_size,
+                        status="done",
                     )
                 )
                 counts["added"] += 1
@@ -151,3 +166,241 @@ def reindex(site_slug: str | None, dry_run: bool) -> None:
     click.echo(f"{label} complete:")
     for k, v in counts.items():
         click.echo(f"  {k}: {v}")
+
+
+@media_group.command("process-renditions")
+@click.option(
+    "--limit",
+    type=int,
+    default=None,
+    help="Maximum rows to claim per pass (default: Settings.attachment_rendition_worker_batch).",
+)
+@with_appcontext
+def process_renditions(limit: int | None) -> None:
+    """Drain pending attachment rendition rows.
+
+    Claims up to `--limit` rows with `status='pending'` in a single
+    UPDATE, reads the parent attachment's original bytes, calls
+    `resize_and_encode(...)` per row's `(width, format)`, writes
+    the file via `store_rendition(...)`, then marks the row
+    `done`. Encoder / IO failures bump `attempts` and re-pend
+    until `Settings.attachment_rendition_max_attempts` (default 3),
+    after which the row is `failed`.
+    """
+    batch = limit if limit is not None else settings.attachment_rendition_worker_batch
+    max_attempts = settings.attachment_rendition_max_attempts
+
+    with SessionLocal() as db:
+        # Two-step claim: select ids of pending rows, then UPDATE
+        # them to `processing` in one statement so a parallel
+        # worker can't pick them up. SQLite has no SKIP LOCKED so
+        # the gap between SELECT and UPDATE is the small window
+        # the dev scheduler's single-worker assumption rests on;
+        # production can run multiple workers if the conditional
+        # UPDATE is honest about its WHERE.
+        pending_ids = list(
+            db.execute(
+                select(AttachmentRendition.id)
+                .where(AttachmentRendition.status == "pending")
+                .order_by(AttachmentRendition.id)
+                .limit(batch)
+            ).scalars()
+        )
+        if not pending_ids:
+            click.echo("no pending renditions")
+            return
+        db.execute(
+            update(AttachmentRendition)
+            .where(
+                AttachmentRendition.id.in_(pending_ids),
+                AttachmentRendition.status == "pending",
+            )
+            .values(status="processing")
+        )
+        db.commit()
+
+        rows = (
+            db.execute(
+                select(AttachmentRendition)
+                .where(AttachmentRendition.id.in_(pending_ids))
+                .order_by(AttachmentRendition.id)
+            )
+            .scalars()
+            .all()
+        )
+
+        done_count = 0
+        failed_count = 0
+        for row in rows:
+            try:
+                attachment = db.get(Attachment, row.attachment_id)
+                if attachment is None:
+                    raise RuntimeError("parent attachment missing")
+                site = db.get(Site, attachment.site_id)
+                if site is None:
+                    raise RuntimeError("parent site missing")
+                original = storage_read_bytes(site.slug, attachment.storage_key)
+                width = int(row.size_label.rstrip("w"))
+                rendition_bytes = resize_and_encode(
+                    original,
+                    target_width=width,
+                    target_format=row.format,
+                    source_content_type=attachment.content_type,
+                )
+                if rendition_bytes is None:
+                    raise RuntimeError(f"encoder returned None for {width}w / {row.format}")
+                with Image.open(io.BytesIO(rendition_bytes)) as img:
+                    actual_width, actual_height = img.width, img.height
+                store_rendition(
+                    site.slug,
+                    attachment.storage_key,
+                    width=width,
+                    format_slug=row.format,
+                    data=rendition_bytes,
+                )
+                row.storage_key = f"{attachment.storage_key}/{width}/{row.format}"
+                row.width = actual_width
+                row.height = actual_height
+                row.bytes_size = len(rendition_bytes)
+                row.status = "done"
+                row.processed_at = naive_utcnow()
+                done_count += 1
+            except Exception as exc:  # noqa: BLE001 -- worker resilience
+                row.attempts += 1
+                row.last_error = str(exc)
+                row.status = "failed" if row.attempts >= max_attempts else "pending"
+                failed_count += 1
+        db.commit()
+
+    click.echo(f"processed {done_count} rendition(s); {failed_count} failed/re-pended")
+
+
+def _purge_renditions(db: Session, site: Site) -> int:
+    """Delete every rendition row for `site`. Returns the count.
+
+    Shared between the `cms media regenerate-all` CLI and the
+    admin POST endpoint. The on-disk rendition files are left
+    behind; the worker will overwrite them on the next pass.
+    Caller owns the transaction commit.
+    """
+    attachment_ids = [
+        a.id for a in db.execute(select(Attachment).where(Attachment.site_id == site.id)).scalars()
+    ]
+    if not attachment_ids:
+        return 0
+    result = db.execute(
+        sa_delete(AttachmentRendition).where(AttachmentRendition.attachment_id.in_(attachment_ids))
+    )
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+def _enqueue_missing_renditions(db: Session, site: Site, app: Any) -> int:
+    """Enqueue pending renditions for any gaps under the active theme.
+
+    Shared between the `cms media regenerate-missing` CLI and the
+    admin POST endpoint so both call sites enqueue identically.
+    The caller owns the transaction commit; this helper only
+    `db.add()`s the new rows.
+
+    Why a separate helper instead of `ctx.invoke()` from the view:
+    a Flask view doesn't have a click context, and synthesising one
+    just to share a few lines of gap-detection logic would be
+    higher friction than a plain function call. Returns the count
+    of pending rows added so the caller can flash / echo it.
+    """
+    registry = app.extensions.get("registry")
+    theme = registry.theme(site.theme) if registry and site.theme else None
+    widths = resolved_widths(theme)
+    formats = ("avif", "webp", "original")
+    target = {(f"{w}w", f) for w in widths for f in formats}
+
+    attachments = (
+        db.execute(select(Attachment).where(Attachment.site_id == site.id)).scalars().all()
+    )
+    added = 0
+    for attachment in attachments:
+        if attachment.width is None:
+            continue
+        existing = {
+            (r.size_label, r.format)
+            for r in db.execute(
+                select(AttachmentRendition).where(
+                    AttachmentRendition.attachment_id == attachment.id
+                )
+            ).scalars()
+        }
+        for size_label, fmt in target - existing:
+            # Don't enqueue widths larger than the source: the
+            # encoder's no-upscale check would skip them anyway,
+            # but we'd churn the worker and accumulate `failed`
+            # rows on every regenerate-missing call.
+            width_px = int(size_label.rstrip("w"))
+            if width_px >= attachment.width:
+                continue
+            db.add(
+                AttachmentRendition(
+                    attachment_id=attachment.id,
+                    size_label=size_label,
+                    format=fmt,
+                    content_type=rendition_target_content_type(fmt, attachment.content_type),
+                    status="pending",
+                )
+            )
+            added += 1
+    return added
+
+
+@media_group.command("regenerate-missing")
+@click.option("--site", "site_slug", required=True, help="Site slug to scan.")
+@with_appcontext
+def regenerate_missing(site_slug: str) -> None:
+    """Enqueue pending renditions for every gap.
+
+    Scans `site_slug`'s image attachments; for each, computes the
+    `(width, format)` set the active theme wants (via
+    `resolved_widths(active_theme)` × `{avif, webp, original}`)
+    and inserts a `status='pending'` row for any combination not
+    already present. The worker
+    (`cms media process-renditions`) drains them later.
+
+    Non-image attachments (no `width` recorded on the row) are
+    skipped.
+    """
+    with SessionLocal() as db:
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+        if site is None:
+            click.echo(f"No site with slug {site_slug!r}.", err=True)
+            raise click.exceptions.Exit(1)
+        added = _enqueue_missing_renditions(db, site, current_app)
+        db.commit()
+    click.echo(f"Enqueued {added} pending rendition(s) for site {site_slug!r}.")
+
+
+@media_group.command("regenerate-all")
+@click.option("--site", "site_slug", required=True, help="Site slug to scan.")
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Required confirmation for the destructive op.",
+)
+@with_appcontext
+def regenerate_all(site_slug: str, yes: bool) -> None:
+    """Drop every rendition row for a site, then re-enqueue from
+    scratch under the active theme.
+
+    Use after a backwards-incompatible change to the rendition
+    layout, or to clear out stale `failed` rows after fixing the
+    underlying cause.
+    """
+    if not yes:
+        raise click.UsageError("regenerate-all is destructive; pass --yes to confirm.")
+
+    with SessionLocal() as db:
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+        if site is None:
+            click.echo(f"No site with slug {site_slug!r}.", err=True)
+            raise click.exceptions.Exit(1)
+        _purge_renditions(db, site)
+        added = _enqueue_missing_renditions(db, site, current_app)
+        db.commit()
+    click.echo(f"Enqueued {added} pending rendition(s) for site {site_slug!r}.")

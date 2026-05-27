@@ -26,9 +26,20 @@
          style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
                 gap: 0.75rem; padding: 0.75rem;">
       {% for r in rows %}
+        {# Per-size rendition keys land as data-rendition-{small,medium,full}
+           so the editor can swap the in-editor `<img src>` when the
+           operator clicks a size button on the bubble menu. The keys
+           are storage_key path strings (`<sha>/<width>/webp`); the
+           editor JS prepends the admin attachment prefix to build the
+           full URL. Empty string when no done WebP exists yet — the
+           editor falls back to the original. #}
         <button type="button"
                 class="picker-card"
+                data-attachment-id="{{ r.id }}"
                 data-storage-key="{{ r.storage_key }}"
+                data-rendition-small="{{ small_key_by_id.get(r.id, '') }}"
+                data-rendition-medium="{{ medium_key_by_id.get(r.id, '') }}"
+                data-rendition-full="{{ full_key_by_id.get(r.id, '') }}"
                 data-filename="{{ r.filename }}"
                 data-alt-text="{{ r.alt_text or '' }}"
                 title="{{ r.filename }}{% if r.width and r.height %} ({{ r.width }}&times;{{ r.height }}){% endif %}"
@@ -36,11 +47,15 @@
                        padding: 0.5rem; background: white; border: 1px solid #ddd;
                        border-radius: 4px; cursor: pointer; text-align: left;
                        overflow: hidden;">
-          {# Build the URL by hand: the delivery blueprint isn't
-             mounted on the admin app, so url_for can't resolve
-             `attachment_delivery.serve_attachment` here. The
-             public delivery URL is always `/attachments/<key>`. #}
-          <img src="/attachments/{{ r.storage_key }}"
+          {# Site-scoped admin URL: the delivery /attachments/<key>
+             route resolves the site from the Host header, which
+             doesn't match on the admin host. attachment_admin's
+             /file/<key> reads the site from the URL path. #}
+          <img src="{{ url_for(
+                 'attachment_admin.serve_attachment_bytes',
+                 site_slug=request.view_args['site_slug'],
+                 storage_key=(thumb_storage_key_by_id.get(r.id) or r.storage_key)
+               ) }}"
                alt="{{ r.alt_text or '' }}"
                loading="lazy"
                style="width: 100%; height: 120px; object-fit: cover;

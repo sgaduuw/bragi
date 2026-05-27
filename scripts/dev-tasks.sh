@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Local-dev task-runner loop. Equivalent to docker/scheduler.sh
-# but invoked from honcho via Procfile.dev so `make dev` exercises
-# the scheduled-publish / webmentions-send / activitypub-send /
+# but invoked from the in-repo Procfile supervisor
+# (`scripts/run-procfile.py`) so `make dev` exercises the
+# scheduled-publish / webmentions-send / activitypub-send /
 # embeds-rerender code paths against the local SQLite DB.
 #
 # Cadence is a deliberately tight 60s (vs the production
 # 60s-to-1-week range) so a dev iterating on a related feature
-# sees the queue drain promptly. The script is foreground; honcho
-# forwards SIGTERM cleanly.
+# sees the queue drain promptly. The script is foreground; the
+# supervisor forwards SIGTERM cleanly via the process group.
 set -uo pipefail
 
 FLASK_APP='bragi.apps.admin:create_admin_app'
@@ -31,5 +32,6 @@ while true; do
     run_cmd cms embeds rerender-pending
     run_cmd cms webmentions send-pending
     run_cmd cms activitypub send-pending
+    run_cmd cms media process-renditions
     sleep "$SLEEP_BETWEEN_PASSES"
 done

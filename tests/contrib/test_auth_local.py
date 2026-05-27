@@ -47,17 +47,10 @@ def _seed_user(session: Session, *, email: str = TEST_EMAIL, password: str = TES
 def admin_app(
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
+    patched_session_locals: sessionmaker[Session],
 ) -> Iterator[Flask]:
     """Admin app with patched SessionLocal references and one seeded user."""
     _seed_user(db_session)
-
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
 
     app = create_admin_app()
     app.config["TESTING"] = True
@@ -416,15 +409,8 @@ def must_change_admin_app(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
     db_session_factory: sessionmaker[Session],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[Flask]:
     _seed_user_must_change(db_session)
-    monkeypatch.setattr("bragi.core.middleware.site_resolver.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.middleware.sessions.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.audit.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.core.security.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory)
-    monkeypatch.setattr("bragi.contrib.auth_local.views.SessionLocal", db_session_factory)
     yield create_admin_app()
 
 
@@ -582,13 +568,12 @@ def test_login_without_must_change_does_not_redirect_to_rotation(
 
 
 def test_user_create_with_generated_password_defaults_to_must_change(
-    db_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
 ) -> None:
     from click.testing import CliRunner
 
     from bragi.contrib.auth_local.cli import user_group
 
-    monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     runner = CliRunner()
     result = runner.invoke(
         user_group,
@@ -603,13 +588,12 @@ def test_user_create_with_generated_password_defaults_to_must_change(
 
 
 def test_user_create_with_supplied_password_defaults_to_no_must_change(
-    db_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
 ) -> None:
     from click.testing import CliRunner
 
     from bragi.contrib.auth_local.cli import user_group
 
-    monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     runner = CliRunner()
     result = runner.invoke(
         user_group,
@@ -632,13 +616,12 @@ def test_user_create_with_supplied_password_defaults_to_no_must_change(
 
 
 def test_user_create_explicit_must_change_flag_overrides_default(
-    db_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
 ) -> None:
     from click.testing import CliRunner
 
     from bragi.contrib.auth_local.cli import user_group
 
-    monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     runner = CliRunner()
     # Supply a password but also explicitly request must_change.
     result = runner.invoke(
@@ -668,7 +651,7 @@ def test_user_create_explicit_must_change_flag_overrides_default(
 
 
 def test_user_grant_creates_role_row(
-    db_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
 ) -> None:
     from click.testing import CliRunner
     from sqlalchemy import select
@@ -677,7 +660,6 @@ def test_user_grant_creates_role_row(
     from bragi.core.models.site import Site
     from bragi.core.models.user_site_role import UserSiteRole
 
-    monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         user = User(email="ada@example.com", display_name="Ada", is_active=True)
         db.add(user)
@@ -705,7 +687,7 @@ def test_user_grant_creates_role_row(
 
 
 def test_user_grant_updates_existing_row(
-    db_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
 ) -> None:
     """Re-running with a different role overwrites instead of failing
     the UNIQUE constraint."""
@@ -716,7 +698,6 @@ def test_user_grant_updates_existing_row(
     from bragi.core.models.site import Site
     from bragi.core.models.user_site_role import UserSiteRole
 
-    monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         user = User(email="ada@example.com", display_name="Ada", is_active=True)
         db.add(user)
@@ -746,14 +727,13 @@ def test_user_grant_updates_existing_row(
 
 
 def test_user_grant_unknown_user_errors(
-    db_session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
 ) -> None:
     from click.testing import CliRunner
 
     from bragi.contrib.auth_local.cli import user_group
     from bragi.core.models.site import Site
 
-    monkeypatch.setattr("bragi.contrib.auth_local.cli.SessionLocal", db_session_factory)
     with db_session_factory() as db:
         owner = User(email="owner@example.com", display_name="Owner", is_active=True)
         db.add(owner)

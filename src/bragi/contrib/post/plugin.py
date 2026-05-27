@@ -35,7 +35,7 @@ from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.render.reading_time import reading_time_minutes
 from bragi.core.render.toc import build_toc_html
-from bragi.core.seo import og_image_url_for
+from bragi.core.seo import featured_image_url_for
 from bragi.core.url import post_url_for
 
 # Re-publishing within this window of the initial publish doesn't
@@ -158,7 +158,7 @@ def _render_post(post: Any, _request: Any) -> str:
         meta_description=post.meta_description or post.body_excerpt or None,
         canonical_url=canonical,
         noindex=post.noindex,
-        og_image_url=og_image_url_for(item=post, site=site),
+        og_image_url=featured_image_url_for(item=post, site=site),
         related_posts=related,
         toc_html=build_toc_html(post.body_html or ""),
     )
