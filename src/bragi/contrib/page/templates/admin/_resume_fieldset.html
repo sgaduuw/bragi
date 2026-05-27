@@ -38,9 +38,9 @@
       <label>Profile links</label>
       {% call(item, idx) repeating_field("header.profile_links", resume.header.profile_links, "+ Add link") %}
         <label>Label</label>
-        <input type="text" data-field="label" value="{{ (item.label if item else '') }}" placeholder="LinkedIn">
+        <input type="text" data-field="label" value="{{ (item.label or '') if item else '' }}" placeholder="LinkedIn">
         <label>URL</label>
-        <input type="url" data-field="url" value="{{ (item.url|string if item else '') }}" placeholder="https://...">
+        <input type="url" data-field="url" value="{{ (item.url or '') if item else '' }}" placeholder="https://...">
       {% endcall %}
     </div>
   </details>
@@ -63,17 +63,17 @@
     <div class="resume-section" data-section="experience">
       {% call(item, idx) repeating_field("experience", resume.experience, "+ Add experience") %}
         <label>Company</label>
-        <input type="text" data-field="company" value="{{ (item.company if item else '') }}" required>
+        <input type="text" data-field="company" value="{{ (item.company or '') if item else '' }}" required>
         <label>Role</label>
-        <input type="text" data-field="role" value="{{ (item.role if item else '') }}" required>
+        <input type="text" data-field="role" value="{{ (item.role or '') if item else '' }}" required>
         <label>Location</label>
-        <input type="text" data-field="location" value="{{ (item.location if item else '') }}">
+        <input type="text" data-field="location" value="{{ (item.location or '') if item else '' }}">
         <label>Start</label>
-        <input type="month" data-field="start_date" value="{{ (item.start_date if item else '') }}">
+        <input type="month" data-field="start_date" value="{{ (item.start_date or '') if item else '' }}">
         <label>End (leave empty for "Present")</label>
-        <input type="month" data-field="end_date" value="{{ (item.end_date if item else '') }}">
+        <input type="month" data-field="end_date" value="{{ (item.end_date or '') if item else '' }}">
         <label>Description (markdown)</label>
-        <textarea data-field="description_markdown" rows="4">{{ (item.description_markdown if item else '') }}</textarea>
+        <textarea data-field="description_markdown" rows="4">{{ (item.description_markdown or '') if item else '' }}</textarea>
         <label>Impacts (one per line)</label>
         <textarea data-field="impacts" rows="3" data-multiline="1">{% if item %}{{ item.impacts | join('\n') }}{% endif %}</textarea>
       {% endcall %}
@@ -86,24 +86,24 @@
     <div class="resume-section" data-section="projects">
       {% call(item, idx) repeating_field("projects", resume.projects, "+ Add project") %}
         <label>Name</label>
-        <input type="text" data-field="name" value="{{ (item.name if item else '') }}" required>
+        <input type="text" data-field="name" value="{{ (item.name or '') if item else '' }}" required>
         <label>Role (optional, leave empty for solo)</label>
-        <input type="text" data-field="role" value="{{ (item.role if item else '') }}">
+        <input type="text" data-field="role" value="{{ (item.role or '') if item else '' }}">
         <label>URL (optional)</label>
-        <input type="url" data-field="url" value="{{ (item.url|string if item else '') }}">
+        <input type="url" data-field="url" value="{{ (item.url or '') if item else '' }}">
         <label>Linked position (optional)</label>
-        <select data-field="linked_position_id" class="js-linked-position" data-current="{{ (item.linked_position_id if item else '') }}">
+        <select data-field="linked_position_id" class="js-linked-position" data-current="{{ (item.linked_position_id or '') if item else '' }}">
           <option value="">— Not linked / personal project —</option>
           {# Options populated client-side from the Experience rows. #}
         </select>
         <label>Location</label>
-        <input type="text" data-field="location" value="{{ (item.location if item else '') }}">
+        <input type="text" data-field="location" value="{{ (item.location or '') if item else '' }}">
         <label>Start</label>
-        <input type="month" data-field="start_date" value="{{ (item.start_date if item else '') }}">
+        <input type="month" data-field="start_date" value="{{ (item.start_date or '') if item else '' }}">
         <label>End</label>
-        <input type="month" data-field="end_date" value="{{ (item.end_date if item else '') }}">
+        <input type="month" data-field="end_date" value="{{ (item.end_date or '') if item else '' }}">
         <label>Description (markdown)</label>
-        <textarea data-field="description_markdown" rows="3">{{ (item.description_markdown if item else '') }}</textarea>
+        <textarea data-field="description_markdown" rows="3">{{ (item.description_markdown or '') if item else '' }}</textarea>
         <label>Impacts (one per line)</label>
         <textarea data-field="impacts" rows="2" data-multiline="1">{% if item %}{{ item.impacts | join('\n') }}{% endif %}</textarea>
       {% endcall %}
@@ -116,17 +116,17 @@
     <div class="resume-section" data-section="education">
       {% call(item, idx) repeating_field("education", resume.education, "+ Add education") %}
         <label>Institution</label>
-        <input type="text" data-field="institution" value="{{ (item.institution if item else '') }}" required>
+        <input type="text" data-field="institution" value="{{ (item.institution or '') if item else '' }}" required>
         <label>Degree</label>
-        <input type="text" data-field="degree" value="{{ (item.degree if item else '') }}" required>
+        <input type="text" data-field="degree" value="{{ (item.degree or '') if item else '' }}" required>
         <label>Location</label>
-        <input type="text" data-field="location" value="{{ (item.location if item else '') }}">
+        <input type="text" data-field="location" value="{{ (item.location or '') if item else '' }}">
         <label>Start</label>
-        <input type="month" data-field="start_date" value="{{ (item.start_date if item else '') }}">
+        <input type="month" data-field="start_date" value="{{ (item.start_date or '') if item else '' }}">
         <label>End</label>
-        <input type="month" data-field="end_date" value="{{ (item.end_date if item else '') }}">
+        <input type="month" data-field="end_date" value="{{ (item.end_date or '') if item else '' }}">
         <label>Description (markdown)</label>
-        <textarea data-field="description_markdown" rows="2">{{ (item.description_markdown if item else '') }}</textarea>
+        <textarea data-field="description_markdown" rows="2">{{ (item.description_markdown or '') if item else '' }}</textarea>
       {% endcall %}
     </div>
   </details>
@@ -137,7 +137,7 @@
     <div class="resume-section" data-section="skills">
       {% call(item, idx) repeating_field("skills", resume.skills, "+ Add skill group") %}
         <label>Group label</label>
-        <input type="text" data-field="group_label" value="{{ (item.group_label if item else '') }}"
+        <input type="text" data-field="group_label" value="{{ (item.group_label or '') if item else '' }}"
                placeholder="e.g. Platform Engineering / SRE / IaC" required>
         <label>Items (comma-separated)</label>
         <input type="text" data-field="items" data-split="comma"
@@ -153,14 +153,14 @@
     <div class="resume-section" data-section="certifications">
       {% call(item, idx) repeating_field("certifications", resume.certifications, "+ Add certification") %}
         <label>Name</label>
-        <input type="text" data-field="name" value="{{ (item.name if item else '') }}" required>
+        <input type="text" data-field="name" value="{{ (item.name or '') if item else '' }}" required>
         <label>Issuer</label>
-        <input type="text" data-field="issuer" value="{{ (item.issuer if item else '') }}">
+        <input type="text" data-field="issuer" value="{{ (item.issuer or '') if item else '' }}">
         <label>Year</label>
-        <input type="number" data-field="year" value="{{ (item.year if item else '') }}"
+        <input type="number" data-field="year" value="{{ (item.year or '') if item else '' }}"
                min="1900" max="2100" step="1">
         <label>URL</label>
-        <input type="url" data-field="url" value="{{ (item.url|string if item else '') }}">
+        <input type="url" data-field="url" value="{{ (item.url or '') if item else '' }}">
       {% endcall %}
     </div>
   </details>
@@ -171,9 +171,9 @@
     <div class="resume-section" data-section="languages">
       {% call(item, idx) repeating_field("languages", resume.languages, "+ Add language") %}
         <label>Name</label>
-        <input type="text" data-field="name" value="{{ (item.name if item else '') }}" required>
+        <input type="text" data-field="name" value="{{ (item.name or '') if item else '' }}" required>
         <label>Level</label>
-        <input type="text" data-field="level" value="{{ (item.level if item else '') }}"
+        <input type="text" data-field="level" value="{{ (item.level or '') if item else '' }}"
                placeholder="e.g. Native, C1, Conversational" required>
       {% endcall %}
     </div>

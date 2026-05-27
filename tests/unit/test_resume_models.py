@@ -14,11 +14,13 @@ from bragi.contrib.page.resume import (
     Education,
     Language,
     Position,
+    ProfileLink,
     Project,
     ResumeData,
     ResumeHeader,
     SkillGroup,
 )
+from bragi.contrib.page.resume_jsonld import build_jsonld
 
 # ============================================================
 # YearMonth pattern
@@ -154,8 +156,6 @@ def test_project_linked_position_id_defaults_to_none() -> None:
 
 
 def test_jsonld_minimal_resume_emits_person_block() -> None:
-    from bragi.contrib.page.resume_jsonld import build_jsonld
-
     jsonld = build_jsonld(page_title="Eelco Wesemann", resume=ResumeData())
     assert jsonld["@context"] == "https://schema.org"
     assert jsonld["@type"] == "Person"
@@ -167,8 +167,6 @@ def test_jsonld_minimal_resume_emits_person_block() -> None:
 
 
 def test_jsonld_emits_jobTitle_and_address_from_header() -> None:
-    from bragi.contrib.page.resume_jsonld import build_jsonld
-
     jsonld = build_jsonld(
         page_title="Eelco",
         resume=ResumeData(
@@ -180,9 +178,6 @@ def test_jsonld_emits_jobTitle_and_address_from_header() -> None:
 
 
 def test_jsonld_emits_sameAs_from_profile_links() -> None:
-    from bragi.contrib.page.resume_jsonld import build_jsonld
-    from bragi.contrib.page.resume import ProfileLink
-
     jsonld = build_jsonld(
         page_title="Eelco",
         resume=ResumeData(
@@ -201,8 +196,6 @@ def test_jsonld_emits_sameAs_from_profile_links() -> None:
 
 
 def test_jsonld_emits_worksFor_from_experience() -> None:
-    from bragi.contrib.page.resume_jsonld import build_jsonld
-
     jsonld = build_jsonld(
         page_title="Eelco",
         resume=ResumeData(
@@ -238,8 +231,6 @@ def test_jsonld_emits_worksFor_from_experience() -> None:
 
 
 def test_jsonld_emits_alumniOf_from_education() -> None:
-    from bragi.contrib.page.resume_jsonld import build_jsonld
-
     jsonld = build_jsonld(
         page_title="Eelco",
         resume=ResumeData(
@@ -255,8 +246,6 @@ def test_jsonld_emits_alumniOf_from_education() -> None:
 
 
 def test_jsonld_emits_hasCredential_from_certifications() -> None:
-    from bragi.contrib.page.resume_jsonld import build_jsonld
-
     jsonld = build_jsonld(
         page_title="Eelco",
         resume=ResumeData(
@@ -272,8 +261,6 @@ def test_jsonld_emits_hasCredential_from_certifications() -> None:
 
 
 def test_jsonld_emits_knowsLanguage() -> None:
-    from bragi.contrib.page.resume_jsonld import build_jsonld
-
     jsonld = build_jsonld(
         page_title="Eelco",
         resume=ResumeData(
