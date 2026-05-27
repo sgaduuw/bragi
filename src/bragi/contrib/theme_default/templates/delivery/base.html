@@ -124,6 +124,26 @@
       display: inline-block;
       transition: background 0.15s ease;
     }
+      /* Image size + alignment classes (see
+       _claude/specs/2026-05-27-image-size-classes-design.md).
+       Picker inserts these via markdown {.class} attrs; pictureify
+       passes them through to the inner <img> of <picture>. */
+    img.size-small  { max-width: 33%; height: auto; }
+    img.size-medium { max-width: 66%; height: auto; }
+    img.size-full   { max-width: 100%; height: auto; }
+    img.align-left  { float: left;  margin: 0.5rem 1rem 0.5rem 0; }
+    img.align-right { float: right; margin: 0.5rem 0 0.5rem 1rem; }
+    img.align-center { display: block; margin: 0.5rem auto; clear: both; }
+    /* Full-width images can't sensibly float; collapse to a centered block. */
+    img.size-full.align-left,
+    img.size-full.align-right { float: none; display: block; margin: 0.5rem auto; }
+    /* Legacy images saved before the picker added these classes have
+       no size-* class; fall back to full-width to match the prior
+       behaviour. */
+    img:not(.size-small):not(.size-medium):not(.size-full) {
+      max-width: 100%;
+      height: auto;
+    }
   </style>
 </head>
 <body>

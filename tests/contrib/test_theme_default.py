@@ -89,3 +89,23 @@ def test_null_theme_renders_through_default_shell(site_with_null_theme: None) ->
     resp = client.get("/__base_smoke", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     assert b"<!DOCTYPE html>" in resp.data
+
+
+def test_theme_default_ships_image_size_classes() -> None:
+    """The picker / bubble menu writes size-* and align-* classes
+    that the theme CSS must style. theme_default ships the baseline;
+    the other in-tree themes (terminal / minimal / serif) inherit
+    by copy-paste in this PR.
+    """
+    from importlib.resources import files
+
+    css = files("bragi.contrib.theme_default.templates.delivery").joinpath("base.html").read_text()
+    for cls in (
+        "img.size-small",
+        "img.size-medium",
+        "img.size-full",
+        "img.align-left",
+        "img.align-right",
+        "img.align-center",
+    ):
+        assert cls in css, f"theme_default missing rule for {cls}"
