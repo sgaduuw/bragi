@@ -6,8 +6,8 @@ help:  ## Show this help
 install:  ## Install all dependencies via poetry
 	poetry install
 
-dev:  ## Run admin + delivery side by side (honcho)
-	poetry run honcho -f Procfile.dev start
+dev:  ## Run admin + delivery side by side (in-repo Procfile supervisor)
+	poetry run python scripts/run-procfile.py Procfile.dev
 
 test:  ## Run the full test suite
 	poetry run pytest

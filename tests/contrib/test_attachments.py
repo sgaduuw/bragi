@@ -3054,3 +3054,360 @@ def test_post_regenerate_all_purges_and_re_enqueues(
     # Default ladder × 3 formats = 9 pending rows.
     assert len(rows) == 9
     assert all(r.status == "pending" for r in rows)
+
+
+def test_pictureify_preserves_class_attribute(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """An <img> with a class lands inside <picture> with the
+    class still on the inner <img>. Regression net so a future
+    refactor of pictureify can't silently drop it."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="p" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="done",
+                storage_key=f"{att.storage_key}/320/webp",
+                width=320,
+                height=160,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = (
+        f'<p><img src="/attachments/{att_storage_key}" '
+        f'alt="x" class="size-medium align-center"></p>'
+    )
+    with (
+        delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    assert "<picture>" in out
+    assert 'class="size-medium align-center"' in out
+
+
+def test_pictureify_emits_per_class_sizes_for_size_small(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """`size-small` → sizes="(min-width: 800px) 264px, 33vw"."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="q" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="done",
+                storage_key=f"{att.storage_key}/320/webp",
+                width=320,
+                height=160,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = (
+        f'<p><img src="/attachments/{att_storage_key}" '
+        f'alt="x" class="size-small align-left"></p>'
+    )
+    with (
+        delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    assert 'sizes="(min-width: 800px) 264px, 33vw"' in out
+
+
+def test_pictureify_emits_per_class_sizes_for_size_medium(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """`size-medium` → sizes="(min-width: 800px) 528px, 66vw"."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="r" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="done",
+                storage_key=f"{att.storage_key}/320/webp",
+                width=320,
+                height=160,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = (
+        f'<p><img src="/attachments/{att_storage_key}" '
+        f'alt="x" class="size-medium align-center"></p>'
+    )
+    with (
+        delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    assert 'sizes="(min-width: 800px) 528px, 66vw"' in out
+
+
+def test_pictureify_emits_default_sizes_without_size_class(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """No `size-*` class → existing default sizes (800px / 100vw)."""
+    from flask import g
+
+    from bragi.contrib.attachments.transforms import pictureify
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="a.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="s" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="done",
+                storage_key=f"{att.storage_key}/320/webp",
+                width=320,
+                height=160,
+                bytes_size=10,
+            )
+        )
+        db.commit()
+        site_id = site.id
+        att_storage_key = att.storage_key
+
+    html_in = f'<p><img src="/attachments/{att_storage_key}" alt="x"></p>'
+    with (
+        delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
+        db_session_factory() as db,
+    ):
+        g.site = db.get(Site, site_id)
+        out = pictureify(html_in)
+    assert 'sizes="(min-width: 800px) 800px, 100vw"' in out
+
+
+def test_delivery_renders_image_with_size_class(
+    admin_app: Flask,
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """Save a post with `![alt](url){.size-medium .align-center}`,
+    render via delivery: the inner <img> of <picture> carries the
+    class through the full pipeline (markdown parse → pictureify →
+    template emit).
+    """
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        seed_blog_index(db, site)
+        att = Attachment(
+            site_id=site.id,
+            filename="hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key="t" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        for fmt in ("avif", "webp", "original"):
+            for w in (320, 800):
+                db.add(
+                    AttachmentRendition(
+                        attachment_id=att.id,
+                        size_label=f"{w}w",
+                        format=fmt,
+                        content_type={
+                            "avif": "image/avif",
+                            "webp": "image/webp",
+                            "original": "image/jpeg",
+                        }[fmt],
+                        status="done",
+                        storage_key=f"{att.storage_key}/{w}/{fmt}",
+                        width=w,
+                        height=w // 2,
+                        bytes_size=10,
+                    )
+                )
+        db.commit()
+        att_storage_key = att.storage_key
+        site_slug = site.slug
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_slug}/posts/new")
+    client.post(
+        f"/admin/sites/{site_slug}/posts/new",
+        data={
+            "title": "Hero post",
+            "slug": "hero-class",
+            "body_markdown": (
+                f"![hero](/attachments/{att_storage_key})" "{.size-medium .align-center}"
+            ),
+            "status": "published",
+            "tags": "",
+            "featured_image_id": "",
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+
+    resp = delivery_app.test_client().get(
+        "/posts/hero-class/", headers={"Host": "blog.example.com"}
+    )
+    body = resp.data.decode()
+    assert "<picture>" in body
+    # The inner <img> carries the class through pictureify.
+    assert 'class="size-medium align-center"' in body
+    # And `sizes` reflects size-medium (528px / 66vw).
+    assert 'sizes="(min-width: 800px) 528px, 66vw"' in body
+
+
+# --------------------- editor_image_renditions Jinja global ---------------------
+
+
+def test_editor_image_renditions_global_returns_map_for_body_images(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The attachments plugin registers `editor_image_renditions`
+    as a Jinja global; the post / page edit partial calls it to
+    emit a `{sha: {small, medium, full}}` map for the TipTap editor
+    to hydrate per-image rendition URLs on reload.
+
+    Wires:
+      - global is registered on the admin app's Jinja env.
+      - call with a body referencing an attachment returns the
+        bucketed ladder for that sha.
+      - empty body / missing site_slug return {} (defensive — the
+        partial calls this on every edit-page render including
+        brand-new posts).
+    """
+    sha = "9" * 64
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=10,
+            storage_key=sha,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        for width in (320, 800):
+            db.add(
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label=f"{width}w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="done",
+                    storage_key=f"{sha}/{width}/webp",
+                    width=width,
+                    height=int(width / 2),
+                    bytes_size=10,
+                )
+            )
+        db.commit()
+
+    fn = admin_app.jinja_env.globals.get("editor_image_renditions")
+    assert callable(fn), "Jinja global not registered by attachments plugin"
+
+    # Defensive shapes the partial relies on: empty body / no slug → {}.
+    assert fn("", "blog") == {}
+    assert fn(f"![alt](/attachments/{sha})", None) == {}
+    assert fn(f"![alt](/attachments/{sha})", "no-such-site") == {}
+
+    # Happy path: body has the image; map carries the bucketed ladder.
+    body = f"![alt](/attachments/{sha}){{.size-medium}}"
+    result = fn(body, "blog")
+    assert result == {
+        sha: {
+            "small": f"{sha}/320/webp",
+            "medium": f"{sha}/800/webp",
+            "full": None,
+        }
+    }

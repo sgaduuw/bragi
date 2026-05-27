@@ -1,6 +1,7 @@
 # Optional local stack via docker compose. The primary dev path is
-# `make dev` (honcho running both processes in your venv); this
-# file is for testing the prod container shape locally.
+# `make dev` (an in-repo Procfile supervisor runs admin + delivery +
+# the dev-tasks loop in your venv); this file is for testing the
+# prod container shape locally.
 services:
   bragi-tasks:
     build:

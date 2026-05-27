@@ -108,6 +108,11 @@ def create_admin_app() -> Flask:
     else:
         app.jinja_loader = package_loader
 
+    # Match the delivery app's reload posture so a template edit is
+    # picked up without restarting the admin server. Cheap: Jinja
+    # only reparses when the source's mtime changes.
+    app.jinja_env.auto_reload = True
+
     pm = create_plugin_manager()
     registry = Registry()
     md_transforms = TransformRegistry()

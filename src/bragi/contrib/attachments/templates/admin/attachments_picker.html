@@ -26,10 +26,20 @@
          style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
                 gap: 0.75rem; padding: 0.75rem;">
       {% for r in rows %}
+        {# Per-size rendition keys land as data-rendition-{small,medium,full}
+           so the editor can swap the in-editor `<img src>` when the
+           operator clicks a size button on the bubble menu. The keys
+           are storage_key path strings (`<sha>/<width>/webp`); the
+           editor JS prepends the admin attachment prefix to build the
+           full URL. Empty string when no done WebP exists yet — the
+           editor falls back to the original. #}
         <button type="button"
                 class="picker-card"
                 data-attachment-id="{{ r.id }}"
                 data-storage-key="{{ r.storage_key }}"
+                data-rendition-small="{{ small_key_by_id.get(r.id, '') }}"
+                data-rendition-medium="{{ medium_key_by_id.get(r.id, '') }}"
+                data-rendition-full="{{ full_key_by_id.get(r.id, '') }}"
                 data-filename="{{ r.filename }}"
                 data-alt-text="{{ r.alt_text or '' }}"
                 title="{{ r.filename }}{% if r.width and r.height %} ({{ r.width }}&times;{{ r.height }}){% endif %}"

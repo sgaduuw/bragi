@@ -29,6 +29,8 @@ from bragi.core.db import SessionLocal
 from bragi.core.image_processor import PillowImageProcessor
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
+from bragi.core.models.site import Site
+from bragi.core.renditions import editor_renditions_for_body
 from bragi.core.storage import LocalStorageBackend
 
 
@@ -158,7 +160,33 @@ def register_template_globals(env: jinja2.Environment) -> None:
     """
     env.globals["srcset_for"] = srcset_for
     env.globals["attachment_url"] = attachment_url
+    env.globals["editor_image_renditions"] = _editor_image_renditions_json
     env.filters["pictureify"] = pictureify
+
+
+def _editor_image_renditions_json(
+    body_markdown: str | None, site_slug: str | None
+) -> dict[str, dict[str, str | None]]:
+    """Jinja global: rendition map for images referenced in `body_markdown`.
+
+    Called from the shared `_tiptap_editor.html` partial so the
+    editor JS can hydrate per-image rendition URLs on reload (the
+    markdown body only carries the original `<sha>` and the size
+    class; the rendition URLs are editor-only and not serialized).
+    Returns `{sha: {small_key, medium_key, full_key}}`.
+
+    Opens its own short-lived DB session because the calling view's
+    session is local to that function and isn't threaded through to
+    Jinja globals. One extra read query per edit-page render; the
+    view's hot path is unaffected.
+    """
+    if not body_markdown or not site_slug:
+        return {}
+    with SessionLocal() as db:
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+        if site is None:
+            return {}
+        return editor_renditions_for_body(db, site_id=site.id, body_markdown=body_markdown)
 
 
 @hookimpl

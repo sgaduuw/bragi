@@ -28,13 +28,24 @@ from typing import cast
 
 from flask import Flask, current_app, has_app_context
 from markdown_it import MarkdownIt
+from mdit_py_plugins.attrs import attrs_plugin
 
 from bragi.core.render.transforms import TransformRegistry
 
 
 def _build_renderer() -> MarkdownIt:
-    """Bare CommonMark renderer; plugins are attached by callers."""
-    return MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table")
+    """Bare CommonMark renderer; plugins are attached by callers.
+
+    The `attrs_plugin` enables curly-brace attribute syntax on
+    images (and other inline elements): `![alt](url){.class}`.
+    bragi uses this for image size + alignment classes (see the
+    image picker's BubbleMenu in `_tiptap_editor.html`); the
+    parser doesn't validate, so unknown classes pass through
+    unchanged and don't break the render.
+    """
+    return (
+        MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table").use(attrs_plugin)
+    )
 
 
 @lru_cache(maxsize=1)
