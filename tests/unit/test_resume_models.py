@@ -146,3 +146,141 @@ def test_project_linked_position_id_accepts_any_string() -> None:
 
 def test_project_linked_position_id_defaults_to_none() -> None:
     assert Project(name="x").linked_position_id is None
+
+
+# ============================================================
+# JSON-LD builder
+# ============================================================
+
+
+def test_jsonld_minimal_resume_emits_person_block() -> None:
+    from bragi.contrib.page.resume_jsonld import build_jsonld
+
+    jsonld = build_jsonld(page_title="Eelco Wesemann", resume=ResumeData())
+    assert jsonld["@context"] == "https://schema.org"
+    assert jsonld["@type"] == "Person"
+    assert jsonld["name"] == "Eelco Wesemann"
+    # Empty resume: no optional blocks
+    assert "jobTitle" not in jsonld
+    assert "worksFor" not in jsonld
+    assert "alumniOf" not in jsonld
+
+
+def test_jsonld_emits_jobTitle_and_address_from_header() -> None:
+    from bragi.contrib.page.resume_jsonld import build_jsonld
+
+    jsonld = build_jsonld(
+        page_title="Eelco",
+        resume=ResumeData(
+            header=ResumeHeader(tagline="Platform Engineer", location="Den Haag, NL")
+        ),
+    )
+    assert jsonld["jobTitle"] == "Platform Engineer"
+    assert jsonld["address"] == "Den Haag, NL"
+
+
+def test_jsonld_emits_sameAs_from_profile_links() -> None:
+    from bragi.contrib.page.resume_jsonld import build_jsonld
+    from bragi.contrib.page.resume import ProfileLink
+
+    jsonld = build_jsonld(
+        page_title="Eelco",
+        resume=ResumeData(
+            header=ResumeHeader(
+                profile_links=[
+                    ProfileLink(label="LinkedIn", url="https://linkedin.test/x"),
+                    ProfileLink(label="GitHub", url="https://github.test/x"),
+                ]
+            )
+        ),
+    )
+    assert jsonld["sameAs"] == [
+        "https://linkedin.test/x",
+        "https://github.test/x",
+    ]
+
+
+def test_jsonld_emits_worksFor_from_experience() -> None:
+    from bragi.contrib.page.resume_jsonld import build_jsonld
+
+    jsonld = build_jsonld(
+        page_title="Eelco",
+        resume=ResumeData(
+            experience=[
+                Position(
+                    company="Acme",
+                    role="SRE",
+                    start_date="2020-01",
+                    end_date="2024-03",
+                ),
+                Position(
+                    company="Logius",
+                    role="Platform Engineer",
+                    start_date="2024-04",
+                    end_date=None,  # Present
+                ),
+            ],
+        ),
+    )
+    assert len(jsonld["worksFor"]) == 2
+    acme = jsonld["worksFor"][0]
+    assert acme["@type"] == "Organization"
+    assert acme["name"] == "Acme"
+    # OccupationalRole nested for start/end dates
+    role = acme["member"]
+    assert role["@type"] == "OccupationalRole"
+    assert role["roleName"] == "SRE"
+    assert role["startDate"] == "2020-01"
+    assert role["endDate"] == "2024-03"
+    # Present: no endDate
+    logius = jsonld["worksFor"][1]
+    assert "endDate" not in logius["member"]
+
+
+def test_jsonld_emits_alumniOf_from_education() -> None:
+    from bragi.contrib.page.resume_jsonld import build_jsonld
+
+    jsonld = build_jsonld(
+        page_title="Eelco",
+        resume=ResumeData(
+            education=[
+                Education(institution="Hogeschool Utrecht", degree="HBO Informatica"),
+            ],
+        ),
+    )
+    assert jsonld["alumniOf"][0]["@type"] == "EducationalOrganization"
+    assert jsonld["alumniOf"][0]["name"] == "Hogeschool Utrecht"
+    assert jsonld["alumniOf"][0]["alumni"]["@type"] == "EducationalOccupationalCredential"
+    assert jsonld["alumniOf"][0]["alumni"]["name"] == "HBO Informatica"
+
+
+def test_jsonld_emits_hasCredential_from_certifications() -> None:
+    from bragi.contrib.page.resume_jsonld import build_jsonld
+
+    jsonld = build_jsonld(
+        page_title="Eelco",
+        resume=ResumeData(
+            certifications=[
+                Certification(name="CKA", issuer="CNCF", year=2024),
+            ],
+        ),
+    )
+    assert jsonld["hasCredential"][0]["@type"] == "EducationalOccupationalCredential"
+    assert jsonld["hasCredential"][0]["name"] == "CKA"
+    assert jsonld["hasCredential"][0]["recognizedBy"] == "CNCF"
+    assert jsonld["hasCredential"][0]["dateCreated"] == "2024"
+
+
+def test_jsonld_emits_knowsLanguage() -> None:
+    from bragi.contrib.page.resume_jsonld import build_jsonld
+
+    jsonld = build_jsonld(
+        page_title="Eelco",
+        resume=ResumeData(
+            languages=[
+                Language(name="Dutch", level="Native"),
+                Language(name="English", level="C2"),
+            ],
+        ),
+    )
+    assert jsonld["knowsLanguage"] == ["Dutch", "English"]
