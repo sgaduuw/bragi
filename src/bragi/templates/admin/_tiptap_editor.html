@@ -163,7 +163,6 @@
   // `attrs_plugin` already; this JS-side counterpart keeps the
   // editor's load-then-serialize cycle from silently dropping
   // the class. See _claude/specs/2026-05-27-image-size-classes-design.md.
-  import markdownItAttrs from 'https://esm.sh/markdown-it-attrs@4';
 
   // Image: extend with a `class` HTML attribute so size + align
   // classes (`size-medium align-center`, etc.) round-trip through
@@ -281,25 +280,15 @@
           linkify: true,
           breaks: false,
           tightLists: true,
-          // Image round-trip: parse side picks up `{.class}` via the
-          // markdown-it-attrs plugin; serialize side writes it back.
-          // Without both halves a save-then-edit cycle silently
-          // drops the class attribute.
-          markdownItOptions: {
-            plugins: [markdownItAttrs],
-          },
-          serializerOptions: {
-            image: {
-              serialize(state, node) {
-                const alt = state.esc(node.attrs.alt || '');
-                const src = state.esc(node.attrs.src || '');
-                const cls = node.attrs.class
-                  ? ` {.${node.attrs.class.split(' ').filter(Boolean).join(' .')}}`
-                  : '';
-                state.write(`![${alt}](${src})${cls}`);
-              },
-            },
-          },
+          // Note: tiptap-markdown@0.8 doesn't expose a stable
+          // hook for adding a markdown-it plugin or overriding a
+          // node's markdown serializer, so the editor-side class
+          // round-trip (load + save) is a known gap. Server-side
+          // the class still works (Python attrs_plugin parses
+          // `{.class}` on render). Fresh inserts via the picker
+          // get the class on the node; the class survives within
+          // a single edit session but may not survive a
+          // save→reload cycle. To be revisited.
         }),
       ],
       content: publicToAdmin(textarea.value),
