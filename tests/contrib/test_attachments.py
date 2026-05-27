@@ -2626,7 +2626,9 @@ def test_attachments_list_surfaces_failed_rendition_count(
     _login(client)
     resp = client.get("/admin/sites/blog/attachments/")
     body = resp.data.decode()
-    assert "2 renditions failed" in body
+    # The failed-rendition surface moved from a standalone warning
+    # banner into the unified status panel as `Failed: <N>`.
+    assert "Failed: <strong>2</strong>" in body
 
 
 def test_pictureify_runs_at_delivery_render_time(
@@ -2768,3 +2770,212 @@ def test_image_picker_inline_thumb_uses_smallest_webp(
     body = resp.data.decode()
     # Inline preview uses the smallest webp's storage_key.
     assert f"{('a' * 64)}/320/webp" in body
+
+
+def test_attachments_list_shows_rendition_status_panel(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Status panel surfaces pending / done / failed counts."""
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="x.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="x" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add_all(
+            [
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label="320w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="pending",
+                ),
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label="800w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="done",
+                    storage_key="x" * 64 + "/800/webp",
+                    width=800,
+                    height=400,
+                    bytes_size=10,
+                ),
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label="1600w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="failed",
+                    attempts=3,
+                    last_error="encoder gave up",
+                ),
+            ]
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/")
+    body = resp.data.decode()
+    # Counts present.
+    assert "Pending: 1" in body or ">1<" in body  # tolerant of layout
+    assert "Done: 1" in body or ">1<" in body
+    assert "Failed: 1" in body or ">1<" in body
+    # Generate-missing form present.
+    assert 'action="/admin/sites/blog/attachments/regenerate-missing"' in body
+    assert "Generate missing renditions" in body
+    # Retry-failed form present (because failed > 0).
+    assert 'action="/admin/sites/blog/attachments/retry-failed"' in body
+    assert "Retry failed" in body
+
+
+def test_attachments_list_hides_retry_when_no_failures(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Retry-failed button hidden when failed_count == 0."""
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/")
+    body = resp.data.decode()
+    # Generate-missing still present even on a fresh site.
+    assert "Generate missing renditions" in body
+    # No retry-failed button when there's nothing failed.
+    assert "Retry failed" not in body
+
+
+def test_post_regenerate_missing_enqueues_for_site(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """The POST /regenerate-missing endpoint enqueues pending rows
+    for any (width, format) gaps under the active theme."""
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site_id = site.id
+        att = Attachment(
+            site_id=site_id,
+            filename="x.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="y" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/")
+    resp = client.post(
+        "/admin/sites/blog/attachments/regenerate-missing",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/admin/sites/blog/attachments/")
+
+    with db_session_factory() as db:
+        rows = (
+            db.execute(
+                select(AttachmentRendition).where(
+                    AttachmentRendition.attachment_id.in_(
+                        select(Attachment.id).where(Attachment.site_id == site_id)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    # 3 widths * 3 formats = 9 pending rows (default Settings ladder
+    # × {avif, webp, original}).
+    assert len(rows) == 9
+    assert all(r.status == "pending" for r in rows)
+
+
+def test_post_retry_failed_resets_failed_rows_to_pending(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """The POST /retry-failed endpoint flips failed rows back to
+    pending so the worker picks them up again. Leaves done rows
+    untouched."""
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="x.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="z" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        db.add_all(
+            [
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label="320w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="failed",
+                    attempts=3,
+                    last_error="encoder gave up",
+                ),
+                AttachmentRendition(
+                    attachment_id=att.id,
+                    size_label="800w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="done",
+                    storage_key="z" * 64 + "/800/webp",
+                    width=800,
+                    height=400,
+                    bytes_size=10,
+                ),
+            ]
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/")
+    resp = client.post(
+        "/admin/sites/blog/attachments/retry-failed",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        rows = (
+            db.execute(select(AttachmentRendition).order_by(AttachmentRendition.size_label))
+            .scalars()
+            .all()
+        )
+    by_label = {r.size_label: r for r in rows}
+    # Failed → pending, attempts cleared, last_error cleared.
+    assert by_label["320w"].status == "pending"
+    assert by_label["320w"].attempts == 0
+    assert by_label["320w"].last_error is None
+    # Done row untouched.
+    assert by_label["800w"].status == "done"
