@@ -123,7 +123,7 @@ def build_attachment_response(site: object, storage_key: str) -> Response:
     return response
 
 
-@bp.route("/<storage_key>", methods=["GET"])
+@bp.route("/<path:storage_key>", methods=["GET"])
 def serve_attachment(storage_key: str) -> ResponseReturnValue:
     """Public bytes endpoint on delivery: site resolved via Host."""
     site = g.get("site")

@@ -164,7 +164,7 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
     )
 
 
-@bp.route("/file/<storage_key>", methods=["GET"])
+@bp.route("/file/<path:storage_key>", methods=["GET"])
 def serve_attachment_bytes(site_slug: str, storage_key: str) -> ResponseReturnValue:
     """Site-scoped attachment bytes for admin previews.
 

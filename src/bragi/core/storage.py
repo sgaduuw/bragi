@@ -166,12 +166,30 @@ def store_original(site_slug: str, *, content_type: str | None, data: bytes) -> 
 def read_bytes(site_slug: str, storage_key: str) -> bytes:
     """Return the bytes stored for `(site, key)`.
 
-    The post-migration layout puts originals at
-    `<sha>/original.<ext>` inside the sha directory. Look for the
-    lone `original.*` file inside that directory. Falls back to
-    the legacy flat path `<sha>` for dev / pre-migration installs.
-    Raises `FileNotFoundError` if neither is present.
+    The storage_key shape determines the on-disk path:
+    - `<sha>` → the original at `<sha>/original.<ext>` (post-migration)
+      or `<sha>` (legacy flat layout).
+    - `<sha>/<width>/<format_slug>` → a generated rendition.
+      The path resolves to `<sha[:2]>/<sha>/<width>/<format_slug>`
+      (no extension; the format slug IS the filename).
+
+    Raises `FileNotFoundError` if no file is present. Raises
+    `ValueError` if the storage_key has slashes but isn't a
+    valid rendition triple.
     """
+    # Rendition path? Renditions are written via `store_rendition`
+    # with a key shaped `<sha>/<width>/<format_slug>`. Same logic
+    # in reverse here.
+    if "/" in storage_key:
+        parts = storage_key.split("/")
+        if len(parts) != 3:
+            raise FileNotFoundError(str(_root() / site_slug / storage_key))
+        parent_sha, width_str, format_slug = parts
+        try:
+            width = int(width_str)
+        except ValueError as exc:
+            raise FileNotFoundError(str(_root() / site_slug / storage_key)) from exc
+        return _rendition_path(site_slug, parent_sha, width, format_slug).read_bytes()
     original = _existing_original_in_sha_dir(site_slug, storage_key)
     if original is not None:
         return original.read_bytes()

@@ -1158,6 +1158,66 @@ def test_delivery_serves_rendition_by_storage_key(
     assert len(resp.data) == len(resized)
 
 
+def test_delivery_serves_path_style_rendition_key(
+    admin_app: Flask,
+    delivery_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """Rendition storage_keys are path-shaped (`<sha>/<width>/<format>`).
+    The delivery /attachments/<...> route must accept slashes
+    (via `<path:storage_key>`) and read the file from the
+    rendition layout.
+    """
+    from bragi.core.storage import store_rendition
+
+    # Plant an attachment + a path-style rendition.
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        att = Attachment(
+            site_id=site.id,
+            filename="hero.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="b" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(att)
+        db.flush()
+        rendition_bytes = _make_png(width=320, height=160)
+        path_style_key = f"{att.storage_key}/320/webp"
+        db.add(
+            AttachmentRendition(
+                attachment_id=att.id,
+                size_label="320w",
+                format="webp",
+                storage_key=path_style_key,
+                content_type="image/webp",
+                width=320,
+                height=160,
+                bytes_size=len(rendition_bytes),
+                status="done",
+            )
+        )
+        db.commit()
+    store_rendition(
+        "blog",
+        "b" * 64,
+        width=320,
+        format_slug="webp",
+        data=rendition_bytes,
+    )
+
+    resp = delivery_app.test_client().get(
+        f"/attachments/{path_style_key}",
+        headers={"Host": "blog.example.com"},
+    )
+    assert resp.status_code == 200, resp.data
+    assert resp.headers["Content-Type"].startswith("image/webp")
+    assert resp.data == rendition_bytes
+
+
 def test_delivery_rendition_cross_site_isolation(
     admin_app: Flask,
     delivery_app: Flask,
