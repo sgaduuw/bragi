@@ -63,6 +63,20 @@
 </dialog>
 <div id="tiptap-editor" class="editor-mount" hidden></div>
 
+<div id="tiptap-image-bubble-menu" class="tiptap-bubble-menu" hidden>
+  <div class="tiptap-bubble-menu__group" role="radiogroup" aria-label="Image size">
+    <button type="button" data-size="size-small"  title="Small">S</button>
+    <button type="button" data-size="size-medium" title="Medium">M</button>
+    <button type="button" data-size="size-full"   title="Full width">full</button>
+  </div>
+  <span class="tiptap-bubble-menu__sep">|</span>
+  <div class="tiptap-bubble-menu__group" role="radiogroup" aria-label="Image alignment">
+    <button type="button" data-align="align-left"   title="Float left">&larr;</button>
+    <button type="button" data-align="align-center" title="Center">&mdash;</button>
+    <button type="button" data-align="align-right"  title="Float right">&rarr;</button>
+  </div>
+</div>
+
 <style>
   .editor-toolbar {
     display: flex; gap: 0.25rem; flex-wrap: wrap;
@@ -100,6 +114,26 @@
   /* Hide the textarea once JS has wired the editor; the body
      attribute is set by the module script. */
   body.has-tiptap-editor textarea#body_markdown { display: none; }
+  /* Bubble menu that floats above a focused Image node. The
+     `tippy-box` class is what @tiptap/extension-bubble-menu wraps
+     the element in; we style the inner element directly. */
+  .tiptap-bubble-menu {
+    display: flex; gap: 0.5rem; align-items: center;
+    padding: 0.25rem 0.5rem; background: white;
+    border: 1px solid #bbb; border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  }
+  .tiptap-bubble-menu__group { display: flex; gap: 0.15rem; }
+  .tiptap-bubble-menu__group button {
+    background: white; color: #222; border: 1px solid #ccc;
+    border-radius: 3px; padding: 0.15rem 0.4rem; font-size: 0.85em;
+    cursor: pointer; line-height: 1;
+  }
+  .tiptap-bubble-menu__group button:hover { background: #eee; }
+  .tiptap-bubble-menu__group button.is-active {
+    background: #222; color: #fff; border-color: #222;
+  }
+  .tiptap-bubble-menu__sep { color: #aaa; }
 </style>
 
 <script type="module">
@@ -120,6 +154,10 @@
   // straight to `![alt](src)`.
   import Image from 'https://esm.sh/@tiptap/extension-image@2.6';
   import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
+  // BubbleMenu floats a small toolbar above the focused Image node
+  // so the operator can change size + alignment without leaving the
+  // editor. Admin-only; delivery ships none of this.
+  import BubbleMenu from 'https://esm.sh/@tiptap/extension-bubble-menu@2.6';
   // markdown-it plugin enabling `{.class}` attribute syntax on
   // images. The Python-side renderer wires `mdit-py-plugins`'s
   // `attrs_plugin` already; this JS-side counterpart keeps the
@@ -185,6 +223,10 @@
         StarterKit,
         Link.configure({ openOnClick: false, autolink: false }),
         ClassedImage,
+        BubbleMenu.configure({
+          element: document.getElementById('tiptap-image-bubble-menu'),
+          shouldShow: ({ editor }) => editor.isActive('image'),
+        }),
         Markdown.configure({
           html: false,
           linkify: true,
@@ -221,6 +263,8 @@
     document.body.classList.add('has-tiptap-editor');
     mount.hidden = false;
     toolbar.hidden = false;
+    const imageBubbleMenu = document.getElementById('tiptap-image-bubble-menu');
+    if (imageBubbleMenu) imageBubbleMenu.hidden = false;
 
     // Prefixes that map to bragi internal-link content types. v1
     // ships post + page in-tree; this list is the JS-side mirror of
@@ -437,6 +481,42 @@
       // Backdrop click closes the dialog. Same shape as the image picker.
       internalDialog.addEventListener('click', (e) => {
         if (e.target === internalDialog) internalDialog.close();
+      });
+    }
+
+    // Image bubble menu: clicking a size or align button updates
+    // the focused Image node's class. The vocabulary is the fixed
+    // six-class set; classes in the same group (size or align) are
+    // mutually exclusive so we strip the existing one before adding
+    // the incoming one. Unknown classes the operator added by hand
+    // pass through untouched.
+    if (imageBubbleMenu) {
+      const SIZE_CLASSES = new Set(['size-small', 'size-medium', 'size-full']);
+      const ALIGN_CLASSES = new Set(['align-left', 'align-center', 'align-right']);
+      imageBubbleMenu.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-size], button[data-align]');
+        if (!btn) return;
+        e.preventDefault();
+        const current = (editor.getAttributes('image').class || '')
+          .split(/\s+/).filter(Boolean);
+        const isSize = btn.dataset.size != null;
+        const incoming = isSize ? btn.dataset.size : btn.dataset.align;
+        const group = isSize ? SIZE_CLASSES : ALIGN_CLASSES;
+        const next = current.filter((c) => !group.has(c));
+        next.push(incoming);
+        editor.chain().focus().updateAttributes('image', {
+          class: next.join(' '),
+        }).run();
+      });
+      // Mark the active size + align buttons so the operator sees
+      // the current state at a glance. Re-run on every selection
+      // change (covers click-to-focus on a different image).
+      editor.on('selectionUpdate', () => {
+        const active = (editor.getAttributes('image').class || '').split(/\s+/);
+        imageBubbleMenu.querySelectorAll('button').forEach((b) => {
+          const slug = b.dataset.size || b.dataset.align;
+          b.classList.toggle('is-active', active.includes(slug));
+        });
       });
     }
 
