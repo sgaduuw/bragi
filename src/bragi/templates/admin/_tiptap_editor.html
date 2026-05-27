@@ -317,6 +317,11 @@
       onSelectionUpdate: ({ editor }) => updateToolbarActive(editor),
     });
 
+    window._editor = editor;
+    const imgExt = editor.extensionManager.extensions.find(e => e.name === 'image');
+    console.log('[bragi-editor] image extension storage:', imgExt && imgExt.storage);
+    console.log('[bragi-editor] image extension storage.markdown:', imgExt && imgExt.storage && imgExt.storage.markdown);
+
     document.body.classList.add('has-tiptap-editor');
     mount.hidden = false;
     toolbar.hidden = false;
