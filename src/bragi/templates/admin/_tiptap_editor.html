@@ -120,6 +120,34 @@
   // straight to `![alt](src)`.
   import Image from 'https://esm.sh/@tiptap/extension-image@2.6';
   import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
+  // markdown-it plugin enabling `{.class}` attribute syntax on
+  // images. The Python-side renderer wires `mdit-py-plugins`'s
+  // `attrs_plugin` already; this JS-side counterpart keeps the
+  // editor's load-then-serialize cycle from silently dropping
+  // the class. See _claude/specs/2026-05-27-image-size-classes-design.md.
+  import markdownItAttrs from 'https://esm.sh/markdown-it-attrs@4';
+
+  // Image: extend with a `class` HTML attribute so size + align
+  // classes (`size-medium align-center`, etc.) round-trip through
+  // markdown via the attrs_plugin syntax. Without `addAttributes`
+  // overriding the parent Image's schema, TipTap drops unknown
+  // HTML attributes on the node and the class vanishes on first
+  // serialize.
+  const ClassedImage = Image.extend({
+    addAttributes() {
+      return {
+        ...this.parent?.(),
+        class: {
+          default: null,
+          parseHTML: (el) => el.getAttribute('class'),
+          renderHTML: (attrs) => {
+            if (!attrs.class) return {};
+            return { class: attrs.class };
+          },
+        },
+      };
+    },
+  });
 
   // Site-scoped admin URL for attachment bytes. The stored
   // markdown uses public `/attachments/<key>` URLs so it round-
@@ -156,12 +184,31 @@
       extensions: [
         StarterKit,
         Link.configure({ openOnClick: false, autolink: false }),
-        Image,
+        ClassedImage,
         Markdown.configure({
           html: false,
           linkify: true,
           breaks: false,
           tightLists: true,
+          // Image round-trip: parse side picks up `{.class}` via the
+          // markdown-it-attrs plugin; serialize side writes it back.
+          // Without both halves a save-then-edit cycle silently
+          // drops the class attribute.
+          markdownItOptions: {
+            plugins: [markdownItAttrs],
+          },
+          serializerOptions: {
+            image: {
+              serialize(state, node) {
+                const alt = state.esc(node.attrs.alt || '');
+                const src = state.esc(node.attrs.src || '');
+                const cls = node.attrs.class
+                  ? ` {.${node.attrs.class.split(' ').filter(Boolean).join(' .')}}`
+                  : '';
+                state.write(`![${alt}](${src})${cls}`);
+              },
+            },
+          },
         }),
       ],
       content: publicToAdmin(textarea.value),
@@ -288,7 +335,14 @@
         editor
           .chain()
           .focus()
-          .setImage({ src: ADMIN_ATTACHMENT_PREFIX + key, alt: alt })
+          .setImage({
+            src: ADMIN_ATTACHMENT_PREFIX + key,
+            alt: alt,
+            // Default class: medium width, centered. The BubbleMenu
+            // on the inserted Image node lets the operator swap to
+            // small/full or left/right after insertion.
+            class: 'size-medium align-center',
+          })
           .run();
         pickerDialog.close();
       });
