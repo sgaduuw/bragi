@@ -307,13 +307,17 @@ def picker(site_slug: str) -> ResponseReturnValue:
         peek = db.execute(peek_query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
         has_more = peek is not None
 
-        # Map each attachment id to its smallest done WebP
-        # rendition's storage_key. The picker template uses this
-        # to render thumbnail src URLs; if an attachment has no
-        # done rendition yet (just uploaded), the mapping yields
-        # None and the template falls back to the original
-        # storage_key.
-        thumb_storage_key_by_id: dict[int, str] = {}
+        # Per-attachment WebP rendition map. The picker template
+        # uses these to drive:
+        #   - the card thumbnail src (smallest WebP)
+        #   - the inserted Image node's per-class rendition data
+        #     attrs, so the editor preview at size-small / medium /
+        #     full shows the right bytes instead of the multi-MB
+        #     original.
+        # An attachment with no done WebP yet (just uploaded) gets
+        # an empty mapping; the template falls back to the original
+        # storage_key for the thumbnail and the editor preview.
+        webp_keys_by_id: dict[int, list[tuple[int, str]]] = {}
         if rows:
             rendition_rows = (
                 db.execute(
@@ -332,10 +336,26 @@ def picker(site_slug: str) -> ResponseReturnValue:
                 .all()
             )
             for rr in rendition_rows:
-                # The first row per attachment_id is the smallest
-                # width (ORDER BY ... width ASC). Subsequent rows
-                # for the same attachment are skipped.
-                thumb_storage_key_by_id.setdefault(rr.attachment_id, rr.storage_key or "")
+                if rr.storage_key is None or rr.width is None:
+                    continue
+                webp_keys_by_id.setdefault(rr.attachment_id, []).append(
+                    (rr.width, rr.storage_key)
+                )
+
+        # Derive the per-size mapping the template renders into the
+        # picker card data-* attributes. Picks from done WebP renditions
+        # actually present: smallest, middle (biased larger on even
+        # lengths), largest. Falls back to "" when no WebP exists yet.
+        thumb_storage_key_by_id: dict[int, str] = {}
+        small_key_by_id: dict[int, str] = {}
+        medium_key_by_id: dict[int, str] = {}
+        full_key_by_id: dict[int, str] = {}
+        for att_id, ladder in webp_keys_by_id.items():
+            # ladder is ordered by width ASC.
+            thumb_storage_key_by_id[att_id] = ladder[0][1]
+            small_key_by_id[att_id] = ladder[0][1]
+            medium_key_by_id[att_id] = ladder[len(ladder) // 2][1]
+            full_key_by_id[att_id] = ladder[-1][1]
 
     return render_template(
         "admin/attachments_picker.html",
@@ -343,6 +363,9 @@ def picker(site_slug: str) -> ResponseReturnValue:
         page=page,
         has_more=has_more,
         thumb_storage_key_by_id=thumb_storage_key_by_id,
+        small_key_by_id=small_key_by_id,
+        medium_key_by_id=medium_key_by_id,
+        full_key_by_id=full_key_by_id,
     )
 
 

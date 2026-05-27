@@ -171,6 +171,22 @@
   // overriding the parent Image's schema, TipTap drops unknown
   // HTML attributes on the node and the class vanishes on first
   // serialize.
+  //
+  // Per-size rendition URLs (renditionSmall/Medium/Full) are also
+  // tracked on the node so the in-editor `<img src>` matches the
+  // active size class. Without these, the editor renders the
+  // multi-MB original even when the operator picks `size-small`,
+  // and the editor becomes unusable on photos. The renditions are
+  // NOT serialized to markdown — the stored `src` stays the
+  // original-sha admin URL (which the load transform converts to /
+  // from the public-prefix path the body persists as), so
+  // pictureify on delivery still wraps the original in a
+  // <picture>.
+  const SIZE_TO_RENDITION_ATTR = {
+    'size-small': 'renditionSmall',
+    'size-medium': 'renditionMedium',
+    'size-full': 'renditionFull',
+  };
   const ClassedImage = Image.extend({
     addAttributes() {
       return {
@@ -183,7 +199,40 @@
             return { class: attrs.class };
           },
         },
+        // Rendition URLs by size class. Editor-only — read by
+        // renderHTML below to pick the visible `<img src>`; never
+        // serialized to markdown. `renderHTML: () => ({})` is the
+        // TipTap idiom for "don't put this in the rendered HTML
+        // attributes".
+        renditionSmall: {
+          default: null,
+          parseHTML: () => null,
+          renderHTML: () => ({}),
+        },
+        renditionMedium: {
+          default: null,
+          parseHTML: () => null,
+          renderHTML: () => ({}),
+        },
+        renditionFull: {
+          default: null,
+          parseHTML: () => null,
+          renderHTML: () => ({}),
+        },
       };
+    },
+    renderHTML({ node, HTMLAttributes }) {
+      // Pick the per-size rendition URL based on the node's
+      // active size class. Falls back to the node's `src` (the
+      // original) when no matching rendition is set.
+      const classes = (node.attrs.class || '').split(/\s+/);
+      for (const cls of classes) {
+        const attrName = SIZE_TO_RENDITION_ATTR[cls];
+        if (attrName && node.attrs[attrName]) {
+          return ['img', { ...HTMLAttributes, src: node.attrs[attrName] }];
+        }
+      }
+      return ['img', HTMLAttributes];
     },
   });
 
@@ -376,6 +425,17 @@
         // escaped on save (#270). The src uses the admin-scoped URL
         // so the in-editor preview resolves; adminToPublic rewrites
         // it back to the public form on save.
+        //
+        // The per-size rendition URLs land on the node as
+        // editor-only attrs; ClassedImage's renderHTML picks the
+        // one matching the active size class so the visible
+        // `<img src>` is the right-sized bytes (otherwise size-small
+        // CSS-scales a 1.8MB JPEG and the editor lays out badly).
+        // Each rendition key is a path-style storage_key
+        // (`<sha>/<width>/webp`); empty string means no done WebP
+        // at that tier yet, which falls back to the original src
+        // via renderHTML.
+        const buildRenditionUrl = (k) => k ? ADMIN_ATTACHMENT_PREFIX + k : null;
         editor
           .chain()
           .focus()
@@ -386,6 +446,9 @@
             // on the inserted Image node lets the operator swap to
             // small/full or left/right after insertion.
             class: 'size-medium align-center',
+            renditionSmall: buildRenditionUrl(card.dataset.renditionSmall || ''),
+            renditionMedium: buildRenditionUrl(card.dataset.renditionMedium || ''),
+            renditionFull: buildRenditionUrl(card.dataset.renditionFull || ''),
           })
           .run();
         pickerDialog.close();
