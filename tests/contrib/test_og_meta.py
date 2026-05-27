@@ -218,6 +218,67 @@ def test_featured_image_url_for_returns_none_when_neither_set(
         assert featured_image_url_for(item=post, site=site, db=db) is None
 
 
+def test_featured_image_url_for_uses_middle_webp_rendition_when_available(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """OG meta points at the middle-tier WebP rendition when one
+    has been processed; falls back to the original otherwise.
+
+    The middle is picked from done WebP renditions actually present,
+    not from the theme's declared ladder, so a partial backfill
+    still produces a sensible URL.
+    """
+    from sqlalchemy import select
+
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        attachment = db.execute(
+            select(Attachment).where(Attachment.storage_key == "sha-default")
+        ).scalar_one()
+        site.default_featured_image_id = attachment.id
+        # Three done WebP renditions; middle is 800w.
+        for w in (320, 800, 1600):
+            db.add(
+                AttachmentRendition(
+                    attachment_id=attachment.id,
+                    size_label=f"{w}w",
+                    format="webp",
+                    content_type="image/webp",
+                    status="done",
+                    storage_key=f"{attachment.storage_key}/{w}/webp",
+                    width=w,
+                    height=w // 2,
+                    bytes_size=10,
+                )
+            )
+        db.commit()
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        url = featured_image_url_for(item=post, site=site, db=db)
+    assert url is not None
+    assert url.endswith(f"/attachments/{attachment.storage_key}/800/webp")
+
+
+def test_featured_image_url_for_falls_back_to_original_without_webp(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """No done WebP yet → URL points at the original storage_key."""
+    from sqlalchemy import select
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        attachment = db.execute(
+            select(Attachment).where(Attachment.storage_key == "sha-default")
+        ).scalar_one()
+        site.default_featured_image_id = attachment.id
+        db.commit()
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        url = featured_image_url_for(item=post, site=site, db=db)
+    assert url is not None
+    assert url.endswith(f"/attachments/{attachment.storage_key}")
+
+
 # --------------------------- cross-site rejection ---------------------------
 
 
