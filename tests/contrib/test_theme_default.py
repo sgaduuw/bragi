@@ -146,3 +146,23 @@ def test_theme_default_ships_image_size_classes() -> None:
         "img.align-center",
     ):
         assert cls in css, f"theme_default missing rule for {cls}"
+
+
+@pytest.mark.parametrize(
+    "theme_slug",
+    ["theme_default", "theme_minimal", "theme_serif", "theme_terminal"],
+)
+def test_each_in_tree_theme_ships_resume_css(theme_slug: str) -> None:
+    """Every in-tree theme must ship a `static/resume.css` so the
+    delivery template's <link> always resolves regardless of which
+    theme the site picked. Themes ship identical baselines today;
+    when they diverge, this test still catches a missing file."""
+    from pathlib import Path
+
+    css_path = (
+        Path(__file__).resolve().parents[2] / f"src/bragi/contrib/{theme_slug}/static/resume.css"
+    )
+    assert css_path.is_file(), f"resume.css missing for theme {theme_slug}"
+    css = css_path.read_text()
+    assert "@media print" in css
+    assert ".resume" in css
