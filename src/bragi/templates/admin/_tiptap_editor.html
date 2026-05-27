@@ -206,8 +206,14 @@
           serialize(state, node) {
             const alt = state.esc(node.attrs.alt || '');
             const src = state.esc(node.attrs.src || '');
+            // markdown-it-attrs (and Python's mdit-py-plugins
+            // attrs_plugin) only recognises `{.class}` when it
+            // directly follows the closing `)` with no whitespace.
+            // A single space turns the whole curly block into
+            // literal text and silently drops the class on both
+            // reload and delivery render.
             const cls = node.attrs.class
-              ? ` {.${node.attrs.class.split(' ').filter(Boolean).join(' .')}}`
+              ? `{.${node.attrs.class.split(' ').filter(Boolean).join(' .')}}`
               : '';
             state.write(`![${alt}](${src})${cls}`);
           },
