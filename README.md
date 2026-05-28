@@ -366,7 +366,7 @@ bragi/
 │   ├── hookspecs.py            # internal hookspec definitions
 │   ├── plugins.py              # PluginManager + entry-point discovery
 │   ├── settings.py             # Pydantic Settings
-│   ├── cli.py                  # `cms` top-level click group
+│   ├── cli.py                  # `bragi` top-level click group
 │   ├── apps/
 │   │   ├── admin.py            # create_admin_app
 │   │   └── delivery.py         # create_delivery_app

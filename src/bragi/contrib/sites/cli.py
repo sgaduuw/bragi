@@ -1,6 +1,6 @@
 """CLI commands for the core Site model.
 
-Exposes a `site` group that the plugin registers under `cms`.
+Exposes a `site` group that the plugin registers under `bragi`.
 The CLI is the only path to seed a Site for now; a real admin UI
 for sites lands when there's a second site to manage.
 """

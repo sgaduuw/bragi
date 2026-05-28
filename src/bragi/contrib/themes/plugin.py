@@ -1,6 +1,6 @@
 """bragi.contrib.themes plugin hookimpls.
 
-Registers the theme-static-asset delivery blueprint and the `cms
+Registers the theme-static-asset delivery blueprint and the `bragi
 theme list` CLI command. Does NOT itself register a theme via
 `register_theme`; this package is the consumer machinery, not a
 shipped theme.

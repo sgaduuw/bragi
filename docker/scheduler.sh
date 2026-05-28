@@ -4,13 +4,9 @@
 # (single source of DDL truth), then enters a sleeper loop dispatching
 # Flask CLI commands at configured cadences.
 #
-# Each subcommand is invoked via `flask --app 'bragi.apps.admin:create_admin_app' cms ...`,
-# opens its own DB session, and exits cleanly so a crash in one task
-# doesn't take the loop down. The explicit `module:factory` form is
-# required: Flask's autodiscovery only looks for factories named
-# `create_app` / `make_app`, not `create_admin_app`, so the bare
-# `--app bragi.apps.admin` form silently degrades to "no app found"
-# and every `cms` invocation exits rc=2.
+# Each subcommand is invoked via the `bragi` console script installed
+# by Poetry, opens its own DB session, and exits cleanly so a crash
+# in one task doesn't take the loop down.
 #
 # Cadences (env-overridable, all in seconds):
 #   SCHEDULED_PUBLISH_EVERY      default 60      ; flip due drafts to published

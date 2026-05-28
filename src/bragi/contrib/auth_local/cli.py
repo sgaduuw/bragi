@@ -1,6 +1,6 @@
 """CLI commands for the local-credential auth path.
 
-Exposes a `user` group that the plugin registers under `cms`.
+Exposes a `user` group that the plugin registers under `bragi`.
 """
 
 from __future__ import annotations
