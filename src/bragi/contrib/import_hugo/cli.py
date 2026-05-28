@@ -1,7 +1,7 @@
 """CLI wrapper around the Hugo importer.
 
-Registers under the top-level `cms` group; invoke via
-`poetry run flask --app bragi.apps.admin cms import hugo <path>`.
+Registers under the top-level `bragi` group; invoke via
+`poetry run bragi import hugo <path>`.
 The plugin's `register_cli_command` adds an `import` subgroup,
 and this module contributes `hugo` to it.
 """

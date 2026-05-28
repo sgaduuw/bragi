@@ -12,7 +12,7 @@ from bragi.contrib.sites.cli import site_group
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Add `site` subcommands to the top-level `cms` CLI group."""
+    """Add `site` subcommands to the top-level `bragi` CLI group."""
     group.add_command(site_group)
 
 

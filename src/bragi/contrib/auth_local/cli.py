@@ -1,6 +1,6 @@
 """CLI commands for the local-credential auth path.
 
-Exposes a `user` group that the plugin registers under `cms`.
+Exposes a `user` group that the plugin registers under `bragi`.
 """
 
 from __future__ import annotations
@@ -101,6 +101,113 @@ def create_user(
         click.echo(f"Generated password: {generated_password}", err=True)
         if must_change:
             click.echo("User will be forced to change password on first login.", err=True)
+
+
+@user_group.command("reset-password")
+@click.option("--email", required=True, help="Email of the user whose password to reset.")
+@click.option("--password", default=None, help="Password; generated if omitted.")
+@click.option(
+    "--must-change/--no-must-change",
+    "must_change",
+    default=None,
+    help=(
+        "Force a password rotation on first login. Defaults to ON when "
+        "--password was generated, OFF when --password was supplied."
+    ),
+)
+@click.option(
+    "--revoke-sessions",
+    is_flag=True,
+    default=False,
+    help="Delete all active sessions for the user (force-logout everywhere).",
+)
+def reset_password(
+    email: str,
+    password: str | None,
+    must_change: bool | None,
+    revoke_sessions: bool,
+) -> None:
+    """Reset a user's local-credential password.
+
+    Updates the existing local_credentials row in place. Refuses
+    (exit 1) when the user has no local credential (OAuth-only
+    users must add a credential via `bragi user create`; this
+    command does not silently create one).
+
+    With --revoke-sessions, every row in the `sessions` table for
+    this user is deleted so all active browsers are logged out.
+    Useful in compromise scenarios; complements the per-row revoke
+    in the admin UI.
+    """
+    from sqlalchemy import delete
+
+    from bragi.core.audit import AuditAction, audit
+    from bragi.core.models.session import Session as SessionRow
+
+    email_normalized = email.strip().lower()
+    generated_password: str | None = None
+    if password is None:
+        generated_password = secrets.token_urlsafe(16)
+        password = generated_password
+    # Same default rule as `bragi user create`: force rotation when the
+    # password was generated (so the operator's record of "what I
+    # typed" can't linger as the real secret), but leave it off when
+    # the operator supplied a password intentionally.
+    if must_change is None:
+        must_change = generated_password is not None
+
+    with SessionLocal() as db:
+        user = db.execute(select(User).where(User.email == email_normalized)).scalar_one_or_none()
+        if user is None:
+            click.echo(f"No user with email {email_normalized!r}.", err=True)
+            sys.exit(1)
+        cred = db.execute(
+            select(LocalCredential).where(LocalCredential.user_id == user.id)
+        ).scalar_one_or_none()
+        if cred is None:
+            click.echo(
+                f"User {email_normalized!r} has no local password. "
+                f"Use 'bragi user create' to add one, or grant a local "
+                f"credential via the admin UI.",
+                err=True,
+            )
+            sys.exit(1)
+
+        cred.password_hash = hash_password(password)
+        cred.must_change = must_change
+
+        revoked = 0
+        if revoke_sessions:
+            result = db.execute(delete(SessionRow).where(SessionRow.user_id == user.id))
+            # CursorResult exposes rowcount; the static return type
+            # from session.execute() is the broader Result, so a
+            # getattr pins it (same idiom used elsewhere in the
+            # codebase for delete-row counts).
+            revoked = int(getattr(result, "rowcount", 0) or 0)
+
+        db.commit()
+        user_id = user.id
+
+    # audit() opens its own SessionLocal block, so call it AFTER the
+    # outer block has committed.
+    audit(
+        AuditAction.USER_PASSWORD_RESET,
+        target_type="user",
+        target_id=user_id,
+        extra={
+            "by_cli": True,
+            "must_change": must_change,
+            "revoke_sessions": revoke_sessions,
+        },
+    )
+
+    click.echo(f"Reset password for {email_normalized}.")
+    if generated_password is not None:
+        click.echo(f"Generated password: {generated_password}", err=True)
+        if must_change:
+            click.echo("User will be forced to change password on first login.", err=True)
+    if revoke_sessions:
+        click.echo(f"Revoked {revoked} active session(s).", err=True)
 
 
 @user_group.command("grant")

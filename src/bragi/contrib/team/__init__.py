@@ -3,7 +3,7 @@
 Owner-facing UI for managing a site's collaborators: list the
 owner + role-holding users, grant a new role to an existing
 User, revoke an existing role row. The CLI counterpart is
-`cms user grant`; this plugin is the polish, not a new
+`bragi user grant`; this plugin is the polish, not a new
 mechanism.
 
 Permission model: the site owner (and any superuser) sees the

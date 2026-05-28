@@ -1,6 +1,6 @@
 """CLI for the search plugin.
 
-`cms search reindex [--site SLUG] [--dry-run]` walks published
+`bragi search reindex [--site SLUG] [--dry-run]` walks published
 posts and pages and rebuilds the FTS index. Run after a
 ladder-style schema change, a tokenizer swap, or any other reset
 of the index state.

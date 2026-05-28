@@ -8,7 +8,7 @@ with a more patient per-call timeout, replacing the pending card
 with the resolved HTML on success. Idempotent: a card that still
 fails stays pending and the next tick has another go.
 
-Driven by `cms embeds rerender-pending` (see `cli.py`), which the
+Driven by `bragi embeds rerender-pending` (see `cli.py`), which the
 task-runner sidecar invokes on a configurable cadence (default
 every 10 minutes via `EMBEDS_RERENDER_EVERY`).
 """

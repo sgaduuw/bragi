@@ -10,7 +10,7 @@ UUID4) so cross-references like `Project.linked_position_id` survive
 reordering and edits. IDs are generated client-side by the admin
 form's `+ Add` JS; server-side, Pydantic's `default_factory` fills
 any missing IDs on validation (useful for non-JS clients like a
-future API caller or `cms` CLI importer).
+future API caller or `bragi` CLI importer).
 """
 
 from __future__ import annotations

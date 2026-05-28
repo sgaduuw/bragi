@@ -5,7 +5,7 @@ Owns:
   `register_content_type`)
 - the admin Blueprint at /admin/posts (`register_admin_blueprint`)
 - the admin nav entry
-- the `cms scheduled-publish` CLI command
+- the `bragi scheduled-publish` CLI command
 - the internal-link resolver for `post:` keys
 
 Public URL dispatch (including the post listing and individual
@@ -215,7 +215,7 @@ def register_template_globals(env: jinja2.Environment) -> None:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Add `cms scheduled-publish`.
+    """Add `bragi scheduled-publish`.
 
     Lives on the post plugin because it operates on Post lifecycle
     state. The task-runner sidecar invokes it on a cadence (see

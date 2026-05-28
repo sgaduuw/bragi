@@ -711,7 +711,7 @@ def admin_app_for_cli(
 
 def test_reindex_cli_walks_all_published(admin_app_for_cli: Flask) -> None:
     runner = admin_app_for_cli.test_cli_runner()
-    result = runner.invoke(args=["cms", "search", "reindex"])
+    result = runner.invoke(args=["search", "reindex"])
     assert result.exit_code == 0, result.output
     assert "posts: 1" in result.output
     assert "pages: 1" in result.output
@@ -719,7 +719,7 @@ def test_reindex_cli_walks_all_published(admin_app_for_cli: Flask) -> None:
 
 def test_reindex_cli_dry_run_writes_nothing(admin_app_for_cli: Flask) -> None:
     runner = admin_app_for_cli.test_cli_runner()
-    result = runner.invoke(args=["cms", "search", "reindex", "--dry-run"])
+    result = runner.invoke(args=["search", "reindex", "--dry-run"])
     assert result.exit_code == 0, result.output
     assert "Dry run" in result.output
     # Backend.search returns 0 since nothing was indexed.
@@ -731,14 +731,14 @@ def test_reindex_cli_dry_run_writes_nothing(admin_app_for_cli: Flask) -> None:
 
 def test_reindex_cli_site_filter(admin_app_for_cli: Flask) -> None:
     runner = admin_app_for_cli.test_cli_runner()
-    result = runner.invoke(args=["cms", "search", "reindex", "--site", "blog"])
+    result = runner.invoke(args=["search", "reindex", "--site", "blog"])
     assert result.exit_code == 0, result.output
     assert "posts: 1" in result.output
 
 
 def test_reindex_cli_unknown_site_errors(admin_app_for_cli: Flask) -> None:
     runner = admin_app_for_cli.test_cli_runner()
-    result = runner.invoke(args=["cms", "search", "reindex", "--site", "nope"])
+    result = runner.invoke(args=["search", "reindex", "--site", "nope"])
     assert result.exit_code != 0
     assert "no site with slug" in result.output.lower()
 

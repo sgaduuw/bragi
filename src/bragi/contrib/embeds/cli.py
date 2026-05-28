@@ -1,6 +1,6 @@
 """Embeds plugin CLI.
 
-`cms embeds rerender-pending` walks posts and pages for embeds
+`bragi embeds rerender-pending` walks posts and pages for embeds
 that fell back to the pending card at save time, retries each
 through the provider registry with a patient timeout, and
 replaces resolved cards inline in `body_html`. Idempotent;

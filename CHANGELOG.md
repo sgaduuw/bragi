@@ -6,6 +6,45 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-05-28
+
+### Added
+- **`bragi user reset-password` CLI.** New subcommand on the
+  `bragi user` group that resets a user's local-credential
+  password in place. Mirrors `bragi user create`'s ergonomic
+  shape: `--email` required, `--password` optional (generated
+  and printed to stderr if omitted), `--must-change/--no-must-change`
+  (defaults to ON when generated, OFF when supplied). Optional
+  `--revoke-sessions` deletes every row in `sessions` for the
+  user so all active browsers are logged out; useful in
+  compromise scenarios. Refuses (exit 1) when the user has no
+  local credential row (OAuth-only users must add a credential
+  via `bragi user create` first; this command never silently
+  creates one). Each reset writes a `user.password_reset` audit
+  log entry. Replaces the prior ~30-line Python-against-the-DB
+  workaround for what is the second-most-common user-management
+  operation after creation.
+
+### Changed
+- **`bragi` console script replaces `flask --app ... cms <x>`.**
+  CLI commands are now invoked as `bragi <subcommand>` (e.g.
+  `bragi user create`, `bragi media process-renditions`,
+  `bragi backup`). The `bragi` script is installed by Poetry via
+  `[project.scripts]` alongside the existing `bragi-admin` and
+  `bragi-delivery` WSGI runners. **Breaking change:** the `cms`
+  wrapper group is gone; subcommands move up one level, and any
+  operator-side script invoking `flask --app
+  'bragi.apps.admin:create_admin_app' cms <x>` must update to
+  `bragi <x>`. The bundled `docker/scheduler.sh` and
+  `scripts/dev-tasks.sh` are updated in lockstep so a fresh
+  deploy "just works". The legacy `flask --app
+  bragi.apps.admin:create_admin_app <x>` form still works through
+  `flask.cli.FlaskGroup`'s app-factory discovery (only the `cms`
+  wrapper is gone, not the Flask-CLI path). Mirrors the pattern
+  shipped in mimir #221. SemVer call: cut as MINOR (1.17.0)
+  pragmatically; the portfolio rule's strict reading would have
+  warranted MAJOR for the interface break.
+
 ## [1.16.0] - 2026-05-27
 
 ### Added

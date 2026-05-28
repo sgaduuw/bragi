@@ -31,8 +31,8 @@ COPY src/ ./src/
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
 COPY pyproject.toml README.md ./
-# Task-runner sidecar reuses the admin image (it has the `cms`
-# CLI registered); ship the scheduler script alongside the app.
+# Task-runner sidecar reuses the admin image (it has the `bragi`
+# console script installed); ship the scheduler script alongside the app.
 COPY docker/scheduler.sh /app/scheduler.sh
 RUN chmod +x /app/scheduler.sh
 

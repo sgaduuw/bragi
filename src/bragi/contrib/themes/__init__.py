@@ -8,7 +8,7 @@ ships the consumer surface that does NOT need to live in core:
 
 - `/theme/<slug>/static/<path>` delivery blueprint serving theme
   static assets when the theme set a `static_dir`.
-- `cms theme list` CLI subcommand for sanity-checking which
+- `bragi theme list` CLI subcommand for sanity-checking which
   themes the running process discovered.
 
 The in-tree default theme lives in `bragi.contrib.theme_default`

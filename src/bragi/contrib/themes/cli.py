@@ -1,6 +1,6 @@
 """CLI for the themes plugin.
 
-`cms theme list` prints the slug + display name of every theme
+`bragi theme list` prints the slug + display name of every theme
 the running process discovered. Used to sanity-check that a
 `pip install bragi-theme-foo` actually wired the entry point.
 """

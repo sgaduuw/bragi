@@ -12,6 +12,6 @@ Sites without a key are no-ops (the plugin doesn't fire). The
 delivery app serves the key at `/<key>.txt` so the search
 engines can verify ownership.
 
-`cms indexnow setup --site <slug>` writes a fresh random key
+`bragi indexnow setup --site <slug>` writes a fresh random key
 into a site's extra_settings.
 """
