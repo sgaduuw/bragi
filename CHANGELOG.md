@@ -6,6 +6,22 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`cms user reset-password` CLI.** New subcommand on the existing
+  `cms user` group that resets a user's local-credential password
+  in place. Mirrors `cms user create`'s ergonomic shape: `--email`
+  required, `--password` optional (generated and printed to stderr
+  if omitted), `--must-change/--no-must-change` (defaults to ON
+  when generated, OFF when supplied). Optional `--revoke-sessions`
+  deletes every row in `sessions` for the user so all active
+  browsers are logged out; useful in compromise scenarios.
+  Refuses (exit 1) when the user has no local credential row
+  (OAuth-only users must add a credential via `cms user create`
+  first; this command never silently creates one). Each reset
+  writes a `user.password_reset` audit log entry. Closes the
+  ~30-LOC-Python-one-liner footgun for what is the second-most-
+  common user-management operation after creation.
+
 ## [1.16.0] - 2026-05-27
 
 ### Added

@@ -756,3 +756,283 @@ def test_user_grant_unknown_user_errors(
     )
     assert result.exit_code == 1
     assert "No user" in result.output
+
+
+# ============================================================
+# `cms user reset-password`
+# ============================================================
+
+
+def _create_user_via_cli(
+    runner: Any,
+    user_group: Any,
+    *,
+    email: str = "ada@example.com",
+    display_name: str = "Ada",
+    password: str = "initial-password",
+) -> None:
+    """Seed a user + local credential via the create-user CLI so the
+    reset tests start from a known LocalCredential state."""
+    result = runner.invoke(
+        user_group,
+        [
+            "create",
+            "--email",
+            email,
+            "--display-name",
+            display_name,
+            "--password",
+            password,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_user_reset_password_with_generated_password_round_trip(
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
+) -> None:
+    """Reset without --password: generated value printed to stderr,
+    new hash verifies, must_change defaults to True."""
+    from click.testing import CliRunner
+    from sqlalchemy import select
+
+    from bragi.contrib.auth_local.cli import user_group
+    from bragi.contrib.auth_local.passwords import verify_password
+
+    runner = CliRunner()
+    _create_user_via_cli(runner, user_group, password="original")
+
+    result = runner.invoke(
+        user_group,
+        ["reset-password", "--email", "ada@example.com"],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    # The generated password is on stderr; parse it out.
+    stderr = result.stderr
+    assert "Generated password: " in stderr
+    new_password = stderr.split("Generated password: ", 1)[1].splitlines()[0].strip()
+    assert new_password and new_password != "original"
+    assert "User will be forced to change password on first login." in stderr
+
+    with db_session_factory() as db:
+        cred = db.execute(select(LocalCredential)).scalar_one()
+    assert cred.must_change is True
+    assert verify_password(cred.password_hash, new_password)
+    assert not verify_password(cred.password_hash, "original")
+
+
+def test_user_reset_password_with_supplied_password(
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
+) -> None:
+    """Reset with --password: nothing leaked to stderr, must_change
+    defaults to False."""
+    from click.testing import CliRunner
+    from sqlalchemy import select
+
+    from bragi.contrib.auth_local.cli import user_group
+    from bragi.contrib.auth_local.passwords import verify_password
+
+    runner = CliRunner()
+    _create_user_via_cli(runner, user_group, password="original")
+
+    result = runner.invoke(
+        user_group,
+        [
+            "reset-password",
+            "--email",
+            "ada@example.com",
+            "--password",
+            "operator-chosen-new",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    # No generated-password line on stderr (operator supplied one).
+    assert "Generated password:" not in result.stderr
+
+    with db_session_factory() as db:
+        cred = db.execute(select(LocalCredential)).scalar_one()
+    assert cred.must_change is False
+    assert verify_password(cred.password_hash, "operator-chosen-new")
+
+
+def test_user_reset_password_explicit_no_must_change_overrides_generated_default(
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
+) -> None:
+    """Explicit --no-must-change wins even when password is generated."""
+    from click.testing import CliRunner
+    from sqlalchemy import select
+
+    from bragi.contrib.auth_local.cli import user_group
+
+    runner = CliRunner()
+    _create_user_via_cli(runner, user_group)
+
+    result = runner.invoke(
+        user_group,
+        ["reset-password", "--email", "ada@example.com", "--no-must-change"],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    with db_session_factory() as db:
+        cred = db.execute(select(LocalCredential)).scalar_one()
+    assert cred.must_change is False
+
+
+def test_user_reset_password_unknown_email_exits_one(
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
+) -> None:
+    """No matching user -> exit 1, stderr message, DB untouched."""
+    from click.testing import CliRunner
+    from sqlalchemy import select
+
+    from bragi.contrib.auth_local.cli import user_group
+
+    runner = CliRunner()
+    result = runner.invoke(
+        user_group,
+        ["reset-password", "--email", "nobody@example.test"],
+    )
+    assert result.exit_code == 1
+    assert "No user with email" in result.stderr
+
+    with db_session_factory() as db:
+        assert db.execute(select(User)).scalar_one_or_none() is None
+
+
+def test_user_reset_password_oauth_only_user_exits_one(
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
+) -> None:
+    """User exists but has no local_credentials row (OAuth-only):
+    exit 1 with a clear message; do NOT silently create a row."""
+    from click.testing import CliRunner
+    from sqlalchemy import select
+
+    from bragi.contrib.auth_local.cli import user_group
+
+    # Seed a user directly (no LocalCredential) -- simulates an
+    # OAuth-only user.
+    with db_session_factory() as db:
+        db.add(
+            User(
+                email="oauth-only@example.test",
+                display_name="OAuth User",
+                is_active=True,
+            )
+        )
+        db.commit()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        user_group,
+        ["reset-password", "--email", "oauth-only@example.test"],
+    )
+    assert result.exit_code == 1
+    assert "has no local password" in result.stderr
+    assert "cms user create" in result.stderr
+
+    # No LocalCredential row was created.
+    with db_session_factory() as db:
+        assert db.execute(select(LocalCredential)).scalar_one_or_none() is None
+
+
+def test_user_reset_password_revoke_sessions_deletes_target_user_sessions_only(
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
+) -> None:
+    """--revoke-sessions deletes only the target user's sessions.
+    Other users' sessions are untouched. Stderr reports the count."""
+    from datetime import timedelta
+
+    from click.testing import CliRunner
+    from sqlalchemy import select
+
+    from bragi.contrib.auth_local.cli import user_group
+    from bragi.core.models.session import Session as SessionRow
+    from bragi.core.time import naive_utcnow
+
+    runner = CliRunner()
+    _create_user_via_cli(runner, user_group, email="target@example.test")
+    _create_user_via_cli(runner, user_group, email="bystander@example.test")
+
+    # Seed two sessions for target + one for bystander.
+    now = naive_utcnow()
+    expires = now + timedelta(hours=1)
+    with db_session_factory() as db:
+        target = db.execute(select(User).where(User.email == "target@example.test")).scalar_one()
+        bystander = db.execute(
+            select(User).where(User.email == "bystander@example.test")
+        ).scalar_one()
+        db.add_all(
+            [
+                SessionRow(
+                    id="sid-target-1",
+                    user_id=target.id,
+                    expires_at=expires,
+                    last_seen_at=now,
+                ),
+                SessionRow(
+                    id="sid-target-2",
+                    user_id=target.id,
+                    expires_at=expires,
+                    last_seen_at=now,
+                ),
+                SessionRow(
+                    id="sid-bystander",
+                    user_id=bystander.id,
+                    expires_at=expires,
+                    last_seen_at=now,
+                ),
+            ]
+        )
+        db.commit()
+
+    result = runner.invoke(
+        user_group,
+        ["reset-password", "--email", "target@example.test", "--revoke-sessions"],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "Revoked 2 active session(s)." in result.stderr
+
+    with db_session_factory() as db:
+        remaining = db.execute(select(SessionRow.id)).scalars().all()
+    assert remaining == ["sid-bystander"]
+
+
+def test_user_reset_password_writes_audit_log_entry(
+    db_session_factory: sessionmaker[Session], patched_session_locals: sessionmaker[Session]
+) -> None:
+    """A reset writes one audit_log row with action=user.password_reset
+    and target_type/target_id set to the resetted user."""
+    from click.testing import CliRunner
+    from sqlalchemy import select
+
+    from bragi.contrib.auth_local.cli import user_group
+    from bragi.core.audit import AuditAction
+    from bragi.core.models.audit_log import AuditLog
+
+    runner = CliRunner()
+    _create_user_via_cli(runner, user_group)
+
+    with db_session_factory() as db:
+        user_id = db.execute(select(User.id)).scalar_one()
+
+    result = runner.invoke(
+        user_group,
+        ["reset-password", "--email", "ada@example.com", "--password", "new"],
+    )
+    assert result.exit_code == 0, result.stderr
+
+    with db_session_factory() as db:
+        rows = (
+            db.execute(select(AuditLog).where(AuditLog.action == AuditAction.USER_PASSWORD_RESET))
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.target_type == "user"
+    assert row.target_id == user_id
+    assert row.actor_user_id is None  # CLI: no request context
+    assert row.extra["by_cli"] is True
+    assert row.extra["must_change"] is False
+    assert row.extra["revoke_sessions"] is False
