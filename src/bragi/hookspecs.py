@@ -61,16 +61,16 @@ def on_app_init(app: Flask, registry: Registry) -> None:
 
 @hookspec
 def register_cli_command(group: click.Group) -> None:
-    """Add subcommands under the top-level `bragi` click group.
+    """Add subcommands to the admin app's CLI.
 
-    The group passed in IS the `bragi` group exposed via the
-    standalone `bragi` console script (pyproject.toml
-    [project.scripts]) and through `flask --app
-    bragi.apps.admin:create_admin_app` via FlaskGroup's
-    app-factory discovery. Add via `@group.command()` for a
-    top-level command or `group.add_command(my_subgroup)` for a
-    namespaced subgroup. Plugin commands are then invoked as
-    `bragi <subcommand>`.
+    The group passed in is `app.cli`, Flask's built-in CLI group on
+    the admin Flask app. FlaskGroup's `list_commands` merges
+    `app.cli.list_commands()` into the standalone `bragi` top-level
+    listing, so commands added here appear as `bragi <subcommand>`
+    (and also via the legacy `flask --app
+    bragi.apps.admin:create_admin_app <subcommand>` form). Use
+    `@group.command()` for a top-level command or
+    `group.add_command(my_subgroup)` for a namespaced subgroup.
     """
     ...
 
