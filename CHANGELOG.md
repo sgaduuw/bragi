@@ -6,6 +6,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-05-28
+
+### Fixed
+- **Welcome fallback 500 on sites using a non-default theme.** When
+  `Site.home_page_id IS NULL` and no other `resolve_home` hookimpl
+  claimed `/`, the `theme_default` trylast hookimpl rendered a
+  "Welcome to <site>" stub. Its template
+  (`delivery/_welcome_fallback.html`) lived inside
+  `bragi.contrib.theme_default/templates/`, so its `PackageLoader`
+  was only consulted when the active theme resolved to `default`.
+  A site running `terminal`, `serif`, or `minimal` hit
+  `jinja2.exceptions.TemplateNotFound` on `/` whenever the stub
+  fired. Moved the template into core
+  (`src/bragi/templates/delivery/`) so the Jinja chain finds it
+  regardless of active theme. Regression test parametrised over
+  every non-default shipped theme.
+
 ## [1.17.0] - 2026-05-28
 
 ### Added
