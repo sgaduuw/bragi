@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from tests.conftest import csrf_token
 
 from bragi.apps.admin import create_admin_app
-from bragi.cli import cms
+from bragi.cli import bragi as cms
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.middleware.sessions import COOKIE_NAME, purge_expired_sessions
 from bragi.core.models.local_credential import LocalCredential

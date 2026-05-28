@@ -229,12 +229,19 @@ def test_site_list_shows_rows(
 
 
 def test_sites_plugin_registers_cli(db_session_factory: sessionmaker[Session]) -> None:
-    """`flask --app bragi.apps.admin cms site ...` should resolve."""
+    """`flask --app bragi.apps.admin site ...` should resolve.
+
+    Plugin commands are now registered directly on `app.cli` (the
+    `cms` wrapper group was removed in the bragi CLI entry-point
+    refactor), so `site` is a top-level `app.cli` command.
+    """
     from bragi.apps.admin import create_admin_app
 
     app = create_admin_app()
-    cms_group = app.cli.commands["cms"]
-    assert "site" in cms_group.commands  # type: ignore[attr-defined]
+    assert app.cli.get_command(None, "site") is not None, (
+        "The `site` command must be reachable from app.cli directly; "
+        "plugin commands are no longer nested under a `cms` group."
+    )
 
 
 def test_site_extra_settings_defaults_to_empty_dict(

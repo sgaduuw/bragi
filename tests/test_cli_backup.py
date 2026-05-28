@@ -16,7 +16,7 @@ import pytest
 from click.testing import CliRunner
 from sqlalchemy.orm import Session
 
-from bragi.cli import cms
+from bragi.cli import bragi as cms
 from bragi.core.models.site import Site
 from tests.conftest import make_test_user
 

@@ -1,10 +1,14 @@
-"""Top-level CLI group registered on the Flask admin app.
+"""Top-level CLI group exposed as the `bragi` console script.
 
 Plugins extend this group via the `register_cli_command` hook.
-Core maintenance commands (session purge, etc.) live here directly
-because they operate on core infrastructure, not plugin-owned data.
+Core maintenance commands (session purge, db vacuum, backup,
+export) live here directly because they operate on core
+infrastructure, not plugin-owned data.
 
-Invoke with `flask --app bragi.apps.admin cms ...`.
+Invoke as `bragi <subcommand>` (the console script registered in
+pyproject.toml's [project.scripts]). The legacy
+`flask --app bragi.apps.admin:create_admin_app <subcommand>` form
+still works via FlaskGroup's app-factory discovery.
 """
 
 from __future__ import annotations
@@ -13,9 +17,11 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
-from flask.cli import with_appcontext
+from flask import Flask
+from flask.cli import FlaskGroup, with_appcontext
 from sqlalchemy import select, text
 
 from bragi.core.db import SessionLocal, engine
@@ -25,13 +31,33 @@ from bragi.core.models.site import Site
 from bragi.core.time import aware_utcnow
 from bragi.settings import settings
 
-
-@click.group()
-def cms() -> None:
-    """bragi management commands."""
+if TYPE_CHECKING:
+    from flask.cli import ScriptInfo
 
 
-@cms.group("plugins")
+def _create_app_for_cli(info: ScriptInfo | None = None) -> Flask:
+    """Factory hook for the standalone `bragi` Click group.
+
+    FlaskGroup passes a ScriptInfo instance, which we ignore (no
+    per-invocation config), and we return the same app
+    `create_admin_app()` builds. Import is local to dodge a
+    top-of-module circular: bragi.cli is imported by the admin
+    app's factory via register_cli_command during create_admin_app.
+    """
+    from bragi.apps.admin import create_admin_app
+
+    return create_admin_app()
+
+
+@click.group(cls=FlaskGroup, create_app=_create_app_for_cli)
+def bragi() -> None:
+    """bragi CLI. Every command registered via register_cli_command
+    is available as `bragi <command>`. Same backing as
+    `flask --app bragi.apps.admin:create_admin_app <command>`; both
+    invocations stay supported."""
+
+
+@bragi.group("plugins")
 def plugins_group() -> None:
     """Plugin platform introspection (#190)."""
 
@@ -92,7 +118,7 @@ def plugins_list() -> None:
         click.echo(f"{name.ljust(name_w)}  {origin.ljust(origin_w)}  {count}")
 
 
-@cms.group("session")
+@bragi.group("session")
 def session_group() -> None:
     """Session storage management."""
 
@@ -109,7 +135,7 @@ def purge_sessions() -> None:
     click.echo(f"Purged {count} expired session(s).")
 
 
-@cms.group("db")
+@bragi.group("db")
 def db_group() -> None:
     """SQLite maintenance commands.
 
@@ -142,11 +168,11 @@ def db_vacuum() -> None:
     would 500 on Postgres. Without the gate the scheduler sidecar
     would log `failed rc=*` lines on its weekly tick under a
     Postgres `BRAGI_DATABASE_URL` until ops notice; same shape
-    as the `cms backup` gate.
+    as the `bragi backup` gate.
     """
     if engine.dialect.name != "sqlite":
         click.echo(
-            f"cms db vacuum requires SQLite; current engine is "
+            f"bragi db vacuum requires SQLite; current engine is "
             f"`{engine.dialect.name}`. Use the engine's native "
             "maintenance command instead (e.g. `VACUUM (FULL)` "
             "for Postgres).",
@@ -161,7 +187,7 @@ def db_vacuum() -> None:
     click.echo("db vacuum: ok")
 
 
-@cms.command("backup")
+@bragi.command("backup")
 @click.option(
     "--output",
     "-o",
@@ -192,7 +218,7 @@ def backup(output_path: Path | None) -> None:
         # `BRAGI_DATABASE_URL` at Postgres would otherwise hit an
         # opaque SQL error here instead of a usable message.
         click.echo(
-            f"cms backup requires SQLite; current engine is "
+            f"bragi backup requires SQLite; current engine is "
             f"`{engine.dialect.name}`. For Postgres use pg_dump; for "
             "other engines use the engine's native snapshot tool.",
             err=True,
@@ -229,7 +255,7 @@ def backup(output_path: Path | None) -> None:
     click.echo(f"backup written: {output_path} ({size_mb:.2f} MiB)")
 
 
-@cms.command("export")
+@bragi.command("export")
 @click.option(
     "--site",
     "site_slug",
@@ -261,7 +287,7 @@ def export_command(site_slug: str | None, output_dir: Path | None) -> None:
     Output is deterministic so a second run against an unchanged
     DB yields a byte-identical tree (useful for diffing what
     actually changed since the last snapshot). Round-trips through
-    `cms import hugo` per post.
+    `bragi import hugo` per post.
     """
     if output_dir is None:
         stamp = aware_utcnow().strftime("%Y%m%d-%H%M%S")

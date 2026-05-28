@@ -590,7 +590,7 @@ def test_cli_rerender_pending_reports_summary(
     )
 
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "embeds", "rerender-pending"])
+    result = runner.invoke(args=["embeds", "rerender-pending"])
     assert result.exit_code == 0, result.output
     assert "resolved 1 card(s)" in result.output
 
@@ -602,7 +602,7 @@ def test_cli_rerender_pending_nothing_to_do(
 ) -> None:
     del db_session_factory, seeded
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "embeds", "rerender-pending"])
+    result = runner.invoke(args=["embeds", "rerender-pending"])
     assert result.exit_code == 0, result.output
     assert "nothing pending" in result.output
 
