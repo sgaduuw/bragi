@@ -74,6 +74,45 @@ def test_welcome_stub_is_trylast() -> None:
     assert impls["bragi.contrib.theme_default.plugin"].trylast is True
 
 
+@pytest.mark.parametrize("active_theme", ["minimal", "serif", "terminal"])
+def test_welcome_stub_renders_under_non_default_theme(
+    patched_session_locals: sessionmaker[Session],
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    active_theme: str,
+) -> None:
+    """The fallback's template must be reachable from every registered theme.
+
+    Regression for the 1.17.0 hotfix: the welcome template originally
+    lived inside `bragi.contrib.theme_default/templates/`, so its
+    `PackageLoader` was only consulted when `Site.theme` resolved to
+    `default`. A site running any other shipped theme (`minimal`,
+    `serif`, `terminal`) hit `TemplateNotFound` on `/` whenever the
+    welcome stub fired (i.e. `home_page_id IS NULL` and no other
+    `resolve_home` impl claimed `/`). The template now lives in core
+    so the chain finds it regardless of active theme.
+    """
+    user = User(email="ada@example.com", display_name="Ada", is_active=True)
+    db_session.add(user)
+    db_session.flush()
+    site = Site(
+        slug=f"naked-{active_theme}",
+        hostname=f"naked-{active_theme}.example.com",
+        title=f"Naked {active_theme.title()}",
+        canonical_url=f"https://naked-{active_theme}.example.com",
+        owner_user_id=user.id,
+        theme=active_theme,
+    )
+    db_session.add(site)
+    db_session.commit()
+
+    app = create_delivery_app()
+    resp = app.test_client().get("/", headers={"Host": f"naked-{active_theme}.example.com"})
+    assert resp.status_code == 200, resp.data.decode()[:500]
+    body = resp.data.decode()
+    assert f"Welcome to Naked {active_theme.title()}" in body
+
+
 def test_higher_priority_impl_preempts_welcome_stub() -> None:
     """A plugin registered at default priority wins over the welcome stub.
 
