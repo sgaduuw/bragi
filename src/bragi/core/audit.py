@@ -52,6 +52,9 @@ class AuditAction:
     TOKEN_REVOKED = "token.revoked"
     TOKEN_USED = "token.used"
 
+    # User management (CLI-driven)
+    USER_PASSWORD_RESET = "user.password_reset"
+
 
 def audit(
     action: str,
