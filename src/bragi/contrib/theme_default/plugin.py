@@ -3,8 +3,11 @@
 Registers the in-tree default theme via `register_theme` and
 provides the welcome-page fallback served at `/` when no other
 plugin handles the home dispatch. Owns the `delivery/base.html`
-site shell every public page extends, plus the
-`_welcome_fallback.html` template the fallback hookimpl renders.
+site shell every public page extends. The `_welcome_fallback.html`
+template the fallback hookimpl renders lives in core
+(`bragi/templates/delivery/`), not here, so the fallback is
+reachable through the Jinja chain regardless of which theme is
+active on the site.
 """
 
 from __future__ import annotations
