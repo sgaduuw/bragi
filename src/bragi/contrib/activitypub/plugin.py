@@ -3,7 +3,7 @@
 Wires:
 
 - The delivery Blueprint (WebFinger, actor, inbox, outbox).
-- The `cms activitypub` CLI group.
+- The `bragi activitypub` CLI group.
 - `on_post_published` to fan out a Create+Note to every follower.
 """
 

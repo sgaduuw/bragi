@@ -6,7 +6,7 @@ Three surfaces today:
   block directive into the app-bound `MarkdownIt`.
 - `register_html_transform` injects the click-to-load handler
   script once per page when any YouTube CTO embed is rendered.
-- `register_cli_command` exposes `cms embeds rerender-pending`
+- `register_cli_command` exposes `bragi embeds rerender-pending`
   for the task-runner sidecar to invoke periodically.
 """
 
@@ -43,7 +43,7 @@ def register_html_transform(registry: TransformRegistry) -> None:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Mount `cms embeds ...` under the admin CLI."""
+    """Mount `bragi embeds ...` under the admin CLI."""
     group.add_command(embeds_group)
 
 

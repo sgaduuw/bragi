@@ -45,7 +45,7 @@ log() { echo "[scheduler $(date -Iseconds)] $*"; }
 # Track the active child PID so SIGTERM/SIGINT can forward to it
 # before exiting the loop. Without this, `docker compose stop`
 # sends SIGTERM and the outer `sleep` runs to completion, then
-# SIGKILL fires; a multi-minute `cms db vacuum` or AP-send-pending
+# SIGKILL fires; a multi-minute `bragi db vacuum` or AP-send-pending
 # run mid-tick loses work. The trap forwards the signal to the
 # child and exits the loop. `SLEEP_PID` covers the cadence-spacing
 # `sleep` too: POSIX `/bin/sh` (dash) does NOT interrupt a
@@ -152,37 +152,37 @@ while true; do
     now=$(date +%s)
 
     if [ $((now - last_scheduled_publish)) -ge "$SCHEDULED_PUBLISH_EVERY" ]; then
-        run "scheduled-publish" flask --app 'bragi.apps.admin:create_admin_app' cms scheduled-publish
+        run "scheduled-publish"  bragi scheduled-publish
         last_scheduled_publish=$(date +%s)
     fi
 
     if [ $((now - last_embeds_rerender)) -ge "$EMBEDS_RERENDER_EVERY" ]; then
-        run "embeds-rerender" flask --app 'bragi.apps.admin:create_admin_app' cms embeds rerender-pending
+        run "embeds-rerender"    bragi embeds rerender-pending
         last_embeds_rerender=$(date +%s)
     fi
 
     if [ $((now - last_webmentions_send)) -ge "$WEBMENTIONS_SEND_EVERY" ]; then
-        run "webmentions-send" flask --app 'bragi.apps.admin:create_admin_app' cms webmentions send-pending
+        run "webmentions-send"   bragi webmentions send-pending
         last_webmentions_send=$(date +%s)
     fi
 
     if [ $((now - last_activitypub_send)) -ge "$ACTIVITYPUB_SEND_EVERY" ]; then
-        run "activitypub-send" flask --app 'bragi.apps.admin:create_admin_app' cms activitypub send-pending
+        run "activitypub-send"   bragi activitypub send-pending
         last_activitypub_send=$(date +%s)
     fi
 
     if [ $((now - last_renditions_process)) -ge "$RENDITIONS_PROCESS_EVERY" ]; then
-        run "renditions-process" flask --app 'bragi.apps.admin:create_admin_app' cms media process-renditions
+        run "renditions-process" bragi media process-renditions
         last_renditions_process=$(date +%s)
     fi
 
     if [ $((now - last_analyze)) -ge "$ANALYZE_EVERY" ]; then
-        run "analyze" flask --app 'bragi.apps.admin:create_admin_app' cms db analyze
+        run "analyze"            bragi db analyze
         last_analyze=$(date +%s)
     fi
 
     if [ $((now - last_vacuum)) -ge "$VACUUM_EVERY" ]; then
-        run "vacuum" flask --app 'bragi.apps.admin:create_admin_app' cms db vacuum
+        run "vacuum"             bragi db vacuum
         last_vacuum=$(date +%s)
     fi
 

@@ -334,7 +334,7 @@ def _page_fields(page: Page) -> dict[str, Any]:
 def _reindex_all(site_id: int | None) -> dict[str, int]:
     """Wipe and rebuild the FTS index for every post and page.
 
-    Used by `cms search reindex` and by the test suite. Wiping is
+    Used by `bragi search reindex` and by the test suite. Wiping is
     coarse on purpose: contentless FTS5 has no `OPTIMIZE` or
     incremental rebuild, and a personal-blog-scale corpus is
     well within the "drop and rebuild" budget.

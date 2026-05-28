@@ -3,7 +3,7 @@
 Mounted under /admin/sites on the admin app. Sites are core to
 the multisite story (Host header -> Site row resolution); seeding
 one is the very first step on any fresh install. The CLI
-(`cms site create`) is still available for scripted setup; this
+(`bragi site create`) is still available for scripted setup; this
 Blueprint covers interactive management.
 
 Active vs delete: a Site can be deactivated (sets `active=False`)

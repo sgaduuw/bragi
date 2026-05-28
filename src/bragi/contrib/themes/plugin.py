@@ -24,7 +24,7 @@ def register_delivery_blueprint() -> Blueprint:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Add `cms theme list`."""
+    """Add `bragi theme list`."""
     group.add_command(theme_group)
 
 

@@ -11,7 +11,6 @@
 # supervisor forwards SIGTERM cleanly via the process group.
 set -uo pipefail
 
-FLASK_APP='bragi.apps.admin:create_admin_app'
 SLEEP_BETWEEN_PASSES=${BRAGI_DEV_TASKS_SLEEP:-60}
 
 log() {
@@ -20,7 +19,7 @@ log() {
 
 run_cmd() {
     log "running: $*"
-    if ! poetry run flask --app "$FLASK_APP" "$@"; then
+    if ! poetry run bragi "$@"; then
         log "command failed (rc=$?); continuing"
     fi
 }
@@ -28,10 +27,10 @@ run_cmd() {
 log "dev-tasks loop started; cadence=${SLEEP_BETWEEN_PASSES}s"
 
 while true; do
-    run_cmd cms scheduled-publish
-    run_cmd cms embeds rerender-pending
-    run_cmd cms webmentions send-pending
-    run_cmd cms activitypub send-pending
-    run_cmd cms media process-renditions
+    run_cmd scheduled-publish
+    run_cmd embeds rerender-pending
+    run_cmd webmentions send-pending
+    run_cmd activitypub send-pending
+    run_cmd media process-renditions
     sleep "$SLEEP_BETWEEN_PASSES"
 done

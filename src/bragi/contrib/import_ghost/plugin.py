@@ -22,7 +22,7 @@ def register_importer() -> ImporterSpec:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Hook `cms import ghost ...` onto the shared `import` group.
+    """Hook `bragi import ghost ...` onto the shared `import` group.
 
     The `import` group is created lazily by whichever importer
     plugin registers first; subsequent ones reuse it.

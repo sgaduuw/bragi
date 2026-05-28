@@ -7,7 +7,7 @@ Two surfaces:
   target (per W3C Webmention §3.2.1), parses an h-card subset
   for author display, persists pending and awaits admin
   approval.
-- **Outbox** (`on_post_published` queues; `cms webmentions send-pending`
+- **Outbox** (`on_post_published` queues; `bragi webmentions send-pending`
   ships): scans the rendered post HTML for external links,
   performs endpoint discovery on each target, and POSTs the
   mention. Idempotent: re-running send-pending is a no-op on

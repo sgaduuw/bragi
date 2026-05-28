@@ -1,6 +1,6 @@
 """CLI for the IndexNow plugin.
 
-`cms indexnow setup --site <slug>` generates a 32-hex-char key
+`bragi indexnow setup --site <slug>` generates a 32-hex-char key
 and writes it to the site's `extra_settings`, then prints the
 verification URL (the location where the key file will be
 served) so the operator can sanity-check the host is reachable

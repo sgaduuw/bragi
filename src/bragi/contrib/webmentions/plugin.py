@@ -4,7 +4,7 @@
   queue them in `webmention_outbox`.
 - `register_delivery_blueprint`: mount the inbox endpoint.
 - `register_admin_blueprint`: mount the moderation list.
-- `register_cli_command`: add `cms webmentions send-pending`.
+- `register_cli_command`: add `bragi webmentions send-pending`.
 - `register_template_globals`: expose `webmention_endpoint_url()`
   and `webmentions_for_post(post)` to delivery templates.
 """

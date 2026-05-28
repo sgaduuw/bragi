@@ -111,7 +111,7 @@ and ARM homelabs run natively rather than through QEMU emulation.
   delete fire a fire-and-forget POST to the configured IndexNow
   endpoint so participating search engines (Bing, Yandex, Seznam,
   Naver, ...) hear about the change immediately. Per-site key
-  bootstrapped with `cms indexnow setup --site <slug>`; the
+  bootstrapped with `bragi indexnow setup --site <slug>`; the
   verification key file lives at `/<key>.txt` on the delivery
   app.
 - **Programmatic posting via API tokens.** Personal access
@@ -124,7 +124,7 @@ and ARM homelabs run natively rather than through QEMU emulation.
   use recorded in the audit log.
 - **Indieweb webmentions (send + receive).** Outbound: on
   publish, every external link in a post is queued; the
-  cron-driven `cms webmentions send-pending` performs W3C
+  cron-driven `bragi webmentions send-pending` performs W3C
   endpoint discovery (Link header, then
   `<link rel="webmention">`) and POSTs the mention. Inbound:
   `POST /webmentions` on the delivery app validates the source
@@ -141,9 +141,9 @@ and ARM homelabs run natively rather than through QEMU emulation.
   HTTP signatures (RSA-SHA256, draft-cavage-12) on outbound
   POSTs; inbound `Follow` / `Undo Follow` verified against the
   sender's public key. On post publish, a Create+Note fans out
-  to every follower; `cms activitypub send-pending` ships
+  to every follower; `bragi activitypub send-pending` ships
   the queued deliveries. Per-site keypair generated on first
-  `/actor` hit or via `cms activitypub keygen --site <slug>`.
+  `/actor` hit or via `bragi activitypub keygen --site <slug>`.
 
 ## What bragi is not
 
@@ -185,8 +185,7 @@ in place rather than duplicating them.
   strings on the alias are stripped before matching. Sites with
   no `post_index` page have no public post URLs, so the importer
   skips the redirect emission for those. `tags:` lists upsert by
-  slug. CLI: `flask --app 'bragi.apps.admin:create_admin_app' cms
-  import hugo --site <slug> [--author <email>] [--dry-run] <path>`.
+  slug. CLI: `bragi import hugo --site <slug> [--author <email>] [--dry-run] <path>`.
 - **Ghost**: parses the single-file JSON export
   (`db[0].data.posts`). Bodies arrive as HTML and convert to
   markdown via `markdownify(heading_style="ATX")`; tags come
@@ -195,8 +194,7 @@ in place rather than duplicating them.
   published post a 301 lands from Ghost's permalink (`/<slug>/`)
   to bragi's canonical under the site's `post_index` page (e.g.
   `/blog/<slug>/`) so legacy bookmarks survive. CLI:
-  `flask --app 'bragi.apps.admin:create_admin_app' cms import
-  ghost --site <slug> [--author <email>] [--dry-run] <path>`.
+  `bragi import ghost --site <slug> [--author <email>] [--dry-run] <path>`.
 - **WordPress**: parses WXR (WordPress eXtended RSS) XML
   exports. `wp:post_type=post` rows become Posts, `page` rows
   become Pages; bodies are converted from WordPress HTML to
@@ -206,16 +204,14 @@ in place rather than duplicating them.
   redirects to the bragi canonical (posts resolve through the
   site's `post_index` page; pages resolve through the static-page
   chain). Idempotency keys on `(site_id, source_id)` via
-  `wp:post_id`. CLI: `flask --app 'bragi.apps.admin:create_admin_app'
-  cms import wordpress --site <slug> [--author <email>] [--dry-run]
-  <wxr.xml>`.
+  `wp:post_id`. CLI: `bragi import wordpress --site <slug> [--author <email>] [--dry-run] <wxr.xml>`.
 
 Notion, Substack, and Medium importers are deferred to
 follow-up packages; no v1.x commitment.
 
 ## Export (portability)
 
-`flask --app 'bragi.apps.admin:create_admin_app' cms export [--site <slug>] [--output <dir>]`
+`bragi export [--site <slug>] [--output <dir>]`
 writes a Hugo-shaped tree per site: posts as
 `content/posts/<slug>.md` with YAML frontmatter, pages under
 `content/pages/`, attachment bytes under `static/attachments/`
@@ -224,15 +220,15 @@ per-site redirect table as `redirects.csv`. Default output is
 `bragi-export-YYYYMMDD-HHMMSS/` in the CWD.
 
 Output is deterministic: re-running against an unchanged DB
-yields byte-identical files, so a periodic `cms export` doubles
-as a diffable snapshot. Posts round-trip through `cms import
+yields byte-identical files, so a periodic `bragi export` doubles
+as a diffable snapshot. Posts round-trip through `bragi import
 hugo`: importing the export and re-exporting changes nothing
 beyond timestamps, so the corpus is portable back into any Hugo
 build at any time.
 
 ## Backups
 
-`flask --app 'bragi.apps.admin:create_admin_app' cms backup [--output PATH]`
+`bragi backup [--output PATH]`
 writes a single `.tar.gz` containing a consistent SQLite snapshot
 (produced with `VACUUM INTO`, so no companion `-wal` / `-shm`
 files) plus the contents of `Settings.attachments_root` as
@@ -245,11 +241,11 @@ restart the admin + delivery processes. There is no `restore`
 subcommand by design; a tool that overwrites a live deployment
 is a big risk for not much help.
 
-`cms backup` is SQLite-only and exits 2 with a clear message
+`bragi backup` is SQLite-only and exits 2 with a clear message
 under a non-SQLite `BRAGI_DATABASE_URL` (its `VACUUM INTO` is
 SQLite-specific). Postgres operators: use `pg_dump` for the
 DB half and a separate tar of `attachments_root` for the file
-half. `cms db vacuum` follows the same gate (`PRAGMA
+half. `bragi db vacuum` follows the same gate (`PRAGMA
 wal_checkpoint(TRUNCATE)` is SQLite-only); on Postgres use
 `VACUUM (FULL)` or your usual autovacuum tooling instead.
 
@@ -381,7 +377,7 @@ bragi/
 │   │   ├── audit.py            # AuditLog writer
 │   │   ├── cache.py            # Cache-Control / ETag / 304 helpers
 │   │   ├── db.py               # SessionLocal
-│   │   ├── export.py           # corpus export writer (cms export)
+│   │   ├── export.py           # corpus export writer (bragi export)
 │   │   ├── feed.py             # Atom feed builder
 │   │   ├── healthz.py          # /healthz handler
 │   │   ├── htmx.py             # HX-Request dispatch helpers
@@ -504,7 +500,7 @@ coral_theme = "coral_theme.plugin"
 The entry-point name (`coral_theme` above) must be unique across
 every plugin installed in the deployment; bragi's runtime fails
 loud on collision (#188). Pick a name that includes your slug so
-the `cms plugins list` output (#190) reads naturally.
+the `bragi plugins list` output (#190) reads naturally.
 
 **Required template: `delivery/base.html`.** Bragi resolves
 `delivery/base.html` against your theme first (via
@@ -579,7 +575,7 @@ pip install bragi-theme-coral
 
 Restart both apps; the entry-point group is read at process
 boot. Once installed, your slug appears in the admin theme
-picker on the site-edit form, and `cms plugins list` reports
+picker on the site-edit form, and `bragi plugins list` reports
 your distribution name + version under "origin".
 
 **Activating.** Per-Site selection via the admin site-edit

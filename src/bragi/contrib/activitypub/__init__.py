@@ -17,7 +17,7 @@ Surfaces:
   and ignored.
 - `/actor/outbox`: paginated `OrderedCollection` of past Create
   activities (one per published post).
-- `cms activitypub keygen --site SLUG`: generate the per-site
+- `bragi activitypub keygen --site SLUG`: generate the per-site
   RSA keypair (also runs automatically on first need).
 
 Out of v1: receiving replies as comments (bragi has no comment

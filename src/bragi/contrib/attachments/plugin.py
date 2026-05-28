@@ -191,5 +191,5 @@ def _editor_image_renditions_json(
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Add `cms media reindex` for backfilling rendition slots."""
+    """Add `bragi media reindex` for backfilling rendition slots."""
     group.add_command(media_group)

@@ -89,7 +89,7 @@ def create_site(
             if owner is None:
                 click.echo(
                     "No superuser exists to default ownership to. "
-                    "Create one with `cms user create --superuser` first, "
+                    "Create one with `bragi user create --superuser` first, "
                     "or pass --owner explicitly.",
                     err=True,
                 )

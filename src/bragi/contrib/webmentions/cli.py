@@ -1,4 +1,4 @@
-"""`cms webmentions send-pending` for the outbox worker.
+"""`bragi webmentions send-pending` for the outbox worker.
 
 Designed for cron use: idempotent on rows already SENT, bounded
 per-run by `--limit`, and quiet on success (prints a summary).
