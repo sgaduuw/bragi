@@ -75,6 +75,8 @@ from typing import Any
 import jinja2
 import pluggy
 
+from bragi.core.breadcrumbs import Crumb, set_breadcrumbs
+
 hookimpl = pluggy.HookimplMarker("bragi")
 
 
@@ -439,6 +441,7 @@ __all__ = [
     "AnalyticsEvent",
     "AuthMethodSpec",
     "ContentTypeSpec",
+    "Crumb",
     "ExternalUser",
     "FieldSpec",
     "ImageMetadata",
@@ -452,6 +455,7 @@ __all__ = [
     "SearchBackendSpec",
     "SearchHit",
     "SearchResults",
+    "set_breadcrumbs",
     "StorageBackendSpec",
     "ThemeSpec",
 ]
