@@ -4,7 +4,7 @@ Owns:
 - The SQLite FTS5 search backend (registered via
   `register_search_backend`).
 - The `/search` delivery route.
-- The `cms search reindex` CLI subcommand.
+- The `bragi search reindex` CLI subcommand.
 - Lifecycle hooks (`on_post_*`) that keep the index fresh in step
   with publish / update / delete events. The page admin reuses
   the same lifecycle hooks (per `bragi.contrib.page.admin`); the
@@ -71,7 +71,7 @@ def register_delivery_blueprint() -> Blueprint:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Add `cms search reindex`."""
+    """Add `bragi search reindex`."""
     group.add_command(search_group)
 
 

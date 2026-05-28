@@ -201,7 +201,7 @@ def serve_attachment_bytes(site_slug: str, storage_key: str) -> ResponseReturnVa
 
 @bp.route("/regenerate-missing", methods=["POST"])
 def regenerate_missing(site_slug: str) -> ResponseReturnValue:
-    """Operator-triggered version of the `cms media regenerate-missing` CLI.
+    """Operator-triggered version of the `bragi media regenerate-missing` CLI.
 
     Enqueues pending rows for every (attachment, width, format)
     gap under the active theme. Mirrors the CLI logic via the
@@ -489,7 +489,7 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
 
         # Enqueue pending rendition rows per the active theme's
         # widths × {avif, webp, original}. The worker
-        # (`cms media process-renditions`) drains them on the
+        # (`bragi media process-renditions`) drains them on the
         # scheduler cadence; upload returns fast with the original
         # only. Skips enqueue when the upload isn't an image (no
         # width recorded by the probe) so PDFs / text never end

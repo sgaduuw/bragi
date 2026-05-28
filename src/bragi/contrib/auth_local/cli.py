@@ -1,6 +1,6 @@
 """CLI commands for the local-credential auth path.
 
-Exposes a `user` group that the plugin registers under `cms`.
+Exposes a `user` group that the plugin registers under `bragi`.
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ def reset_password(
 
     Updates the existing local_credentials row in place. Refuses
     (exit 1) when the user has no local credential (OAuth-only
-    users must add a credential via `cms user create`; this
+    users must add a credential via `bragi user create`; this
     command does not silently create one).
 
     With --revoke-sessions, every row in the `sessions` table for
@@ -149,7 +149,7 @@ def reset_password(
     if password is None:
         generated_password = secrets.token_urlsafe(16)
         password = generated_password
-    # Same default rule as `cms user create`: force rotation when the
+    # Same default rule as `bragi user create`: force rotation when the
     # password was generated (so the operator's record of "what I
     # typed" can't linger as the real secret), but leave it off when
     # the operator supplied a password intentionally.
@@ -167,7 +167,7 @@ def reset_password(
         if cred is None:
             click.echo(
                 f"User {email_normalized!r} has no local password. "
-                f"Use 'cms user create' to add one, or grant a local "
+                f"Use 'bragi user create' to add one, or grant a local "
                 f"credential via the admin UI.",
                 err=True,
             )

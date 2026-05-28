@@ -102,5 +102,5 @@ def register_auth_method() -> AuthMethodSpec:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Add `user` subcommands to the top-level `cms` CLI group."""
+    """Add `user` subcommands to the top-level `bragi` CLI group."""
     group.add_command(user_group)

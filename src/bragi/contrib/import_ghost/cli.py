@@ -1,6 +1,6 @@
 """CLI wrapper around the Ghost importer.
 
-Invoked as `cms import ghost --site <slug> [--author <email>]
+Invoked as `bragi import ghost --site <slug> [--author <email>]
 [--dry-run] <path>`. The plugin's `register_cli_command`
 attaches this command under the shared `import` subgroup.
 """

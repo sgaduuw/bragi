@@ -9,7 +9,7 @@ in-case-of-fire backup when the OAuth provider is unreachable.
 Contributes:
 - `register_admin_blueprint`: /auth/login and /auth/logout views.
 - `register_auth_method`: AuthMethodSpec with `bootstrap=True`.
-- `register_cli_command`: `cms user create` for the bootstrap path.
+- `register_cli_command`: `bragi user create` for the bootstrap path.
 - `on_app_init`: installs the auth guard on the admin app (anon
   hits get redirected to /auth/login).
 

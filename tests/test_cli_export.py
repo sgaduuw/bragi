@@ -17,7 +17,7 @@ from click.testing import CliRunner
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from bragi.cli import cms
+from bragi.cli import bragi as cms
 from bragi.contrib.import_hugo.importer import apply as hugo_apply
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.page import Page, PageKind, PageStatus

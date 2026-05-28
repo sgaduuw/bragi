@@ -1,6 +1,6 @@
 """CLI commands for `bragi.contrib.attachments`.
 
-`cms media reindex` walks the image Attachment rows and fills in
+`bragi media reindex` walks the image Attachment rows and fills in
 any rendition slots missing from the current
 `Settings.attachment_rendition_widths` ladder. Use this after
 changing the ladder, or after an operator imports content from a
@@ -278,7 +278,7 @@ def process_renditions(limit: int | None) -> None:
 def _purge_renditions(db: Session, site: Site) -> int:
     """Delete every rendition row for `site`. Returns the count.
 
-    Shared between the `cms media regenerate-all` CLI and the
+    Shared between the `bragi media regenerate-all` CLI and the
     admin POST endpoint. The on-disk rendition files are left
     behind; the worker will overwrite them on the next pass.
     Caller owns the transaction commit.
@@ -297,7 +297,7 @@ def _purge_renditions(db: Session, site: Site) -> int:
 def _enqueue_missing_renditions(db: Session, site: Site, app: Any) -> int:
     """Enqueue pending renditions for any gaps under the active theme.
 
-    Shared between the `cms media regenerate-missing` CLI and the
+    Shared between the `bragi media regenerate-missing` CLI and the
     admin POST endpoint so both call sites enqueue identically.
     The caller owns the transaction commit; this helper only
     `db.add()`s the new rows.
@@ -361,7 +361,7 @@ def regenerate_missing(site_slug: str) -> None:
     `resolved_widths(active_theme)` × `{avif, webp, original}`)
     and inserts a `status='pending'` row for any combination not
     already present. The worker
-    (`cms media process-renditions`) drains them later.
+    (`bragi media process-renditions`) drains them later.
 
     Non-image attachments (no `width` recorded on the row) are
     skipped.

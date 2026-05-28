@@ -1,6 +1,6 @@
 """bragi.contrib.themes plugin hookimpls.
 
-Registers the theme-static-asset delivery blueprint and the `cms
+Registers the theme-static-asset delivery blueprint and the `bragi
 theme list` CLI command. Does NOT itself register a theme via
 `register_theme`; this package is the consumer machinery, not a
 shipped theme.
@@ -24,7 +24,7 @@ def register_delivery_blueprint() -> Blueprint:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Add `cms theme list`."""
+    """Add `bragi theme list`."""
     group.add_command(theme_group)
 
 

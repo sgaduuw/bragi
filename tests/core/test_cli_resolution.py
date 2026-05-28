@@ -1,15 +1,13 @@
 """Guards against the rc=2 regression that silently broke the
 task-runner sidecar in 1.8.0 - 1.9.0.
 
-The sidecar's `docker/scheduler.sh` dispatches
-`flask --app bragi.apps.admin cms <subcommand>` on a cadence to run
-scheduled-publish, embed rerenders, and SQLite maintenance. Flask's
-CLI autodiscovery only looks for factories named `create_app` or
-`make_app`; `create_admin_app` doesn't match, so the bare
+The sidecar's `docker/scheduler.sh` dispatches commands on a cadence
+to run scheduled-publish, embed rerenders, and SQLite maintenance.
+Flask's CLI autodiscovery only looks for factories named `create_app`
+or `make_app`; `create_admin_app` doesn't match, so the bare
 `--app bragi.apps.admin` form silently fails:
 
     Error: Failed to find Flask application or factory ...
-    Error: No such command 'cms'.
 
 and every tick exits rc=2. The container kept running, the loop
 kept ticking, and nothing scheduled-publish, no embed retries, no
@@ -17,9 +15,15 @@ ANALYZE, no VACUUM landed in prod until the regression was caught
 in `journalctl`.
 
 Fix: use the explicit `module:factory` form everywhere
-(`flask --app 'bragi.apps.admin:create_admin_app' cms ...`). These
+(`flask --app 'bragi.apps.admin:create_admin_app' <subcommand>`
+or the standalone `bragi <subcommand>` console script). These
 tests are the canary: any future call site that drops back to the
 bare form fails this guard.
+
+Since the `cms` wrapper group was removed in the bragi CLI entry-point
+refactor, plugin commands are now registered directly on `app.cli`
+and invokable as `flask --app bragi.apps.admin:create_admin_app
+<subcommand>` or `bragi <subcommand>` without the `cms` prefix.
 """
 
 from __future__ import annotations
@@ -42,15 +46,21 @@ def _patch_session_locals(
     yield
 
 
-def test_explicit_factory_form_resolves_and_exposes_cms() -> None:
+def test_explicit_factory_form_resolves_and_exposes_plugin_commands() -> None:
     """`bragi.apps.admin:create_admin_app` resolves and registers
-    the `cms` click group. This is the form used by `scheduler.sh`,
-    the gunicorn admin command, and the CLAUDE.md docs."""
+    plugin commands directly on `app.cli`. Since the `cms` wrapper
+    group was removed, plugin subgroups are reachable as top-level
+    commands via `flask --app ... <subcommand>` or `bragi <subcommand>`.
+    This is the form used by `scheduler.sh`, the gunicorn admin
+    command, and the CLAUDE.md docs."""
     info = ScriptInfo(app_import_path="bragi.apps.admin:create_admin_app")
     app = info.load_app()
-    assert app.cli.get_command(None, "cms") is not None, (
-        "The `cms` click group must be reachable from the admin "
-        "Flask CLI; the scheduler depends on it for every tick."
+    # `scheduled-publish` is registered by the post plugin directly on
+    # app.cli; it is the canonical scheduler command and its presence
+    # means the plugin-command wiring is intact.
+    assert app.cli.get_command(None, "scheduled-publish") is not None, (
+        "The `scheduled-publish` command must be reachable from the "
+        "admin Flask CLI; the scheduler depends on it for every tick."
     )
 
 

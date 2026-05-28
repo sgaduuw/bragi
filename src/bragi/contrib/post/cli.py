@@ -1,6 +1,6 @@
 """Post plugin CLI.
 
-`cms scheduled-publish` flips posts whose `scheduled_for` has
+`bragi scheduled-publish` flips posts whose `scheduled_for` has
 elapsed from `scheduled` to `published`. Intended to be invoked
 on a cadence by the task-runner sidecar (see `docker/scheduler.sh`);
 also safe to invoke ad-hoc.

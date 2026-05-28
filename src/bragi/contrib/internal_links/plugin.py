@@ -15,7 +15,7 @@ Surfaces:
   backlinks views at
   `/admin/sites/<slug>/{posts,pages}/<id>/backlinks` (#116).
 - `register_cli_command` adds
-  `cms internal-links rebuild-backlinks` for one-shot backfill
+  `bragi internal-links rebuild-backlinks` for one-shot backfill
   of the InternalLink edge table on existing content (#116).
 - `on_post_published` / `on_post_updated` / `on_post_deleted`
   reconcile the InternalLink edge table for the affected source

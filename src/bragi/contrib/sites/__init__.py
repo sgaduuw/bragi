@@ -7,5 +7,5 @@ first step on any fresh install.
 
 The `Site` SQLAlchemy model itself lives in
 `bragi.core.models.site`; this plugin only contributes a CLI
-group (`cms site ...`) for creating and listing rows.
+group (`bragi site ...`) for creating and listing rows.
 """

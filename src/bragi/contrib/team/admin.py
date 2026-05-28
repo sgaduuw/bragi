@@ -10,7 +10,7 @@ deliberate ceiling on collaborator power.
 
 Grant / revoke both write audit rows. The owner row is never
 revocable from this UI; the ownership-transfer path stays on
-the CLI (`cms site transfer`) per P1's deferral.
+the CLI (`bragi site transfer`) per P1's deferral.
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ def grant(site_slug: str) -> ResponseReturnValue:
         if target is None:
             flash(
                 f"No user with email {email!r}. They need an account first "
-                "(via `cms user create` or self-register).",
+                "(via `bragi user create` or self-register).",
                 "error",
             )
             return redirect(url_for("team_admin.list_team"))
@@ -160,7 +160,7 @@ def revoke(site_slug: str, user_id: int) -> ResponseReturnValue:
         site = _resolve_site_for_owner(db, site_slug)
         if user_id == site.owner_user_id:
             # The owner can not be revoked from this UI. Transfer
-            # ownership first via `cms site transfer`, then the
+            # ownership first via `bragi site transfer`, then the
             # ex-owner can be revoked like any other collaborator
             # (or stays without any role at all).
             abort(403)

@@ -22,6 +22,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ~30-LOC-Python-one-liner footgun for what is the second-most-
   common user-management operation after creation.
 
+### Changed
+- **`bragi` console script replaces `flask --app ... cms <x>`.**
+  CLI commands are now invoked as `bragi <subcommand>` (e.g.
+  `bragi user create`, `bragi media process-renditions`,
+  `bragi backup`). The `bragi` script is installed by Poetry via
+  `[project.scripts]` alongside the existing `bragi-admin` and
+  `bragi-delivery` WSGI runners. **Breaking change:** the `cms`
+  wrapper group is gone -- subcommands move up one level, and any
+  operator-side script invoking `flask --app
+  'bragi.apps.admin:create_admin_app' cms <x>` must update to
+  `bragi <x>`. The bundled `docker/scheduler.sh` and
+  `scripts/dev-tasks.sh` are updated in lockstep so a fresh
+  deploy "just works". The legacy `flask --app
+  bragi.apps.admin:create_admin_app <x>` form still works through
+  `flask.cli.FlaskGroup`'s app-factory discovery (only the `cms`
+  wrapper is gone, not the Flask-CLI path). Mirrors the pattern
+  shipped in mimir #221. Versioning call (MINOR-as-pragmatic vs
+  MAJOR-per-the-rule) deferred to release-cut time.
+
 ## [1.16.0] - 2026-05-27
 
 ### Added

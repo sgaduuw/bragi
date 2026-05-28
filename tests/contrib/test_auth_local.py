@@ -563,7 +563,7 @@ def test_login_without_must_change_does_not_redirect_to_rotation(
 
 
 # ============================================================
-# `cms user create` --must-change defaults
+# `bragi user create` --must-change defaults
 # ============================================================
 
 
@@ -929,7 +929,7 @@ def test_user_reset_password_oauth_only_user_exits_one(
     )
     assert result.exit_code == 1
     assert "has no local password" in result.stderr
-    assert "cms user create" in result.stderr
+    assert "bragi user create" in result.stderr
 
     # No LocalCredential row was created.
     with db_session_factory() as db:

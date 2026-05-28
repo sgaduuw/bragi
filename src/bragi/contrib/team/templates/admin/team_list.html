@@ -23,7 +23,7 @@
       <td><code>{{ owner.email }}</code></td>
       <td>{{ owner.display_name or '' }}</td>
       <td><strong>Owner</strong></td>
-      <td><small style="color: #888;">Transfer ownership via <code>cms site transfer</code>.</small></td>
+      <td><small style="color: #888;">Transfer ownership via <code>bragi site transfer</code>.</small></td>
     </tr>
     {% endif %}
     {% for role, user in collaborators %}
@@ -47,7 +47,7 @@
 
 <h2 style="margin-top: 2rem;">Add a collaborator</h2>
 <p style="color: #666; margin-top: -0.5rem;">
-  The user must already exist (run <code>cms user create</code>
+  The user must already exist (run <code>bragi user create</code>
   on the host first). Inviting un-registered users by email link
   isn't built yet.
 </p>

@@ -1,6 +1,6 @@
 """Outbox: discover endpoint + POST for each pending outbox row.
 
-Used by both `cms webmentions send-pending` and tests. Kept as
+Used by both `bragi webmentions send-pending` and tests. Kept as
 plain functions on a session for fixture-friendliness.
 """
 

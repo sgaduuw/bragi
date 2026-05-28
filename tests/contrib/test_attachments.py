@@ -1509,7 +1509,7 @@ def test_reindex_cli_adds_missing_slots(
         db.commit()
 
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "media", "reindex"])
+    result = runner.invoke(args=["media", "reindex"])
     assert result.exit_code == 0, result.output
     assert "Reindex complete" in result.output
 
@@ -1543,7 +1543,7 @@ def test_reindex_cli_dry_run_writes_nothing(
         db.commit()
 
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "media", "reindex", "--dry-run"])
+    result = runner.invoke(args=["media", "reindex", "--dry-run"])
     assert result.exit_code == 0, result.output
     assert "would add" in result.output
 
@@ -1575,7 +1575,7 @@ def test_reindex_cli_site_filter(
         db.commit()
 
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "media", "reindex", "--site", "blog", "--dry-run"])
+    result = runner.invoke(args=["media", "reindex", "--site", "blog", "--dry-run"])
     assert result.exit_code == 0, result.output
     # "blog/x.png" appears, "other/x.png" doesn't.
     assert "blog/x.png" in result.output
@@ -1614,7 +1614,7 @@ def test_reindex_cli_skips_existing_slots(
     assert rendition_count_before == 9
 
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "media", "reindex"])
+    result = runner.invoke(args=["media", "reindex"])
     assert result.exit_code == 0, result.output
 
     with db_session_factory() as db:
@@ -1624,7 +1624,7 @@ def test_reindex_cli_skips_existing_slots(
 
 def test_reindex_cli_unknown_site_errors(admin_app: Flask) -> None:
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "media", "reindex", "--site", "nope"])
+    result = runner.invoke(args=["media", "reindex", "--site", "nope"])
     assert result.exit_code != 0
     assert "no site with slug" in result.output.lower()
 

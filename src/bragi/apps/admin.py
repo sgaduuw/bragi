@@ -3,7 +3,8 @@
 Hosts the editor UI, the write API, OAuth callback flow, and all
 admin Blueprints registered by plugins. The Flask CLI group also
 lives here, so management commands are invoked as
-`flask --app bragi.apps.admin cms ...`.
+`bragi <subcommand>` (or the legacy
+`flask --app bragi.apps.admin <subcommand>` form).
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from flask import Flask, g, render_template, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from bragi import __version__
-from bragi.cli import cms
 from bragi.core.cache import CACHE_POLICIES
 from bragi.core.healthz import register_healthz
 from bragi.core.middleware.csrf import register_csrf
@@ -43,7 +43,7 @@ def create_admin_app() -> Flask:
         5. register_auth_method     -> Registry
         6. register_admin_nav       -> Registry
         7. register_admin_blueprint -> app.register_blueprint()
-        8. register_cli_command(group=cms)
+        8. register_cli_command(group=app.cli)
         9. register_template_globals(env=app.jinja_env)
         10. register_markdown_transform(registry=md_transforms)
         11. register_html_transform(registry=html_transforms)
@@ -178,9 +178,12 @@ def create_admin_app() -> Flask:
         response.headers["Cache-Control"] = CACHE_POLICIES_ADMIN
         return response
 
-    # Register the top-level `cms` CLI group so plugin commands
-    # land under `flask --app bragi.apps.admin cms <subcommand>`.
-    app.cli.add_command(cms)
+    # No app.cli.add_command here: the FlaskGroup (`bragi`) picks up
+    # commands registered directly on it (core commands: backup, db,
+    # export, plugins, session) and merges app.cli's Flask-native
+    # commands (run, shell, routes) automatically. Adding
+    # bragi_cli_group to app.cli would nest the whole group as a
+    # subcommand of itself, producing a "bragi bragi ..." structure.
 
     pm.hook.on_app_init(app=app, registry=registry)
     # Marker for `register_csrf` to assert the ordering invariant
@@ -226,7 +229,13 @@ def create_admin_app() -> Flask:
             app.register_blueprint(entry)
 
     # Plumb CLI, Jinja, and transform registries through.
-    pm.hook.register_cli_command(group=cms)
+    # Plugin subgroups are added to app.cli so they surface in
+    # bragi --help via FlaskGroup's list_commands merge of
+    # info.load_app().cli.list_commands(). Adding them to
+    # bragi_cli_group directly would register them AFTER
+    # FlaskGroup's super().list_commands() snapshot, making them
+    # invisible in --help output.
+    pm.hook.register_cli_command(group=app.cli)
     pm.hook.register_template_globals(env=app.jinja_env)
     pm.hook.register_markdown_transform(registry=md_transforms)
     pm.hook.register_html_transform(registry=html_transforms)

@@ -1,4 +1,4 @@
-"""`cms activitypub ...` CLI commands.
+"""`bragi activitypub ...` CLI commands.
 
 - `keygen --site SLUG`: generate the per-site RSA keypair
   (no-op when one exists; pass `--force` to rotate).

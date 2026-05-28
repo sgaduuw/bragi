@@ -1,6 +1,6 @@
 """CLI wrapper around the WordPress importer.
 
-Invoked as `cms import wordpress --site <slug> [--author <email>]
+Invoked as `bragi import wordpress --site <slug> [--author <email>]
 [--dry-run] <wxr.xml>`. The plugin's `register_cli_command`
 attaches this command under the shared `import` subgroup.
 """

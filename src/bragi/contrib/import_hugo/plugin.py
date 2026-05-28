@@ -22,7 +22,7 @@ def register_importer() -> ImporterSpec:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Wire `cms import hugo ...` onto the top-level `cms` group.
+    """Wire `bragi import hugo ...` onto the top-level `bragi` group.
 
     The `import` subgroup is created on first registration; later
     importers add their own command under it without a coordination

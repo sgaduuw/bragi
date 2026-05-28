@@ -34,6 +34,7 @@ homepage = "https://github.com/sgaduuw/bragi"
 repository = "https://github.com/sgaduuw/bragi"
 
 [project.scripts]
+bragi          = "bragi.cli:bragi"
 bragi-admin    = "bragi.apps.admin:run"
 bragi-delivery = "bragi.apps.delivery:run"
 

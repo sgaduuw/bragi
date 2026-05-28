@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.delivery import create_delivery_app
-from bragi.cli import cms
+from bragi.cli import bragi as cms
 from bragi.contrib.activitypub.activities import (
     actor_document,
     create_for_note,

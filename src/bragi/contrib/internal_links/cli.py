@@ -1,6 +1,6 @@
 """CLI surface for the internal_links plugin (#116).
 
-`cms internal-links rebuild-backlinks` walks every Post and Page
+`bragi internal-links rebuild-backlinks` walks every Post and Page
 on every site, scans `body_html` for `data-bragi-link` markers,
 and reconciles the `internal_links` edge table from scratch.
 Designed for one-shot use after upgrading to v1.13.0: the

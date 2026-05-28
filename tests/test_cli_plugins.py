@@ -1,4 +1,4 @@
-"""Tests for `cms plugins list` (#190).
+"""Tests for `bragi plugins list` (#190).
 
 Exercises the plugin-platform introspection command: prints every
 registered plugin, its origin (in-tree vs distribution), and the
@@ -8,27 +8,19 @@ live plugin manager attached to the admin app at boot.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
-import pytest
-from flask import Flask
 from sqlalchemy.orm import Session, sessionmaker
 
-from bragi.apps.admin import create_admin_app
 
-
-@pytest.fixture
-def admin_app(
+def test_plugins_list_includes_in_tree_plugins(
+    db_session_factory: sessionmaker[Session],
     patched_session_locals: sessionmaker[Session],
-) -> Iterator[Flask]:
-    del patched_session_locals
-    yield create_admin_app()
-
-
-def test_plugins_list_includes_in_tree_plugins(admin_app: Flask) -> None:
+) -> None:
     """A handful of well-known in-tree plugins surface in the output."""
-    runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "plugins", "list"])
+    from click.testing import CliRunner
+
+    from bragi.cli import bragi
+
+    result = CliRunner().invoke(bragi, ["plugins", "list"])
     assert result.exit_code == 0, result.output
     out = result.output
     # Header columns present.
@@ -42,11 +34,17 @@ def test_plugins_list_includes_in_tree_plugins(admin_app: Flask) -> None:
     assert "in-tree" in out
 
 
-def test_plugins_list_shows_positive_hook_counts(admin_app: Flask) -> None:
+def test_plugins_list_shows_positive_hook_counts(
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
     """Every row has a numeric hook count that's non-negative (and at
     least one plugin in the bragi.contrib set has >0)."""
-    runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "plugins", "list"])
+    from click.testing import CliRunner
+
+    from bragi.cli import bragi
+
+    result = CliRunner().invoke(bragi, ["plugins", "list"])
     assert result.exit_code == 0, result.output
 
     # Parse the body lines: skip header + separator.

@@ -557,14 +557,14 @@ def test_cli_lists_no_themes(admin_app_with_user: Flask) -> None:
     `nothing registered` branch of the CLI output."""
     admin_app_with_user.extensions["registry"].themes.clear()
     runner = admin_app_with_user.test_cli_runner()
-    result = runner.invoke(args=["cms", "theme", "list"])
+    result = runner.invoke(args=["theme", "list"])
     assert result.exit_code == 0, result.output
     assert "No themes registered" in result.output
 
 
 def test_cli_lists_registered_themes(admin_app_with_user: Flask) -> None:
     runner = admin_app_with_user.test_cli_runner()
-    result = runner.invoke(args=["cms", "theme", "list"])
+    result = runner.invoke(args=["theme", "list"])
     assert result.exit_code == 0, result.output
     assert "Stub Theme" in result.output
     assert "stub-theme" in result.output

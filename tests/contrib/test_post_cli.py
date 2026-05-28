@@ -94,7 +94,7 @@ def test_flips_due_posts_to_published(
         )
 
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "scheduled-publish"])
+    result = runner.invoke(args=["scheduled-publish"])
     assert result.exit_code == 0, result.output
     assert "1 post(s) published" in result.output
 
@@ -121,7 +121,7 @@ def test_dry_run_writes_nothing(
         )
 
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "scheduled-publish", "--dry-run"])
+    result = runner.invoke(args=["scheduled-publish", "--dry-run"])
     assert result.exit_code == 0, result.output
     assert "would be published" in result.output
     assert f"id={post_id}" in result.output
@@ -144,11 +144,11 @@ def test_idempotent_no_op_on_second_run(
         _make_post(db, site, user, slug="due", status=PostStatus.SCHEDULED, scheduled_for=past)
 
     runner = admin_app.test_cli_runner()
-    first = runner.invoke(args=["cms", "scheduled-publish"])
+    first = runner.invoke(args=["scheduled-publish"])
     assert first.exit_code == 0, first.output
     assert "1 post(s) published" in first.output
 
-    second = runner.invoke(args=["cms", "scheduled-publish"])
+    second = runner.invoke(args=["scheduled-publish"])
     assert second.exit_code == 0, second.output
     assert "nothing due" in second.output
 
@@ -179,7 +179,7 @@ def test_skips_drafts_and_already_published(
         )
 
     runner = admin_app.test_cli_runner()
-    result = runner.invoke(args=["cms", "scheduled-publish"])
+    result = runner.invoke(args=["scheduled-publish"])
     assert result.exit_code == 0, result.output
     assert "nothing due" in result.output
 
@@ -228,7 +228,7 @@ def test_fires_on_post_published_hook(
     pm.register(Probe(), name="test-probe")
     try:
         runner = admin_app.test_cli_runner()
-        result = runner.invoke(args=["cms", "scheduled-publish"])
+        result = runner.invoke(args=["scheduled-publish"])
         assert result.exit_code == 0, result.output
     finally:
         pm.unregister(name="test-probe")
