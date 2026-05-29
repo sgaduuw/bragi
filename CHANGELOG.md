@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-05-29
+
 ### Added
 - **`bragi.contrib.import_linkedin`: LinkedIn data-export
   importer.** Two-phase plan-review-apply flow imports the
@@ -32,6 +34,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   compat re-export shim. New `ChangeProposal` dataclass and
   `ImportPlan.proposals` field support per-change review for
   importers that emit them.
+
+### Fixed
+- **`import_linkedin` records `importer_version` in `source_meta`.**
+  Spec-committed provenance field that was missing in the
+  initial implementation. Operators can now triage "which
+  bragi version produced this import" from the stored metadata
+  when debugging a regression that only surfaces after a bragi
+  upgrade.
+- **`import_linkedin` concurrent-edit detection now warns.** The
+  recompute-then-filter pattern in `apply()` was correctly
+  skipping proposals whose target row had changed between plan
+  and apply, but the skip was silent (`counts["skipped"]` was
+  initialised but never incremented, `warnings` stayed empty).
+  Operators clicking "Apply" after a concurrent edit got a
+  success flash with no signal that anything was dropped.
+  `apply()` now emits one warning per skipped proposal id and
+  bumps the skipped counter; the admin route surfaces a summary
+  flash describing how many changes were skipped and how to
+  refresh.
 
 ## [1.19.1] - 2026-05-29
 
