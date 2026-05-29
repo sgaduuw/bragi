@@ -12,6 +12,7 @@ from collections.abc import Iterator
 
 import pytest
 from flask import Flask
+from flask.testing import FlaskClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.admin import create_admin_app
@@ -43,7 +44,7 @@ def admin_app(
     yield create_admin_app()
 
 
-def _login(client) -> None:
+def _login(client: FlaskClient) -> None:
     with client.session_transaction() as s:
         s["user_email"] = "ada@example.com"
         s["user_id"] = 1

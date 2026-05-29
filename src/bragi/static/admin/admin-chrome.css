@@ -1,4 +1,4 @@
-/* bragi admin chrome v2 -- two-row nav, breadcrumbs, mobile drawer.
+/* bragi admin chrome v2: two-row nav, breadcrumbs, mobile drawer.
  *
  * Loaded by `src/bragi/templates/admin/base.html` from
  * /admin/static/admin-chrome.css, served by the `admin_static`
@@ -18,7 +18,7 @@ body {
   color: #222;
 }
 
-/* --- Nav rows (desktop) --- */
+/* Nav rows (desktop) */
 .admin-nav-row-1,
 .admin-nav-row-2 {
   display: flex;
@@ -58,7 +58,7 @@ body {
 }
 .context-dot { opacity: 0.4; }
 
-/* --- Dropdowns (site switcher + user menu, <details>) --- */
+/* Dropdowns (site switcher + user menu, <details>) */
 .admin-nav-row-1 details,
 .admin-nav-row-2 details {
   position: relative;
@@ -126,7 +126,7 @@ body {
   font-weight: 600;
 }
 
-/* --- Breadcrumbs row --- */
+/* Breadcrumbs row */
 .admin-breadcrumbs {
   background: #f6f6f6;
   color: #444;
@@ -145,7 +145,7 @@ body {
 .admin-breadcrumbs .crumb-current { opacity: 0.85; }
 .admin-breadcrumbs .crumb-sep { opacity: 0.45; }
 
-/* --- Mobile (drawer) --- */
+/* Mobile (drawer) */
 #nav-toggle { display: none; }
 .nav-hamburger {
   display: none;
@@ -183,7 +183,7 @@ body {
   .admin-breadcrumbs { display: none; }
 }
 
-/* --- Page chrome (preserved from prior base.html) --- */
+/* Page chrome (preserved from prior base.html) */
 main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
 h1 { margin-top: 0; }
 table { width: 100%; border-collapse: collapse; }
