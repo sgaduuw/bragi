@@ -6,6 +6,42 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Admin chrome split into two rows.** The single horizontal nav
+  is replaced by a global row (cross-site management) plus a site
+  row (per-site content + settings), with thin vertical dividers
+  between section groups within each row. Below 768px both rows
+  collapse into a hamburger drawer driven by pure CSS. The
+  account-scope items (My sessions, API tokens) and Logout now
+  live inside a user-menu dropdown anchored at the far right of
+  the global row; the site switcher becomes a proper dropdown
+  next to it. Plugin contract (`NavItem`, `register_admin_nav`)
+  is unchanged. The `sessions` plugin's "My sessions" item
+  moves from `section="system"` to `section="account"` so the
+  per-section template rule (any `section="account"` global
+  to user menu) places it correctly without endpoint hardcoding.
+
+### Added
+- **Site settings in the site row.** The `sites` contrib registers
+  a second NavItem ("Site settings", site-scoped, section="site")
+  pointing at a new `site_admin.edit_site_current` route that
+  resolves the active site and shares its render path with the
+  existing `edit_site(site_id)` (refactored via a shared
+  `_render_edit_form` helper). Reachable from any in-site admin
+  page.
+- **Breadcrumb row.** A conditional third row under the nav shows
+  the chain to the current page on edit / detail views. Views
+  declare their chain by calling
+  `set_breadcrumbs(Crumb(...), ...)` before `render_template`;
+  the helper plus `Crumb` dataclass are exported from `bragi.api`
+  for third-party plugin use. List views do not set breadcrumbs
+  (the nav row is the crumb). Initial coverage: post, page,
+  attachment, redirect, site edit / new / revision views.
+- **Admin chrome stylesheet** at `/admin/static/admin-chrome.css`,
+  served by a thin `admin_static` Blueprint registered in
+  `bragi.apps.admin`. The inline `<style>` block previously baked
+  into `src/bragi/templates/admin/base.html` is gone.
+
 ## [1.17.1] - 2026-05-28
 
 ### Fixed
