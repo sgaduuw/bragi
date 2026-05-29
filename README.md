@@ -78,6 +78,12 @@ and ARM homelabs run natively rather than through QEMU emulation.
   Drafts are excluded; out-of-range or empty buckets 404. Each
   level carries the standard `ETag` + `Last-Modified` validators
   so feed readers and crawlers get cheap 304s.
+- **Auto-navigation from the page tree.** Published pages
+  appear in the public-site header nav by default, ordered by
+  a per-page `menu_order`. Direct children become a native
+  `<details>` submenu. The per-page checkbox opts an
+  individual page out; the page mapped to the site's home is
+  auto-hidden so the brand link is not duplicated.
 - **Plugin-extensible from day one.** Built-ins (Post, Page,
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties
@@ -413,6 +419,7 @@ bragi/
 │       ├── indexnow/           # IndexNow push-crawl on publish/update/delete
 │       ├── internal_links/     # [text](post:42) save-time + delivery-time resolver + admin picker
 │       ├── markdown_extras/    # bundled markdown-it extensions (footnotes, ...)
+│       ├── nav/                # auto-derived public site navigation from the page tree
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301
