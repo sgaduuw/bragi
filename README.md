@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.19.1 (2026-05-29).
+**Latest release:** 1.20.0 (2026-05-29).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -21,7 +21,7 @@ theme-aware multi-format multi-width renditions (`<picture>` with
 AVIF / WebP / fallback tiers and per-class `sizes`), pinned posts
 on the landing page, ActivityPub + webmentions, four in-tree
 themes with auto light/dark, sitemap / feed / JSON-LD,
-audit-driven hardening from v1.12 through v1.18.
+audit-driven hardening from v1.12 through v1.19.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 
@@ -306,7 +306,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.19.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.20.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
