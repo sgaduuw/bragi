@@ -6,6 +6,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Post-index disc bullets visible on every theme.** The
+  `post_index.html` (and `tag_list.html`) template renders posts
+  as `<ul class="post-list"><li>...</li></ul>`, but none of the
+  four shipped themes (`default`, `minimal`, `serif`, `terminal`)
+  suppressed the browser's default disc bullets or
+  bullet-aligning left padding. The bullets were structurally
+  visible on every theme; the Solarized-dark palette of
+  `terminal` just made them visually prominent in a way the
+  other themes' whitespace masked. Added `.post-list
+  { list-style: none; padding-left: 0; }` to each theme's
+  inline `<style>` block alongside the existing `.pinned`
+  post-index rules. Same rule covers `tag_list.html` which
+  reuses the `.post-list` class.
+
 ## [1.18.0] - 2026-05-28
 
 ### Changed
