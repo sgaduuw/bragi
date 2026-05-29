@@ -261,6 +261,61 @@ def test_apply_writes_source_id_and_source_meta(
     assert "linkedin_export_filename" in page.source_meta
     assert "imported_at" in page.source_meta
     assert "applied_change_ids" in page.source_meta
+    # importer_version lets operators triage which bragi version
+    # produced this import; needed when debugging a regression that
+    # only surfaces after a bragi upgrade.
+    import bragi
+
+    assert page.source_meta["importer_version"] == bragi.__version__
+
+
+# ----------------------- concurrent-edit warning -----------
+
+
+def test_apply_emits_warning_when_proposal_id_goes_stale(
+    tmp_path: Path, patched_session_locals, db_session
+) -> None:
+    """If a selected proposal id no longer matches a recomputed
+    proposal id (because the page changed between plan and apply),
+    `apply()` skips it, increments `counts['skipped']`, and appends
+    a 'Skipped proposal' warning. The admin route uses this signal
+    to flash a summary message to the operator."""
+    site = make_test_site(
+        db_session,
+        hostname="t5.example",
+        title="T5",
+        slug="t5",
+        canonical_url="https://t5.example",
+    )
+    user = make_test_user(db_session)
+    page = _make_resume_page(db_session, site, user)
+    zp = _build_zip(
+        tmp_path,
+        {
+            "Profile.csv": "First Name,Last Name\nA,B\n",
+            "Positions.csv": ("Company Name,Title,Started On\nAcme,Engineer,Jan 2020\n"),
+        },
+    )
+
+    plan_result = plan(zp, page)
+    assert plan_result.proposals, "fixture should produce proposals"
+    selected_ids = {pr.id for pr in plan_result.proposals}
+
+    # Concurrent edit: rename the page's `body_markdown` so a body
+    # proposal (if any) re-hashes; more importantly, ensure at
+    # least one selected id has no analogue after recompute by
+    # asking apply() to enact a synthetic id that the recompute
+    # would never produce.
+    fake_id = "deadbeefcafe"
+    apply_result = apply(
+        zp,
+        page,
+        {"selected_change_ids": selected_ids | {fake_id}},
+    )
+
+    assert apply_result.counts.get("skipped", 0) >= 1
+    assert any("Skipped proposal" in w for w in apply_result.warnings)
+    assert any(fake_id in w for w in apply_result.warnings)
 
 
 # ----------------------- hookimpl wiring --------------------
