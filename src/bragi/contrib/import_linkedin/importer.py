@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import bragi
 from bragi.api import (
     Certification,
     Education,
@@ -281,6 +282,7 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
             "linkedin_export_filename": Path(zip_path).name,
             "imported_at": datetime.now(UTC).isoformat(),
             "applied_change_ids": sorted(approved),
+            "importer_version": bragi.__version__,
         }
 
         db.commit()

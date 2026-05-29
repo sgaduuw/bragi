@@ -261,6 +261,12 @@ def test_apply_writes_source_id_and_source_meta(
     assert "linkedin_export_filename" in page.source_meta
     assert "imported_at" in page.source_meta
     assert "applied_change_ids" in page.source_meta
+    # importer_version lets operators triage which bragi version
+    # produced this import; needed when debugging a regression that
+    # only surfaces after a bragi upgrade.
+    import bragi
+
+    assert page.source_meta["importer_version"] == bragi.__version__
 
 
 # ----------------------- hookimpl wiring --------------------
