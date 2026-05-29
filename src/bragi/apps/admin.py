@@ -9,9 +9,11 @@ lives here, so management commands are invoked as
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 import jinja2
-from flask import Flask, g, render_template, session
+from flask import Blueprint, Flask, g, render_template, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from bragi import __version__
@@ -39,6 +41,19 @@ CACHE_POLICIES_ADMIN = CACHE_POLICIES["admin"]
 # muscle-memory ordering of "the day's work first; admin/audit
 # last" survives an arbitrary contrib adding a new section name.
 _SECTION_RANK: dict[str, int] = {"content": 0, "system": 2}
+
+# Admin-internal Blueprint serving `src/bragi/static/admin/` at
+# `/admin/static/`. Lives in core (not a plugin) because the chrome
+# CSS is part of the admin app shell, not a plugin contribution.
+# Module-level so the instance is shared across factory invocations
+# (repeated test calls to `create_admin_app()` in the same process
+# should not re-create the Blueprint object).
+_ADMIN_STATIC_BP = Blueprint(
+    "admin_static",
+    __name__,
+    static_folder=str(Path(__file__).parent.parent / "static" / "admin"),
+    static_url_path="/admin/static",
+)
 
 
 def _group_nav_by_section(
@@ -244,6 +259,13 @@ def create_admin_app() -> Flask:
         registry.add_search_backend(spec)
     for spec in pm.hook.register_theme():
         registry.add_theme(spec)
+
+    # Mount the admin-static Blueprint so the chrome CSS is served
+    # at /admin/static/ regardless of which plugins are active.
+    # Registered before the plugin Blueprint loop; it does not
+    # participate in CSRF (static files have no form submission),
+    # and it is not a plugin concern.
+    app.register_blueprint(_ADMIN_STATIC_BP)
 
     # Mount plugin-contributed Blueprints on the admin app. A
     # plugin may return either a single Blueprint or a list (some

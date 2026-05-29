@@ -22,6 +22,12 @@ PUBLIC_ENDPOINTS: frozenset[str] = frozenset(
         "auth_github.login",
         "auth_github.callback",
         "static",
+        # Admin chrome stylesheet and other admin-shell statics.
+        # The Blueprint is named `admin_static`; its static endpoint
+        # is `admin_static.static`. CSS must be reachable without a
+        # session so the login page itself can reference the
+        # stylesheet (future: once Task 8 moves the inline block).
+        "admin_static.static",
         # The container healthcheck hits this without a session;
         # without the exemption the probe would 302 to /auth/login
         # and an unhealthy worker can't be distinguished from an
