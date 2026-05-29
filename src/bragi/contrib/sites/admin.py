@@ -23,6 +23,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -433,6 +434,10 @@ def site_dashboard(site_slug: str) -> ResponseReturnValue:
 
 @bp.route("/new", methods=["GET", "POST"])
 def new_site() -> ResponseReturnValue:
+    set_breadcrumbs(
+        Crumb("Sites", "site_admin.list_sites"),
+        Crumb("New site", None),
+    )
     themes = _available_themes()
     new_site_action = url_for("site_admin.new_site")
     if request.method == "GET":
@@ -544,6 +549,10 @@ def _render_edit_form(site: Site, db: Session, form_action: str) -> ResponseRetu
     submit back to wherever the user came from so browser history and
     htmx `hx-push-url` both stay coherent.
     """
+    set_breadcrumbs(
+        Crumb("Sites", "site_admin.list_sites"),
+        Crumb(site.title or site.hostname, None),
+    )
     themes = _available_themes()
     if request.method == "GET":
         form = {
