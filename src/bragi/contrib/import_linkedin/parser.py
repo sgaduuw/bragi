@@ -70,7 +70,11 @@ def _csv_rows(zf: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
         reader = csv.DictReader(text)
         rows: list[dict[str, str]] = []
         for raw in reader:
-            normalised = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
+            normalised = {
+                (k or "").strip().lower(): (v or "").strip()
+                for k, v in raw.items()
+                if isinstance(v, str)
+            }
             rows.append(normalised)
         return rows
 

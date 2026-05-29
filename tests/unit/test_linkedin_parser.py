@@ -142,6 +142,22 @@ def test_parse_positions_preserves_description_as_narrative() -> None:
     assert p.impacts == []
 
 
+def test_parse_positions_none_start_date_sorts_last() -> None:
+    zf = _zip_with(
+        {
+            "Positions.csv": (
+                "Company Name,Title,Location,Started On,Finished On,Description\n"
+                "Acme,Engineer,NYC,Jan 2020,Mar 2022,with date\n"
+                "Old,Intern,Anywhere,,Dec 2010,no start\n"
+                "Beta,Senior Engineer,Berlin,Apr 2024,,current\n"
+            ),
+        }
+    )
+    positions = parse_positions(zf)
+    # Dated rows come first (desc), undated rows last
+    assert [p.company for p in positions] == ["Beta", "Acme", "Old"]
+
+
 def test_parse_positions_empty_csv_returns_empty_list() -> None:
     zf = _zip_with({"Other.csv": "a\n"})
     assert parse_positions(zf) == []
