@@ -1,6 +1,6 @@
 [project]
 name = "bragi"
-version = "1.19.1"
+version = "1.20.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
@@ -60,6 +60,7 @@ analytics = "bragi.contrib.analytics.plugin"
 import_hugo = "bragi.contrib.import_hugo.plugin"
 import_ghost = "bragi.contrib.import_ghost.plugin"
 import_wordpress = "bragi.contrib.import_wordpress.plugin"
+import_linkedin = "bragi.contrib.import_linkedin.plugin"
 indexnow = "bragi.contrib.indexnow.plugin"
 search = "bragi.contrib.search.plugin"
 themes = "bragi.contrib.themes.plugin"

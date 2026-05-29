@@ -90,6 +90,9 @@
 
   {% if current_kind == 'resume' %}
     {% include "admin/_resume_fieldset.html" %}
+    {% for partial_path in resume_admin_extras() %}
+      {% include partial_path %}
+    {% endfor %}
   {% endif %}
 
   <fieldset>

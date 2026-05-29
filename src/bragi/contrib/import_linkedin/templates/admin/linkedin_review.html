@@ -1,0 +1,52 @@
+{% extends "admin/base.html" %}
+{% block title %}Review LinkedIn import &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Review LinkedIn import</h1>
+<p>Reviewing changes from <code>{{ export_filename }}</code>. Untick any
+proposed change you want to skip; the rest will be applied to this
+resume page.</p>
+
+{% if warnings %}
+<div class="banner banner--warning">
+  <p>Warnings:</p>
+  <ul>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<form method="post"
+      action="{{ url_for('linkedin_admin.apply_plan',
+                          site_slug=site_slug, page_id=page_id) }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="token" value="{{ token }}">
+
+  {% if not by_section %}
+  <p>No changes proposed. (Either the ZIP matches what's already
+     on this page, or it contains nothing the importer can use.)</p>
+  {% endif %}
+
+  {% for section, proposals in by_section.items() %}
+  <details open>
+    <summary><strong>{{ section.capitalize() }}</strong>
+      ({{ proposals | length }})</summary>
+    <ul style="list-style: none; padding-left: 0.5rem;">
+      {% for p in proposals %}
+      <li>
+        <label>
+          <input type="checkbox" name="selected" value="{{ p.id }}" checked>
+          <code>{{ p.kind }}</code> {{ p.summary }}
+        </label>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endfor %}
+
+  <div class="actions">
+    <button type="submit">Apply selected changes</button>
+    <button type="submit" formaction="{{ url_for('linkedin_admin.cancel',
+                                                  site_slug=site_slug,
+                                                  page_id=page_id) }}"
+            formnovalidate>Cancel and discard</button>
+  </div>
+</form>
+{% endblock %}

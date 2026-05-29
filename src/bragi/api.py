@@ -17,12 +17,16 @@ What's covered:
   `bragi/hookspecs.py`. Hook names, parameter names, and
   parameter types are stable. Internal call-ordering and
   bracketing helpers are not.
-- The spec dataclasses defined below: `FieldSpec`,
+- The spec types defined below: `FieldSpec`,
   `ContentTypeSpec`, `ImporterSpec`, `NavItem`,
   `OAuthProviderSpec`, `AuthMethodSpec`, `RedirectTarget`,
   `TransformRegistry`, `SearchBackendSpec`, `ThemeSpec`,
   `StorageBackendSpec`, `ImageProcessorSpec`,
-  `InternalLinkResolution`, `NavNode`, `Crumb`.
+  `InternalLinkResolution`, `NavNode`, `Crumb`,
+  `ResumeData`, `ResumeHeader`, `Position`, `Project`,
+  `Education`, `SkillGroup`, `Certification`, `Language`,
+  `ProfileLink`, `ChangeProposal`, `ImportPlan`,
+  `ImportResult`.
 - The `set_breadcrumbs(*crumbs: Crumb) -> None` helper,
   re-exported from `bragi.core.breadcrumbs` so admin views in
   third-party plugins can declare their breadcrumb chains
@@ -74,10 +78,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+from uuid import uuid4
 
 import jinja2
 import pluggy
+from pydantic import BaseModel, Field, HttpUrl, StringConstraints
 
 from bragi.core.breadcrumbs import Crumb, set_breadcrumbs
 
@@ -150,13 +156,39 @@ class ContentTypeSpec:
 # ============================================================
 
 
+@dataclass(frozen=True)
+class ChangeProposal:
+    """One concrete change proposed by an importer's plan phase.
+
+    Stable `id` (computed by the importer from
+    section+match_key+payload) lets the operator's selection
+    survive plan-file edits or admin-form posts. `apply` defaults
+    to True so a plan file can be applied unchanged if the
+    operator trusts the diff.
+    """
+
+    id: str
+    section: str  # e.g. 'experience', 'education', 'header', 'body', 'skills'
+    kind: str  # 'add' | 'update' | 'remove'
+    summary: str  # human-readable, shown on the review page / dry-run output
+    payload: dict[str, Any] = field(default_factory=dict)
+    apply: bool = True
+
+
 @dataclass
 class ImportPlan:
-    """Result of an importer's dry-run plan()."""
+    """Result of an importer's dry-run plan().
 
-    counts: dict[str, int]  # {'posts': 142, 'pages': 8, 'attachments': 36}
+    Importers that emit per-change review proposals populate
+    `proposals` (e.g. `bragi.contrib.import_linkedin`); importers
+    that run as single-shot (Hugo / Ghost / WordPress) leave it
+    empty.
+    """
+
+    counts: dict[str, int]  # {'posts': 142, 'pages': 8, ...}
     warnings: list[str]  # human-readable warnings
     redirects: int = 0  # redirect rows that would be inserted
+    proposals: list[ChangeProposal] = field(default_factory=list)
 
 
 @dataclass
@@ -176,7 +208,7 @@ class ImporterSpec:
     name: str  # 'hugo', 'ghost', 'wordpress'
     description: str
     detect: Callable[[Any], bool]  # True if path looks like this source
-    plan: Callable[[Any], ImportPlan]  # dry-run
+    plan: Callable[..., ImportPlan]  # dry-run; arity varies by importer
     apply: Callable[[Any, Any, dict[str, Any]], ImportResult]
     # apply signature: (src_path, site, options) -> ImportResult
 
@@ -459,12 +491,141 @@ class NavNode:
     children: list[NavNode]
 
 
+# ============================================================
+# Resume page schema (public; consumed by resume-source plugins)
+# ============================================================
+
+# YYYY-MM, month-precision dates. Matches the author's CV idiom
+# ("Apr 2024 - Present") and HTML5 `<input type="month">` output.
+# Day precision was rejected (authors don't know exact start days);
+# free-form strings were rejected (no semantic value for microdata).
+YearMonth = Annotated[
+    str,
+    StringConstraints(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+]
+
+
+def _new_id() -> str:
+    """12-char hex from a UUID4: short enough to read in the DOM,
+    long enough for collision-free per-row identity on a single
+    resume. Used as the stable per-row id on resume entries
+    (`Position.id`, `Project.id`, etc.) so cross-references like
+    `Project.linked_position_id` survive reordering."""
+    return uuid4().hex[:12]
+
+
+class ProfileLink(BaseModel):
+    """Single external profile link (e.g. LinkedIn, GitHub)."""
+
+    label: str
+    url: HttpUrl
+
+
+class ResumeHeader(BaseModel):
+    """Singleton header block. Name comes from `page.title`."""
+
+    tagline: str | None = None
+    location: str | None = None
+    profile_links: list[ProfileLink] = Field(default_factory=list)
+
+
+class Position(BaseModel):
+    """One work experience entry."""
+
+    id: str = Field(default_factory=_new_id)
+    company: str
+    role: str
+    location: str | None = None
+    start_date: YearMonth | None = None
+    end_date: YearMonth | None = None  # None = "Present"
+    description_markdown: str = ""
+    impacts: list[str] = Field(default_factory=list)
+
+
+class Project(BaseModel):
+    """One project entry. Can optionally link to a Position via
+    `linked_position_id` (the linked Position's `id`); the delivery
+    template renders the annotation 'at <company>' and an anchor
+    link when set."""
+
+    id: str = Field(default_factory=_new_id)
+    name: str
+    role: str | None = None
+    url: HttpUrl | None = None
+    linked_position_id: str | None = None
+    location: str | None = None
+    start_date: YearMonth | None = None
+    end_date: YearMonth | None = None
+    description_markdown: str = ""
+    impacts: list[str] = Field(default_factory=list)
+
+
+class Education(BaseModel):
+    """One education entry. All date / location fields optional."""
+
+    id: str = Field(default_factory=_new_id)
+    institution: str
+    degree: str
+    location: str | None = None
+    start_date: YearMonth | None = None
+    end_date: YearMonth | None = None
+    description_markdown: str = ""
+
+
+class SkillGroup(BaseModel):
+    """One grouped skills entry: a label plus an ordered list of items."""
+
+    id: str = Field(default_factory=_new_id)
+    group_label: str
+    items: list[str]
+
+
+class Certification(BaseModel):
+    """One certification (or course; courses fold in here in v1)."""
+
+    id: str = Field(default_factory=_new_id)
+    name: str
+    issuer: str | None = None
+    year: int | None = None
+    url: HttpUrl | None = None
+
+
+class Language(BaseModel):
+    """One language entry. `level` is free-form (`Native`, `C1`,
+    `Conversational`) so authors are not forced into a taxonomy."""
+
+    id: str = Field(default_factory=_new_id)
+    name: str
+    level: str
+
+
+class ResumeData(BaseModel):
+    """The full structured payload for a resume page.
+
+    Stored at `pages.resume_data`. The narrative Summary lives
+    separately in `pages.body_markdown` (the existing column,
+    repurposed for resume kind).
+    """
+
+    header: ResumeHeader = Field(default_factory=ResumeHeader)
+    highlights: list[str] = Field(default_factory=list)
+    experience: list[Position] = Field(default_factory=list)
+    projects: list[Project] = Field(default_factory=list)
+    education: list[Education] = Field(default_factory=list)
+    skills: list[SkillGroup] = Field(default_factory=list)
+    certifications: list[Certification] = Field(default_factory=list)
+    languages: list[Language] = Field(default_factory=list)
+
+
 __all__ = [
     "hookimpl",
     "AnalyticsEvent",
     "AuthMethodSpec",
+    "Certification",
+    "ChangeProposal",
     "ContentTypeSpec",
     "Crumb",
+    "Education",
     "ExternalUser",
     "FieldSpec",
     "ImageMetadata",
@@ -472,14 +633,22 @@ __all__ = [
     "ImportPlan",
     "ImportResult",
     "ImporterSpec",
+    "Language",
     "NavItem",
     "NavNode",
     "OAuthProviderSpec",
+    "Position",
+    "ProfileLink",
+    "Project",
     "RedirectTarget",
+    "ResumeData",
+    "ResumeHeader",
     "SearchBackendSpec",
     "SearchHit",
     "SearchResults",
     "set_breadcrumbs",
+    "SkillGroup",
     "StorageBackendSpec",
     "ThemeSpec",
+    "YearMonth",
 ]

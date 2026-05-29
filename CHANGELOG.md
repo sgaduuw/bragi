@@ -6,6 +6,54 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-05-29
+
+### Added
+- **`bragi.contrib.import_linkedin`: LinkedIn data-export
+  importer.** Two-phase plan-review-apply flow imports the
+  seven resume-relevant CSVs from the LinkedIn "Download your
+  data" export ZIP into a resume page's `resume_data`. CLI:
+  `bragi import linkedin <zip> --site <slug>` writes a JSON
+  plan; operator marks proposals `apply: false` to skip them;
+  `bragi import linkedin --apply plan.json` enacts the
+  filtered subset. Admin UI: upload widget on every resume
+  page edit form; review page lets the operator untick
+  proposed changes before applying. Re-imports preserve
+  narrative fields (`description_markdown`, `impacts`,
+  `body_markdown`, `header.profile_links`, `highlights`)
+  across all matched rows. Skills reconciliation preserves
+  operator-defined groupings.
+
+### Changed
+- **`bragi.api` public surface expanded.** The resume schema
+  (`ResumeData`, `ResumeHeader`, `Position`, `Project`,
+  `Education`, `SkillGroup`, `Certification`, `Language`,
+  `ProfileLink`, plus the `YearMonth` constraint) is now
+  exported from `bragi.api`; previously these lived in
+  `bragi.contrib.page.resume` which remains as a backward-
+  compat re-export shim. New `ChangeProposal` dataclass and
+  `ImportPlan.proposals` field support per-change review for
+  importers that emit them.
+
+### Fixed
+- **`import_linkedin` records `importer_version` in `source_meta`.**
+  Spec-committed provenance field that was missing in the
+  initial implementation. Operators can now triage "which
+  bragi version produced this import" from the stored metadata
+  when debugging a regression that only surfaces after a bragi
+  upgrade.
+- **`import_linkedin` concurrent-edit detection now warns.** The
+  recompute-then-filter pattern in `apply()` was correctly
+  skipping proposals whose target row had changed between plan
+  and apply, but the skip was silent (`counts["skipped"]` was
+  initialised but never incremented, `warnings` stayed empty).
+  Operators clicking "Apply" after a concurrent edit got a
+  success flash with no signal that anything was dropped.
+  `apply()` now emits one warning per skipped proposal id and
+  bumps the skipped counter; the admin route surfaces a summary
+  flash describing how many changes were skipped and how to
+  refresh.
+
 ## [1.19.1] - 2026-05-29
 
 ### Fixed
