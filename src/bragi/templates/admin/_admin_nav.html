@@ -116,7 +116,10 @@
       </div>
     </details>
   {% endif %}
-  {% if site_nav_groups %}
+  {# Site nav only renders when in a site context; the url_for calls
+     for site-scoped endpoints require site_slug in g, which the
+     url_defaults hook only sets when the request URL carries it. #}
+  {% if current_site and site_nav_groups %}
     {% for section_name, items in site_nav_groups %}
       {% if not loop.first %}<hr>{% endif %}
       {% for item in items %}{{ nav_link(item) }}{% endfor %}

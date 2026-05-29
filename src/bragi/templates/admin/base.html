@@ -1,73 +1,16 @@
+{# Admin chrome shell. The nav itself lives in `_admin_nav.html`;
+   page chrome (CSS link, flash slot, htmx script) lives here. #}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}bragi admin{% endblock %}</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #222; }
-    nav.topbar { background: #222; color: #eee; padding: 0.75rem 1.5rem; display: flex; align-items: center; }
-    nav.topbar .brand { font-weight: 700; font-size: 1.1em; letter-spacing: 0.5px; }
-    nav.topbar a { color: #eee; text-decoration: none; margin-left: 1.5rem; }
-    nav.topbar a:hover { text-decoration: underline; }
-    nav.topbar .spacer { flex: 1; }
-    nav.topbar .user { font-size: 0.9em; opacity: 0.85; margin-left: 1rem; }
-    nav.topbar form.logout { display: inline; margin-left: 1rem; }
-    nav.topbar form.logout button {
-      background: transparent; color: #eee; border: 0; padding: 0;
-      cursor: pointer; font: inherit; text-decoration: underline;
-    }
-    main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
-    h1 { margin-top: 0; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 0.5rem; border-bottom: 1px solid #ddd; text-align: left; }
-    th { background: #f5f5f5; font-size: 0.9em; }
-    form { display: flex; flex-direction: column; gap: 0.75rem; }
-    form fieldset { border: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
-    form label { font-weight: 600; font-size: 0.9em; }
-    form input[type="text"], form input[type="email"], form select, form textarea {
-      padding: 0.5rem; font-size: 1em; border: 1px solid #bbb; border-radius: 4px;
-    }
-    form textarea { min-height: 14rem; font-family: ui-monospace, Menlo, Consolas, monospace; }
-    form .actions { display: flex; gap: 0.5rem; align-items: center; }
-    form button, .btn {
-      padding: 0.5rem 1rem; cursor: pointer; font-size: 0.95em;
-      background: #222; color: #fff; border: 0; border-radius: 4px;
-      text-decoration: none; display: inline-block; line-height: 1.4;
-    }
-    form button.danger, .btn.danger { background: #b22; }
-    form button.secondary, .btn.secondary { background: #888; }
-    form button:hover, .btn:hover { background: #444; }
-    form button.danger:hover, .btn.danger:hover { background: #911; }
-    .flash { padding: 0.5rem 0.75rem; margin-bottom: 1rem; border-radius: 4px; font-size: 0.9em; }
-    .flash.error { background: #fde2e2; color: #8a1f1f; }
-    .flash.success { background: #e3f5e1; color: #1f5a2a; }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('admin_static.static', filename='admin-chrome.css') }}">
+  {% block head_extra %}{% endblock %}
 </head>
 <body>
-  <nav class="topbar">
-    <span class="brand">bragi</span>
-    {% for item in global_nav_items %}
-      <a href="{{ url_for(item.endpoint) }}">{{ item.label }}</a>
-    {% endfor %}
-    {% if current_site %}
-      <span style="opacity: 0.5; margin-left: 1.5rem;">|</span>
-      <span style="margin-left: 1rem; opacity: 0.85;">{{ current_site.title }}</span>
-      {% for item in site_nav_items %}
-        <a href="{{ url_for(item.endpoint) }}">{{ item.label }}</a>
-      {% endfor %}
-      <a href="{{ url_for('site_admin.list_sites') }}"
-         style="margin-left: 1rem; opacity: 0.7; font-size: 0.9em;">switch site</a>
-    {% endif %}
-    <span class="spacer"></span>
-    {% if current_user_email %}
-      <span class="user">{{ current_user_display_name or current_user_email }}</span>
-      <form method="post" action="{{ url_for('auth_local.logout') }}" class="logout">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <button type="submit">Log out</button>
-      </form>
-    {% endif %}
-  </nav>
+  {% include "admin/_admin_nav.html" %}
   <main>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for category, msg in messages %}
@@ -76,9 +19,10 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
-  {# htmx, CDN-hosted for v1. Self-hosted bundle (and a Subresource
-     Integrity hash) is a follow-up; the admin is gated behind auth
-     so the surface is the operator's own browser, not the public. #}
+  {# htmx, CDN-hosted for v1. Self-hosted bundle (and a
+     Subresource Integrity hash) is a follow-up; the admin is
+     gated behind auth so the surface is the operator's own
+     browser, not the public. #}
   <script src="https://unpkg.com/htmx.org@1.9.10" crossorigin="anonymous"></script>
 </body>
 </html>
