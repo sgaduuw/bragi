@@ -113,6 +113,17 @@ class Page(IdMixin, TimestampsMixin, Base):
     canonical_url: Mapped[str | None] = mapped_column(String(255), default=None)
     noindex: Mapped[bool] = mapped_column(default=False)
 
+    # Navigation. `show_in_nav` defaults to True so newly created
+    # pages appear in the auto-derived public nav unless the editor
+    # opts out. `menu_order` orders pages within their level (lower
+    # first, ties broken alphabetically by title at render time).
+    # Both columns are read by `bragi.contrib.nav.tree.build_nav_tree`;
+    # PageRevision deliberately does NOT snapshot these (nav state
+    # is configuration, not content, mirroring how noindex /
+    # meta_title are absent from PageRevision).
+    show_in_nav: Mapped[bool] = mapped_column(default=True)
+    menu_order: Mapped[int] = mapped_column(default=0)
+
     # Featured image. Used for OG / Twitter Card meta, the landing-
     # page card on parent listings, and the page-detail hero where
     # applicable. Nullable; falls back through the site's
