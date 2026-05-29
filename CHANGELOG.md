@@ -6,6 +6,38 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-05-29
+
+### Added
+- **Auto-navigation menu derived from the page tree.** Every
+  published page appears in the public-site nav by default,
+  ordered by a new per-page `menu_order` integer (lower first,
+  ties broken alphabetically by title). A per-page
+  `show_in_nav` checkbox lets editors opt out. Direct children
+  of a top-level page render as a native `<details>` submenu;
+  grandchildren are not surfaced. The page mapped to a site's
+  home (`site.home_page_id`) is auto-hidden from the nav, since
+  the brand link already covers `/`. New `bragi.contrib.nav`
+  plugin; all four shipped themes pick up the partial via
+  `{% include 'delivery/_site_nav.html' %}` and style the
+  `.site-nav__*` CSS hooks themselves. Migration adds the two
+  columns to `pages`.
+
+### Fixed
+- **Post-index disc bullets visible on every theme.** The
+  `post_index.html` (and `tag_list.html`) template renders posts
+  as `<ul class="post-list"><li>...</li></ul>`, but none of the
+  four shipped themes (`default`, `minimal`, `serif`, `terminal`)
+  suppressed the browser's default disc bullets or
+  bullet-aligning left padding. The bullets were structurally
+  visible on every theme; the Solarized-dark palette of
+  `terminal` just made them visually prominent in a way the
+  other themes' whitespace masked. Added `.post-list
+  { list-style: none; padding-left: 0; }` to each theme's
+  inline `<style>` block alongside the existing `.pinned`
+  post-index rules. Same rule covers `tag_list.html` which
+  reuses the `.post-list` class.
+
 ## [1.18.0] - 2026-05-28
 
 ### Changed

@@ -73,7 +73,30 @@ def _form_from_request() -> dict[str, str]:
         "parent_id": (request.form.get("parent_id") or "").strip(),
         "featured_image_id": (request.form.get("featured_image_id") or "").strip(),
         "resume_data": request.form.get("resume_data") or "",
+        # Nav controls. show_in_nav: HTML checkbox sends "1" when
+        # checked and is absent when unchecked, so we coerce on
+        # write only (a string "1" in the form dict means "checked").
+        "show_in_nav": "1" if request.form.get("show_in_nav") == "1" else "",
+        # menu_order: a numeric string; persisted via int().
+        # Defaults to "0" so a fresh edit form does not blank-submit.
+        "menu_order": (request.form.get("menu_order") or "0").strip(),
     }
+
+
+def _safe_int(raw: str | None, *, default: int = 0) -> int:
+    """Parse an integer from a form field, falling back on default.
+
+    Used for `menu_order`. A typo'd input ("0.5", "abc") falls
+    back to 0 instead of raising; the admin form's
+    `<input type="number">` already prevents most bad input, this
+    is the belt-and-suspenders guard.
+    """
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _validate_resume_data(raw: str) -> tuple[dict[str, object] | None, str | None]:
@@ -337,6 +360,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 featured_image=None,
                 featured_image_thumb_key=None,
                 resume_data_for_form=_resume_data_for_form(None, {}),
+                site=site,
             )
 
         form = _form_from_request()
@@ -353,6 +377,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
 
         new_kind = str(form["kind"])
@@ -368,6 +393,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
 
         parent_id = _normalized_parent_id(form["parent_id"])
@@ -384,6 +410,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
@@ -401,6 +428,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], site_id
@@ -417,6 +445,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
 
         # Validate resume_data when kind is resume. This runs after all
@@ -434,6 +463,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
 
         # Promotion to POST_INDEX swaps any existing POST_INDEX page
@@ -456,6 +486,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 resume_data_for_form=_resume_data_for_form(None, form),
                 swap_pending=True,
                 swap_target=existing_index,
+                site=site,
             )
 
         body_markdown = str(form["body_markdown"])
@@ -479,6 +510,8 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             kind=new_kind,
             featured_image_id=featured_image_id,
             resume_data=resume_data_dict,
+            show_in_nav=(form.get("show_in_nav") == "1"),
+            menu_order=_safe_int(form.get("menu_order")),
         )
         db.add(page_row)
         db.commit()
@@ -553,12 +586,19 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "parent_id": str(page.parent_id) if page.parent_id else "",
                 "featured_image_id": str(page.featured_image_id) if page.featured_image_id else "",
                 "resume_data": "",
+                # Pre-populate the nav fields from the persisted page. Without
+                # these keys the template renders the checkbox as checked and
+                # the order as 0 regardless of stored state, so any save (even
+                # an unrelated edit) would silently reset both fields.
+                "show_in_nav": "1" if page.show_in_nav else "",
+                "menu_order": str(page.menu_order),
             }
             return render_template(
                 "admin/page_edit.html",
                 page=page,
                 form=form,
                 parents=parents,
+                site=site,
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -576,6 +616,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 page=page,
                 form=form,
                 parents=parents,
+                site=site,
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -592,6 +633,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 page=page,
                 form=form,
                 parents=parents,
+                site=site,
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -611,6 +653,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 page=page,
                 form=form,
                 parents=parents,
+                site=site,
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -630,6 +673,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 page=page,
                 form=form,
                 parents=parents,
+                site=site,
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -648,6 +692,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 page=page,
                 form=form,
                 parents=parents,
+                site=site,
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -667,6 +712,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 page=page,
                 form=form,
                 parents=parents,
+                site=site,
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -691,6 +737,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 page=page,
                 form=form,
                 parents=parents,
+                site=site,
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -726,6 +773,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                     page=page,
                     form=form,
                     parents=parents,
+                    site=site,
                     featured_image=_load_featured_image(
                         db, form.get("featured_image_id"), page.site_id
                     ),
@@ -766,6 +814,8 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page.kind = new_kind
         page.featured_image_id = featured_image_id
         page.resume_data = resume_data_dict
+        page.show_in_nav = form.get("show_in_nav") == "1"
+        page.menu_order = _safe_int(form.get("menu_order"))
 
         db.commit()
         updated_id = page.id

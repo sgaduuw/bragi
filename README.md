@@ -6,20 +6,22 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.18.0 (2026-05-28).
+**Latest release:** 1.19.0 (2026-05-29).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
 a bubble menu for inline picks), structured CV / resume page kind
 (`PageKind.RESUME` with typed sections, Project↔Position linkage,
-schema.org microdata, print-friendly), GitHub OAuth + local
+schema.org microdata, print-friendly), auto-derived public
+navigation from the page tree (with per-page `show_in_nav` and
+`menu_order` controls), GitHub OAuth + local
 bootstrap, redirects as a first-class subsystem, importers for
 Hugo / Ghost / WordPress, attachments + media library with
 theme-aware multi-format multi-width renditions (`<picture>` with
 AVIF / WebP / fallback tiers and per-class `sizes`), pinned posts
 on the landing page, ActivityPub + webmentions, four in-tree
 themes with auto light/dark, sitemap / feed / JSON-LD,
-audit-driven hardening from v1.12 through v1.17.
+audit-driven hardening from v1.12 through v1.18.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 
@@ -78,6 +80,12 @@ and ARM homelabs run natively rather than through QEMU emulation.
   Drafts are excluded; out-of-range or empty buckets 404. Each
   level carries the standard `ETag` + `Last-Modified` validators
   so feed readers and crawlers get cheap 304s.
+- **Auto-navigation from the page tree.** Published pages
+  appear in the public-site header nav by default, ordered by
+  a per-page `menu_order`. Direct children become a native
+  `<details>` submenu. The per-page checkbox opts an
+  individual page out; the page mapped to the site's home is
+  auto-hidden so the brand link is not duplicated.
 - **Plugin-extensible from day one.** Built-ins (Post, Page,
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties
@@ -413,6 +421,7 @@ bragi/
 │       ├── indexnow/           # IndexNow push-crawl on publish/update/delete
 │       ├── internal_links/     # [text](post:42) save-time + delivery-time resolver + admin picker
 │       ├── markdown_extras/    # bundled markdown-it extensions (footnotes, ...)
+│       ├── nav/                # auto-derived public site navigation from the page tree
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301

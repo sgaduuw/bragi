@@ -1,6 +1,6 @@
 [project]
 name = "bragi"
-version = "1.18.0"
+version = "1.19.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
@@ -44,6 +44,7 @@ bragi-delivery = "bragi.apps.delivery:run"
 [project.entry-points."bragi.plugins"]
 post = "bragi.contrib.post.plugin"
 page = "bragi.contrib.page.plugin"
+nav = "bragi.contrib.nav.plugin"
 redirects = "bragi.contrib.redirects.plugin"
 auth_local = "bragi.contrib.auth_local.plugin"
 auth_github = "bragi.contrib.auth_github.plugin"
