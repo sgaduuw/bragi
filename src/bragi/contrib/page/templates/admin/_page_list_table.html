@@ -8,6 +8,8 @@
       <th>Slug</th>
       <th>Parent</th>
       <th>Status</th>
+      <th>Nav</th>
+      <th style="text-align: right;">Order</th>
       <th>Updated</th>
       <th></th>
     </tr>
@@ -19,6 +21,8 @@
       <td><code>{{ page.slug }}</code></td>
       <td>{{ page.parent_id or '(root)' }}</td>
       <td>{{ page.status }}</td>
+      <td>{{ '✓' if page.show_in_nav else '—' }}</td>
+      <td style="text-align: right;">{{ page.menu_order }}</td>
       <td>{{ page.updated_at.strftime('%Y-%m-%d') }}</td>
       <td>
         <form method="post"
