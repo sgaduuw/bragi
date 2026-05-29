@@ -586,6 +586,12 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "parent_id": str(page.parent_id) if page.parent_id else "",
                 "featured_image_id": str(page.featured_image_id) if page.featured_image_id else "",
                 "resume_data": "",
+                # Pre-populate the nav fields from the persisted page. Without
+                # these keys the template renders the checkbox as checked and
+                # the order as 0 regardless of stored state, so any save (even
+                # an unrelated edit) would silently reset both fields.
+                "show_in_nav": "1" if page.show_in_nav else "",
+                "menu_order": str(page.menu_order),
             }
             return render_template(
                 "admin/page_edit.html",
