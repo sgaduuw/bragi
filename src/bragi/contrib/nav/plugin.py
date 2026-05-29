@@ -47,7 +47,7 @@ def _site_nav_tree() -> list[NavNode]:
         )
     return build_nav_tree(
         list(rows),
-        home_page_id=getattr(site, "home_page_id", None),
+        home_page_id=site.home_page_id,
     )
 
 
