@@ -1,0 +1,16 @@
+{# Injected into page_edit.html by the resume_admin_extras
+   aggregator. Shows the file upload form on every Resume page
+   edit; submit posts to linkedin_admin.upload_and_plan. #}
+<fieldset>
+  <legend>Import from LinkedIn</legend>
+  <form method="post" enctype="multipart/form-data"
+        action="{{ url_for('linkedin_admin.upload_and_plan',
+                            site_slug=request.view_args['site_slug'],
+                            page_id=page.id) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <p>Upload your LinkedIn data export ZIP. You'll review proposed
+       changes before anything is written.</p>
+    <input type="file" name="file" accept=".zip" required>
+    <button type="submit">Upload and review</button>
+  </form>
+</fieldset>
