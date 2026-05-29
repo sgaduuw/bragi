@@ -10,17 +10,40 @@
    CSS hooks (`site-nav__*`) let each theme style without
    touching this markup.
 
-   The reset for the default `<details>` marker lives next to
-   the markup so themes don't have to remember it. #}
+   Ships a minimal structural CSS reset so the nav renders
+   sensibly out of the box on any theme: no default disc bullets,
+   `<nav>` sits inline next to the brand link, submenu absolutely
+   positioned under its parent. Themes refine colors / fonts /
+   spacing / hover via the `.site-nav__*` hooks; structure is
+   the partial's concern so every theme (built-in or third-party)
+   gets a working baseline without copy-pasting the same boilerplate. #}
 {% set tree = site_nav_tree() %}
 {% if tree %}
 <style>
+  /* Structural reset. Themes override via higher specificity on
+     the same hooks if they want a vertical sidebar, a different
+     gap, etc. */
+  .site-nav { display: inline-block; margin-left: 1rem; vertical-align: baseline; }
+  .site-nav__list,
+  .site-nav__submenu { list-style: none; padding: 0; margin: 0; }
+  .site-nav__list { display: inline-flex; gap: 1.25rem; flex-wrap: wrap; }
+  .site-nav__item { position: relative; }
+  .site-nav__submenu {
+    position: absolute; top: 100%; left: 0;
+    min-width: 8rem; padding: 0.25rem 0;
+  }
+  .site-nav__submenu li { padding: 0.15rem 0; }
   /* Hide the browser's default disclosure triangle so themes
      own the caret look entirely. Scoped to .site-nav__summary
      to avoid leaking into theme content. */
   .site-nav__summary::-webkit-details-marker { display: none; }
   .site-nav__summary::marker { content: ''; }
-  .site-nav__summary { cursor: pointer; }
+  .site-nav__summary {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.15rem;
+  }
 </style>
 <nav class="site-nav" aria-label="Site navigation">
   <ul class="site-nav__list">
