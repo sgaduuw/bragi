@@ -32,6 +32,7 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
+from sqlalchemy.orm import Session
 
 from bragi.contrib.import_linkedin.importer import apply as run_apply
 from bragi.contrib.import_linkedin.importer import detect
@@ -80,14 +81,7 @@ def _resolve_stash(token: str) -> Path | None:
     return p if p.is_dir() else None
 
 
-def _require_resume_page(db: object, site_id: int, page_id: int) -> Page:
-    # db is a SQLAlchemy Session; typed as object to avoid an import
-    # of the SQLAlchemy Session class at module level (it's only
-    # needed for the type annotation, and the ORM Session.get API is
-    # stable enough to call without the full import).
-    from sqlalchemy.orm import Session as _Session  # noqa: PLC0415 - local for type use only
-
-    assert isinstance(db, _Session)
+def _require_resume_page(db: Session, site_id: int, page_id: int) -> Page:
     page = db.get(Page, page_id)
     if page is None or page.site_id != site_id:
         abort(404)
