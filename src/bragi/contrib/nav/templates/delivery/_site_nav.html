@@ -1,0 +1,48 @@
+{# Auto-derived site navigation.
+
+   Reads `site_nav_tree()` from the Jinja env (registered by
+   `bragi.contrib.nav.plugin`). Renders nothing when the tree
+   is empty so sites with zero eligible pages don't grow empty
+   markup.
+
+   Parents with children use native <details> disclosure: the
+   <a> follows the link, the caret toggles the submenu. Stable
+   CSS hooks (`site-nav__*`) let each theme style without
+   touching this markup.
+
+   The reset for the default `<details>` marker lives next to
+   the markup so themes don't have to remember it. #}
+{% set tree = site_nav_tree() %}
+{% if tree %}
+<style>
+  /* Hide the browser's default disclosure triangle so themes
+     own the caret look entirely. Scoped to .site-nav__summary
+     to avoid leaking into theme content. */
+  .site-nav__summary::-webkit-details-marker { display: none; }
+  .site-nav__summary::marker { content: ''; }
+  .site-nav__summary { cursor: pointer; }
+</style>
+<nav class="site-nav" aria-label="Site navigation">
+  <ul class="site-nav__list">
+    {% for item in tree %}
+      <li class="site-nav__item">
+        {% if item.children %}
+          <details class="site-nav__details">
+            <summary class="site-nav__summary">
+              <a href="{{ url_for_page(item.page) }}">{{ item.page.title }}</a>
+              <span class="site-nav__caret" aria-hidden="true">▾</span>
+            </summary>
+            <ul class="site-nav__submenu">
+              {% for child in item.children %}
+                <li><a href="{{ url_for_page(child.page) }}">{{ child.page.title }}</a></li>
+              {% endfor %}
+            </ul>
+          </details>
+        {% else %}
+          <a href="{{ url_for_page(item.page) }}">{{ item.page.title }}</a>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</nav>
+{% endif %}
