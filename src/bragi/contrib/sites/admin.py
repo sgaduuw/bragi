@@ -677,9 +677,22 @@ def edit_site_current(site_slug: str) -> ResponseReturnValue:
     `g.current_site` so the admin chrome shows the correct site name.
     The form posts back to this same slug-keyed URL so browser history
     and htmx `hx-push-url` both stay coherent.
+
+    After the membership check we re-fetch the site through the active
+    session. `resolve_site_or_abort` calls `db.expunge()` on the row
+    it returns so the object can outlive the session (the chrome
+    context processor reads `g.current_site` after the session closes).
+    An expunged instance is detached: SQLAlchemy 2.0 accepts attribute
+    writes silently but the session never tracks them, so `db.commit()`
+    issues no UPDATE. Re-fetching binds the row to the session's
+    identity map so POST mutations are committed correctly.
     """
     with SessionLocal() as db:
-        site = resolve_site_or_abort(db, site_slug)
+        resolve_site_or_abort(db, site_slug)
+        # Re-fetch into the active session so POST mutations are tracked.
+        # The value returned by resolve_site_or_abort is expunged (detached);
+        # writing to it and calling db.commit() would silently drop the changes.
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one()
         form_action = url_for("site_admin.edit_site_current", site_slug=site_slug)
         return _render_edit_form(site, db, form_action)
 

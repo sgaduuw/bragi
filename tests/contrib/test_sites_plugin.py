@@ -4,7 +4,7 @@ Covers:
 - register_admin_nav returns the documented NavItem set
   (Sites global + Site settings site-scoped).
 - edit_site_current resolves the site from the URL slug and renders
-  the same form as edit_site(site_id) — the shared helper extraction
+  the same form as edit_site(site_id); the shared helper extraction
   must be behaviour-preserving.
 - edit_site_current 404s on an unknown slug (defence-in-depth).
 """
@@ -148,3 +148,54 @@ def test_edit_site_current_404_on_unknown_slug(admin_app: Flask) -> None:
     _login(client)
     resp = client.get("/admin/sites/nonexistent/current/edit")
     assert resp.status_code == 404
+
+
+def test_edit_site_current_post_persists_changes(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Regression test: the previous implementation passed an expunged site
+    into _render_edit_form, which silently dropped POST mutations (no UPDATE
+    issued by SQLAlchemy). Confirm the title round-trips through a POST.
+    """
+    import re
+
+    client = admin_app.test_client()
+    _login(client)
+
+    # GET first to capture the CSRF token from the rendered form.
+    get_resp = client.get("/admin/sites/blog/current/edit")
+    assert get_resp.status_code == 200
+    m = re.search(r'name="_csrf_token" value="([^"]+)"', get_resp.data.decode())
+    assert m is not None, "no CSRF token in form"
+    csrf = m.group(1)
+
+    with db_session_factory() as db:
+        before = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        before_title = before.title
+
+    # Provide every required field (slug, hostname, title) plus locale so
+    # the form validates. Optional fields default gracefully in
+    # _form_from_request (timezone defaults to "UTC", etc.).
+    post_data = {
+        "_csrf_token": csrf,
+        "slug": "blog",
+        "hostname": "admin.example.com",
+        "title": "Renamed by test",
+        "locale": "en",
+    }
+    post_resp = client.post(
+        "/admin/sites/blog/current/edit",
+        data=post_data,
+        follow_redirects=False,
+    )
+    # Successful save redirects; any 4xx means a validation failure.
+    assert post_resp.status_code in (302, 303), (
+        f"expected redirect on save, got {post_resp.status_code}; "
+        f"body snippet: {post_resp.data.decode()[:500]}"
+    )
+
+    with db_session_factory() as db:
+        after = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        assert (
+            after.title == "Renamed by test"
+        ), f"title was not persisted; before={before_title!r}, after={after.title!r}"
