@@ -247,3 +247,17 @@ def test_page_plugin_registers_content_type(delivery_app: Flask) -> None:
     assert spec.label == "Page"
     assert spec.sitemap_eligible is True
     assert spec.feed_eligible is False
+
+
+def test_resume_admin_extras_global_returns_list(patched_session_locals, db_session) -> None:
+    """`resume_admin_extras()` returns a list (empty when no
+    plugin registers a template). Smoke-checks the aggregator
+    wiring before any resume-source plugin is loaded."""
+    from bragi.apps.admin import create_admin_app
+
+    app = create_admin_app()
+    assert "resume_admin_extras" in app.jinja_env.globals
+    extras_fn = app.jinja_env.globals["resume_admin_extras"]
+    with app.test_request_context("/"):
+        result = extras_fn()
+    assert isinstance(result, list)
