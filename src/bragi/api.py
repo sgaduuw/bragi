@@ -208,7 +208,7 @@ class ImporterSpec:
     name: str  # 'hugo', 'ghost', 'wordpress'
     description: str
     detect: Callable[[Any], bool]  # True if path looks like this source
-    plan: Callable[[Any], ImportPlan]  # dry-run
+    plan: Callable[..., ImportPlan]  # dry-run; arity varies by importer
     apply: Callable[[Any, Any, dict[str, Any]], ImportResult]
     # apply signature: (src_path, site, options) -> ImportResult
 

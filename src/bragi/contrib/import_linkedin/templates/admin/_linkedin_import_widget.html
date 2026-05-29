@@ -1,6 +1,9 @@
 {# Injected into page_edit.html by the resume_admin_extras
    aggregator. Shows the file upload form on every Resume page
-   edit; submit posts to linkedin_admin.upload_and_plan. #}
+   edit; submit posts to linkedin_admin.upload_and_plan.
+   Guard: only rendered when the page is already saved (has an id),
+   so the url_for call is safe on the new-page form. #}
+{% if page.id %}
 <fieldset>
   <legend>Import from LinkedIn</legend>
   <form method="post" enctype="multipart/form-data"
@@ -14,3 +17,4 @@
     <button type="submit">Upload and review</button>
   </form>
 </fieldset>
+{% endif %}
