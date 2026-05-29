@@ -18,16 +18,21 @@ def register_admin_blueprint() -> Blueprint:
 
 @hookimpl
 def register_admin_nav() -> list[NavItem]:
-    """Add the 'My sessions' nav entry plus a superuser-gated
-    'All sessions' entry. NavItem.permission='superuser' is
-    enforced by the admin app's context_processor (see
-    `bragi.apps.admin._inject_admin_context`).
+    """Register the two sessions nav entries.
+
+    'My sessions' (section='account') renders inside the admin
+    chrome's user-menu dropdown via the per-section template
+    rule: any section='account' global item lands in the menu
+    next to API tokens and the Logout form. 'All sessions'
+    (section='system', superuser-gated) renders in the global
+    row alongside Audit log; gating is enforced by the context
+    processor in `bragi.apps.admin._inject_admin_context`.
     """
     return [
         NavItem(
             label="My sessions",
             endpoint="sessions_admin.list_self_sessions",
-            section="system",
+            section="account",
             weight=10,
         ),
         NavItem(
