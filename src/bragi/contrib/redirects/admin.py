@@ -29,6 +29,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.permissions import require_role, resolve_site_or_abort
@@ -154,6 +155,10 @@ def list_redirects(site_slug: str) -> ResponseReturnValue:
 
 @bp.route("/new", methods=["GET", "POST"])
 def new_redirect(site_slug: str) -> ResponseReturnValue:
+    set_breadcrumbs(
+        Crumb("Redirects", "redirect_admin.list_redirects"),
+        Crumb("New redirect", None),
+    )
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
@@ -224,6 +229,11 @@ def edit_redirect(site_slug: str, redirect_id: int) -> ResponseReturnValue:
         # Cross-site row probe -> 404 (not 403).
         if row is None or row.site_id != site.id:
             abort(404)
+
+        set_breadcrumbs(
+            Crumb("Redirects", "redirect_admin.list_redirects"),
+            Crumb(row.source_path, None),
+        )
 
         if request.method == "GET":
             form = {
