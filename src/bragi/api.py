@@ -25,7 +25,8 @@ What's covered:
   `InternalLinkResolution`, `NavNode`, `Crumb`,
   `ResumeData`, `ResumeHeader`, `Position`, `Project`,
   `Education`, `SkillGroup`, `Certification`, `Language`,
-  `ProfileLink`.
+  `ProfileLink`, `ChangeProposal`, `ImportPlan`,
+  `ImportResult`.
 - The `set_breadcrumbs(*crumbs: Crumb) -> None` helper,
   re-exported from `bragi.core.breadcrumbs` so admin views in
   third-party plugins can declare their breadcrumb chains
@@ -155,13 +156,39 @@ class ContentTypeSpec:
 # ============================================================
 
 
+@dataclass(frozen=True)
+class ChangeProposal:
+    """One concrete change proposed by an importer's plan phase.
+
+    Stable `id` (computed by the importer from
+    section+match_key+payload) lets the operator's selection
+    survive plan-file edits or admin-form posts. `apply` defaults
+    to True so a plan file can be applied unchanged if the
+    operator trusts the diff.
+    """
+
+    id: str
+    section: str  # e.g. 'experience', 'education', 'header', 'body', 'skills'
+    kind: str  # 'add' | 'update' | 'remove'
+    summary: str  # human-readable, shown on the review page / dry-run output
+    payload: dict[str, Any] = field(default_factory=dict)
+    apply: bool = True
+
+
 @dataclass
 class ImportPlan:
-    """Result of an importer's dry-run plan()."""
+    """Result of an importer's dry-run plan().
 
-    counts: dict[str, int]  # {'posts': 142, 'pages': 8, 'attachments': 36}
+    Importers that emit per-change review proposals populate
+    `proposals` (e.g. `bragi.contrib.import_linkedin`); importers
+    that run as single-shot (Hugo / Ghost / WordPress) leave it
+    empty.
+    """
+
+    counts: dict[str, int]  # {'posts': 142, 'pages': 8, ...}
     warnings: list[str]  # human-readable warnings
     redirects: int = 0  # redirect rows that would be inserted
+    proposals: list[ChangeProposal] = field(default_factory=list)
 
 
 @dataclass
@@ -595,6 +622,7 @@ __all__ = [
     "AnalyticsEvent",
     "AuthMethodSpec",
     "Certification",
+    "ChangeProposal",
     "ContentTypeSpec",
     "Crumb",
     "Education",
