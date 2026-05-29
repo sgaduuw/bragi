@@ -70,9 +70,13 @@ def _lang_key(lang: Language) -> str:
 def _structural_diff(existing: Any, incoming: Any, preserved: set[str]) -> dict[str, Any] | None:
     """Compare two pydantic model instances; return a dict of
     differing fields (excluding preserved-fields). None if no diff.
+
+    Uses `mode="json"` so the resulting diff dict is JSON-safe
+    (HttpUrl values become strings); update proposals embed this
+    dict in their payload, which the CLI plan file serialises.
     """
-    e = existing.model_dump()
-    i = incoming.model_dump()
+    e = existing.model_dump(mode="json")
+    i = incoming.model_dump(mode="json")
     diff: dict[str, Any] = {}
     for k, v in i.items():
         if k in preserved:

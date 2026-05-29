@@ -5,7 +5,10 @@ the proposal list. No Flask, no ZIP, no DB."""
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from bragi.api import (
+    Education,
     Position,
     ResumeData,
     SkillGroup,
@@ -22,10 +25,10 @@ def _position(
     start: str | None,
     description: str = "",
     impacts: list[str] | None = None,
-    position_id: str = "abc123",
+    position_id: str | None = None,
 ) -> Position:
     return Position(
-        id=position_id,
+        id=position_id or uuid4().hex[:12],
         company=company,
         role=role,
         start_date=start,
@@ -122,6 +125,43 @@ def test_experience_structural_diff_emits_update() -> None:
     assert exp[0].payload["new"]["location"] == "NYC"
     assert exp[0].payload["new"]["end_date"] == "2022-03"
     assert "description_markdown" not in exp[0].payload["new"]
+
+
+# ----------------------- education: update -------------------
+
+
+def test_education_structural_diff_emits_update() -> None:
+    existing = ResumeData(
+        education=[
+            Education(
+                id="edu_keep",
+                institution="TU Delft",
+                degree="BSc",
+                description_markdown="Thesis on X.",
+            ),
+        ]
+    )
+    incoming = ResumeData(
+        education=[
+            Education(
+                institution="TU Delft",
+                degree="BSc",
+                end_date="2014-07",
+            ),
+        ]
+    )
+    proposals = generate_proposals(
+        incoming,
+        existing,
+        {"full_name": None, "headline": None, "location": None, "summary": None},
+        page_is_new=False,
+    )
+    edu = [p for p in proposals if p.section == "education"]
+    assert len(edu) == 1
+    assert edu[0].kind == "update"
+    assert edu[0].payload["new"]["end_date"] == "2014-07"
+    # Preserved narrative not in payload
+    assert "description_markdown" not in edu[0].payload["new"]
 
 
 # ----------------------- skills proposals ---------------------
