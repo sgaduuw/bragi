@@ -160,6 +160,8 @@ def test_nav_does_not_leak_across_sites(
     body_a = client.get("/", headers={"Host": "a.example"}).get_data(as_text=True)
     body_b = client.get("/", headers={"Host": "b.example"}).get_data(as_text=True)
     assert "Leaky" not in body_a
+    assert "About" in body_a
+    assert "Projects" in body_a
     assert "About" not in body_b
     assert "Leaky" in body_b
 
