@@ -88,6 +88,13 @@
     .toc-wrapper ol.toc ol { padding-left: 1.25rem; }
     .toc-wrapper ol.toc a { text-decoration: none; }
     .toc-wrapper ol.toc a:hover { text-decoration: underline; }
+    /* Post-index landing page: list reset. The page wraps each
+       post in an <li> inside a <ul> with the post-list hook;
+       suppress the default disc bullets and bullet-aligning
+       padding so the title + meta + excerpt stack reads as
+       cards, not as a bulleted list. Same applies to the
+       tag-listing page (reuses the same hook). */
+    .post-list { list-style: none; padding-left: 0; }
     /* Pinned carousel on the post-index landing page. */
     .pinned { margin: 1.5rem 0; }
     .pinned-label {
