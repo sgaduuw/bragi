@@ -261,3 +261,65 @@ def test_apply_writes_source_id_and_source_meta(
     assert "linkedin_export_filename" in page.source_meta
     assert "imported_at" in page.source_meta
     assert "applied_change_ids" in page.source_meta
+
+
+# ----------------------- hookimpl wiring --------------------
+
+
+def test_register_importer_registered(patched_session_locals) -> None:
+    """`register_importer` hookimpl returns an ImporterSpec with
+    name='linkedin' that the plugin manager surfaces alongside
+    the other importers."""
+    from bragi.plugins import create_plugin_manager
+
+    pm = create_plugin_manager()
+    specs = pm.hook.register_importer()
+    names = [s.name for s in specs]
+    assert "linkedin" in names, names
+    linkedin = next(s for s in specs if s.name == "linkedin")
+    assert linkedin.description == "LinkedIn data export (ZIP)"
+    assert callable(linkedin.detect)
+    assert callable(linkedin.plan)
+    assert callable(linkedin.apply)
+
+
+def test_register_admin_blueprint_mounts(patched_session_locals) -> None:
+    """`register_admin_blueprint` hookimpl causes the
+    `linkedin_admin` Blueprint to be mounted on the admin app."""
+    from bragi.apps.admin import create_admin_app
+
+    app = create_admin_app()
+    assert "linkedin_admin" in app.blueprints
+    # The Blueprint declares the upload route; build the rule list.
+    rules = {r.endpoint for r in app.url_map.iter_rules()}
+    assert "linkedin_admin.upload_and_plan" in rules
+    assert "linkedin_admin.apply_plan" in rules
+    assert "linkedin_admin.cancel" in rules
+
+
+def test_register_resume_admin_template_returns_widget_path(
+    patched_session_locals,
+) -> None:
+    """`register_resume_admin_template` hookimpl returns the
+    upload widget template path, which the page plugin's
+    resume_admin_extras() aggregator surfaces to templates."""
+    from bragi.apps.admin import create_admin_app
+
+    app = create_admin_app()
+    extras_fn = app.jinja_env.globals["resume_admin_extras"]
+    with app.test_request_context("/"):
+        result = extras_fn()
+    assert "admin/_linkedin_import_widget.html" in result
+
+
+def test_register_cli_command_registered_under_import_group(
+    patched_session_locals,
+) -> None:
+    """`register_cli_command` hookimpl adds `linkedin` under the
+    shared `import` click subgroup on the admin app."""
+    from bragi.apps.admin import create_admin_app
+
+    app = create_admin_app()
+    import_group = app.cli.commands.get("import")
+    assert import_group is not None, "no `import` subgroup on app.cli"
+    assert "linkedin" in import_group.commands
