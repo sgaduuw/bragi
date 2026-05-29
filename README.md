@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.19.0 (2026-05-29).
+**Latest release:** 1.19.1 (2026-05-29).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
