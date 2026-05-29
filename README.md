@@ -16,7 +16,7 @@ schema.org microdata, print-friendly), auto-derived public
 navigation from the page tree (with per-page `show_in_nav` and
 `menu_order` controls), GitHub OAuth + local
 bootstrap, redirects as a first-class subsystem, importers for
-Hugo / Ghost / WordPress, attachments + media library with
+Hugo / Ghost / WordPress / LinkedIn, attachments + media library with
 theme-aware multi-format multi-width renditions (`<picture>` with
 AVIF / WebP / fallback tiers and per-class `sizes`), pinned posts
 on the landing page, ActivityPub + webmentions, four in-tree
@@ -178,7 +178,7 @@ and ARM homelabs run natively rather than through QEMU emulation.
 
 ## Importers
 
-All three ship in 1.x and are idempotent via `Post.source_id`,
+All four ship in 1.x and are idempotent via `Post.source_id`,
 so re-running the importer over an updated source updates rows
 in place rather than duplicating them.
 
@@ -213,6 +213,25 @@ in place rather than duplicating them.
   site's `post_index` page; pages resolve through the static-page
   chain). Idempotency keys on `(site_id, source_id)` via
   `wp:post_id`. CLI: `bragi import wordpress --site <slug> [--author <email>] [--dry-run] <wxr.xml>`.
+- **LinkedIn** (`bragi.contrib.import_linkedin`). Reads the
+  seven resume-relevant CSVs in LinkedIn's "Download your data"
+  export ZIP and populates a Resume page's `resume_data` via a
+  two-phase plan-review-apply flow. The plan emits one
+  `ChangeProposal` per concrete diff (add / update / remove);
+  the operator approves a subset by editing the JSON plan file
+  or by checking boxes on the admin review page. Re-imports
+  preserve operator-authored narrative fields
+  (`description_markdown`, `impacts`, `body_markdown`,
+  `header.profile_links`, `highlights`) across matched rows;
+  position-matching uses `(company, role, start_date)` so
+  renamed titles surface as a remove+add pair the operator can
+  spot and reject. CLI:
+  `bragi import linkedin <zip> --site <slug> [--page-slug cv] [--plan-out PATH]`
+  to plan;
+  `bragi import linkedin --apply <plan.json>`
+  to apply the filtered subset. Admin UI: upload widget on
+  every resume page edit form, with a review page rendered
+  after the upload.
 
 Notion, Substack, and Medium importers are deferred to
 follow-up packages; no v1.x commitment.
@@ -287,7 +306,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.18.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.19.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -417,6 +436,7 @@ bragi/
 │       ├── highlight/          # Pygments html transform
 │       ├── import_ghost/       # Ghost JSON importer
 │       ├── import_hugo/        # Hugo content-tree importer
+│       ├── import_linkedin/    # LinkedIn data export (ZIP) importer for resume pages
 │       ├── import_wordpress/   # WordPress WXR XML importer
 │       ├── indexnow/           # IndexNow push-crawl on publish/update/delete
 │       ├── internal_links/     # [text](post:42) save-time + delivery-time resolver + admin picker

@@ -6,6 +6,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`bragi.contrib.import_linkedin`: LinkedIn data-export
+  importer.** Two-phase plan-review-apply flow imports the
+  seven resume-relevant CSVs from the LinkedIn "Download your
+  data" export ZIP into a resume page's `resume_data`. CLI:
+  `bragi import linkedin <zip> --site <slug>` writes a JSON
+  plan; operator marks proposals `apply: false` to skip them;
+  `bragi import linkedin --apply plan.json` enacts the
+  filtered subset. Admin UI: upload widget on every resume
+  page edit form; review page lets the operator untick
+  proposed changes before applying. Re-imports preserve
+  narrative fields (`description_markdown`, `impacts`,
+  `body_markdown`, `header.profile_links`, `highlights`)
+  across all matched rows. Skills reconciliation preserves
+  operator-defined groupings.
+
+### Changed
+- **`bragi.api` public surface expanded.** The resume schema
+  (`ResumeData`, `ResumeHeader`, `Position`, `Project`,
+  `Education`, `SkillGroup`, `Certification`, `Language`,
+  `ProfileLink`, plus the `YearMonth` constraint) is now
+  exported from `bragi.api`; previously these lived in
+  `bragi.contrib.page.resume` which remains as a backward-
+  compat re-export shim. New `ChangeProposal` dataclass and
+  `ImportPlan.proposals` field support per-change review for
+  importers that emit them.
+
 ## [1.19.1] - 2026-05-29
 
 ### Fixed

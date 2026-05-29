@@ -84,6 +84,21 @@ def register_template_globals(env: jinja2.Environment) -> None:
     ...
 
 
+@hookspec
+def register_resume_admin_template() -> str | None:
+    """Return a template path to include inside the resume page
+    edit form, or None to contribute nothing.
+
+    Resume-source plugins (LinkedIn, future Notion-CV, etc.)
+    implement this to inject an upload widget or similar UI
+    fragment. The page plugin aggregates all non-None responses
+    and exposes the list via the `resume_admin_extras()` Jinja
+    global, which the page_edit template iterates over inside a
+    `{% if current_kind == 'resume' %}` guard.
+    """
+    ...
+
+
 # ============================================================
 # Content types
 # ============================================================

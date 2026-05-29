@@ -237,6 +237,18 @@ def register_template_globals(env: jinja2.Environment) -> None:
 
     env.globals["active_theme_slug"] = _active_theme_slug
 
+    def _resume_admin_extras() -> list[str]:
+        """Aggregate template paths contributed by resume-source
+        plugins. Walks the plugin manager calling the
+        `register_resume_admin_template` hook and returns every
+        non-None result. Empty when no resume-source plugin is
+        loaded (e.g. fresh install).
+        """
+        pm = current_app.extensions["plugin_manager"]
+        return [t for t in pm.hook.register_resume_admin_template() if t]
+
+    env.globals["resume_admin_extras"] = _resume_admin_extras
+
     def _linked_position(resume: Any, position_id: str | None) -> Any:
         """Look up a Position by id within a ResumeData's experience list.
 
