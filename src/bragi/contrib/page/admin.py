@@ -360,6 +360,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 featured_image=None,
                 featured_image_thumb_key=None,
                 resume_data_for_form=_resume_data_for_form(None, {}),
+                site=site,
             )
 
         form = _form_from_request()
@@ -376,6 +377,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
 
         new_kind = str(form["kind"])
@@ -391,6 +393,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
 
         parent_id = _normalized_parent_id(form["parent_id"])
@@ -407,6 +410,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
@@ -424,6 +428,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], site_id
@@ -440,6 +445,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
 
         # Validate resume_data when kind is resume. This runs after all
@@ -457,6 +463,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                     db, form.get("featured_image_id"), site_id
                 ),
                 resume_data_for_form=_resume_data_for_form(None, form),
+                site=site,
             )
 
         # Promotion to POST_INDEX swaps any existing POST_INDEX page
@@ -479,6 +486,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 resume_data_for_form=_resume_data_for_form(None, form),
                 swap_pending=True,
                 swap_target=existing_index,
+                site=site,
             )
 
         body_markdown = str(form["body_markdown"])
