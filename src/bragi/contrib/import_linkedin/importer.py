@@ -179,7 +179,6 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
         # value (narrative preserve).
         new_experience = _apply_list_section(
             existing.experience,
-            positions,
             approved,
             proposals,
             section="experience",
@@ -187,7 +186,6 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
         )
         new_education = _apply_list_section(
             existing.education,
-            education,
             approved,
             proposals,
             section="education",
@@ -195,7 +193,6 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
         )
         new_projects = _apply_list_section(
             existing.projects,
-            projects,
             approved,
             proposals,
             section="projects",
@@ -210,7 +207,6 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
         )
         new_certs = _apply_list_section(
             existing.certifications,
-            certs,
             approved,
             proposals,
             section="certifications",
@@ -218,7 +214,6 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
         )
         new_languages = _apply_list_section(
             existing.languages,
-            languages,
             approved,
             proposals,
             section="languages",
@@ -300,20 +295,18 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
 
 def _apply_list_section(
     existing_list: list[Any],
-    incoming_list: list[Any],
     approved: set[str],
     proposals: list[Any],
     *,
     section: str,
     preserve_fields: set[str],
 ) -> list[Any]:
-    """Build the new list for a section by walking approved proposals.
-
-    Existing matched rows keep `preserve_fields`. The algorithm is:
-    1. Start with the existing list.
-    2. Apply removes: drop matched rows.
-    3. Apply updates: merge non-preserved fields into matched rows.
-    4. Apply adds: append rows built from the incoming list.
+    """Build the new list for a section by walking approved
+    proposals. Existing matched rows keep `preserve_fields`
+    even if a proposal's `new` payload accidentally carries
+    values for them; this function is the local enforcement
+    point so future callers don't have to trust that the
+    upstream proposal generator already stripped them.
     """
     sec_props = [p for p in proposals if p.section == section]
     out = list(existing_list)
@@ -325,12 +318,15 @@ def _apply_list_section(
         mk = tuple(prop.payload.get("match_key") or [])
         out = [r for r in out if _list_match_key(r, section) != mk]
 
-    # Apply updates (in-place by match key; preserve preserve_fields).
+    # Apply updates (in-place by match key; never overwrite
+    # preserve_fields even if a buggy proposal includes them).
     for prop in sec_props:
         if prop.kind != "update" or prop.id not in approved:
             continue
         mk = tuple(prop.payload.get("match_key") or [])
-        new_fields = prop.payload.get("new") or {}
+        new_fields = {
+            k: v for k, v in (prop.payload.get("new") or {}).items() if k not in preserve_fields
+        }
         for i, row in enumerate(out):
             if _list_match_key(row, section) == mk:
                 out[i] = row.model_copy(update=new_fields)
