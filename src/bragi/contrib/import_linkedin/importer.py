@@ -174,6 +174,18 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
         )
 
         approved = {p.id for p in proposals if p.id in selected}
+        # Concurrent-edit detection. Any id in `selected` that no
+        # longer matches a recomputed proposal id means the target
+        # row changed between plan and apply (e.g. the operator
+        # edited the page in another tab). Skip the stale proposal
+        # and surface a warning so the admin flash can tell the
+        # operator that something was dropped.
+        dropped = selected - approved
+        counts["skipped"] = len(dropped)
+        for stale_id in sorted(dropped):
+            warnings.append(
+                f"Skipped proposal {stale_id} (target row changed since " f"plan was generated)."
+            )
 
         # Build the new ResumeData by walking the proposals; sections
         # not touched by any approved proposal stay at the existing

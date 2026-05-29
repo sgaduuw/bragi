@@ -172,8 +172,19 @@ def apply_plan(site_slug: str, page_id: int) -> ResponseReturnValue:
         parts.append(f"{counts['removed']} removed")
     summary = ", ".join(parts) or "no changes"
     flash(f"Imported from LinkedIn: {summary}.", "success")
-    for w in result.warnings:
-        flash(w, "warning")
+    # Concurrent-edit detection. apply() emits one warning per
+    # proposal whose target row changed between upload and apply.
+    # Roll those into one operator-readable summary flash so a stale
+    # selection of many proposals doesn't carpet the page with
+    # individual messages.
+    skipped = counts.get("skipped", 0)
+    if skipped:
+        flash(
+            f"{skipped} proposed change(s) were skipped because the page "
+            f"changed between upload and apply. Re-upload to refresh the "
+            f"review.",
+            "warning",
+        )
     return redirect(url_for("page_admin.edit_page", site_slug=site_slug, page_id=page_id))
 
 
