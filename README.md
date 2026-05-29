@@ -375,6 +375,7 @@ bragi/
 │   │   ├── middleware/         # site_resolver, csrf, sessions, redirects
 │   │   ├── render/             # markdown + transform registries
 │   │   ├── audit.py            # AuditLog writer
+│   │   ├── breadcrumbs.py      # Crumb dataclass + set_breadcrumbs helper (admin nav)
 │   │   ├── cache.py            # Cache-Control / ETag / 304 helpers
 │   │   ├── db.py               # SessionLocal
 │   │   ├── export.py           # corpus export writer (bragi export)
@@ -382,9 +383,10 @@ bragi/
 │   │   ├── healthz.py          # /healthz handler
 │   │   ├── htmx.py             # HX-Request dispatch helpers
 │   │   ├── http.py             # hardened outbound fetcher (safe_get / safe_post)
-│   │   ├── image_processor.py  # rendition pipeline
+│   │   ├── image_processor.py  # image transform helpers
 │   │   ├── permissions.py      # per-site role enforcement
 │   │   ├── registry.py         # in-process Registry (content types, importers, nav, ...)
+│   │   ├── renditions.py       # attachment rendition pipeline
 │   │   ├── safe_urls.py        # safe_external_url + IDN gate
 │   │   ├── security.py         # current_user / is_superuser
 │   │   ├── seo.py              # title/meta/canonical/og helpers

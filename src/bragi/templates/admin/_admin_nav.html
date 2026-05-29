@@ -1,0 +1,147 @@
+{# Admin chrome partial: two-row nav + conditional breadcrumbs + mobile drawer.
+
+   Inputs (from `bragi.apps.admin._inject_admin_context`):
+   - global_nav_groups: list[(section, list[NavItem])]  (row 1)
+   - site_nav_groups:   list[(section, list[NavItem])]  (row 2; suppressed
+                                                          if empty)
+   - account_menu_items: list[NavItem]                  (user menu contents)
+   - user_visible_sites: list[Site]                     (site switcher list)
+   - current_site: Site | None
+   - current_user_email / current_user_display_name
+   - breadcrumbs: tuple[Crumb, ...]                     (row 3; suppressed
+                                                          if empty)
+
+   The chrome ships zero JavaScript: dropdowns are <details>/<summary>;
+   the mobile drawer is a hidden checkbox + sibling-combinator CSS. #}
+
+{% macro nav_link(item) -%}
+  <a href="{{ url_for(item.endpoint) }}"
+     {%- if request.endpoint == item.endpoint %} class="is-current"{% endif %}>
+    {{ item.label }}
+  </a>
+{%- endmacro %}
+
+{% macro render_groups(groups) -%}
+  {%- for section_name, items in groups -%}
+    {%- if not loop.first %}<span class="section-divider">│</span>{% endif -%}
+    {%- for item in items -%}{{ nav_link(item) }}{%- endfor -%}
+  {%- endfor -%}
+{%- endmacro %}
+
+<input type="checkbox" id="nav-toggle" aria-hidden="true">
+
+{# Row 1: global #}
+<nav class="admin-nav-row-1" aria-label="Global navigation">
+  <span class="brand">bragi</span>
+
+  <span class="desktop-only" style="display:contents">
+    {{ render_groups(global_nav_groups) }}
+  </span>
+
+  <span class="nav-spacer"></span>
+
+  {# Site switcher (always present; dimmed when no site context) #}
+  <details class="desktop-only">
+    <summary>
+      {% if current_site %}
+        {{ current_site.title or current_site.hostname }} ▾
+      {% else %}
+        <span style="opacity:0.5">Choose a site ▾</span>
+      {% endif %}
+    </summary>
+    <div class="dropdown-panel">
+      {% for site in user_visible_sites if not (current_site and site.id == current_site.id) %}
+        <a href="{{ url_for('site_admin.site_dashboard', site_slug=site.slug) }}">
+          {{ site.title or site.hostname }}
+        </a>
+      {% else %}
+        <a style="opacity:0.6" href="{{ url_for('site_admin.list_sites') }}">
+          No other sites
+        </a>
+      {% endfor %}
+    </div>
+  </details>
+
+  <span class="context-dot desktop-only">·</span>
+
+  {# User menu: account items + logout. Always present when logged in. #}
+  {% if current_user_email %}
+    <details id="user-menu" class="desktop-only">
+      <summary>
+        <span class="user-avatar"
+              style="background:hsl({{ (session.get('user_id', 0) * 137.5) % 360 }}, 50%, 40%)">
+          {{ (current_user_display_name or current_user_email)[:1] | upper }}
+        </span>
+        {{ current_user_display_name or current_user_email }} ▾
+      </summary>
+      <div class="dropdown-panel">
+        {% for item in account_menu_items %}
+          <a href="{{ url_for(item.endpoint) }}">{{ item.label }}</a>
+        {% endfor %}
+        <hr>
+        <form method="post" action="{{ url_for('auth_local.logout') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Logout</button>
+        </form>
+      </div>
+    </details>
+  {% endif %}
+
+  {# Mobile hamburger #}
+  <label for="nav-toggle" class="nav-hamburger" aria-label="Toggle navigation">☰</label>
+</nav>
+
+{# Row 2: site (suppressed if no site context or no items) #}
+{% if current_site and site_nav_groups %}
+  <nav class="admin-nav-row-2" aria-label="Site navigation">
+    <span class="current-site-label">
+      {{ current_site.title or current_site.hostname }}
+    </span>
+    <span class="context-dot">·</span>
+    {{ render_groups(site_nav_groups) }}
+  </nav>
+{% endif %}
+
+{# Mobile drawer: same items as the two rows, stacked #}
+<div class="admin-nav-drawer" aria-label="Mobile navigation">
+  {% if current_site %}
+    <details>
+      <summary>{{ current_site.title or current_site.hostname }} ▾ (switch site)</summary>
+      <div>
+        {% for site in user_visible_sites if not (site.id == current_site.id) %}
+          <a href="{{ url_for('site_admin.site_dashboard', site_slug=site.slug) }}">
+            {{ site.title or site.hostname }}
+          </a>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
+  {# Site nav only renders when in a site context; the url_for calls
+     for site-scoped endpoints require site_slug in g, which the
+     url_defaults hook only sets when the request URL carries it. #}
+  {% if current_site and site_nav_groups %}
+    {% for section_name, items in site_nav_groups %}
+      {% if not loop.first %}<hr>{% endif %}
+      {% for item in items %}{{ nav_link(item) }}{% endfor %}
+    {% endfor %}
+    <hr>
+  {% endif %}
+  {% for section_name, items in global_nav_groups %}
+    {% if not loop.first %}<hr>{% endif %}
+    {% for item in items %}{{ nav_link(item) }}{% endfor %}
+  {% endfor %}
+</div>
+
+{# Row 3: breadcrumbs (suppressed when chain is empty) #}
+{% if breadcrumbs %}
+  <nav class="admin-breadcrumbs" aria-label="Breadcrumb">
+    {% for crumb in breadcrumbs %}
+      {% if not loop.first %}<span class="crumb-sep">›</span>{% endif %}
+      {% if crumb.endpoint %}
+        <a href="{{ url_for(crumb.endpoint, **(crumb.values or {})) }}">{{ crumb.label }}</a>
+      {% else %}
+        <span class="crumb-current">{{ crumb.label }}</span>
+      {% endif %}
+    {% endfor %}
+  </nav>
+{% endif %}

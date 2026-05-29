@@ -1,0 +1,211 @@
+/* bragi admin chrome v2: two-row nav, breadcrumbs, mobile drawer.
+ *
+ * Loaded by `src/bragi/templates/admin/base.html` from
+ * /admin/static/admin-chrome.css, served by the `admin_static`
+ * Blueprint registered in `bragi.apps.admin.create_admin_app`.
+ *
+ * Layout summary:
+ *   .admin-nav-row-1   global row (#1a1a1a)
+ *   .admin-nav-row-2   site row   (#2a2a2a)
+ *   .admin-breadcrumbs row 3, conditional (#f6f6f6)
+ *   .admin-nav-drawer  mobile dropdown panel
+ *   #nav-toggle        hidden checkbox driving the drawer
+ */
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  color: #222;
+}
+
+/* Nav rows (desktop) */
+.admin-nav-row-1,
+.admin-nav-row-2 {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.55rem 1rem;
+  color: #eee;
+  font-size: 0.85em;
+}
+.admin-nav-row-1 { background: #1a1a1a; }
+.admin-nav-row-2 { background: #2a2a2a; gap: 0.9rem; font-size: 0.82em; color: #ddd; }
+.admin-nav-row-1 .brand { font-weight: 700; letter-spacing: 0.4px; }
+.admin-nav-row-1 a,
+.admin-nav-row-2 a {
+  color: inherit;
+  text-decoration: none;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+}
+.admin-nav-row-1 a:hover,
+.admin-nav-row-2 a:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.admin-nav-row-1 a.is-current,
+.admin-nav-row-2 a.is-current {
+  box-shadow: inset 0 -2px 0 #06c;
+}
+.section-divider {
+  color: rgba(255, 255, 255, 0.2);
+  user-select: none;
+}
+.nav-spacer { flex: 1; }
+.current-site-label {
+  font-weight: 600;
+  opacity: 0.7;
+  font-size: 0.95em;
+}
+.context-dot { opacity: 0.4; }
+
+/* Dropdowns (site switcher + user menu, <details>) */
+.admin-nav-row-1 details,
+.admin-nav-row-2 details {
+  position: relative;
+}
+.admin-nav-row-1 details > summary,
+.admin-nav-row-2 details > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+}
+.admin-nav-row-1 details > summary::-webkit-details-marker,
+.admin-nav-row-2 details > summary::-webkit-details-marker { display: none; }
+.admin-nav-row-1 details[open] > summary,
+.admin-nav-row-2 details[open] > summary {
+  background: rgba(255, 255, 255, 0.12);
+}
+.admin-nav-row-1 details > .dropdown-panel,
+.admin-nav-row-2 details > .dropdown-panel {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  min-width: 14rem;
+  background: #fff;
+  color: #222;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 0.35rem 0;
+  z-index: 50;
+}
+.dropdown-panel a,
+.dropdown-panel button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85em;
+  color: #222;
+  text-decoration: none;
+  cursor: pointer;
+}
+.dropdown-panel a:hover,
+.dropdown-panel button:hover {
+  background: #f3f3f3;
+}
+.dropdown-panel hr {
+  border: 0;
+  border-top: 1px solid #eee;
+  margin: 0.3rem 0;
+}
+.user-avatar {
+  display: inline-block;
+  width: 1.5em;
+  height: 1.5em;
+  line-height: 1.5em;
+  text-align: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.75em;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+  font-weight: 600;
+}
+
+/* Breadcrumbs row */
+.admin-breadcrumbs {
+  background: #f6f6f6;
+  color: #444;
+  padding: 0.45rem 1rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.78em;
+  border-bottom: 1px solid #ddd;
+}
+.admin-breadcrumbs a {
+  color: #06c;
+  text-decoration: none;
+}
+.admin-breadcrumbs a:hover { text-decoration: underline; }
+.admin-breadcrumbs .crumb-current { opacity: 0.85; }
+.admin-breadcrumbs .crumb-sep { opacity: 0.45; }
+
+/* Mobile (drawer) */
+#nav-toggle { display: none; }
+.nav-hamburger {
+  display: none;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  font-size: 1.2em;
+  line-height: 1;
+}
+.nav-hamburger:hover { background: rgba(255, 255, 255, 0.08); }
+.admin-nav-drawer { display: none; }
+
+@media (max-width: 768px) {
+  .admin-nav-row-1 .desktop-only,
+  .admin-nav-row-2 { display: none; }
+  .nav-hamburger { display: inline-block; }
+  #nav-toggle:checked ~ .admin-nav-drawer { display: block; }
+  .admin-nav-drawer {
+    background: #2a2a2a;
+    color: #ddd;
+    padding: 0.4rem 1rem;
+  }
+  .admin-nav-drawer a {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    padding: 0.45rem 0.2rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .admin-nav-drawer hr {
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    margin: 0.3rem 0;
+  }
+  .admin-breadcrumbs { display: none; }
+}
+
+/* Page chrome (preserved from prior base.html) */
+main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+h1 { margin-top: 0; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 0.5rem; border-bottom: 1px solid #ddd; text-align: left; }
+th { background: #f5f5f5; font-size: 0.9em; }
+form { display: flex; flex-direction: column; gap: 0.75rem; }
+form fieldset { border: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+form label { font-weight: 600; font-size: 0.9em; }
+form input[type="text"], form input[type="email"], form select, form textarea {
+  padding: 0.5rem; font-size: 1em; border: 1px solid #bbb; border-radius: 4px;
+}
+form textarea { min-height: 14rem; font-family: ui-monospace, Menlo, Consolas, monospace; }
+form .actions { display: flex; gap: 0.5rem; align-items: center; }
+form button, .btn {
+  padding: 0.5rem 1rem; cursor: pointer; font-size: 0.95em;
+  background: #222; color: #fff; border: 0; border-radius: 4px;
+  text-decoration: none; display: inline-block; line-height: 1.4;
+}
+form button.danger, .btn.danger { background: #b22; }
+form button.secondary, .btn.secondary { background: #888; }
+form button:hover, .btn:hover { background: #444; }
+form button.danger:hover, .btn.danger:hover { background: #911; }
+.flash { padding: 0.5rem 0.75rem; margin-bottom: 1rem; border-radius: 4px; font-size: 0.9em; }
+.flash.error { background: #fde2e2; color: #8a1f1f; }
+.flash.success { background: #e3f5e1; color: #1f5a2a; }

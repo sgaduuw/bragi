@@ -22,7 +22,11 @@ What's covered:
   `OAuthProviderSpec`, `AuthMethodSpec`, `RedirectTarget`,
   `TransformRegistry`, `SearchBackendSpec`, `ThemeSpec`,
   `StorageBackendSpec`, `ImageProcessorSpec`,
-  `InternalLinkResolution`.
+  `InternalLinkResolution`, `Crumb`.
+- The `set_breadcrumbs(*crumbs: Crumb) -> None` helper,
+  re-exported from `bragi.core.breadcrumbs` so admin views in
+  third-party plugins can declare their breadcrumb chains
+  through the same public surface used by the in-tree views.
 - The `bragi.plugins` entry-point group as the plugin-discovery
   contract (see `bragi/plugins.py`).
 
@@ -74,6 +78,8 @@ from typing import Any
 
 import jinja2
 import pluggy
+
+from bragi.core.breadcrumbs import Crumb, set_breadcrumbs
 
 hookimpl = pluggy.HookimplMarker("bragi")
 
@@ -439,6 +445,7 @@ __all__ = [
     "AnalyticsEvent",
     "AuthMethodSpec",
     "ContentTypeSpec",
+    "Crumb",
     "ExternalUser",
     "FieldSpec",
     "ImageMetadata",
@@ -452,6 +459,7 @@ __all__ = [
     "SearchBackendSpec",
     "SearchHit",
     "SearchResults",
+    "set_breadcrumbs",
     "StorageBackendSpec",
     "ThemeSpec",
 ]

@@ -32,6 +32,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
@@ -321,6 +322,11 @@ def new_page(site_slug: str) -> ResponseReturnValue:
         require_role("author", site.id)
         site_id = site.id
 
+        set_breadcrumbs(
+            Crumb("Pages", "page_admin.list_pages"),
+            Crumb("New page", None),
+        )
+
         if request.method == "GET":
             parents = _all_pages_for_picker(db, site_id)
             return render_template(
@@ -527,6 +533,11 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
+
+        set_breadcrumbs(
+            Crumb("Pages", "page_admin.list_pages"),
+            Crumb(page.title or "Untitled", None),
+        )
 
         # Exclude self from the parent picker to avoid loops.
         all_parents = _all_pages_for_picker(db, page.site_id)
@@ -862,6 +873,13 @@ def list_page_revisions(site_slug: str, page_id: int) -> ResponseReturnValue:
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
+
+        set_breadcrumbs(
+            Crumb("Pages", "page_admin.list_pages"),
+            Crumb(page.title or "Untitled", "page_admin.edit_page", {"page_id": page.id}),
+            Crumb("Revisions", None),
+        )
+
         revisions = (
             db.execute(
                 select(PageRevision)
@@ -881,6 +899,14 @@ def show_page_revision(site_slug: str, page_id: int, rev_id: int) -> ResponseRet
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
+
+        set_breadcrumbs(
+            Crumb("Pages", "page_admin.list_pages"),
+            Crumb(page.title or "Untitled", "page_admin.edit_page", {"page_id": page.id}),
+            Crumb("Revisions", "page_admin.list_page_revisions", {"page_id": page.id}),
+            Crumb(f"Revision {rev_id}", None),
+        )
+
         revision = db.get(PageRevision, rev_id)
         if revision is None or revision.page_id != page.id:
             flash("Revision not found.", "error")

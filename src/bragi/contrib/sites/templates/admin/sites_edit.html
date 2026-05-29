@@ -6,7 +6,7 @@
 <h1>{{ 'Edit site' if is_edit else 'New site' }}</h1>
 
 <form method="post"
-      action="{{ url_for('site_admin.edit_site', site_id=site.id) if is_edit else url_for('site_admin.new_site') }}">
+      action="{{ form_action }}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 
   <fieldset>

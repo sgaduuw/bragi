@@ -318,7 +318,9 @@ def test_authenticated_index_has_logout_form(admin_app: Flask) -> None:
     resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 200
     assert b"/auth/logout" in resp.data
-    assert b"Log out" in resp.data
+    # The redesigned chrome labels this "Logout" (one word; old label
+    # was "Log out"). The logout form action URL is the durable assertion.
+    assert b"Logout" in resp.data
 
 
 # ============================================================
