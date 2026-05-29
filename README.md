@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.17.1 (2026-05-28).
+**Latest release:** 1.18.0 (2026-05-28).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -279,7 +279,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.17.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.18.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -375,6 +375,7 @@ bragi/
 │   │   ├── middleware/         # site_resolver, csrf, sessions, redirects
 │   │   ├── render/             # markdown + transform registries
 │   │   ├── audit.py            # AuditLog writer
+│   │   ├── breadcrumbs.py      # Crumb dataclass + set_breadcrumbs helper (admin nav)
 │   │   ├── cache.py            # Cache-Control / ETag / 304 helpers
 │   │   ├── db.py               # SessionLocal
 │   │   ├── export.py           # corpus export writer (bragi export)
@@ -382,9 +383,10 @@ bragi/
 │   │   ├── healthz.py          # /healthz handler
 │   │   ├── htmx.py             # HX-Request dispatch helpers
 │   │   ├── http.py             # hardened outbound fetcher (safe_get / safe_post)
-│   │   ├── image_processor.py  # rendition pipeline
+│   │   ├── image_processor.py  # image transform helpers
 │   │   ├── permissions.py      # per-site role enforcement
 │   │   ├── registry.py         # in-process Registry (content types, importers, nav, ...)
+│   │   ├── renditions.py       # attachment rendition pipeline
 │   │   ├── safe_urls.py        # safe_external_url + IDN gate
 │   │   ├── security.py         # current_user / is_superuser
 │   │   ├── seo.py              # title/meta/canonical/og helpers

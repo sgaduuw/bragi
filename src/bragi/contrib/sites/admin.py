@@ -21,7 +21,9 @@ from typing import Any
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -432,9 +434,16 @@ def site_dashboard(site_slug: str) -> ResponseReturnValue:
 
 @bp.route("/new", methods=["GET", "POST"])
 def new_site() -> ResponseReturnValue:
+    set_breadcrumbs(
+        Crumb("Sites", "site_admin.list_sites"),
+        Crumb("New site", None),
+    )
     themes = _available_themes()
+    new_site_action = url_for("site_admin.new_site")
     if request.method == "GET":
-        return render_template("admin/sites_edit.html", site=None, form={}, themes=themes)
+        return render_template(
+            "admin/sites_edit.html", site=None, form={}, themes=themes, form_action=new_site_action
+        )
 
     form = _form_from_request()
     errors = _validate(form)
@@ -444,7 +453,13 @@ def new_site() -> ResponseReturnValue:
     if errors:
         for err in errors:
             flash(err, "error")
-        return render_template("admin/sites_edit.html", site=None, form=form, themes=themes)
+        return render_template(
+            "admin/sites_edit.html",
+            site=None,
+            form=form,
+            themes=themes,
+            form_action=new_site_action,
+        )
 
     # Default the canonical URL when the form leaves it blank.
     canonical = form["canonical_url"] or f"https://{form['hostname']}"
@@ -458,7 +473,13 @@ def new_site() -> ResponseReturnValue:
             ).scalar_one_or_none()
             if existing is not None:
                 flash(f"A site with {column} {value!r} already exists.", "error")
-                return render_template("admin/sites_edit.html", site=None, form=form, themes=themes)
+                return render_template(
+                    "admin/sites_edit.html",
+                    site=None,
+                    form=form,
+                    themes=themes,
+                    form_action=new_site_action,
+                )
 
         # The creator becomes the owner. The before_request gate
         # already ensured a non-anonymous superuser is on the
@@ -505,75 +526,118 @@ def new_site() -> ResponseReturnValue:
 
 @bp.route("/<int:site_id>/edit", methods=["GET", "POST"])
 def edit_site(site_id: int) -> ResponseReturnValue:
-    themes = _available_themes()
     with SessionLocal() as db:
         site = db.get(Site, site_id)
         if site is None:
             flash("Site not found.", "error")
             return redirect(url_for("site_admin.list_sites"))
+        form_action = url_for("site_admin.edit_site", site_id=site_id)
+        return _render_edit_form(site, db, form_action)
 
-        if request.method == "GET":
-            form = {
-                "slug": site.slug,
-                "hostname": site.hostname,
-                "title": site.title,
-                "locale": site.locale,
-                "timezone": site.timezone,
-                "canonical_url": site.canonical_url,
-                "theme": site.theme or "",
-                "home_page_id": str(site.home_page_id) if site.home_page_id else "",
-                "default_featured_image_id": (
-                    str(site.default_featured_image_id) if site.default_featured_image_id else ""
-                ),
-            }
-            aliases = (
-                db.execute(
-                    select(SiteAlias)
-                    .where(SiteAlias.site_id == site.id)
-                    .order_by(SiteAlias.hostname)
-                )
-                .scalars()
-                .all()
-            )
-            home_pages = _published_pages_for(db, site.id)
-            return render_template(
-                "admin/sites_edit.html",
-                site=site,
-                form=form,
-                aliases=aliases,
-                themes=themes,
-                home_pages=home_pages,
-                default_featured_image=_load_default_featured_image(
-                    db, form["default_featured_image_id"], site.id
-                ),
-                default_featured_image_thumb_key=_default_featured_image_thumb_key(
-                    db, form["default_featured_image_id"], site.id
-                ),
-            )
 
-        form = _form_from_request()
-        errors = _validate(form)
-        theme_value, theme_err = _theme_or_error(form["theme"])
-        if theme_err is not None:
-            errors.append(theme_err)
-        home_page_value, home_page_err = _home_page_id_or_error(db, form["home_page_id"], site.id)
-        if home_page_err is not None:
-            errors.append(home_page_err)
-        default_featured_image_value, default_featured_image_err = (
-            _default_featured_image_id_or_error(db, form["default_featured_image_id"], site.id)
+def _render_edit_form(site: Site, db: Session, form_action: str) -> ResponseReturnValue:
+    """Render the site edit form for GET, or process and save for POST.
+
+    Extracted so `edit_site` (id-keyed, cross-site management path)
+    and `edit_site_current` (slug-keyed, in-site nav path) can share
+    the exact same logic without duplication. Each caller resolves the
+    site row and computes the right POST target URL; this helper owns
+    everything after that.
+
+    `form_action` is passed in rather than computed here because the
+    two callers want POSTs to land on their own URL. The form must
+    submit back to wherever the user came from so browser history and
+    htmx `hx-push-url` both stay coherent.
+    """
+    set_breadcrumbs(
+        Crumb("Sites", "site_admin.list_sites"),
+        Crumb(site.title or site.hostname, None),
+    )
+    themes = _available_themes()
+    if request.method == "GET":
+        form = {
+            "slug": site.slug,
+            "hostname": site.hostname,
+            "title": site.title,
+            "locale": site.locale,
+            "timezone": site.timezone,
+            "canonical_url": site.canonical_url,
+            "theme": site.theme or "",
+            "home_page_id": str(site.home_page_id) if site.home_page_id else "",
+            "default_featured_image_id": (
+                str(site.default_featured_image_id) if site.default_featured_image_id else ""
+            ),
+        }
+        aliases = (
+            db.execute(
+                select(SiteAlias).where(SiteAlias.site_id == site.id).order_by(SiteAlias.hostname)
+            )
+            .scalars()
+            .all()
         )
-        if default_featured_image_err is not None:
-            errors.append(default_featured_image_err)
         home_pages = _published_pages_for(db, site.id)
-        if errors:
-            for err in errors:
-                flash(err, "error")
+        return render_template(
+            "admin/sites_edit.html",
+            site=site,
+            form=form,
+            aliases=aliases,
+            themes=themes,
+            home_pages=home_pages,
+            form_action=form_action,
+            default_featured_image=_load_default_featured_image(
+                db, form["default_featured_image_id"], site.id
+            ),
+            default_featured_image_thumb_key=_default_featured_image_thumb_key(
+                db, form["default_featured_image_id"], site.id
+            ),
+        )
+
+    form = _form_from_request()
+    errors = _validate(form)
+    theme_value, theme_err = _theme_or_error(form["theme"])
+    if theme_err is not None:
+        errors.append(theme_err)
+    home_page_value, home_page_err = _home_page_id_or_error(db, form["home_page_id"], site.id)
+    if home_page_err is not None:
+        errors.append(home_page_err)
+    default_featured_image_value, default_featured_image_err = _default_featured_image_id_or_error(
+        db, form["default_featured_image_id"], site.id
+    )
+    if default_featured_image_err is not None:
+        errors.append(default_featured_image_err)
+    home_pages = _published_pages_for(db, site.id)
+    if errors:
+        for err in errors:
+            flash(err, "error")
+        return render_template(
+            "admin/sites_edit.html",
+            site=site,
+            form=form,
+            themes=themes,
+            home_pages=home_pages,
+            form_action=form_action,
+            default_featured_image=_load_default_featured_image(
+                db, form["default_featured_image_id"], site.id
+            ),
+            default_featured_image_thumb_key=_default_featured_image_thumb_key(
+                db, form["default_featured_image_id"], site.id
+            ),
+        )
+
+    # Uniqueness checks excluding the row being edited.
+    for column, value in (("slug", form["slug"]), ("hostname", form["hostname"])):
+        existing = db.execute(
+            select(Site).where(getattr(Site, column) == value, Site.id != site.id)
+        ).scalar_one_or_none()
+        if existing is not None:
+            flash(f"Another site already uses {column} {value!r}.", "error")
             return render_template(
                 "admin/sites_edit.html",
                 site=site,
                 form=form,
                 themes=themes,
                 home_pages=home_pages,
+                form_action=form_action,
                 default_featured_image=_load_default_featured_image(
                     db, form["default_featured_image_id"], site.id
                 ),
@@ -582,53 +646,64 @@ def edit_site(site_id: int) -> ResponseReturnValue:
                 ),
             )
 
-        # Uniqueness checks excluding the row being edited.
-        for column, value in (("slug", form["slug"]), ("hostname", form["hostname"])):
-            existing = db.execute(
-                select(Site).where(getattr(Site, column) == value, Site.id != site.id)
-            ).scalar_one_or_none()
-            if existing is not None:
-                flash(f"Another site already uses {column} {value!r}.", "error")
-                return render_template(
-                    "admin/sites_edit.html",
-                    site=site,
-                    form=form,
-                    themes=themes,
-                    home_pages=home_pages,
-                    default_featured_image=_load_default_featured_image(
-                        db, form["default_featured_image_id"], site.id
-                    ),
-                    default_featured_image_thumb_key=_default_featured_image_thumb_key(
-                        db, form["default_featured_image_id"], site.id
-                    ),
-                )
-
-        old_home_page_id = site.home_page_id
-        site.slug = form["slug"]
-        site.hostname = form["hostname"]
-        site.title = form["title"]
-        site.locale = form["locale"]
-        site.timezone = form["timezone"]
-        site.canonical_url = form["canonical_url"] or f"https://{form['hostname']}"
-        # Theme-switch hook: enqueue pending renditions for any
-        # (width, format) the new theme wants but doesn't have, and
-        # delete rendition rows + files for widths the new theme
-        # no longer wants. Original is untouched.
-        if theme_value != site.theme:
-            _sync_renditions_for_theme(
-                db, site_id=site.id, new_theme_slug=theme_value, app=current_app
-            )
-        site.theme = theme_value
-        site.home_page_id = home_page_value
-        site.default_featured_image_id = default_featured_image_value
-        # Sync the page-slug → / redirect inside the same
-        # transaction so a half-applied state (site updated but
-        # redirect stale) can never be observed.
-        _sync_home_page_redirect(db, site.id, old_home_page_id, home_page_value)
-        db.commit()
-        flash(f"Site '{form['slug']}' updated.", "success")
+    old_home_page_id = site.home_page_id
+    site.slug = form["slug"]
+    site.hostname = form["hostname"]
+    site.title = form["title"]
+    site.locale = form["locale"]
+    site.timezone = form["timezone"]
+    site.canonical_url = form["canonical_url"] or f"https://{form['hostname']}"
+    # Theme-switch hook: enqueue pending renditions for any
+    # (width, format) the new theme wants but doesn't have, and
+    # delete rendition rows + files for widths the new theme
+    # no longer wants. Original is untouched.
+    if theme_value != site.theme:
+        _sync_renditions_for_theme(db, site_id=site.id, new_theme_slug=theme_value, app=current_app)
+    site.theme = theme_value
+    site.home_page_id = home_page_value
+    site.default_featured_image_id = default_featured_image_value
+    # Sync the page-slug → / redirect inside the same
+    # transaction so a half-applied state (site updated but
+    # redirect stale) can never be observed.
+    _sync_home_page_redirect(db, site.id, old_home_page_id, home_page_value)
+    db.commit()
+    flash(f"Site '{form['slug']}' updated.", "success")
 
     return redirect(url_for("site_admin.list_sites"))
+
+
+@bp.route("/<site_slug>/current/edit", methods=["GET", "POST"])
+def edit_site_current(site_slug: str) -> ResponseReturnValue:
+    """Edit the current site via the in-site nav path (slug-keyed URL).
+
+    This endpoint exists alongside `edit_site(site_id)` because the
+    admin nav redesign adds a "Site settings" entry in each site's
+    per-site row. That entry must resolve without going through the
+    global Sites list, and it must carry a stable slug-keyed URL that
+    the `url_defaults` machinery can fill in from `g.site_slug`.
+
+    `resolve_site_or_abort` both authenticates membership and sets
+    `g.current_site` so the admin chrome shows the correct site name.
+    The form posts back to this same slug-keyed URL so browser history
+    and htmx `hx-push-url` both stay coherent.
+
+    After the membership check we re-fetch the site through the active
+    session. `resolve_site_or_abort` calls `db.expunge()` on the row
+    it returns so the object can outlive the session (the chrome
+    context processor reads `g.current_site` after the session closes).
+    An expunged instance is detached: SQLAlchemy 2.0 accepts attribute
+    writes silently but the session never tracks them, so `db.commit()`
+    issues no UPDATE. Re-fetching binds the row to the session's
+    identity map so POST mutations are committed correctly.
+    """
+    with SessionLocal() as db:
+        resolve_site_or_abort(db, site_slug)
+        # Re-fetch into the active session so POST mutations are tracked.
+        # The value returned by resolve_site_or_abort is expunged (detached);
+        # writing to it and calling db.commit() would silently drop the changes.
+        site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one()
+        form_action = url_for("site_admin.edit_site_current", site_slug=site_slug)
+        return _render_edit_form(site, db, form_action)
 
 
 @bp.route("/<int:site_id>/deactivate", methods=["POST"])

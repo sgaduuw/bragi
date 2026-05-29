@@ -37,6 +37,7 @@ from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from werkzeug.utils import secure_filename
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.contrib.attachments.cli import (
     _enqueue_missing_renditions,
     _purge_renditions,
@@ -599,6 +600,11 @@ def edit_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue:
         row = db.get(Attachment, attachment_id)
         if row is None or row.site_id != site.id:
             abort(404)
+
+        set_breadcrumbs(
+            Crumb("Attachments", "attachment_admin.list_attachments"),
+            Crumb(row.filename, None),
+        )
 
         if request.method == "GET":
             return render_template("admin/attachment_edit.html", row=row)

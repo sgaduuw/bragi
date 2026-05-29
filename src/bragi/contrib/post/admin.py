@@ -32,6 +32,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
@@ -261,6 +262,11 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         require_role("author", site.id)
         site_id = site.id
 
+        set_breadcrumbs(
+            Crumb("Posts", "post_admin.list_posts"),
+            Crumb("New post", None),
+        )
+
         if request.method == "GET":
             return render_template(
                 "admin/edit.html",
@@ -369,6 +375,11 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         is_own = bool(active and active.id == post.author_id)
         if not ((is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)):
             abort(403)
+
+        set_breadcrumbs(
+            Crumb("Posts", "post_admin.list_posts"),
+            Crumb(post.title or "Untitled", None),
+        )
 
         if request.method == "GET":
             form = {
@@ -628,6 +639,11 @@ def list_revisions(site_slug: str, post_id: int) -> ResponseReturnValue:
             abort(404)
         if not _can_view_post(post):
             abort(403)
+        set_breadcrumbs(
+            Crumb("Posts", "post_admin.list_posts"),
+            Crumb(post.title or "Untitled", "post_admin.edit_post", {"post_id": post.id}),
+            Crumb("Revisions", None),
+        )
         revisions = (
             db.execute(
                 select(PostRevision)
@@ -653,6 +669,12 @@ def show_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseReturnVa
         if revision is None or revision.post_id != post.id:
             flash("Revision not found.", "error")
             return redirect(url_for("post_admin.list_revisions", post_id=post.id))
+        set_breadcrumbs(
+            Crumb("Posts", "post_admin.list_posts"),
+            Crumb(post.title or "Untitled", "post_admin.edit_post", {"post_id": post.id}),
+            Crumb("Revisions", "post_admin.list_revisions", {"post_id": post.id}),
+            Crumb(f"Revision {rev_id}", None),
+        )
         return render_template(
             "admin/post_revision_detail.html",
             post=post,

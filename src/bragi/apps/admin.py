@@ -9,17 +9,21 @@ lives here, so management commands are invoked as
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 import jinja2
-from flask import Flask, g, render_template, session
+from flask import Blueprint, Flask, g, render_template, session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from bragi import __version__
+from bragi.api import NavItem
 from bragi.core.cache import CACHE_POLICIES
 from bragi.core.healthz import register_healthz
 from bragi.core.middleware.csrf import register_csrf
 from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
+from bragi.core.permissions import accessible_sites_for
 from bragi.core.registry import Registry
 from bragi.core.render.markdown import install_app_renderer
 from bragi.core.render.transforms import TransformRegistry
@@ -30,6 +34,45 @@ from bragi.settings import assert_secret_key_safe, settings
 # Pulled out so the after_request hook stays a one-liner. The
 # admin response should never be cacheable, even on 3xx/4xx.
 CACHE_POLICIES_ADMIN = CACHE_POLICIES["admin"]
+
+# Section ordering rule: `content` always first; `system` always
+# last; everything else alphabetical between. Same rule applies to
+# both the global row and the site row. The pins exist so the
+# muscle-memory ordering of "the day's work first; admin/audit
+# last" survives an arbitrary contrib adding a new section name.
+_SECTION_RANK: dict[str, int] = {"content": 0, "system": 2}
+
+# Admin-internal Blueprint serving `src/bragi/static/admin/` at
+# `/admin/static/`. Lives in core (not a plugin) because the chrome
+# CSS is part of the admin app shell, not a plugin contribution.
+# Module-level so the instance is shared across factory invocations
+# (repeated test calls to `create_admin_app()` in the same process
+# should not re-create the Blueprint object).
+_ADMIN_STATIC_BP = Blueprint(
+    "admin_static",
+    __name__,
+    static_folder=str(Path(__file__).parent.parent / "static" / "admin"),
+    static_url_path="/admin/static",
+)
+
+
+def _group_nav_by_section(
+    items: list[NavItem],
+) -> list[tuple[str, list[NavItem]]]:
+    """Group NavItems by section, preserving per-section weight order.
+
+    Returns a list of (section_name, items_in_weight_order) tuples
+    in the spec-defined section order (see `_SECTION_RANK`). Within
+    a section, items keep the order they arrived in; callers
+    pre-sort by weight so input order IS weight order.
+    """
+    grouped: dict[str, list[NavItem]] = {}
+    for item in items:
+        grouped.setdefault(item.section, []).append(item)
+    return sorted(
+        grouped.items(),
+        key=lambda kv: (_SECTION_RANK.get(kv[0], 1), kv[0]),
+    )
 
 
 def create_admin_app() -> Flask:
@@ -217,6 +260,13 @@ def create_admin_app() -> Flask:
     for spec in pm.hook.register_theme():
         registry.add_theme(spec)
 
+    # Mount the admin-static Blueprint so the chrome CSS is served
+    # at /admin/static/ regardless of which plugins are active.
+    # Registered before the plugin Blueprint loop; it does not
+    # participate in CSRF (static files have no form submission),
+    # and it is not a plugin concern.
+    app.register_blueprint(_ADMIN_STATIC_BP)
+
     # Mount plugin-contributed Blueprints on the admin app. A
     # plugin may return either a single Blueprint or a list (some
     # plugins, e.g. api_tokens, contribute multiple URL spaces
@@ -282,6 +332,18 @@ def create_admin_app() -> Flask:
         # site_slug, which the app's url_defaults hook fills from g.
         global_nav_items = [i for i in sorted_nav if getattr(i, "scope", "global") == "global"]
         site_nav_items = [i for i in sorted_nav if getattr(i, "scope", "global") == "site"]
+        # Account peel-off: `section="account"` globals render inside
+        # the user-menu dropdown (per the chrome template rule); the
+        # remaining globals render in the main row. The dropdown
+        # rule keeps the chrome free of per-endpoint hardcoding.
+        global_row_items = [i for i in global_nav_items if i.section != "account"]
+        account_menu_items = [i for i in global_nav_items if i.section == "account"]
+        global_nav_groups = _group_nav_by_section(global_row_items)
+        site_nav_groups = _group_nav_by_section(site_nav_items)
+        # Sites this user can access, for the in-row site switcher.
+        # The same helper backs the global Sites list, so the two
+        # surfaces never disagree about reachability.
+        user_visible_sites = accessible_sites_for(current_user())
         return {
             # Back-compat alias: a couple of older templates still
             # iterate `nav_items` as the full ordered list. New
@@ -289,6 +351,11 @@ def create_admin_app() -> Flask:
             "nav_items": sorted_nav,
             "global_nav_items": global_nav_items,
             "site_nav_items": site_nav_items,
+            "global_nav_groups": global_nav_groups,
+            "site_nav_groups": site_nav_groups,
+            "account_menu_items": account_menu_items,
+            "user_visible_sites": user_visible_sites,
+            "breadcrumbs": getattr(g, "breadcrumbs", ()),
             "current_site": getattr(g, "current_site", None),
             "current_site_slug": getattr(g, "site_slug", None),
             "current_user_email": session.get("user_email"),
