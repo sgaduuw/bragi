@@ -47,6 +47,18 @@ def _stable_id(section: str, match_key: tuple[Any, ...], payload: dict[str, Any]
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
 
+def _add_payload_for_hash(new_dict: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of a model-dump dict with auto-generated `id`
+    excluded so the stable proposal id is identical across plan() and
+    apply() runs that re-parse the ZIP (each parse creates fresh uuid
+    ids on the pydantic objects; the id must not influence the hash).
+
+    The full dict (including `id`) is still stored in the proposal's
+    `payload` so apply() can use it to reconstruct the row.
+    """
+    return {k: v for k, v in new_dict.items() if k != "id"}
+
+
 def _exp_key(p: Position) -> tuple[str, str, str | None]:
     return (p.company.lower(), p.role.lower(), p.start_date)
 
@@ -117,10 +129,11 @@ def _experience_proposals(
                     )
                 )
         else:
-            payload = {"new": new.model_dump(mode="json")}
+            new_dump = new.model_dump(mode="json")
+            payload = {"new": new_dump}
             out.append(
                 ChangeProposal(
-                    id=_stable_id("experience", key, payload),
+                    id=_stable_id("experience", key, {"new": _add_payload_for_hash(new_dump)}),
                     section="experience",
                     kind="add",
                     summary=(
@@ -180,10 +193,11 @@ def _education_proposals(
                     )
                 )
         else:
-            payload = {"new": new.model_dump(mode="json")}
+            new_dump = new.model_dump(mode="json")
+            payload = {"new": new_dump}
             out.append(
                 ChangeProposal(
-                    id=_stable_id("education", key, payload),
+                    id=_stable_id("education", key, {"new": _add_payload_for_hash(new_dump)}),
                     section="education",
                     kind="add",
                     summary=f"Add Education: {new.degree} at {new.institution}",
@@ -228,10 +242,11 @@ def _projects_proposals(incoming: list[Project], existing: list[Project]) -> lis
                     )
                 )
         else:
-            payload = {"new": new.model_dump(mode="json")}
+            new_dump = new.model_dump(mode="json")
+            payload = {"new": new_dump}
             out.append(
                 ChangeProposal(
-                    id=_stable_id("projects", key, payload),
+                    id=_stable_id("projects", key, {"new": _add_payload_for_hash(new_dump)}),
                     section="projects",
                     kind="add",
                     summary=f"Add Project: {new.name}",
@@ -279,10 +294,11 @@ def _certifications_proposals(
                     )
                 )
         else:
-            payload = {"new": new.model_dump(mode="json")}
+            new_dump = new.model_dump(mode="json")
+            payload = {"new": new_dump}
             out.append(
                 ChangeProposal(
-                    id=_stable_id("certifications", key, payload),
+                    id=_stable_id("certifications", key, {"new": _add_payload_for_hash(new_dump)}),
                     section="certifications",
                     kind="add",
                     summary=f"Add Certification: {new.name}",
@@ -329,10 +345,11 @@ def _languages_proposals(
                     )
                 )
         else:
-            payload = {"new": new.model_dump(mode="json")}
+            new_dump = new.model_dump(mode="json")
+            payload = {"new": new_dump}
             out.append(
                 ChangeProposal(
-                    id=_stable_id("languages", key, payload),
+                    id=_stable_id("languages", key, {"new": _add_payload_for_hash(new_dump)}),
                     section="languages",
                     kind="add",
                     summary=f"Add Language: {new.name} ({new.level})",
