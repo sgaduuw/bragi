@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-05-28
+
 ### Changed
 - **Admin chrome split into two rows.** The single horizontal nav
   is replaced by a global row (cross-site management) plus a site
