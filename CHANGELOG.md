@@ -6,6 +6,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.19.1] - 2026-05-29
+
+### Fixed
+- **Auto-nav rendered with default disc bullets stacked below the
+  brand link.** The 1.19.0 `_site_nav.html` partial shipped only
+  a CSS reset for the `<details>` disclosure marker; everything
+  else (bullet removal, inline layout next to the brand, submenu
+  positioning) was left "for themes to own." None of the four
+  shipped themes added that styling, so the default render of
+  the nav was a vertical bulleted list pushed onto its own line
+  below the brand. Extended the partial's inline `<style>` block
+  with a minimal structural reset (`display: inline-block` on
+  the `<nav>`, `inline-flex` on the top-level `<ul>`, `list-style:
+  none` on both the top-level and submenu `<ul>`s, absolute
+  positioning on the submenu). Themes still override colors,
+  fonts, spacing, and hover via the `.site-nav__*` hooks; only
+  the structural baseline is now shipped by the partial so
+  third-party themes don't have to re-derive it.
+
 ## [1.19.0] - 2026-05-29
 
 ### Added
