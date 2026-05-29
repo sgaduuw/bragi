@@ -31,9 +31,7 @@ from bragi.core.models.page import Page, PageStatus
 def build_nav_tree(pages: list[Page], *, home_page_id: int | None) -> list[NavNode]:
     """Build the auto-nav tree from an in-memory list of pages."""
     visible: dict[int, Page] = {
-        p.id: p
-        for p in pages
-        if p.status == PageStatus.PUBLISHED and p.show_in_nav
+        p.id: p for p in pages if p.status == PageStatus.PUBLISHED and p.show_in_nav
     }
 
     def sort_key(p: Page) -> tuple[int, str]:
@@ -55,10 +53,6 @@ def build_nav_tree(pages: list[Page], *, home_page_id: int | None) -> list[NavNo
             (p for p in visible.values() if p.parent_id == root.id),
             key=sort_key,
         )
-        children = [
-            NavNode(page=c, children=[])
-            for c in children_pages
-            if c.id != home_page_id
-        ]
+        children = [NavNode(page=c, children=[]) for c in children_pages if c.id != home_page_id]
         nodes.append(NavNode(page=root, children=children))
     return nodes
