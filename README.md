@@ -6,20 +6,22 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.18.0 (2026-05-28).
+**Latest release:** 1.19.0 (2026-05-29).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
 a bubble menu for inline picks), structured CV / resume page kind
 (`PageKind.RESUME` with typed sections, Project↔Position linkage,
-schema.org microdata, print-friendly), GitHub OAuth + local
+schema.org microdata, print-friendly), auto-derived public
+navigation from the page tree (with per-page `show_in_nav` and
+`menu_order` controls), GitHub OAuth + local
 bootstrap, redirects as a first-class subsystem, importers for
 Hugo / Ghost / WordPress, attachments + media library with
 theme-aware multi-format multi-width renditions (`<picture>` with
 AVIF / WebP / fallback tiers and per-class `sizes`), pinned posts
 on the landing page, ActivityPub + webmentions, four in-tree
 themes with auto light/dark, sitemap / feed / JSON-LD,
-audit-driven hardening from v1.12 through v1.17.
+audit-driven hardening from v1.12 through v1.18.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 

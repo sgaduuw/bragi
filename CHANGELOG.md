@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-05-29
+
 ### Added
 - **Auto-navigation menu derived from the page tree.** Every
   published page appears in the public-site nav by default,
