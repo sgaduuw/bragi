@@ -17,7 +17,7 @@ What's covered:
   `bragi/hookspecs.py`. Hook names, parameter names, and
   parameter types are stable. Internal call-ordering and
   bracketing helpers are not.
-- The spec dataclasses defined below: `FieldSpec`,
+- The spec types defined below: `FieldSpec`,
   `ContentTypeSpec`, `ImporterSpec`, `NavItem`,
   `OAuthProviderSpec`, `AuthMethodSpec`, `RedirectTarget`,
   `TransformRegistry`, `SearchBackendSpec`, `ThemeSpec`,
@@ -469,7 +469,9 @@ class NavNode:
 # ============================================================
 
 # YYYY-MM, month-precision dates. Matches the author's CV idiom
-# and HTML5 `<input type="month">` output.
+# ("Apr 2024 - Present") and HTML5 `<input type="month">` output.
+# Day precision was rejected (authors don't know exact start days);
+# free-form strings were rejected (no semantic value for microdata).
 YearMonth = Annotated[
     str,
     StringConstraints(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
@@ -477,10 +479,11 @@ YearMonth = Annotated[
 
 
 def _new_id() -> str:
-    """12-char hex from a UUID4. Used as the stable per-row id on
-    resume entries (Position.id, Project.id, etc.) so cross-
-    references like `Project.linked_position_id` survive
-    reordering."""
+    """12-char hex from a UUID4: short enough to read in the DOM,
+    long enough for collision-free per-row identity on a single
+    resume. Used as the stable per-row id on resume entries
+    (`Position.id`, `Project.id`, etc.) so cross-references like
+    `Project.linked_position_id` survive reordering."""
     return uuid4().hex[:12]
 
 
