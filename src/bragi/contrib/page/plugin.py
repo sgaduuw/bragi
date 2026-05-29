@@ -242,7 +242,8 @@ def register_template_globals(env: jinja2.Environment) -> None:
         plugins. Walks the plugin manager calling the
         `register_resume_admin_template` hook and returns every
         non-None result. Empty when no resume-source plugin is
-        loaded (e.g. fresh install)."""
+        loaded (e.g. fresh install).
+        """
         pm = current_app.extensions["plugin_manager"]
         return [t for t in pm.hook.register_resume_admin_template() if t]
 

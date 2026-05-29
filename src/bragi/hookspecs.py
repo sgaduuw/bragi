@@ -94,7 +94,7 @@ def register_resume_admin_template() -> str | None:
     fragment. The page plugin aggregates all non-None responses
     and exposes the list via the `resume_admin_extras()` Jinja
     global, which the page_edit template iterates over inside a
-    `{% if page.kind == 'resume' %}` guard.
+    `{% if current_kind == 'resume' %}` guard.
     """
     ...
 
