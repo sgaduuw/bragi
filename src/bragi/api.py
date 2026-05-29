@@ -22,7 +22,7 @@ What's covered:
   `OAuthProviderSpec`, `AuthMethodSpec`, `RedirectTarget`,
   `TransformRegistry`, `SearchBackendSpec`, `ThemeSpec`,
   `StorageBackendSpec`, `ImageProcessorSpec`,
-  `InternalLinkResolution`, `Crumb`.
+  `InternalLinkResolution`, `NavNode`, `Crumb`.
 - The `set_breadcrumbs(*crumbs: Crumb) -> None` helper,
   re-exported from `bragi.core.breadcrumbs` so admin views in
   third-party plugins can declare their breadcrumb chains
@@ -440,6 +440,25 @@ class AnalyticsEvent:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class NavNode:
+    """A node in the auto-derived site navigation tree.
+
+    Returned by the `site_nav_tree()` Jinja global registered by
+    `bragi.contrib.nav`. Themes and third-party plugins read this
+    shape when rendering a custom nav surface.
+
+    `page` is the SQLAlchemy `Page` row; kept as `Any` here to
+    preserve `bragi.api`'s independence from `bragi.core.models`
+    (matching the precedent set by `ContentTypeSpec.url_for`).
+    `children` is a list of direct children only; the tree is
+    capped at one level by the builder.
+    """
+
+    page: Any
+    children: list[NavNode]
+
+
 __all__ = [
     "hookimpl",
     "AnalyticsEvent",
@@ -454,6 +473,7 @@ __all__ = [
     "ImportResult",
     "ImporterSpec",
     "NavItem",
+    "NavNode",
     "OAuthProviderSpec",
     "RedirectTarget",
     "SearchBackendSpec",

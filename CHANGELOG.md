@@ -6,6 +6,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Auto-navigation menu derived from the page tree.** Every
+  published page appears in the public-site nav by default,
+  ordered by a new per-page `menu_order` integer (lower first,
+  ties broken alphabetically by title). A per-page
+  `show_in_nav` checkbox lets editors opt out. Direct children
+  of a top-level page render as a native `<details>` submenu;
+  grandchildren are not surfaced. The page mapped to a site's
+  home (`site.home_page_id`) is auto-hidden from the nav, since
+  the brand link already covers `/`. New `bragi.contrib.nav`
+  plugin; all four shipped themes pick up the partial via
+  `{% include 'delivery/_site_nav.html' %}` and style the
+  `.site-nav__*` CSS hooks themselves. Migration adds the two
+  columns to `pages`.
+
 ### Fixed
 - **Post-index disc bullets visible on every theme.** The
   `post_index.html` (and `tag_list.html`) template renders posts

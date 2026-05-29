@@ -116,6 +116,33 @@
     </small>
   </fieldset>
 
+  <fieldset>
+    <legend>Navigation</legend>
+    {% if is_edit and site is defined and site.home_page_id == page.id %}
+    <p class="banner banner--info" style="margin: 0 0 0.75rem 0;">
+      This page is mapped to <code>/</code> (your site's home).
+      It is automatically hidden from the navigation menu
+      regardless of the checkbox below. To change this, edit
+      the site's home-page setting in
+      <a href="{{ url_for('site_admin.edit_site_current', site_slug=request.view_args['site_slug']) }}">Site settings</a>.
+    </p>
+    {% endif %}
+    <div style="display: flex; align-items: center; gap: 0.5rem;">
+      <input type="checkbox" name="show_in_nav" id="show_in_nav" value="1"
+             {% if form.get('show_in_nav', '1') == '1' %}checked{% endif %}>
+      <label for="show_in_nav" style="margin: 0;">Show in navigation menu</label>
+    </div>
+    <div style="margin-top: 0.5rem;">
+      <label for="menu_order">Menu order</label>
+      <input type="number" name="menu_order" id="menu_order"
+             value="{{ form.get('menu_order', '0') }}" step="1">
+      <small>
+        Lower numbers come first within this level; ties broken
+        alphabetically by title.
+      </small>
+    </div>
+  </fieldset>
+
   {{ image_picker_field(
        name="featured_image_id",
        value=form.get("featured_image_id"),
