@@ -424,3 +424,65 @@ def test_parse_profile_cleans_summary() -> None:
     profile = parse_profile(zf)
     assert "- Loves Python" in (profile["summary"] or "")
     assert "• " not in (profile["summary"] or "")
+
+
+# ----------------------- inline-asterisk bullet shape ----
+
+
+def test_clean_linkedin_description_inline_asterisks_with_intro() -> None:
+    raw = "Built X.  * Designed it * Led the team * Shipped v1"
+    result = clean_linkedin_description(raw)
+    assert result == ("Built X.\n" "\n" "- Designed it\n" "- Led the team\n" "- Shipped v1")
+
+
+def test_clean_linkedin_description_inline_asterisks_no_intro() -> None:
+    raw = "* point one * point two * point three"
+    result = clean_linkedin_description(raw)
+    assert result == "- point one\n- point two\n- point three"
+
+
+def test_clean_linkedin_description_inline_asterisks_double_space_separator() -> None:
+    # LinkedIn often uses "  * " (double-space before asterisk)
+    # after a sentence-ending period.
+    raw = "Intro.  * a  * b  * c"
+    result = clean_linkedin_description(raw)
+    assert result == "Intro.\n\n- a\n- b\n- c"
+
+
+def test_clean_linkedin_description_single_asterisk_preserved() -> None:
+    # A single ` * ` is more likely literal text (math, footnote,
+    # or stray punctuation) than a one-item list. Require 2+
+    # markers to trigger the split.
+    raw = "5 * 7 = 35"
+    result = clean_linkedin_description(raw)
+    assert result == "5 * 7 = 35"
+
+
+def test_clean_linkedin_description_real_linkedin_shape() -> None:
+    # Shape observed in a real LinkedIn export: ~1000-char single
+    # line with an intro sentence and several inline asterisk
+    # bullet markers, no actual newlines.
+    raw = (
+        "Built the X platform from scratch.  * Architect the system "
+        "across multiple environments * Codify deployment patterns "
+        "in Ansible * Coach junior engineers on operations"
+    )
+    result = clean_linkedin_description(raw)
+    assert result.startswith("Built the X platform from scratch.\n\n- Architect")
+    assert "- Codify deployment patterns in Ansible" in result
+    assert "- Coach junior engineers on operations" in result
+    # The intro paragraph should NOT contain any leftover ` * `.
+    assert " * " not in result
+
+
+def test_clean_linkedin_description_inline_asterisks_in_parse_positions() -> None:
+    zf = _zip_with(
+        {
+            "Positions.csv": (
+                "Company Name,Title,Location,Started On,Finished On,Description\n"
+                'Acme,Engineer,NYC,Jan 2020,Mar 2022,"Built X.  * Designed it * Led team"\n'
+            ),
+        }
+    )
+    [p] = parse_positions(zf)
+    assert p.description_markdown == ("Built X.\n" "\n" "- Designed it\n" "- Led team")
