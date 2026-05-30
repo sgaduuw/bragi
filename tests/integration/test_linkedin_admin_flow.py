@@ -165,6 +165,108 @@ def test_upload_review_apply_subset(
             ), "apply with one selected proposal should have written at least one field"
 
 
+def test_upload_widget_form_is_not_nested_in_page_edit_form(
+    app_and_page: tuple[Flask, int, str, int],
+) -> None:
+    """Regression for the report 'uploading the LinkedIn zip reset
+    the page type to a normal page'.
+
+    HTML5 forbids nested <form>s. If the LinkedIn upload widget's
+    <form> renders INSIDE the page-edit <form>, browsers strip
+    the inner open tag and the inner </form> prematurely closes
+    the outer form. Every input after the widget (status, kind,
+    show_in_nav, ...) becomes orphaned, and clicking 'Upload and
+    review' submits a truncated form to page_admin.edit_page that
+    is missing those fields. The page-edit POST handler defaults
+    the missing kind to 'static' and status to 'draft', silently
+    downgrading the page.
+
+    The fix moves the widget OUTSIDE the page-edit form. This
+    test guards the structural invariant: the widget's <form>
+    must appear AFTER the page-edit form's closing </form> tag.
+    """
+    app, page_id, site_slug, user_id = app_and_page
+    edit_path = f"/admin/sites/{site_slug}/pages/{page_id}/edit"
+
+    with app.test_client() as client:
+        _login(client, user_id)
+        resp = client.get(edit_path)
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+
+    # The page-edit form posts to page_admin.edit_page; find its
+    # opening and closing tags.
+    edit_action = f"/admin/sites/{site_slug}/pages/{page_id}/edit"
+    edit_form_open = body.find(f'action="{edit_action}"')
+    assert edit_form_open != -1, "page-edit form not found"
+
+    # Find the closing </form> tag that ends the page-edit form.
+    # The next </form> after the open tag closes it.
+    edit_form_close = body.find("</form>", edit_form_open)
+    assert edit_form_close != -1, "page-edit form's closing tag not found"
+
+    # The LinkedIn upload widget's form posts to
+    # linkedin_admin.upload_and_plan. Its <form> tag must appear
+    # AFTER the page-edit form's closing </form>.
+    widget_form_open = body.find("import-linkedin/upload")
+    assert widget_form_open != -1, (
+        "LinkedIn widget upload form not rendered " "(check resume_admin_extras() loop is firing)"
+    )
+    assert widget_form_open > edit_form_close, (
+        "LinkedIn widget <form> is nested INSIDE the page-edit form. "
+        "Nested forms cause the inner </form> to close the outer form "
+        "prematurely, orphaning status/kind/show_in_nav fields. Move "
+        "the widget OUTSIDE the page-edit form. "
+        f"(widget at offset {widget_form_open}, "
+        f"page-edit form closes at {edit_form_close})"
+    )
+
+
+def test_full_flow_preserves_page_kind_resume(
+    app_and_page: tuple[Flask, int, str, int],
+) -> None:
+    """Regression for the report 'uploading the LinkedIn zip
+    reset the page type to a normal page'. After upload + apply,
+    the Resume page must still have kind=resume in the DB AND
+    the GET-rendered edit form must show 'resume' selected in
+    the kind dropdown (not 'static')."""
+    app, page_id, site_slug, user_id = app_and_page
+    edit_path = f"/admin/sites/{site_slug}/pages/{page_id}/edit"
+    apply_url = f"/admin/sites/{site_slug}/pages/{page_id}/import-linkedin/apply"
+
+    with app.test_client() as client:
+        _login(client, user_id)
+        token, ids = _upload_and_extract(client, site_slug, page_id)
+
+        client.post(
+            apply_url,
+            data={
+                "_csrf_token": csrf_token(client, path=edit_path),
+                "token": token,
+                "selected": ids,
+            },
+            follow_redirects=True,
+        )
+
+        # 1. DB state: kind unchanged.
+        with SessionLocal() as db:
+            page = db.get(Page, page_id)
+            assert page is not None
+            assert page.kind == PageKind.RESUME, f"DB kind reset to {page.kind!r} after apply"
+
+        # 2. GET-rendered edit form shows resume selected in the
+        #    kind dropdown (not static).
+        resp = client.get(edit_path)
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert (
+            '<option value="resume" selected>Resume / CV (structured content)</option>' in body
+        ) or ('value="resume" selected' in body and "Resume / CV" in body), (
+            "kind dropdown should pre-select resume after import; "
+            f"page kind in DB was: {page.kind}"
+        )
+
+
 def test_apply_skips_proposals_on_concurrent_edit(
     app_and_page: tuple[Flask, int, str, int],
 ) -> None:

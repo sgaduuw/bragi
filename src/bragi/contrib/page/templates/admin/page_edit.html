@@ -90,9 +90,6 @@
 
   {% if current_kind == 'resume' %}
     {% include "admin/_resume_fieldset.html" %}
-    {% for partial_path in resume_admin_extras() %}
-      {% include partial_path %}
-    {% endfor %}
   {% endif %}
 
   <fieldset>
@@ -171,4 +168,18 @@
     <a href="{{ url_for('page_admin.list_pages') }}" class="btn secondary">Cancel</a>
   </div>
 </form>
+
+{# Resume-source plugin widgets (LinkedIn upload, etc.) live OUTSIDE the
+   page-edit form because they post to their own endpoints with their own
+   <form> elements. HTML5 forbids nested <form>s; the browser strips the
+   inner open tag and the inner </form> prematurely closes the outer
+   form, orphaning every input below it (status, kind, show_in_nav, ...).
+   Saving in that state silently wipes the orphaned fields back to their
+   defaults (kind -> static, status -> draft). Keep these contributions
+   OUTSIDE the main form. #}
+{% if is_edit and current_kind == 'resume' %}
+  {% for partial_path in resume_admin_extras() %}
+    {% include partial_path %}
+  {% endfor %}
+{% endif %}
 {% endblock %}
