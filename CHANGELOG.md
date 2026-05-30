@@ -6,6 +6,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-05-30
+
+### Changed
+- **`bragi.contrib.import_linkedin` cleans plain-text
+  descriptions into markdown at import time.** LinkedIn's CSV
+  export carries description fields (`Positions.Description`,
+  `Education.Notes` / `Activities`, `Projects.Description`,
+  `Profile.Summary`) as plain text with `\r\n` line endings, no
+  markdown formatting, and Unicode bullet glyphs (`•`, `‣`,
+  `▪`, `◦`, `●`, `○`, `◆`) at the start of bullet lines. Dumped
+  straight into a resume page they rendered as a wall of text
+  with stray characters. A new helper
+  `clean_linkedin_description(raw) -> str` (exported from
+  `bragi.contrib.import_linkedin.parser`) normalises line
+  endings, strips trailing whitespace per line, converts
+  line-leading bullet glyphs to markdown `-` list markers
+  (preserving indentation for nested lists), preserves
+  paragraph breaks, and leaves mid-line bullet glyphs alone.
+  Applied at the four read sites in the parser; existing
+  re-imports of bullet-laden descriptions produce proper
+  `<ul><li>` markup in the delivery template. Previously-
+  imported descriptions stay janky in the DB until the
+  operator re-imports or hand-edits.
+
 ## [1.20.1] - 2026-05-30
 
 ### Fixed
