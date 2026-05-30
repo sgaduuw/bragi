@@ -6,6 +6,7 @@ import io
 import zipfile
 
 from bragi.contrib.import_linkedin.parser import (
+    clean_linkedin_description,
     parse_certifications,
     parse_education,
     parse_languages,
@@ -281,3 +282,145 @@ def test_parse_projects_basic() -> None:
     assert p.start_date == "2024-01"
     assert p.end_date is None
     assert p.description_markdown == "LKML indexer"
+
+
+# ----------------------- clean_linkedin_description ----
+
+
+def test_clean_linkedin_description_empty_input() -> None:
+    assert clean_linkedin_description("") == ""
+    assert clean_linkedin_description("   \n  ") == ""
+
+
+def test_clean_linkedin_description_plain_text_unchanged() -> None:
+    assert clean_linkedin_description("Built X.") == "Built X."
+
+
+def test_clean_linkedin_description_normalises_crlf() -> None:
+    assert clean_linkedin_description("a\r\nb\r\nc") == "a\nb\nc"
+    assert clean_linkedin_description("a\rb") == "a\nb"
+
+
+def test_clean_linkedin_description_converts_bullet_glyph() -> None:
+    raw = "Key wins:\n• Shipped X\n• Led Y"
+    expected = "Key wins:\n- Shipped X\n- Led Y"
+    assert clean_linkedin_description(raw) == expected
+
+
+def test_clean_linkedin_description_accepts_multiple_bullet_glyphs() -> None:
+    raw = "• a\n‣ b\n▪ c\n◦ d"
+    expected = "- a\n- b\n- c\n- d"
+    assert clean_linkedin_description(raw) == expected
+
+
+def test_clean_linkedin_description_handles_bullet_without_space() -> None:
+    raw = "•item one\n•item two"
+    expected = "- item one\n- item two"
+    assert clean_linkedin_description(raw) == expected
+
+
+def test_clean_linkedin_description_preserves_indented_bullets() -> None:
+    raw = "Main:\n  • Sub a\n  • Sub b"
+    expected = "Main:\n  - Sub a\n  - Sub b"
+    assert clean_linkedin_description(raw) == expected
+
+
+def test_clean_linkedin_description_preserves_paragraph_breaks() -> None:
+    raw = "First paragraph.\n\nSecond paragraph."
+    assert clean_linkedin_description(raw) == raw
+
+
+def test_clean_linkedin_description_strips_trailing_whitespace_per_line() -> None:
+    raw = "line one   \nline two\t\n"
+    assert clean_linkedin_description(raw) == "line one\nline two"
+
+
+def test_clean_linkedin_description_does_not_touch_inline_bullet_glyph() -> None:
+    # Mid-line bullets used as ornamental separators must be left alone.
+    raw = "Foo • Bar • Baz"
+    assert clean_linkedin_description(raw) == "Foo • Bar • Baz"
+
+
+def test_clean_linkedin_description_full_example() -> None:
+    raw = (
+        "Built the X platform from scratch.\r\n"
+        "\r\n"
+        "Key responsibilities:\r\n"
+        "• Designed the architecture\r\n"
+        "• Led a team of 5 engineers\r\n"
+        "• Shipped v1 in 6 months\r\n"
+        "\r\n"
+        "Then got the team to ship faster.\r\n"
+    )
+    expected = (
+        "Built the X platform from scratch.\n"
+        "\n"
+        "Key responsibilities:\n"
+        "- Designed the architecture\n"
+        "- Led a team of 5 engineers\n"
+        "- Shipped v1 in 6 months\n"
+        "\n"
+        "Then got the team to ship faster."
+    )
+    assert clean_linkedin_description(raw) == expected
+
+
+# ----------------------- cleanup applies in parsers -----
+
+
+def test_parse_positions_cleans_bulleted_description() -> None:
+    zf = _zip_with(
+        {
+            "Positions.csv": (
+                "Company Name,Title,Location,Started On,Finished On,Description\n"
+                'Acme,Engineer,NYC,Jan 2018,Dec 2019,"Built X.\n\n• Shipped Y\n• Led Z"\n'
+            ),
+        }
+    )
+    [p] = parse_positions(zf)
+    assert "- Shipped Y" in p.description_markdown
+    assert "- Led Z" in p.description_markdown
+    assert "• " not in p.description_markdown
+
+
+def test_parse_projects_cleans_bulleted_description() -> None:
+    zf = _zip_with(
+        {
+            "Projects.csv": (
+                "Title,Url,Started On,Finished On,Description\n"
+                'Mimir,,Jan 2024,,"LKML indexer\n• fast\n• indexed"\n'
+            ),
+        }
+    )
+    [p] = parse_projects(zf)
+    assert "- fast" in p.description_markdown
+    assert "- indexed" in p.description_markdown
+
+
+def test_parse_education_cleans_joined_notes_and_activities() -> None:
+    zf = _zip_with(
+        {
+            "Education.csv": (
+                "School Name,Degree Name,Start Date,End Date,Notes,Activities\n"
+                'TUD,BSc,Sep 2010,Jul 2014,"Thesis on X\n• prize-winning",'
+                '"Hackathons\n• demo team"\n'
+            ),
+        }
+    )
+    [e] = parse_education(zf)
+    # Both notes and activities should end up cleaned.
+    assert "- prize-winning" in e.description_markdown
+    assert "- demo team" in e.description_markdown
+
+
+def test_parse_profile_cleans_summary() -> None:
+    zf = _zip_with(
+        {
+            "Profile.csv": (
+                "First Name,Last Name,Summary\n" 'Eelco,W,"Engineer\n• Loves Python\n• Hates JS"\n'
+            ),
+        }
+    )
+    profile = parse_profile(zf)
+    assert "- Loves Python" in (profile["summary"] or "")
+    assert "• " not in (profile["summary"] or "")
