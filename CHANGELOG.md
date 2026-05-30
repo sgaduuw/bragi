@@ -6,6 +6,33 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.21.2] - 2026-05-30
+
+### Fixed
+- **Resume admin form serialised empty narrative textareas as
+  `null`, breaking save after a LinkedIn import.** The resume
+  fieldset's JS row serialiser (`rowToObject` in
+  `_resume_fieldset.html`) converted every empty form field to
+  JSON `null`. That is correct for `Optional[str]` fields like
+  `location` or `start_date` (blank means "not set"), but wrong
+  for `description_markdown` on `Position` / `Project` /
+  `Education`, which the schema declares as `str = ""`
+  (required string, defaults to empty). A LinkedIn import of a
+  current position with no Description set on LinkedIn's side
+  correctly stored `description_markdown=""` on the
+  `resume_data`. The textarea rendered blank. On save, the JS
+  rewrote `"" -> null`, and pydantic correctly rejected the
+  payload with `resume_data validation failed at
+  experience.0.description_markdown: Input should be a valid
+  string`. Pre-existing bug that any operator creating a
+  Position from scratch and leaving the description blank
+  would also hit; surfaced in the wild by the LinkedIn
+  importer. Fix: textareas without `data-multiline="1"` (the
+  impacts arrays) now preserve empty as `""` instead of
+  `null`. The three `description_markdown` textareas are the
+  only fields that take this default code path today. Two
+  server-side regression tests pin the contract.
+
 ## [1.21.1] - 2026-05-30
 
 ### Fixed

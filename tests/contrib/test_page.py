@@ -261,3 +261,87 @@ def test_resume_admin_extras_global_returns_list(patched_session_locals, db_sess
     with app.test_request_context("/"):
         result = extras_fn()
     assert isinstance(result, list)
+
+
+# ----------------------- resume_data validation contract ----
+
+
+def test_validate_resume_data_accepts_empty_description_markdown() -> None:
+    """The resume form's JS serialiser sends `description_markdown:
+    ""` for blank narrative textareas (Position / Project /
+    Education). The Pydantic schema declares
+    `description_markdown: str = ""`, so an empty string MUST be
+    accepted. Regression: a `null` here used to break save after
+    importing a current LinkedIn position with no Description
+    set, because the JS serialiser previously converted "" to
+    null for every text field including textareas. See the inline
+    comment in `_resume_fieldset.html`'s rowToObject for the
+    fix."""
+    import json
+
+    from bragi.contrib.page.admin import _validate_resume_data
+
+    payload = {
+        "header": {"tagline": None, "location": None, "profile_links": []},
+        "highlights": [],
+        "experience": [
+            {
+                "id": "abc123def456",
+                "company": "Acme",
+                "role": "Engineer",
+                "location": None,
+                "start_date": "2020-01",
+                "end_date": None,
+                "description_markdown": "",
+                "impacts": [],
+            }
+        ],
+        "projects": [],
+        "education": [],
+        "skills": [],
+        "certifications": [],
+        "languages": [],
+    }
+    result, err = _validate_resume_data(json.dumps(payload))
+    assert err is None, err
+    assert result is not None
+
+
+def test_validate_resume_data_rejects_null_description_markdown() -> None:
+    """A `null` `description_markdown` is the bug shape that
+    pydantic must reject; the resume form's JS serialiser is the
+    only producer of this payload and was fixed to send "". This
+    test guards the contract from the server side so a future
+    regression in the JS gets caught: if the JS starts sending
+    null again, manual import flows will fail in exactly this
+    way."""
+    import json
+
+    from bragi.contrib.page.admin import _validate_resume_data
+
+    payload = {
+        "header": {"tagline": None, "location": None, "profile_links": []},
+        "highlights": [],
+        "experience": [
+            {
+                "id": "abc123def456",
+                "company": "Acme",
+                "role": "Engineer",
+                "location": None,
+                "start_date": "2020-01",
+                "end_date": None,
+                "description_markdown": None,
+                "impacts": [],
+            }
+        ],
+        "projects": [],
+        "education": [],
+        "skills": [],
+        "certifications": [],
+        "languages": [],
+    }
+    result, err = _validate_resume_data(json.dumps(payload))
+    assert result is None
+    assert err is not None
+    assert "experience.0.description_markdown" in err
+    assert "valid string" in err

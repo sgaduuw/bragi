@@ -344,6 +344,19 @@
             .filter(Boolean);
         } else if (el.type === 'number') {
           obj[field] = raw === '' ? null : Number(raw);
+        } else if (el.tagName === 'TEXTAREA') {
+          // Textareas back required-string fields in the resume
+          // schema (description_markdown on Position / Project /
+          // Education, declared as `str = ""`). An empty textarea
+          // means "no narrative yet"; we must send "" so pydantic's
+          // str validator accepts it. Sending null (the default-
+          // input behaviour below) breaks validation on save with
+          // "Input should be a valid string", which surfaces in the
+          // wild whenever LinkedIn imports a current position that
+          // has no Description set on LinkedIn's side. Multiline
+          // array textareas (impacts) take the data-multiline
+          // branch above and never reach here.
+          obj[field] = raw;
         } else {
           obj[field] = raw === '' ? null : raw;
         }
