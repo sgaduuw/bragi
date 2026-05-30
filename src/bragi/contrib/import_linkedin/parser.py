@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import zipfile
 from datetime import datetime
 
@@ -34,6 +35,61 @@ _URL_ADAPTER: TypeAdapter[HttpUrl | None] = TypeAdapter(HttpUrl | None)
 # LinkedIn writes dates as "MMM YYYY" (e.g. "Apr 2024") or
 # "MMMM YYYY" ("January 2020"); empty for current positions.
 _YEAR_MONTH_FORMATS = ("%b %Y", "%B %Y")
+
+# Unicode glyphs LinkedIn (and Word / Pages, where authors often
+# paste from) uses as bullet markers at the start of plain-text
+# description lines. Match these only when they sit at the start
+# of a line (possibly after whitespace, i.e. an indented bullet)
+# so a glyph used mid-line as an ornamental separator is left
+# alone.
+_BULLET_GLYPHS = "•‣▪◦●○◆"
+_BULLET_LINE_RE = re.compile(r"^([ \t]*)[" + _BULLET_GLYPHS + r"][ \t]*")
+
+
+def clean_linkedin_description(raw: str) -> str:
+    """Convert a LinkedIn plain-text description into presentable
+    markdown.
+
+    LinkedIn's CSV export carries descriptions as plain text:
+    `\\r\\n` line endings, no markdown formatting, and bullet
+    points expressed as Unicode glyphs (`•`, `‣`, etc.) at the
+    start of each line. Dumped straight into the resume page they
+    render as a wall of text with stray Unicode characters.
+
+    This helper applies a small deterministic cleanup:
+
+    - Normalises `\\r\\n` and `\\r` to `\\n`.
+    - Strips trailing whitespace on each line.
+    - Converts a bullet glyph at the start of a line (after
+      optional indentation) into a markdown ``-`` list marker.
+      Indentation is preserved so nested bullets become nested
+      markdown lists.
+    - Preserves paragraph breaks (`\\n\\n`).
+    - Leaves bullet glyphs mid-line alone (`Foo • Bar • Baz` is a
+      separator pattern, not a list).
+
+    Heuristic, not perfect. The operator can still hand-edit any
+    description that comes out looking odd in the admin form.
+    """
+    if not raw:
+        return ""
+    # Line endings: normalise to \n.
+    text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    out_lines: list[str] = []
+    for line in text.split("\n"):
+        # Trailing whitespace stripped per line.
+        stripped = line.rstrip()
+        # Bullet glyph at start (after optional whitespace) -> "- ".
+        # The capture group preserves the leading indentation.
+        converted = _BULLET_LINE_RE.sub(r"\1- ", stripped)
+        # If the substitution produced "- " followed by nothing
+        # (the original line was just a bullet), trim the trailing
+        # space so the line reads "-", which markdown still renders
+        # as an empty list item without leaving a dangling space.
+        if converted.endswith("- "):
+            converted = converted[:-1]
+        out_lines.append(converted)
+    return "\n".join(out_lines).strip()
 
 
 def parse_year_month(raw: str | None) -> str | None:
@@ -120,11 +176,13 @@ def parse_profile(zf: zipfile.ZipFile) -> dict[str, str | None]:
     first = _none_if_blank(r.get("first name"))
     last = _none_if_blank(r.get("last name"))
     name_parts = [p for p in (first, last) if p]
+    summary_raw = r.get("summary") or ""
+    summary_clean = clean_linkedin_description(summary_raw)
     return {
         "full_name": " ".join(name_parts) if name_parts else None,
         "headline": _none_if_blank(r.get("headline")),
         "location": _none_if_blank(r.get("geo location")),
-        "summary": _none_if_blank(r.get("summary")),
+        "summary": summary_clean or None,
     }
 
 
@@ -147,7 +205,7 @@ def parse_positions(zf: zipfile.ZipFile) -> list[Position]:
                 location=_none_if_blank(r.get("location")),
                 start_date=parse_year_month(r.get("started on")),
                 end_date=parse_year_month(r.get("finished on")),
-                description_markdown=(r.get("description") or "").strip(),
+                description_markdown=clean_linkedin_description(r.get("description") or ""),
                 impacts=[],
             )
         )
@@ -174,8 +232,8 @@ def parse_education(zf: zipfile.ZipFile) -> list[Education]:
         if not institution:
             continue
         degree = _none_if_blank(r.get("degree name")) or "(unspecified)"
-        notes = (r.get("notes") or "").strip()
-        activities = (r.get("activities") or "").strip()
+        notes = clean_linkedin_description(r.get("notes") or "")
+        activities = clean_linkedin_description(r.get("activities") or "")
         joined = "\n\n".join(p for p in (notes, activities) if p)
         out.append(
             Education(
@@ -260,7 +318,7 @@ def parse_projects(zf: zipfile.ZipFile) -> list[Project]:
                 url=_parse_url(r.get("url")),
                 start_date=parse_year_month(r.get("started on")),
                 end_date=parse_year_month(r.get("finished on")),
-                description_markdown=(r.get("description") or "").strip(),
+                description_markdown=clean_linkedin_description(r.get("description") or ""),
                 impacts=[],
             )
         )
