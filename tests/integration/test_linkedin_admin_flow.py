@@ -165,6 +165,51 @@ def test_upload_review_apply_subset(
             ), "apply with one selected proposal should have written at least one field"
 
 
+def test_full_flow_preserves_page_kind_resume(
+    app_and_page: tuple[Flask, int, str, int],
+) -> None:
+    """Regression for the report 'uploading the LinkedIn zip
+    reset the page type to a normal page'. After upload + apply,
+    the Resume page must still have kind=resume in the DB AND
+    the GET-rendered edit form must show 'resume' selected in
+    the kind dropdown (not 'static')."""
+    app, page_id, site_slug, user_id = app_and_page
+    edit_path = f"/admin/sites/{site_slug}/pages/{page_id}/edit"
+    apply_url = f"/admin/sites/{site_slug}/pages/{page_id}/import-linkedin/apply"
+
+    with app.test_client() as client:
+        _login(client, user_id)
+        token, ids = _upload_and_extract(client, site_slug, page_id)
+
+        client.post(
+            apply_url,
+            data={
+                "_csrf_token": csrf_token(client, path=edit_path),
+                "token": token,
+                "selected": ids,
+            },
+            follow_redirects=True,
+        )
+
+        # 1. DB state: kind unchanged.
+        with SessionLocal() as db:
+            page = db.get(Page, page_id)
+            assert page is not None
+            assert page.kind == PageKind.RESUME, f"DB kind reset to {page.kind!r} after apply"
+
+        # 2. GET-rendered edit form shows resume selected in the
+        #    kind dropdown (not static).
+        resp = client.get(edit_path)
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert (
+            '<option value="resume" selected>Resume / CV (structured content)</option>' in body
+        ) or ('value="resume" selected' in body and "Resume / CV" in body), (
+            "kind dropdown should pre-select resume after import; "
+            f"page kind in DB was: {page.kind}"
+        )
+
+
 def test_apply_skips_proposals_on_concurrent_edit(
     app_and_page: tuple[Flask, int, str, int],
 ) -> None:

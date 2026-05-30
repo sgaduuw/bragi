@@ -78,6 +78,46 @@ def test_detect_rejects_non_zip(tmp_path: Path) -> None:
     assert not detect(np)
 
 
+# ----------------------- regression: page.kind unchanged ----
+
+
+def test_apply_does_not_change_page_kind(
+    tmp_path: Path, patched_session_locals: sessionmaker, db_session: Session
+) -> None:
+    """Regression for the report 'uploading the LinkedIn zip
+    reset the page type to a normal page'. apply() must not
+    touch Page.kind under any code path: the page is and
+    remains a Resume."""
+    site = make_test_site(
+        db_session,
+        hostname="kindprobe.example",
+        title="kindprobe",
+        slug="kindprobe",
+        canonical_url="https://kindprobe.example",
+    )
+    user = make_test_user(db_session)
+    page = _make_resume_page(db_session, site, user)
+    assert page.kind == PageKind.RESUME  # baseline
+
+    zp = _build_zip(
+        tmp_path,
+        {
+            "Profile.csv": (
+                "First Name,Last Name,Headline,Geo Location,Summary\n"
+                "Eelco,W,Engineer,Amsterdam,Bio\n"
+            ),
+            "Positions.csv": ("Company Name,Title,Started On\n" "Acme,Engineer,Jan 2020\n"),
+            "Skills.csv": "Name\nPython\n",
+        },
+    )
+
+    p = plan(zp, page)
+    apply(zp, page, {"selected_change_ids": {pr.id for pr in p.proposals}})
+
+    db_session.refresh(page)
+    assert page.kind == PageKind.RESUME, f"apply() must not change page.kind; got {page.kind!r}"
+
+
 # ----------------------- plan + apply happy path -----
 
 
