@@ -45,28 +45,78 @@ _YEAR_MONTH_FORMATS = ("%b %Y", "%B %Y")
 _BULLET_GLYPHS = "•‣▪◦●○◆"
 _BULLET_LINE_RE = re.compile(r"^([ \t]*)[" + _BULLET_GLYPHS + r"][ \t]*")
 
+# Inline asterisk bullet marker. LinkedIn often serialises a
+# bulleted description into a single line with no actual line
+# breaks, using ` * ` (space-asterisk-whitespace) or a leading
+# `* ` at the start as the separator between bullet items.
+# Example shape: `intro. * point one * point two * point three`.
+# We only treat this as a list when at least 2 markers are
+# present so a single literal asterisk in prose (e.g. `5 * 7 =
+# 35` or a footnote marker) is not misclassified.
+_INLINE_ASTERISK_BULLET_RE = re.compile(r"(?:^|\s)\*\s+")
+
+
+def _convert_inline_asterisk_bullets(text: str) -> str:
+    """If the text looks like an inline-asterisk bullet list,
+    rewrite it as intro paragraph + markdown list. Returns the
+    text unchanged otherwise.
+    """
+    matches = list(_INLINE_ASTERISK_BULLET_RE.finditer(text))
+    # Require at least 2 markers; a single inline `*` is more
+    # likely a literal asterisk than a one-item list.
+    if len(matches) < 2:
+        return text
+    chunks: list[str] = []
+    prev_end = 0
+    for m in matches:
+        chunks.append(text[prev_end : m.start()].strip())
+        prev_end = m.end()
+    chunks.append(text[prev_end:].strip())
+    intro = chunks[0]
+    bullets = [c for c in chunks[1:] if c]
+    if not bullets:
+        return text
+    parts: list[str] = []
+    if intro:
+        parts.append(intro)
+        # Blank line before the list so strict CommonMark renders
+        # it as a list rather than continuing the paragraph.
+        parts.append("")
+    parts.extend(f"- {b}" for b in bullets)
+    return "\n".join(parts)
+
 
 def clean_linkedin_description(raw: str) -> str:
     """Convert a LinkedIn plain-text description into presentable
     markdown.
 
-    LinkedIn's CSV export carries descriptions as plain text:
-    `\\r\\n` line endings, no markdown formatting, and bullet
-    points expressed as Unicode glyphs (`•`, `‣`, etc.) at the
-    start of each line. Dumped straight into the resume page they
-    render as a wall of text with stray Unicode characters.
+    LinkedIn's CSV export carries description fields as plain
+    text. Common shapes:
 
-    This helper applies a small deterministic cleanup:
+    1. `\\r\\n` line endings between paragraphs, with a Unicode
+       bullet glyph (`•`, `‣`, etc.) at the start of each bullet
+       line. (Older / paste-from-Pages authors.)
+    2. A single line containing the whole description with no
+       real line breaks, using inline ` * ` markers between
+       bullet items: ``intro. * point one * point two``. (Most
+       common in newer LinkedIn-authored exports.)
+    3. Plain prose with no bullets at all.
+
+    This helper applies a small deterministic cleanup that
+    covers shapes 1 and 2 and leaves shape 3 alone:
 
     - Normalises `\\r\\n` and `\\r` to `\\n`.
+    - Detects inline ` * ` bullet patterns (2+ markers required
+      to avoid misclassifying a literal asterisk in prose) and
+      rewrites them as intro paragraph + markdown list.
     - Strips trailing whitespace on each line.
     - Converts a bullet glyph at the start of a line (after
       optional indentation) into a markdown ``-`` list marker.
       Indentation is preserved so nested bullets become nested
       markdown lists.
     - Preserves paragraph breaks (`\\n\\n`).
-    - Leaves bullet glyphs mid-line alone (`Foo • Bar • Baz` is a
-      separator pattern, not a list).
+    - Leaves bullet glyphs mid-line alone (`Foo • Bar • Baz` is
+      an ornamental separator pattern, not a list).
 
     Heuristic, not perfect. The operator can still hand-edit any
     description that comes out looking odd in the admin form.
@@ -75,6 +125,8 @@ def clean_linkedin_description(raw: str) -> str:
         return ""
     # Line endings: normalise to \n.
     text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    # Inline ` * ` bullet pattern: rewrite as intro + list.
+    text = _convert_inline_asterisk_bullets(text)
     out_lines: list[str] = []
     for line in text.split("\n"):
         # Trailing whitespace stripped per line.

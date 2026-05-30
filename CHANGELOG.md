@@ -6,6 +6,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.21.1] - 2026-05-30
+
+### Fixed
+- **LinkedIn description cleanup now handles the inline ` * `
+  bullet shape.** After 1.21.0 shipped, an operator reported
+  that re-imported descriptions still looked janky. Inspecting
+  the actual export ZIP revealed the cause: modern LinkedIn
+  exports do not put line breaks in description fields at all.
+  Instead, each description is a single string using
+  ` * ` (space-asterisk-space) as inline bullet separators:
+  `Built X.  * Designed it * Led team * Shipped v1`. 1.21.0's
+  `clean_linkedin_description()` only caught Unicode bullet
+  glyphs at the start of lines (the older paste-from-Pages
+  shape), so the inline-asterisk shape sailed through. Fix:
+  `clean_linkedin_description()` now also detects inline ` * `
+  patterns and rewrites them as intro paragraph + markdown
+  list. Requires ≥2 markers to avoid misclassifying a single
+  literal asterisk in prose (e.g. `5 * 7 = 35`) as a one-item
+  list. The older line-leading Unicode-glyph path from 1.21.0
+  still applies; the two paths don't overlap.
+
 ## [1.21.0] - 2026-05-30
 
 ### Changed
