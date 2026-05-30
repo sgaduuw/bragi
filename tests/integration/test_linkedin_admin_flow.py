@@ -165,6 +165,63 @@ def test_upload_review_apply_subset(
             ), "apply with one selected proposal should have written at least one field"
 
 
+def test_upload_widget_form_is_not_nested_in_page_edit_form(
+    app_and_page: tuple[Flask, int, str, int],
+) -> None:
+    """Regression for the report 'uploading the LinkedIn zip reset
+    the page type to a normal page'.
+
+    HTML5 forbids nested <form>s. If the LinkedIn upload widget's
+    <form> renders INSIDE the page-edit <form>, browsers strip
+    the inner open tag and the inner </form> prematurely closes
+    the outer form. Every input after the widget (status, kind,
+    show_in_nav, ...) becomes orphaned, and clicking 'Upload and
+    review' submits a truncated form to page_admin.edit_page that
+    is missing those fields. The page-edit POST handler defaults
+    the missing kind to 'static' and status to 'draft', silently
+    downgrading the page.
+
+    The fix moves the widget OUTSIDE the page-edit form. This
+    test guards the structural invariant: the widget's <form>
+    must appear AFTER the page-edit form's closing </form> tag.
+    """
+    app, page_id, site_slug, user_id = app_and_page
+    edit_path = f"/admin/sites/{site_slug}/pages/{page_id}/edit"
+
+    with app.test_client() as client:
+        _login(client, user_id)
+        resp = client.get(edit_path)
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+
+    # The page-edit form posts to page_admin.edit_page; find its
+    # opening and closing tags.
+    edit_action = f"/admin/sites/{site_slug}/pages/{page_id}/edit"
+    edit_form_open = body.find(f'action="{edit_action}"')
+    assert edit_form_open != -1, "page-edit form not found"
+
+    # Find the closing </form> tag that ends the page-edit form.
+    # The next </form> after the open tag closes it.
+    edit_form_close = body.find("</form>", edit_form_open)
+    assert edit_form_close != -1, "page-edit form's closing tag not found"
+
+    # The LinkedIn upload widget's form posts to
+    # linkedin_admin.upload_and_plan. Its <form> tag must appear
+    # AFTER the page-edit form's closing </form>.
+    widget_form_open = body.find("import-linkedin/upload")
+    assert widget_form_open != -1, (
+        "LinkedIn widget upload form not rendered " "(check resume_admin_extras() loop is firing)"
+    )
+    assert widget_form_open > edit_form_close, (
+        "LinkedIn widget <form> is nested INSIDE the page-edit form. "
+        "Nested forms cause the inner </form> to close the outer form "
+        "prematurely, orphaning status/kind/show_in_nav fields. Move "
+        "the widget OUTSIDE the page-edit form. "
+        f"(widget at offset {widget_form_open}, "
+        f"page-edit form closes at {edit_form_close})"
+    )
+
+
 def test_full_flow_preserves_page_kind_resume(
     app_and_page: tuple[Flask, int, str, int],
 ) -> None:
