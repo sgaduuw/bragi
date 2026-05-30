@@ -6,6 +6,29 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.20.1] - 2026-05-30
+
+### Fixed
+- **`page_edit.html` nested `<form>` downgraded Resume pages on
+  LinkedIn upload click.** The `resume_admin_extras()` Jinja
+  loop sat inside the page-edit `<form>`, and the LinkedIn
+  upload widget (the only contributor today) renders its own
+  `<form>`. HTML5 forbids nested forms; browsers strip the
+  inner open tag, and the inner `</form>` prematurely closes
+  the outer form. Every input after the widget (status, kind,
+  show_in_nav, menu_order, featured_image, skip_redirect, save
+  button) was orphaned. Clicking "Upload and review" submitted
+  the outer page-edit form to `page_admin.edit_page` with
+  those fields missing; the POST handler silently defaulted
+  `kind` to `static` and `status` to `draft`, downgrading the
+  Resume page on every upload click. Fix: moved the
+  `resume_admin_extras()` loop OUTSIDE the page-edit form. The
+  resume fieldset (whose data is part of the page save) stays
+  inside; the widget partials live after the closing `</form>`
+  with their own forms intact and non-nested. Added a
+  structural regression test that fails fast if anyone re-nests
+  it. Reported by an operator on 2026-05-30 against 1.20.0.
+
 ## [1.20.0] - 2026-05-29
 
 ### Added
