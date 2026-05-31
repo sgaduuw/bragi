@@ -31,6 +31,14 @@
   <legend>Resume content</legend>
   <input type="hidden" name="resume_data" id="resume-data-hidden" value="">
 
+  {# Display options. Single boolean; serializeResumeData() picks
+     it up from this checkbox at submit time. #}
+  <label style="display: block; margin: 0.5rem 0;">
+    <input type="checkbox" id="resume-lead-with-role"
+           {% if resume.lead_with_role %}checked{% endif %}>
+    Lead with role instead of company in position headings
+  </label>
+
   {# HEADER #}
   <details {% if resume.header.tagline or resume.header.location or resume.header.profile_links %}open{% endif %}>
     <summary>Header</summary>
@@ -374,7 +382,14 @@
         skills: [],
         certifications: [],
         languages: [],
+        lead_with_role: false,
       };
+
+      // Display toggle: checkbox lives at the top of the fieldset,
+      // outside any [data-section] so the SECTIONS sweep below
+      // does not touch it.
+      const leadRole = document.getElementById('resume-lead-with-role');
+      data.lead_with_role = !!(leadRole && leadRole.checked);
 
       // Header singletons
       data.header.tagline =
