@@ -241,3 +241,108 @@ def test_resume_emits_social_meta_and_canonical(
     assert 'rel="canonical"' in body
     # Title format includes site title
     assert "CV Site" in body
+
+
+def _position_heading_html(html: str) -> str:
+    """Extract the first <h3>...</h3> inside the experience section,
+    so we can assert which span comes first."""
+    match = re.search(
+        r'<article class="position"[^>]*>\s*<h3>(.*?)</h3>',
+        html,
+        re.DOTALL,
+    )
+    assert match, "no position heading found in rendered resume"
+    return match.group(1)
+
+
+_MINIMAL_RESUME = {
+    "header": {"tagline": "Eng", "location": "NL", "profile_links": []},
+    "highlights": [],
+    "experience": [
+        {
+            "id": "p1",
+            "company": "Acme Corp",
+            "role": "Senior Engineer",
+            "location": None,
+            "start_date": "2020-01",
+            "end_date": None,
+            "description_markdown": "",
+            "impacts": [],
+        }
+    ],
+    "projects": [],
+    "education": [],
+    "skills": [],
+    "certifications": [],
+    "languages": [],
+}
+
+
+def test_position_heading_default_leads_with_company(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Default (lead_with_role omitted or False): company first."""
+    with db_session_factory() as db:
+        _seed_resume_page(db, slug="cv-default", resume_data=dict(_MINIMAL_RESUME))
+    resp = delivery_app.test_client().get("/cv-default", headers={"Host": "blog.example.com"})
+    assert resp.status_code == 200
+    heading = _position_heading_html(resp.get_data(as_text=True))
+    company_pos = heading.find('itemprop="name"')
+    role_pos = heading.find('class="role"')
+    assert company_pos != -1 and role_pos != -1
+    assert (
+        company_pos < role_pos
+    ), f"expected company before role with lead_with_role=False; got {heading!r}"
+
+
+def test_position_heading_lead_with_role_swaps_order(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """lead_with_role=True: role appears before company in the h3."""
+    rd = dict(_MINIMAL_RESUME)
+    rd["lead_with_role"] = True
+    with db_session_factory() as db:
+        _seed_resume_page(db, slug="cv-role-first", resume_data=rd)
+    resp = delivery_app.test_client().get("/cv-role-first", headers={"Host": "blog.example.com"})
+    assert resp.status_code == 200
+    heading = _position_heading_html(resp.get_data(as_text=True))
+    company_pos = heading.find('itemprop="name"')
+    role_pos = heading.find('class="role"')
+    assert company_pos != -1 and role_pos != -1
+    assert (
+        role_pos < company_pos
+    ), f"expected role before company with lead_with_role=True; got {heading!r}"
+
+
+def _jsonld_block(html: str) -> str:
+    """Extract the JSON-LD <script> body from the rendered page."""
+    match = re.search(
+        r'<script type="application/ld\+json">(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    assert match, "no JSON-LD <script> block found"
+    return match.group(1).strip()
+
+
+def test_lead_with_role_does_not_affect_jsonld(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """JSON-LD output is byte-identical regardless of lead_with_role.
+    Pins the design invariant 'visible-order only; semantic mapping
+    is fixed'."""
+    rd_false = dict(_MINIMAL_RESUME)
+    rd_true = dict(_MINIMAL_RESUME) | {"lead_with_role": True}
+    with db_session_factory() as db:
+        _seed_resume_page(db, slug="cv-jsonld-false", resume_data=rd_false)
+        _seed_resume_page(db, slug="cv-jsonld-true", resume_data=rd_true)
+    client = delivery_app.test_client()
+    jsonld_false = _jsonld_block(
+        client.get("/cv-jsonld-false", headers={"Host": "blog.example.com"}).get_data(as_text=True)
+    )
+    jsonld_true = _jsonld_block(
+        client.get("/cv-jsonld-true", headers={"Host": "blog.example.com"}).get_data(as_text=True)
+    )
+    # Parse to dicts so canonical-form comparison ignores incidental
+    # key-order differences from json.dumps.
+    assert json.loads(jsonld_false) == json.loads(jsonld_true)

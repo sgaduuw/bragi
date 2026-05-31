@@ -271,3 +271,28 @@ def test_jsonld_emits_knowsLanguage() -> None:
         ),
     )
     assert jsonld["knowsLanguage"] == ["Dutch", "English"]
+
+
+# ============================================================
+# lead_with_role display toggle
+# ============================================================
+
+
+def test_lead_with_role_defaults_to_false() -> None:
+    """Default preserves Company  Role rendering on existing resumes."""
+    rd = ResumeData()
+    assert rd.lead_with_role is False
+
+
+def test_lead_with_role_backwards_compat_on_missing_key() -> None:
+    """Existing resume_data JSON blobs predate the field; deserialising
+    must fill the default rather than raise. This is the invariant that
+    lets us ship without an alembic migration."""
+    rd = ResumeData.model_validate({})
+    assert rd.lead_with_role is False
+
+
+def test_lead_with_role_round_trips_true() -> None:
+    rd = ResumeData.model_validate({"lead_with_role": True})
+    assert rd.lead_with_role is True
+    assert rd.model_dump()["lead_with_role"] is True

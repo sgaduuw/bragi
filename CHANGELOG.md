@@ -6,6 +6,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Resume page: optional "lead with role" toggle on the admin form
+  swaps the company/role order in position headings on the public
+  page. Default off; existing resume pages render unchanged.
+
 ## [1.21.2] - 2026-05-30
 
 ### Fixed

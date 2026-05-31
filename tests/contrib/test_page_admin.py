@@ -780,3 +780,99 @@ def test_resume_kind_revisions_snapshot_resume_data(
         assert revision.resume_data == {"highlights": ["v1"]} or revision.resume_data[
             "highlights"
         ] == ["v1"]
+
+
+# ============================================================
+# lead_with_role persistence (Task 4: admin checkbox wiring)
+# ============================================================
+
+_MINIMAL_RESUME_PAYLOAD: dict = {
+    "header": {"tagline": None, "location": None, "profile_links": []},
+    "highlights": [],
+    "experience": [],
+    "projects": [],
+    "education": [],
+    "skills": [],
+    "certifications": [],
+    "languages": [],
+}
+
+
+def test_resume_save_persists_lead_with_role_true(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Posting a resume page with lead_with_role=True in the
+    serialised JSON persists the field on the Page row."""
+    import json
+
+    from bragi.api import ResumeData
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client)
+
+    resume_payload = {**_MINIMAL_RESUME_PAYLOAD, "lead_with_role": True}
+
+    resp = client.post(
+        "/admin/sites/blog/pages/new",
+        data={
+            "title": "Lead Role CV",
+            "slug": "lead-role-cv",
+            "kind": "resume",
+            "status": "draft",
+            "parent_id": "",
+            "body_markdown": "",
+            "featured_image_id": "",
+            "resume_data": json.dumps(resume_payload),
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303), resp.data[:500]
+
+    with db_session_factory() as db:
+        from bragi.core.models.page import Page
+
+        page = db.execute(select(Page).where(Page.slug == "lead-role-cv")).scalar_one()
+        assert page.resume_data is not None
+        assert ResumeData.model_validate(page.resume_data).lead_with_role is True
+
+
+def test_resume_save_omitted_lead_with_role_defaults_to_false(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Posting without lead_with_role in JSON: the persisted page
+    validates with the default value of False."""
+    import json
+
+    from bragi.api import ResumeData
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client)
+
+    # Payload intentionally does not include lead_with_role, mimicking
+    # a save from the old JS marshaller or any legacy resume payload.
+    resp = client.post(
+        "/admin/sites/blog/pages/new",
+        data={
+            "title": "Default Role CV",
+            "slug": "default-role-cv",
+            "kind": "resume",
+            "status": "draft",
+            "parent_id": "",
+            "body_markdown": "",
+            "featured_image_id": "",
+            "resume_data": json.dumps(_MINIMAL_RESUME_PAYLOAD),
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303), resp.data[:500]
+
+    with db_session_factory() as db:
+        from bragi.core.models.page import Page
+
+        page = db.execute(select(Page).where(Page.slug == "default-role-cv")).scalar_one()
+        assert page.resume_data is not None
+        assert ResumeData.model_validate(page.resume_data).lead_with_role is False
