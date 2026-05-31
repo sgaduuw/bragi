@@ -64,7 +64,7 @@
   margin: 0 0 0.2rem;
   font-size: 1.05rem;
 }
-.resume .position h3 span:nth-child(2) {
+.resume .position h3 span:nth-child(n+2) {
   color: #555;
   font-weight: 500;
 }
@@ -146,7 +146,7 @@
     border-bottom: 1px solid #000;
     color: #000;
   }
-  .resume .position h3 span:nth-child(2),
+  .resume .position h3 span:nth-child(n+2),
   .resume .project .at a {
     color: #000;
   }
