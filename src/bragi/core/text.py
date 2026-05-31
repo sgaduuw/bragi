@@ -3,7 +3,12 @@
 Slugify lives here because it's used in at least three places
 (heading anchors, post / page slug auto-suggest, tag slug
 derivation) and cross-plugin imports are forbidden by the
-contrib boundary rule. Keep it dependency-light: stdlib only.
+contrib boundary rule. The pure-string slugify function keeps it
+dependency-light: stdlib only. Unique-slug helpers for posts and
+pages (unique_slug_for_post, unique_slug_for_page) were added
+here to keep slug-to-string concerns co-located; they use function-
+local SQLAlchemy and model imports so slugify's import graph stays
+clean.
 """
 
 from __future__ import annotations
