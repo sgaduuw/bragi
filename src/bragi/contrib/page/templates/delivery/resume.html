@@ -72,8 +72,11 @@
         <article class="position" id="position-{{ pos.id }}"
                  itemprop="worksFor" itemscope itemtype="https://schema.org/Organization">
           <h3>
-            <span itemprop="name">{{ pos.company }}</span> —
-            <span class="role">{{ pos.role }}</span>
+            {% if resume.lead_with_role %}
+              <span class="role">{{ pos.role }}</span><span class="sep"> — </span><span itemprop="name">{{ pos.company }}</span>
+            {% else %}
+              <span itemprop="name">{{ pos.company }}</span><span class="sep"> — </span><span class="role">{{ pos.role }}</span>
+            {% endif %}
           </h3>
           <p class="meta">
             {% if pos.location %}<span itemprop="location">{{ pos.location }}</span> · {% endif %}

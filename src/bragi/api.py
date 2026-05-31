@@ -615,6 +615,11 @@ class ResumeData(BaseModel):
     skills: list[SkillGroup] = Field(default_factory=list)
     certifications: list[Certification] = Field(default_factory=list)
     languages: list[Language] = Field(default_factory=list)
+    # Display: when True, position headings render as
+    # "<role> — <company>" instead of "<company> — <role>".
+    # Visible-order only; JSON-LD semantics (Organization.name =
+    # company, jobTitle = role) are unchanged.
+    lead_with_role: bool = False
 
 
 __all__ = [

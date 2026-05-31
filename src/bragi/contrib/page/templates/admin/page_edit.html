@@ -169,6 +169,34 @@
   </div>
 </form>
 
+{% if not is_edit %}
+<script>
+  // Slug live-suggest: as the operator types the title, write a
+  // slugified version into the slug field, until they touch it.
+  // The server-side handler also fills empty slug at POST time;
+  // this script is the live-UX layer.
+  (function () {
+    const titleEl = document.getElementById('title');
+    const slugEl = document.getElementById('slug');
+    if (!titleEl || !slugEl) return;
+    let touched = slugEl.value.length > 0;
+    slugEl.addEventListener('input', function () { touched = true; });
+    titleEl.addEventListener('input', function () {
+      if (touched) return;
+      slugEl.value = slugify(titleEl.value);
+    });
+    function slugify(text) {
+      return text
+        .normalize('NFKD')
+        .replace(/\p{M}/gu, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    }
+  })();
+</script>
+{% endif %}
+
 {# Resume-source plugin widgets (LinkedIn upload, etc.) live OUTSIDE the
    page-edit form because they post to their own endpoints with their own
    <form> elements. HTML5 forbids nested <form>s; the browser strips the
