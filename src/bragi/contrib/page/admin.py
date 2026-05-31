@@ -365,6 +365,21 @@ def new_page(site_slug: str) -> ResponseReturnValue:
 
         form = _form_from_request()
         parents = _all_pages_for_picker(db, site_id)
+        if not form["slug"] and form["title"]:
+            from bragi.core.text import unique_slug_for_page
+
+            autofill_parent_id = _normalized_parent_id(form["parent_id"])
+            try:  # noqa: SIM105
+                form["slug"] = unique_slug_for_page(
+                    db,
+                    site_id=site_id,
+                    parent_id=autofill_parent_id,
+                    title=form["title"],
+                )
+            except ValueError:
+                # Slug generation failed (e.g., title is empty or too short);
+                # let the required-fields validation below handle the error.
+                pass
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return render_template(
