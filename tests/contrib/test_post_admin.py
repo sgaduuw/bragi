@@ -877,3 +877,146 @@ def test_edit_get_loads_for_pinned_post(
         reloaded = db.get(Post, post_id)
         assert reloaded.is_pinned is True
         assert reloaded.pinned_until == datetime(2026, 12, 31, 12, 0)
+
+
+# ============================================================
+# Auto-suggest slug from title on new post form
+# ============================================================
+
+
+def test_new_post_autofills_slug_from_title_when_slug_blank(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Empty slug + non-empty title => slug = slugify(title)."""
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
+    resp = client.post(
+        "/admin/sites/blog/posts/new",
+        data={
+            "title": "Hello World!",
+            "slug": "",
+            "body_markdown": "Body",
+            "status": "draft",
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303), resp.data
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.title == "Hello World!")).scalar_one()
+        assert post.slug == "hello-world"
+
+
+def test_new_post_autofill_disambiguates_collision(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """If slugify(title) collides with an existing post on the same
+    site, the auto-fill appends -2."""
+    client = admin_app.test_client()
+    _login(client)
+
+    # First post: title slugifies to `test-slug`.
+    token1 = csrf_token(client, path="/admin/sites/blog/posts/new")
+    r1 = client.post(
+        "/admin/sites/blog/posts/new",
+        data={
+            "title": "Test Slug",
+            "slug": "",
+            "body_markdown": "First",
+            "status": "draft",
+            "_csrf_token": token1,
+        },
+    )
+    assert r1.status_code in (302, 303), r1.data
+
+    # Second post with same-slugifying title: should auto-fill to test-slug-2.
+    token2 = csrf_token(client, path="/admin/sites/blog/posts/new")
+    r2 = client.post(
+        "/admin/sites/blog/posts/new",
+        data={
+            "title": "Test, Slug!",
+            "slug": "",
+            "body_markdown": "Second",
+            "status": "draft",
+            "_csrf_token": token2,
+        },
+    )
+    assert r2.status_code in (302, 303), r2.data
+    with db_session_factory() as db:
+        slugs = {
+            p.slug
+            for p in db.execute(
+                select(Post).where(Post.title.in_(["Test Slug", "Test, Slug!"]))
+            ).scalars()
+        }
+        assert slugs == {"test-slug", "test-slug-2"}
+
+
+def test_new_post_explicit_slug_is_not_overwritten(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """If the operator typed a slug, the auto-fill must not engage."""
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
+    resp = client.post(
+        "/admin/sites/blog/posts/new",
+        data={
+            "title": "Whatever",
+            "slug": "my-explicit-slug",
+            "body_markdown": "",
+            "status": "draft",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code in (302, 303), resp.data
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.title == "Whatever")).scalar_one()
+        assert post.slug == "my-explicit-slug"
+
+
+def test_new_post_empty_title_and_slug_still_errors(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Auto-fill only engages when title is non-empty. Both blank
+    must continue to error as the existing 'slug required' path."""
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
+    resp = client.post(
+        "/admin/sites/blog/posts/new",
+        data={
+            "title": "",
+            "slug": "",
+            "body_markdown": "",
+            "status": "draft",
+            "_csrf_token": token,
+        },
+    )
+    # The existing path re-renders the form with a flash (200), not a redirect.
+    assert resp.status_code == 200
+    assert b"required" in resp.data.lower()
+
+
+def test_new_post_title_with_no_sluggable_chars_falls_through_to_required_error(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A title like '中文' slugifies to '' so the helper raises ValueError;
+    the handler must swallow it and fall through to the existing required-
+    fields error rather than persist an opaque slug."""
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/posts/new")
+    resp = client.post(
+        "/admin/sites/blog/posts/new",
+        data={
+            "title": "中文",
+            "slug": "",
+            "body_markdown": "",
+            "status": "draft",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 200
+    assert b"required" in resp.data.lower()

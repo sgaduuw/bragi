@@ -10,6 +10,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Resume page: optional "lead with role" toggle on the admin form
   swaps the company/role order in position headings on the public
   page. Default off; existing resume pages render unchanged.
+- Admin: new post and new page forms auto-suggest the slug from
+  the title. JS live-preview as you type; server-side fallback at
+  POST time if the slug field is empty. Collisions are
+  disambiguated with a `-2`/`-3` suffix. Closes #265.
 
 ## [1.21.2] - 2026-05-30
 

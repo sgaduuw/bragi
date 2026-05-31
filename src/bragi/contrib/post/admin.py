@@ -277,6 +277,15 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             )
 
         form = _form_from_request()
+        if not form["slug"] and form["title"]:
+            from bragi.core.text import unique_slug_for_post
+
+            try:  # noqa: SIM105
+                form["slug"] = unique_slug_for_post(db, site_id=site_id, title=form["title"])
+            except ValueError:
+                # slugify(title) was empty — fall through to the existing
+                # required-fields error path with the title preserved.
+                pass
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return render_template(
