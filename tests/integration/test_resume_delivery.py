@@ -290,9 +290,9 @@ def test_position_heading_default_leads_with_company(
     company_pos = heading.find('itemprop="name"')
     role_pos = heading.find('class="role"')
     assert company_pos != -1 and role_pos != -1
-    assert company_pos < role_pos, (
-        f"expected company before role with lead_with_role=False; got {heading!r}"
-    )
+    assert (
+        company_pos < role_pos
+    ), f"expected company before role with lead_with_role=False; got {heading!r}"
 
 
 def test_position_heading_lead_with_role_swaps_order(
@@ -309,6 +309,40 @@ def test_position_heading_lead_with_role_swaps_order(
     company_pos = heading.find('itemprop="name"')
     role_pos = heading.find('class="role"')
     assert company_pos != -1 and role_pos != -1
-    assert role_pos < company_pos, (
-        f"expected role before company with lead_with_role=True; got {heading!r}"
+    assert (
+        role_pos < company_pos
+    ), f"expected role before company with lead_with_role=True; got {heading!r}"
+
+
+def _jsonld_block(html: str) -> str:
+    """Extract the JSON-LD <script> body from the rendered page."""
+    match = re.search(
+        r'<script type="application/ld\+json">(.*?)</script>',
+        html,
+        re.DOTALL,
     )
+    assert match, "no JSON-LD <script> block found"
+    return match.group(1).strip()
+
+
+def test_lead_with_role_does_not_affect_jsonld(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """JSON-LD output is byte-identical regardless of lead_with_role.
+    Pins the design invariant 'visible-order only; semantic mapping
+    is fixed'."""
+    rd_false = dict(_MINIMAL_RESUME)
+    rd_true = dict(_MINIMAL_RESUME) | {"lead_with_role": True}
+    with db_session_factory() as db:
+        _seed_resume_page(db, slug="cv-jsonld-false", resume_data=rd_false)
+        _seed_resume_page(db, slug="cv-jsonld-true", resume_data=rd_true)
+    client = delivery_app.test_client()
+    jsonld_false = _jsonld_block(
+        client.get("/cv-jsonld-false", headers={"Host": "blog.example.com"}).get_data(as_text=True)
+    )
+    jsonld_true = _jsonld_block(
+        client.get("/cv-jsonld-true", headers={"Host": "blog.example.com"}).get_data(as_text=True)
+    )
+    # Parse to dicts so canonical-form comparison ignores incidental
+    # key-order differences from json.dumps.
+    assert json.loads(jsonld_false) == json.loads(jsonld_true)
