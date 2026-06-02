@@ -5,11 +5,11 @@ API calls are made. The attachment creation path is real -- we verify
 a clean Attachment row lands in the DB with all five
 external_source_* / credit_* columns populated.
 
-Blueprint registration note: `bragi.contrib.unsplash` is not yet
-wired into `pyproject.toml`'s `[project.entry-points."bragi.plugins"]`
-(that happens when a plugin.py is added). The test fixture registers
-the admin blueprint directly on the app object so the routes are
-reachable without waiting for the full plugin.py / entry-point step.
+Blueprint registration: `bragi.contrib.unsplash` is wired into
+`pyproject.toml`'s `[project.entry-points."bragi.plugins"]` via
+`plugin.py`. `create_admin_app()` discovers and registers the admin
+blueprint automatically via the plugin entry-point; the fixture does
+not register it manually.
 """
 
 from __future__ import annotations
@@ -97,10 +97,6 @@ def admin_app(
     db_session.commit()
 
     app = create_admin_app()
-    # Register the Unsplash blueprint directly since the plugin is not yet
-    # wired into pyproject.toml entry-points. Production wiring happens
-    # via plugin.py (a later task).
-    app.register_blueprint(unsplash_admin.bp)
     yield app
 
 
