@@ -3,17 +3,23 @@
 Wires up:
 - The admin blueprint (search + select routes).
 - The image-picker tab hookimpl (returns None when unconfigured).
-
-The HTML transform for inline-body credit wrapping is added in
-Task 6 alongside this file.
+- The delivery-side Jinja filter `unsplash_credit_wrap` that wraps
+  credited <img> tags in a <figure> with a photographer caption.
+  Registered via `register_template_globals` (not
+  `register_html_transform`) because the transform needs `g.site`
+  for the site-scoped DB lookup, which is only available in a live
+  delivery request context. This is the same pattern used by
+  `pictureify` in `bragi.contrib.attachments`.
 """
 
 from __future__ import annotations
 
+import jinja2
 from flask import Blueprint
 
 from bragi.api import ImagePickerTab, hookimpl
 from bragi.contrib.unsplash.admin import bp as unsplash_admin_bp
+from bragi.contrib.unsplash.render import unsplash_credit_wrap
 from bragi.settings import Settings, settings
 
 
@@ -44,7 +50,27 @@ def register_image_picker_tab() -> ImagePickerTab | None:
     return _get_image_picker_tab(settings)
 
 
+@hookimpl
+def register_template_globals(env: jinja2.Environment) -> None:
+    """Register the `unsplash_credit_wrap` Jinja filter.
+
+    Delivery templates pipe `body_html` through it after `pictureify`
+    so credited Unsplash images gain a <figure> + <figcaption> credit
+    block. Priority on the template pipeline: applying after
+    `pictureify` ensures the <img> is already in its final form
+    (possibly inside a <picture>) before the credit wrap runs, but
+    the credit wrap targets `<img>` directly, so the ordering is
+    informational rather than a hard dependency.
+
+    The filter is a no-op outside a Flask request context or when
+    `g.site` is absent, so admin-side renders (which don't set a
+    site on `g`) pass through unchanged.
+    """
+    env.filters["unsplash_credit_wrap"] = unsplash_credit_wrap
+
+
 __all__ = [
     "register_admin_blueprint",
     "register_image_picker_tab",
+    "register_template_globals",
 ]
