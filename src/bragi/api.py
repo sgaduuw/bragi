@@ -21,7 +21,7 @@ What's covered:
   `ContentTypeSpec`, `ImporterSpec`, `NavItem`,
   `OAuthProviderSpec`, `AuthMethodSpec`, `RedirectTarget`,
   `TransformRegistry`, `SearchBackendSpec`, `ThemeSpec`,
-  `StorageBackendSpec`, `ImageProcessorSpec`,
+  `StorageBackendSpec`, `ImageProcessorSpec`, `ImagePickerTab`,
   `InternalLinkResolution`, `NavNode`, `Crumb`,
   `ResumeData`, `ResumeHeader`, `Position`, `Project`,
   `Education`, `SkillGroup`, `Certification`, `Language`,
@@ -271,6 +271,36 @@ class NavItem:
     # when the user is in a site context (URL contains <site_slug>),
     # and their endpoint resolves with site_slug from the request.
     scope: str = "global"
+
+
+class ImagePickerTab(BaseModel):
+    """Dataclass returned by `register_image_picker_tab` hookimpls.
+
+    Lets a plugin contribute a tab to the unified attachments picker
+    dialog. The picker renders a tab nav when any plugins contribute
+    a tab; the dialog body shows the picked tab's `template_path`.
+
+    Return `None` from the hookimpl to opt out (e.g. when a plugin's
+    required configuration is missing); the picker filters None out.
+    """
+
+    label: str
+    """Display text on the tab header."""
+
+    slug: str
+    """URL-safe id for the tab pane (becomes the `aria-controls`
+    target and a CSS hook). Must be unique across contributing
+    plugins; if two plugins contribute the same slug, the later
+    one is dropped with a warning."""
+
+    template_path: str
+    """Jinja path rendered inside the tab pane. The picker passes
+    the same context that the host template receives."""
+
+    enabled: bool = True
+    """Set False to hide the tab (the picker filters disabled tabs
+    out). Useful for plugins that load but only activate when
+    configured."""
 
 
 # ============================================================
@@ -634,6 +664,7 @@ __all__ = [
     "ExternalUser",
     "FieldSpec",
     "ImageMetadata",
+    "ImagePickerTab",
     "ImageProcessorSpec",
     "ImportPlan",
     "ImportResult",
