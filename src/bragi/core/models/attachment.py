@@ -22,7 +22,7 @@ live and feed into this model.
 
 from __future__ import annotations
 
-from sqlalchemy import Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
@@ -36,6 +36,12 @@ class Attachment(IdMixin, TimestampsMixin, Base):
         # (different posts using the same image), but each (site,
         # storage_key) pair is unique: per-site dedup.
         UniqueConstraint("site_id", "storage_key", name="uq_attachments_site_key"),
+        Index(
+            "ix_attachments_external_source",
+            "site_id",
+            "external_source",
+            "external_source_id",
+        ),
     )
 
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
@@ -58,3 +64,16 @@ class Attachment(IdMixin, TimestampsMixin, Base):
     # by themes for art-directed cropping. NULL means "centre".
     focal_x: Mapped[float | None] = mapped_column(Float, default=None)
     focal_y: Mapped[float | None] = mapped_column(Float, default=None)
+
+    # External-source provenance (Unsplash today; reserved generic
+    # for Pexels / Pixabay / etc. plugins later). NULL for operator-
+    # uploaded images.
+    external_source: Mapped[str | None] = mapped_column(String(64), default=None)
+    external_source_id: Mapped[str | None] = mapped_column(String(128), default=None)
+    external_source_url: Mapped[str | None] = mapped_column(String(512), default=None)
+    # Photographer / artist attribution. `credit_url` is rendered with
+    # utm_source / utm_medium params at delivery time, not stored
+    # with them, so the operator can rename their app without a
+    # backfill.
+    credit_name: Mapped[str | None] = mapped_column(String(256), default=None)
+    credit_url: Mapped[str | None] = mapped_column(String(512), default=None)

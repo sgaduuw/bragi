@@ -26,6 +26,7 @@ from bragi.api import (
     AnalyticsEvent,
     AuthMethodSpec,
     ContentTypeSpec,
+    ImagePickerTab,
     ImageProcessorSpec,
     ImporterSpec,
     NavItem,
@@ -364,6 +365,22 @@ def register_image_processor() -> ImageProcessorSpec:
     Resolution: the first processor whose `can_process(content_type)`
     returns True wins; Pillow (registered by
     `bragi.contrib.attachments`) is the fallback.
+    """
+    ...
+
+
+@hookspec
+def register_image_picker_tab() -> ImagePickerTab | None:
+    """Add a tab to the unified attachments-picker dialog.
+
+    Plugins return an `ImagePickerTab` to contribute; return `None`
+    to opt out (e.g. when the plugin's required configuration is
+    not set). The picker template renders a tab nav when any
+    plugin contributes a non-None tab; otherwise the dialog stays
+    single-pane (no chrome cost).
+
+    Stability: covered by bragi's two-step deprecation policy
+    (see `bragi/api.py` top-of-module docstring).
     """
     ...
 

@@ -63,7 +63,7 @@
   </aside>
   {% endif %}
   <div class="body">
-    {{ post.body_html | internal_link_rewrite | pictureify | safe }}
+    {{ post.body_html | internal_link_rewrite | unsplash_credit_wrap | pictureify | safe }}
   </div>
   {% if author_bio %}
   <aside class="author-bio">

@@ -111,6 +111,21 @@ services:
       # BRAGI_EMBED_OEMBED_TIMEOUT_AGGREGATE: "5.0"
       # BRAGI_EMBED_RERENDER_TIMEOUT_PER: "15.0"
       # BRAGI_INDEXNOW_ENDPOINT: "https://api.indexnow.org/indexnow"
+      # Unsplash plugin. Set BRAGI_UNSPLASH_ACCESS_KEY to enable
+      # the Unsplash tab in the admin attachments picker (also
+      # surfaced by the TipTap "Insert image" button, which opens
+      # the same picker). Get a key from
+      # https://unsplash.com/developers. Empty / unset = plugin
+      # loads but the picker tab stays hidden and the search /
+      # select routes return 400. The delivery container does not
+      # need this key (credit captions render from stored
+      # attachment metadata, not from Unsplash API calls).
+      # BRAGI_UNSPLASH_ACCESS_KEY: ${BRAGI_UNSPLASH_ACCESS_KEY:-}
+      # BRAGI_UNSPLASH_APP_NAME (default "bragi") is the utm_source
+      # tag on photographer-credit links; match it across admin and
+      # delivery if you customise so rendered credit URLs stay
+      # consistent.
+      # BRAGI_UNSPLASH_APP_NAME: "bragi"
       # ADMIN_WORKERS: "2"
     volumes:
       - bragi-data:/data
@@ -148,6 +163,14 @@ services:
       # Optional knobs (see `src/bragi/settings.py` for field docs).
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
       # BRAGI_MAX_REQUEST_BYTES: "1048576"
+      # BRAGI_UNSPLASH_APP_NAME (default "bragi") affects the
+      # utm_source tag on photographer-credit links rendered at
+      # delivery time. Set on both admin and delivery if you
+      # customise so credit URLs match the ones admin generates
+      # when picking. The Unsplash access key is NOT needed here;
+      # credit captions render from the stored attachment
+      # metadata, not from Unsplash API calls.
+      # BRAGI_UNSPLASH_APP_NAME: "bragi"
       # DELIVERY_WORKERS: "4"
     volumes:
       - bragi-data:/data
