@@ -17,46 +17,33 @@
    their selection logic.
 #}
 <style>
-  /* Scoped styles for the Unsplash tab. Inline-style attributes
-     alone aren't enough here: the parent <dialog> applies heading-
-     sized typography to bare <button> elements, so the Search
-     submit button blew up to full-width and oversized without
-     explicit font-size + width constraints. */
+  /* Scoped styles for the Unsplash tab.
+     The admin-wide `form { display: flex; flex-direction: column }`
+     rule in admin-chrome.css stacks every form vertically by default;
+     we override `flex-direction: row` here so the search input + submit
+     button sit side-by-side. Button styling comes from the global
+     `form button` rule (dark pill, padding 0.5rem 1rem) which is fine
+     as-is; we only need a `flex: 0 0 auto` so it stays compact next to
+     the input rather than stretching. `input[type="search"]` isn't
+     covered by the global text/email/select rule, so we add the same
+     padding + border treatment for visual consistency. */
   .unsplash-panel {
     padding: 0.75rem;
   }
   .unsplash-panel form.unsplash-search {
-    display: flex;
+    flex-direction: row;
     gap: 0.5rem;
     margin-bottom: 0.5rem;
   }
   .unsplash-panel input[type="search"] {
     flex: 1;
-    font: inherit;
-    font-size: 0.9rem;
-    padding: 0.4rem 0.6rem;
+    padding: 0.5rem;
+    font-size: 1em;
     border: 1px solid #bbb;
-    border-radius: 3px;
+    border-radius: 4px;
   }
   .unsplash-panel button[type="submit"] {
-    appearance: none;
-    font: inherit;
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: #fff;
-    background: #333;
-    border: 0;
-    border-radius: 3px;
-    padding: 0.4rem 1rem;
-    cursor: pointer;
     flex: 0 0 auto;
-  }
-  .unsplash-panel button[type="submit"]:hover {
-    background: #111;
-  }
-  .unsplash-panel button[type="submit"]:focus-visible {
-    outline: 2px solid #2a6;
-    outline-offset: 2px;
   }
 </style>
 <div class="unsplash-panel" data-site-slug="{{ site_slug }}">
