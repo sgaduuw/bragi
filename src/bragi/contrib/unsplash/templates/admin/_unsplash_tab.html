@@ -16,15 +16,44 @@
    the Unsplash tab compatible with both surfaces without duplicating
    their selection logic.
 #}
+<style>
+  /* Scoped styles for the Unsplash tab.
+     The admin-wide `form { display: flex; flex-direction: column }`
+     rule in admin-chrome.css stacks every form vertically by default;
+     we override `flex-direction: row` here so the search input + submit
+     button sit side-by-side. Button styling comes from the global
+     `form button` rule (dark pill, padding 0.5rem 1rem) which is fine
+     as-is; we only need a `flex: 0 0 auto` so it stays compact next to
+     the input rather than stretching. `input[type="search"]` isn't
+     covered by the global text/email/select rule, so we add the same
+     padding + border treatment for visual consistency. */
+  .unsplash-panel {
+    padding: 0.75rem;
+  }
+  .unsplash-panel form.unsplash-search {
+    flex-direction: row;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .unsplash-panel input[type="search"] {
+    flex: 1;
+    padding: 0.5rem;
+    font-size: 1em;
+    border: 1px solid #bbb;
+    border-radius: 4px;
+  }
+  .unsplash-panel button[type="submit"] {
+    flex: 0 0 auto;
+  }
+</style>
 <div class="unsplash-panel" data-site-slug="{{ site_slug }}">
-  <form hx-get="{{ url_for('unsplash_admin.search', site_slug=site_slug) }}"
+  <form class="unsplash-search"
+        hx-get="{{ url_for('unsplash_admin.search', site_slug=site_slug) }}"
         hx-trigger="submit, keyup changed delay:400ms from:input[name=q]"
         hx-target="#unsplash-results-target"
-        hx-swap="innerHTML"
-        style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+        hx-swap="innerHTML">
     <input type="search" name="q" placeholder="Search Unsplash"
-           minlength="2" autofocus
-           style="flex: 1; padding: 0.4rem 0.6rem;">
+           minlength="2" autofocus>
     <button type="submit">Search</button>
   </form>
   <div id="unsplash-results-target"></div>
