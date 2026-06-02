@@ -16,15 +16,57 @@
    the Unsplash tab compatible with both surfaces without duplicating
    their selection logic.
 #}
+<style>
+  /* Scoped styles for the Unsplash tab. Inline-style attributes
+     alone aren't enough here: the parent <dialog> applies heading-
+     sized typography to bare <button> elements, so the Search
+     submit button blew up to full-width and oversized without
+     explicit font-size + width constraints. */
+  .unsplash-panel {
+    padding: 0.75rem;
+  }
+  .unsplash-panel form.unsplash-search {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .unsplash-panel input[type="search"] {
+    flex: 1;
+    font: inherit;
+    font-size: 0.9rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #bbb;
+    border-radius: 3px;
+  }
+  .unsplash-panel button[type="submit"] {
+    appearance: none;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #fff;
+    background: #333;
+    border: 0;
+    border-radius: 3px;
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+  .unsplash-panel button[type="submit"]:hover {
+    background: #111;
+  }
+  .unsplash-panel button[type="submit"]:focus-visible {
+    outline: 2px solid #2a6;
+    outline-offset: 2px;
+  }
+</style>
 <div class="unsplash-panel" data-site-slug="{{ site_slug }}">
-  <form hx-get="{{ url_for('unsplash_admin.search', site_slug=site_slug) }}"
+  <form class="unsplash-search"
+        hx-get="{{ url_for('unsplash_admin.search', site_slug=site_slug) }}"
         hx-trigger="submit, keyup changed delay:400ms from:input[name=q]"
         hx-target="#unsplash-results-target"
-        hx-swap="innerHTML"
-        style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+        hx-swap="innerHTML">
     <input type="search" name="q" placeholder="Search Unsplash"
-           minlength="2" autofocus
-           style="flex: 1; padding: 0.4rem 0.6rem;">
+           minlength="2" autofocus>
     <button type="submit">Search</button>
   </form>
   <div id="unsplash-results-target"></div>
