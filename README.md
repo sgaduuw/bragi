@@ -18,10 +18,13 @@ navigation from the page tree (with per-page `show_in_nav` and
 bootstrap, redirects as a first-class subsystem, importers for
 Hugo / Ghost / WordPress / LinkedIn, attachments + media library with
 theme-aware multi-format multi-width renditions (`<picture>` with
-AVIF / WebP / fallback tiers and per-class `sizes`), pinned posts
-on the landing page, ActivityPub + webmentions, four in-tree
-themes with auto light/dark, sitemap / feed / JSON-LD,
-audit-driven hardening from v1.12 through v1.19.
+AVIF / WebP / fallback tiers and per-class `sizes`), Unsplash
+plugin (search + insert from the admin image picker, photographer
+credit auto-renders beneath inline-body images; requires
+`BRAGI_UNSPLASH_ACCESS_KEY`), pinned posts on the landing page,
+ActivityPub + webmentions, four in-tree themes with auto
+light/dark, sitemap / feed / JSON-LD, audit-driven hardening
+from v1.12 through v1.19.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 
