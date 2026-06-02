@@ -168,6 +168,20 @@
       max-width: 100%;
       height: auto;
     }
+    /* Photographer credit caption shown beneath credited images
+       (Unsplash etc.). Monospace font matches the terminal aesthetic;
+       italic and muted to keep it visually subordinate to the image. */
+    .credit {
+      font-size: 0.85em;
+      color: var(--muted);
+      font-style: italic;
+      font-family: var(--mono);
+      margin-top: 0.25rem;
+    }
+    .credit a {
+      color: inherit;
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
