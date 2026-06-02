@@ -23,17 +23,54 @@
      site-scoped, so the picker always loads the right corpus. #}
 
   {% if _picker_tabs %}
-    {# Tab nav: Library (built-in) + each contributed tab. #}
-    <div role="tablist"
-         style="display: flex; gap: 0; border-bottom: 1px solid #ddd;
-                padding: 0 0.5rem; background: #fafafa;">
+    {# Tab nav: Library (built-in) + each contributed tab. Tab styling
+       lives in the scoped <style> block below; the JS only toggles
+       aria-selected and CSS reacts via [aria-selected="true"]. Doing
+       it this way avoids inline styles inheriting the dialog's heading
+       typography (which made the tabs render giant-bold without
+       explicit font-size). #}
+    <style>
+      #attachment-picker [role="tablist"] {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid #ddd;
+        padding: 0 0.5rem;
+        background: #fafafa;
+      }
+      #attachment-picker [role="tab"] {
+        appearance: none;
+        font: inherit;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #555;
+        background: transparent;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        padding: 0.5rem 1rem;
+        margin: 0;
+        cursor: pointer;
+        line-height: 1.4;
+      }
+      #attachment-picker [role="tab"]:hover {
+        color: #111;
+        background: #f0f0f0;
+      }
+      #attachment-picker [role="tab"][aria-selected="true"] {
+        color: #111;
+        font-weight: 600;
+        border-bottom-color: #333;
+      }
+      #attachment-picker [role="tab"]:focus-visible {
+        outline: 2px solid #2a6;
+        outline-offset: -2px;
+      }
+    </style>
+    <div role="tablist">
       <button role="tab"
               id="tab-btn-library"
               aria-selected="true"
               aria-controls="tab-pane-library"
-              type="button"
-              style="padding: 0.5rem 1rem; border: none; background: none;
-                     cursor: pointer; font-weight: bold; border-bottom: 2px solid #333;">
+              type="button">
         Library
       </button>
       {% for tab in _picker_tabs %}
@@ -41,9 +78,7 @@
                 id="tab-btn-{{ tab.slug }}"
                 aria-selected="false"
                 aria-controls="tab-pane-{{ tab.slug }}"
-                type="button"
-                style="padding: 0.5rem 1rem; border: none; background: none;
-                       cursor: pointer; border-bottom: 2px solid transparent;">
+                type="button">
           {{ tab.label }}
         </button>
       {% endfor %}
@@ -81,11 +116,11 @@
           var targetId = btn.getAttribute('aria-controls');
           if (!targetId) return;
 
-          // Deselect all tabs and hide all panes.
+          // Deselect all tabs and hide all panes. CSS reacts to
+          // [aria-selected="true"] for the active-tab styling, so
+          // we only toggle the attribute here.
           tablist.querySelectorAll('[role="tab"]').forEach(function (t) {
             t.setAttribute('aria-selected', 'false');
-            t.style.fontWeight = '';
-            t.style.borderBottomColor = 'transparent';
           });
           picker.querySelectorAll('[role="tabpanel"]').forEach(function (p) {
             p.hidden = true;
@@ -93,8 +128,6 @@
 
           // Activate the clicked tab and its pane.
           btn.setAttribute('aria-selected', 'true');
-          btn.style.fontWeight = 'bold';
-          btn.style.borderBottomColor = '#333';
           var pane = document.getElementById(targetId);
           if (pane) pane.hidden = false;
         });

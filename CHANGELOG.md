@@ -6,6 +6,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.23.1] - 2026-06-02
+
+### Fixed
+- Admin image-picker tab nav rendered with heading-sized
+  white-on-light-gray text because the tab buttons had no
+  explicit font-size or color in their inline styles. Replaced
+  the inline styles with a scoped `<style>` block targeting
+  `#attachment-picker [role="tab"]`; the JS now toggles only
+  `aria-selected` and CSS reacts via `[aria-selected="true"]`.
+  Adds hover + focus-visible states.
+- Unsplash tab's search form stacked the input and Search
+  button on two full-width rows because `admin-chrome.css`'s
+  global `form { display: flex; flex-direction: column }`
+  rule overrode the form's default inline layout. Scoped
+  override sets `flex-direction: row` on the Unsplash search
+  form so input + button sit side-by-side; button styling
+  inherits the global `form button` dark-pill rule.
+
 ## [1.23.0] - 2026-06-02
 
 ### Added
