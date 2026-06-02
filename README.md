@@ -378,6 +378,21 @@ class; `--access-logfile -` to stdout). Worker counts default to
 `DELIVERY_WORKERS` env vars on each service if your traffic
 shape needs it.
 
+`BRAGI_UNSPLASH_ACCESS_KEY` (optional) enables the Unsplash
+plugin: authors search Unsplash from inside the admin
+attachments picker (and the TipTap "Insert image" button, which
+opens the same picker), pick a photo, and the plugin downloads
+it into bragi's storage as a regular attachment with the
+photographer's name and profile URL stored alongside. On the
+public page the credit auto-renders beneath inline-body
+Unsplash images. Set the key on the `admin` service only; the
+`delivery` service doesn't talk to Unsplash. Get a key from
+<https://unsplash.com/developers>. Leave unset to disable the
+plugin (the Unsplash tab stays hidden). `BRAGI_UNSPLASH_APP_NAME`
+(default `bragi`) controls the `utm_source` tag on credit links;
+if you customise it, set it on both admin and delivery for
+consistency.
+
 Task-runner cadences (all in seconds, set on the `bragi-tasks`
 service) default to `SCHEDULED_PUBLISH_EVERY=60`,
 `EMBEDS_RERENDER_EVERY=600`, `WEBMENTIONS_SEND_EVERY=300`,
