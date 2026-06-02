@@ -177,3 +177,29 @@ def test_trigger_download_ping_calls_the_correct_url(
     client.trigger_download_ping(photo)
     assert captured["url"] == "https://api.unsplash.com/photos/abc123/download"
     assert captured["headers"]["Authorization"] == "Client-ID test-key"
+
+
+def test_get_photo_full_bytes_passes_large_max_bytes_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression pin: the default safe_get cap is 1 MB, which
+    would truncate typical Unsplash full-res JPEGs (2-15 MB).
+    The client must pass an explicit higher cap."""
+    captured: dict[str, Any] = {}
+
+    def _capturing_safe_get(url: str, *, headers=None, params=None, max_bytes=None, **kwargs):
+        captured["max_bytes"] = max_bytes
+        resp = MagicMock()
+        resp.content = b"binary"
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(uc, "safe_get", _capturing_safe_get)
+
+    client = uc.UnsplashClient(access_key="test-key", app_name="testapp")
+    photo = uc.UnsplashPhoto.model_validate(SAMPLE_SEARCH_RESPONSE["results"][0])
+    client.get_photo_full_bytes(photo)
+    # Must be well above the safe_get default of 1 MB and large
+    # enough for typical Unsplash full-res JPEGs (commonly 2-15 MB).
+    assert captured["max_bytes"] is not None
+    assert captured["max_bytes"] >= 10_000_000

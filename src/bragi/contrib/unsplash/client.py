@@ -77,8 +77,18 @@ class UnsplashClient:
         return SearchResults.model_validate(resp.json())
 
     def get_photo_full_bytes(self, photo: UnsplashPhoto) -> bytes:
-        """GET the URL in photo.urls.full. Returns the binary."""
-        resp = safe_get(photo.urls.full, headers=self._auth_headers())
+        """GET the URL in photo.urls.full. Returns the binary.
+
+        Bypasses safe_get's default 1 MB cap because Unsplash
+        full-resolution JPEGs commonly run 2-15 MB. 20 MB is the
+        upper bound for the largest typical Unsplash original;
+        bumping further hurts nothing on a single-author CMS
+        but the cap protects against pathological inputs."""
+        resp = safe_get(
+            photo.urls.full,
+            headers=self._auth_headers(),
+            max_bytes=20_000_000,
+        )
         resp.raise_for_status()
         return resp.content
 
