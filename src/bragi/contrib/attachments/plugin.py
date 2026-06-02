@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import click
 import jinja2
-from flask import Blueprint, url_for
+from flask import Blueprint, current_app, url_for
 from sqlalchemy import select
 
-from bragi.api import ImageProcessorSpec, NavItem, StorageBackendSpec, hookimpl
+from bragi.api import ImagePickerTab, ImageProcessorSpec, NavItem, StorageBackendSpec, hookimpl
 from bragi.contrib.attachments.admin import bp as attachment_admin_bp
 from bragi.contrib.attachments.cli import media_group
 from bragi.contrib.attachments.delivery import bp as attachment_delivery_bp
@@ -162,6 +162,19 @@ def register_template_globals(env: jinja2.Environment) -> None:
     env.globals["attachment_url"] = attachment_url
     env.globals["editor_image_renditions"] = _editor_image_renditions_json
     env.filters["pictureify"] = pictureify
+
+    def _image_picker_tabs() -> list[ImagePickerTab]:
+        """Aggregate picker tabs contributed by plugins.
+
+        Walks the plugin manager calling `register_image_picker_tab`
+        and returns every non-None result. Empty when no plugin
+        contributes (e.g. Unsplash key not configured), which keeps
+        the attachment picker single-pane with no extra chrome.
+        """
+        pm = current_app.extensions["plugin_manager"]
+        return [t for t in pm.hook.register_image_picker_tab() if t]
+
+    env.globals["image_picker_tabs"] = _image_picker_tabs
 
 
 def _editor_image_renditions_json(

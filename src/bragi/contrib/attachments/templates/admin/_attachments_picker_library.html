@@ -1,0 +1,84 @@
+{# Library tab pane: the built-in attachment grid.
+
+   Included by `attachments_picker.html` for both the tabbed layout
+   (when plugins contribute picker tabs) and the single-pane fallback
+   (when no plugins contribute). The `_` prefix signals this is a
+   partial-only template, not a standalone page. #}
+
+{% if not rows %}
+  <p style="padding: 1rem;">
+    No images yet on this site.
+    <a href="{{ url_for('attachment_admin.upload_attachment') }}" target="_blank">
+      Upload one.
+    </a>
+  </p>
+{% else %}
+  <div class="picker-grid"
+       style="display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+              gap: 0.75rem; padding: 0.75rem;">
+    {% for r in rows %}
+      {# Per-size rendition keys land as data-rendition-{small,medium,full}
+         so the editor can swap the in-editor `<img src>` when the
+         operator clicks a size button on the bubble menu. The keys
+         are storage_key path strings (`<sha>/<width>/webp`); the
+         editor JS prepends the admin attachment prefix to build the
+         full URL. Empty string when no done WebP exists yet — the
+         editor falls back to the original. #}
+      <button type="button"
+              class="picker-card"
+              data-attachment-id="{{ r.id }}"
+              data-storage-key="{{ r.storage_key }}"
+              data-rendition-small="{{ small_key_by_id.get(r.id, '') }}"
+              data-rendition-medium="{{ medium_key_by_id.get(r.id, '') }}"
+              data-rendition-full="{{ full_key_by_id.get(r.id, '') }}"
+              data-filename="{{ r.filename }}"
+              data-alt-text="{{ r.alt_text or '' }}"
+              title="{{ r.filename }}{% if r.width and r.height %} ({{ r.width }}&times;{{ r.height }}){% endif %}"
+              style="display: flex; flex-direction: column; gap: 0.25rem;
+                     padding: 0.5rem; background: white; border: 1px solid #ddd;
+                     border-radius: 4px; cursor: pointer; text-align: left;
+                     overflow: hidden;">
+        {# Site-scoped admin URL: the delivery /attachments/<key>
+           route resolves the site from the Host header, which
+           doesn't match on the admin host. attachment_admin's
+           /file/<key> reads the site from the URL path. #}
+        <img src="{{ url_for(
+               'attachment_admin.serve_attachment_bytes',
+               site_slug=request.view_args['site_slug'],
+               storage_key=(thumb_storage_key_by_id.get(r.id) or r.storage_key)
+             ) }}"
+             alt="{{ r.alt_text or '' }}"
+             loading="lazy"
+             style="width: 100%; height: 120px; object-fit: cover;
+                    background: #f0f0f0; border-radius: 2px;">
+        <small style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          <code>{{ r.filename }}</code>
+        </small>
+        <small style="color: {% if r.alt_text %}#080{% else %}#a00{% endif %};">
+          {% if r.alt_text %}&check; alt text{% else %}no alt text{% endif %}
+        </small>
+      </button>
+    {% endfor %}
+  </div>
+
+  <nav style="padding: 0.5rem; border-top: 1px solid #eee;
+              display: flex; gap: 0.5rem; justify-content: center;">
+    {% if page > 1 %}
+      <button type="button"
+              hx-get="{{ url_for('attachment_admin.picker', page=page-1) }}"
+              hx-target="#attachment-picker"
+              hx-swap="outerHTML">
+        &laquo; Prev
+      </button>
+    {% endif %}
+    <span>Page {{ page }}</span>
+    {% if has_more %}
+      <button type="button"
+              hx-get="{{ url_for('attachment_admin.picker', page=page+1) }}"
+              hx-target="#attachment-picker"
+              hx-swap="outerHTML">
+        Next &raquo;
+      </button>
+    {% endif %}
+  </nav>
+{% endif %}
