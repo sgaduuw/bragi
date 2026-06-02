@@ -151,6 +151,14 @@ class Settings(BaseSettings):
     github_client_id: str | None = None
     github_client_secret: str | None = None
 
+    # Unsplash. Enabling the plugin requires an access key from
+    # https://unsplash.com/developers. Empty = plugin loads but
+    # search UIs stay hidden; matches the auth_github pattern.
+    unsplash_access_key: str | None = None
+    # Used as utm_source on credit links so Unsplash can attribute
+    # referrals back to this site / app. Defaults to "bragi".
+    unsplash_app_name: str = "bragi"
+
     # IndexNow push-crawl endpoint. `api.indexnow.org` is the
     # provider-agnostic router that fans out to every participating
     # search engine (Bing, Yandex, Seznam, Naver, ...); set this to
