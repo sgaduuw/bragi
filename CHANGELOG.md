@@ -6,6 +6,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.23.2] - 2026-06-02
+
+### Fixed
+- Unsplash plugin search and select returned 404 in production
+  because the attachments picker view didn't pass `site_slug`
+  into the template context. The included Unsplash tab partial's
+  `{{ url_for('unsplash_admin.search', site_slug=site_slug) }}`
+  and `data-site-slug="{{ site_slug }}"` both rendered the slug
+  as the empty string, generating URLs like
+  `/admin/sites//unsplash/search?q=...` which Flask 404s.
+  Affected v1.23.0 and v1.23.1; Unsplash was non-functional on
+  any deployment despite the picker tab rendering visually
+  correctly. Pinned by a new regression test in
+  `tests/contrib/test_attachments.py`.
+
 ## [1.23.1] - 2026-06-02
 
 ### Fixed

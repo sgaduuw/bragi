@@ -364,6 +364,13 @@ def picker(site_slug: str) -> ResponseReturnValue:
 
     return render_template(
         "admin/attachments_picker.html",
+        # Consumed by any plugin-contributed picker-tab partial
+        # (Unsplash etc.) to generate per-site action URLs via
+        # `url_for(..., site_slug=site_slug)`. Without this
+        # explicit pass the variable is undefined in the included
+        # tab template, renders as the empty string, and every URL
+        # the tab generates targets `/admin/sites//...` which 404s.
+        site_slug=site_slug,
         rows=rows,
         page=page,
         has_more=has_more,
