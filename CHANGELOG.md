@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-06-02
+
 ### Added
 - Unsplash plugin: search Unsplash from the admin attachments
   picker (which the TipTap "Insert image" button also opens),
