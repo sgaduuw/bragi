@@ -157,6 +157,21 @@
       max-width: 100%;
       height: auto;
     }
+    /* Photographer credit caption shown beneath credited images
+       (Unsplash etc.). Small, italic, muted. Uses heading-font for
+       the caption since it sits visually adjacent to figure
+       contexts that often use sans headings; inherits muted color. */
+    .credit {
+      font-size: 0.85em;
+      color: var(--muted);
+      font-style: italic;
+      font-family: var(--heading-font);
+      margin-top: 0.25rem;
+    }
+    .credit a {
+      color: inherit;
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>

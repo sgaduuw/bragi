@@ -153,6 +153,19 @@
       max-width: 100%;
       height: auto;
     }
+    /* Photographer credit caption shown beneath credited images
+       (Unsplash etc.). Small, italic, muted — inherits the theme's
+       muted-text color so it works in both light and dark modes. */
+    .credit {
+      font-size: 0.85em;
+      color: var(--muted);
+      font-style: italic;
+      margin-top: 0.25rem;
+    }
+    .credit a {
+      color: inherit;
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>

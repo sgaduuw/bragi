@@ -6,6 +6,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-06-02
+
+### Added
+- Unsplash plugin: search Unsplash from the admin attachments
+  picker (which the TipTap "Insert image" button also opens),
+  click to download into bragi's storage as a regular
+  attachment, photographer credit auto-renders on inline-body
+  images on the public page beneath the image. Requires
+  `BRAGI_UNSPLASH_ACCESS_KEY`.
+
 ## [1.22.0] - 2026-05-31
 
 ### Added

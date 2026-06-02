@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.22.0 (2026-05-31).
+**Latest release:** 1.23.0 (2026-06-02).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -18,10 +18,13 @@ navigation from the page tree (with per-page `show_in_nav` and
 bootstrap, redirects as a first-class subsystem, importers for
 Hugo / Ghost / WordPress / LinkedIn, attachments + media library with
 theme-aware multi-format multi-width renditions (`<picture>` with
-AVIF / WebP / fallback tiers and per-class `sizes`), pinned posts
-on the landing page, ActivityPub + webmentions, four in-tree
-themes with auto light/dark, sitemap / feed / JSON-LD,
-audit-driven hardening from v1.12 through v1.19.
+AVIF / WebP / fallback tiers and per-class `sizes`), Unsplash
+plugin (search + insert from the admin image picker, photographer
+credit auto-renders beneath inline-body images; requires
+`BRAGI_UNSPLASH_ACCESS_KEY`), pinned posts on the landing page,
+ActivityPub + webmentions, four in-tree themes with auto
+light/dark, sitemap / feed / JSON-LD, audit-driven hardening
+from v1.12 through v1.19.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 
@@ -306,7 +309,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.22.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.23.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -374,6 +377,21 @@ class; `--access-logfile -` to stdout). Worker counts default to
 2 for admin and 4 for delivery; tune via `ADMIN_WORKERS` /
 `DELIVERY_WORKERS` env vars on each service if your traffic
 shape needs it.
+
+`BRAGI_UNSPLASH_ACCESS_KEY` (optional) enables the Unsplash
+plugin: authors search Unsplash from inside the admin
+attachments picker (and the TipTap "Insert image" button, which
+opens the same picker), pick a photo, and the plugin downloads
+it into bragi's storage as a regular attachment with the
+photographer's name and profile URL stored alongside. On the
+public page the credit auto-renders beneath inline-body
+Unsplash images. Set the key on the `admin` service only; the
+`delivery` service doesn't talk to Unsplash. Get a key from
+<https://unsplash.com/developers>. Leave unset to disable the
+plugin (the Unsplash tab stays hidden). `BRAGI_UNSPLASH_APP_NAME`
+(default `bragi`) controls the `utm_source` tag on credit links;
+if you customise it, set it on both admin and delivery for
+consistency.
 
 Task-runner cadences (all in seconds, set on the `bragi-tasks`
 service) default to `SCHEDULED_PUBLISH_EVERY=60`,

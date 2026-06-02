@@ -1,6 +1,6 @@
 [project]
 name = "bragi"
-version = "1.22.0"
+version = "1.23.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
@@ -74,6 +74,7 @@ markdown_extras = "bragi.contrib.markdown_extras.plugin"
 api_tokens = "bragi.contrib.api_tokens.plugin"
 webmentions = "bragi.contrib.webmentions.plugin"
 activitypub = "bragi.contrib.activitypub.plugin"
+unsplash = "bragi.contrib.unsplash.plugin"
 
 # Poetry-specific build layout: src-layout package discovery. PEP
 # 621 has no portable equivalent for this; stays in `[tool.poetry]`.
