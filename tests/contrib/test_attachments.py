@@ -3411,3 +3411,38 @@ def test_editor_image_renditions_global_returns_map_for_body_images(
             "full": None,
         }
     }
+
+
+def test_picker_passes_site_slug_to_template_context_for_plugin_tabs(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression pin (v1.23.2): the picker view must pass `site_slug`
+    into the template context so plugin-contributed tabs (Unsplash etc.)
+    can build per-site action URLs via `url_for(..., site_slug=...)`.
+
+    Without the explicit pass, `site_slug` was undefined in the included
+    tab template, rendered as `""`, and every URL the Unsplash tab
+    generated targeted `/admin/sites//unsplash/...` which 404s in
+    production.
+
+    Patches the settings singleton directly because pydantic-settings
+    reads env + .env at import time, so monkeypatch.setenv is too late
+    to influence whether the Unsplash plugin contributes a tab on this
+    request."""
+    from bragi.settings import settings as _settings
+
+    monkeypatch.setattr(_settings, "unsplash_access_key", "test-key")
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/picker")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    # The Unsplash tab partial renders `data-site-slug="{{ site_slug }}"`
+    # on its panel; before the fix this came through as empty.
+    assert 'data-site-slug="blog"' in body
+    # The Unsplash search form's hx-get URL must include the site slug
+    # (not the broken `/admin/sites//unsplash/search`).
+    assert "/admin/sites/blog/unsplash/search" in body
+    assert "/admin/sites//unsplash/search" not in body
