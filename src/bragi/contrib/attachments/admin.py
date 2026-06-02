@@ -43,6 +43,7 @@ from bragi.contrib.attachments.cli import (
     _purge_renditions,
 )
 from bragi.contrib.attachments.delivery import build_attachment_response
+from bragi.contrib.attachments.service import create_attachment_from_bytes
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
@@ -50,8 +51,6 @@ from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
-from bragi.core.storage import store_original
-from bragi.core.themes import rendition_target_content_type, resolved_widths
 from bragi.settings import settings
 
 # Allowlist of MIME types accepted at upload time. Anything not
@@ -419,107 +418,56 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
         )
         return render_template("admin/attachments_new.html")
 
+    # Image probe: ask the registered processor for dimensions.
+    # For declared image/* types this is REQUIRED; magic-byte
+    # mismatch (e.g. a `.html` renamed to `.png` uploaded with
+    # `Content-Type: image/png`) means the declared type is a lie,
+    # and serving such bytes from the delivery host with
+    # `Content-Disposition: inline` would let the browser interpret
+    # the content as the declared type but possibly render the
+    # underlying HTML. We must probe BEFORE writing to storage and
+    # roll back on mismatch, which is why this block stays in the
+    # upload route rather than inside `create_attachment_from_bytes`.
+    width: int | None = None
+    height: int | None = None
+    registry = current_app.extensions.get("registry")
+    if registry is not None:
+        processor = registry.image_processor_for(content_type)
+        if processor is not None:
+            # Probe before writing so a magic-byte mismatch never
+            # lands bytes on disk.
+            meta = processor.probe(data)
+            if meta is None:
+                flash(
+                    f"Upload rejected: declared content-type {content_type!r} "
+                    "could not be probed as an image (magic-byte check failed).",
+                    "error",
+                )
+                return render_template("admin/attachments_new.html")
+            width = meta.width
+            height = meta.height
+
+    actor_id = session.get("user_id")
     with SessionLocal() as db:
-        # Store first so the row's storage_key matches the backend
-        # location. Idempotent: a duplicate upload reuses the file.
-        # `store_original` lands at <sha>/original.<ext> (the
-        # rendition-aware layout); `backend.remove` below knows to
-        # walk that path on rollback. The backend handle is still
-        # used for the rollback so a non-local backend stays
-        # consistent on the cleanup path.
-        backend = resolve_storage(current_app)
-        storage_key, size = store_original(
-            site_slug_for_storage, content_type=content_type, data=data
-        )
-        existing = db.execute(
-            select(Attachment).where(
-                Attachment.site_id == site_id,
-                Attachment.storage_key == storage_key,
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            # Same site + same bytes: nothing to add. Surface as
-            # success and link the existing row.
-            flash(f"Already uploaded; reused existing row #{existing.id}.", "success")
-            return redirect(url_for("attachment_admin.list_attachments"))
-
-        # Image probe: ask the registered processor for dimensions.
-        # For declared image/* types this is REQUIRED; magic-byte
-        # mismatch (e.g. a `.html` renamed to `.png` and uploaded
-        # with `Content-Type: image/png`) means the declared type
-        # is a lie, and serving such bytes from the delivery host
-        # with `Content-Disposition: inline` would let the browser
-        # interpret the content as the declared type but possibly
-        # render the underlying HTML. Reject the upload outright.
-        width: int | None = None
-        height: int | None = None
-        processor = None
-        registry = current_app.extensions.get("registry")
-        if registry is not None:
-            processor = registry.image_processor_for(content_type)
-            if processor is not None:
-                meta = processor.probe(data)
-                if meta is None:
-                    # Reject: the declared image type does not match
-                    # what Pillow can decode. Roll back the storage
-                    # write so the orphaned bytes don't linger.
-                    backend.remove(site_slug_for_storage, storage_key)
-                    flash(
-                        f"Upload rejected: declared content-type {content_type!r} "
-                        "could not be probed as an image (magic-byte check failed).",
-                        "error",
-                    )
-                    return render_template("admin/attachments_new.html")
-                width = meta.width
-                height = meta.height
-
-        actor_id = session.get("user_id")
-        attachment = Attachment(
+        result = create_attachment_from_bytes(
+            db,
             site_id=site_id,
+            site_slug=site_slug_for_storage,
+            site_theme_slug=site_theme_slug,
             filename=filename,
             content_type=content_type,
-            size_bytes=size,
-            storage_key=storage_key,
+            data=data,
             width=width,
             height=height,
             uploaded_by=actor_id if isinstance(actor_id, int) else None,
         )
-        db.add(attachment)
-        db.flush()  # populate attachment.id for the rendition FKs
-        new_id = attachment.id
-
-        # Enqueue pending rendition rows per the active theme's
-        # widths × {avif, webp, original}. The worker
-        # (`bragi media process-renditions`) drains them on the
-        # scheduler cadence; upload returns fast with the original
-        # only. Skips enqueue when the upload isn't an image (no
-        # width recorded by the probe) so PDFs / text never end
-        # up with a phantom ladder.
-        rendition_count = 0
-        if width is not None and height is not None:
-            registry = current_app.extensions.get("registry")
-            active_theme = (
-                registry.theme(site_theme_slug)
-                if registry is not None and site_theme_slug
-                else None
-            )
-            widths = resolved_widths(active_theme)
-            for target_width in widths:
-                if target_width >= width:
-                    # Skip slots the source can't satisfy (no upscaling).
-                    continue
-                for format_slug in ("avif", "webp", "original"):
-                    db.add(
-                        AttachmentRendition(
-                            attachment_id=new_id,
-                            size_label=f"{target_width}w",
-                            format=format_slug,
-                            content_type=rendition_target_content_type(format_slug, content_type),
-                            status="pending",
-                        )
-                    )
-                    rendition_count += 1
-
+        if result.deduped:
+            # Same site + same bytes: nothing to add. Surface as
+            # success and link the existing row.
+            flash(f"Already uploaded; reused existing row #{result.attachment.id}.", "success")
+            return redirect(url_for("attachment_admin.list_attachments"))
+        new_id = result.attachment.id
+        rendition_count = result.rendition_count
         db.commit()
 
     audit(
@@ -529,7 +477,7 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
         site_id=site_id,
         extra={
             "filename": filename,
-            "size_bytes": size,
+            "size_bytes": len(data),
             "renditions": rendition_count,
         },
     )

@@ -92,6 +92,15 @@ class UnsplashClient:
         resp.raise_for_status()
         return resp.content
 
+    def get_photo(self, photo_id: str) -> UnsplashPhoto:
+        """GET /photos/<id>. Returns a fresh UnsplashPhoto."""
+        resp = safe_get(
+            f"{API_BASE}/photos/{photo_id}",
+            headers=self._auth_headers(),
+        )
+        resp.raise_for_status()
+        return UnsplashPhoto.model_validate(resp.json())
+
     def trigger_download_ping(self, photo: UnsplashPhoto) -> None:
         """Fire the API-required download tracker. Errors logged but
         not raised; the user-facing flow has already committed by the

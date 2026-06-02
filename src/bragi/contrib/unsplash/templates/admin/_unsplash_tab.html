@@ -1,0 +1,98 @@
+{# Unsplash tab content rendered inside the unified attachments
+   picker dialog. Contains a search input that htmx-loads the
+   results grid into #unsplash-results-target.
+
+   Card-click mechanism: clicking a `.unsplash-card` button POSTs
+   to /select, which creates (or deduplicates) an Attachment row
+   and returns JSON {attachment_id, storage_key, filename, alt_text,
+   deduped}. The JS then synthesises a hidden `.picker-card` button
+   with the matching data-* attributes and programmatically clicks
+   it so the host picker (either `_image_picker_field.html` or the
+   TipTap editor) wires it up exactly as for a library pick.
+
+   Both host pickers listen for clicks on `.picker-card` inside the
+   picker dialog and read `data-attachment-id`, `data-storage-key`,
+   `data-filename`, `data-alt-text`. Synthesising that button keeps
+   the Unsplash tab compatible with both surfaces without duplicating
+   their selection logic.
+#}
+<div class="unsplash-panel" data-site-slug="{{ site_slug }}">
+  <form hx-get="{{ url_for('unsplash_admin.search', site_slug=site_slug) }}"
+        hx-trigger="submit, keyup changed delay:400ms from:input[name=q]"
+        hx-target="#unsplash-results-target"
+        hx-swap="innerHTML"
+        style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+    <input type="search" name="q" placeholder="Search Unsplash"
+           minlength="2" autofocus
+           style="flex: 1; padding: 0.4rem 0.6rem;">
+    <button type="submit">Search</button>
+  </form>
+  <div id="unsplash-results-target"></div>
+</div>
+
+<script>
+  (function () {
+    var panel = document.currentScript.previousElementSibling;
+    if (!panel) return;
+
+    panel.addEventListener('click', function (e) {
+      var card = e.target.closest('.unsplash-card');
+      if (!card) return;
+      e.preventDefault();
+
+      var siteSlug = panel.dataset.siteSlug;
+      var photoId = card.dataset.photoId;
+      card.disabled = true;
+      card.style.opacity = '0.5';
+
+      var formData = new FormData();
+      formData.append('photo_id', photoId);
+      // Include the session CSRF token so the CSRF guard passes.
+      var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+      if (csrfMeta) formData.append('_csrf_token', csrfMeta.content);
+
+      fetch('/admin/sites/' + siteSlug + '/unsplash/select', {
+        method: 'POST',
+        body: formData,
+      })
+        .then(function (resp) {
+          if (!resp.ok) {
+            return resp.text().then(function (t) {
+              throw new Error('Unsplash select failed (' + resp.status + '): ' + t);
+            });
+          }
+          return resp.json();
+        })
+        .then(function (body) {
+          // Synthesise a hidden .picker-card with the same data-*
+          // shape the attachment-picker and image-picker-field use.
+          // Clicking it programmatically triggers whichever host
+          // picker's click handler is listening on the dialog.
+          var synthetic = document.createElement('button');
+          synthetic.type = 'button';
+          synthetic.className = 'picker-card';
+          synthetic.dataset.attachmentId = String(body.attachment_id);
+          synthetic.dataset.storageKey = body.storage_key || '';
+          synthetic.dataset.filename = body.filename || '';
+          synthetic.dataset.altText = body.alt_text || '';
+          // rendition keys are not available yet (the background
+          // worker hasn't processed them); the host picker falls
+          // back to the original via empty rendition slots.
+          synthetic.dataset.renditionSmall = '';
+          synthetic.dataset.renditionMedium = '';
+          synthetic.dataset.renditionFull = '';
+          synthetic.style.display = 'none';
+          panel.appendChild(synthetic);
+          synthetic.click();
+          panel.removeChild(synthetic);
+        })
+        .catch(function (err) {
+          alert(err.message);
+        })
+        .finally(function () {
+          card.disabled = false;
+          card.style.opacity = '';
+        });
+    });
+  })();
+</script>

@@ -179,6 +179,29 @@ def test_trigger_download_ping_calls_the_correct_url(
     assert captured["headers"]["Authorization"] == "Client-ID test-key"
 
 
+def test_get_photo_fetches_by_id_and_returns_unsplash_photo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _capturing_safe_get(url: str, *, headers=None, **kwargs):
+        captured["url"] = url
+        captured["headers"] = headers
+        resp = MagicMock()
+        resp.json.return_value = SAMPLE_SEARCH_RESPONSE["results"][0]
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(uc, "safe_get", _capturing_safe_get)
+
+    client = uc.UnsplashClient(access_key="test-key", app_name="testapp")
+    photo = client.get_photo("abc123")
+    assert captured["url"] == "https://api.unsplash.com/photos/abc123"
+    assert captured["headers"]["Authorization"] == "Client-ID test-key"
+    assert isinstance(photo, uc.UnsplashPhoto)
+    assert photo.id == "abc123"
+
+
 def test_get_photo_full_bytes_passes_large_max_bytes_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

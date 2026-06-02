@@ -1,0 +1,44 @@
+{# Unsplash search result grid. Returned by GET /search; htmx-
+   swappable as the user types / paginates.
+
+   Each card is a <button> carrying data-* attributes that match
+   the shape the `.picker-card` cards in `attachments_picker.html`
+   use. However, Unsplash cards work differently: clicking one
+   POSTs to /select (JS below handles it) to first create the
+   Attachment row, then the caller updates the picker UI using
+   the returned attachment_id. See `_unsplash_tab.html` for
+   the click handler.
+#}
+<div class="unsplash-results"
+     data-site-slug="{{ site_slug }}"
+     data-page="{{ page }}"
+     data-total-pages="{{ total_pages }}">
+  {% if photos %}
+  <div class="unsplash-grid"
+       style="display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+              gap: 0.5rem;">
+    {% for photo in photos %}
+    <button type="button"
+            class="unsplash-card"
+            data-photo-id="{{ photo.id }}"
+            data-credit-name="{{ photo.user.name }}"
+            title="Photo by {{ photo.user.name }}"
+            style="padding: 0; border: 1px solid #ddd; background: {{ photo.color or '#eee' }};
+                   cursor: pointer; aspect-ratio: 4/3;">
+      <img src="{{ photo.urls.thumb }}"
+           alt="{{ photo.alt_description or ('Unsplash photo by ' ~ photo.user.name) }}"
+           loading="lazy"
+           style="width: 100%; height: 100%; object-fit: cover; display: block;">
+    </button>
+    {% endfor %}
+  </div>
+  <p class="unsplash-attribution"
+     style="margin-top: 0.5rem; font-size: 0.85em; color: #666;">
+    Photos from <a href="https://unsplash.com/?utm_source={{ settings.unsplash_app_name }}&amp;utm_medium=referral"
+                   target="_blank" rel="noopener">Unsplash</a>.
+  </p>
+  {% else %}
+  <p style="padding: 1rem; color: #888;">No results for &ldquo;{{ query }}&rdquo;.</p>
+  {% endif %}
+</div>
