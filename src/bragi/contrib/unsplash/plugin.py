@@ -54,13 +54,12 @@ def register_image_picker_tab() -> ImagePickerTab | None:
 def register_template_globals(env: jinja2.Environment) -> None:
     """Register the `unsplash_credit_wrap` Jinja filter.
 
-    Delivery templates pipe `body_html` through it after `pictureify`
-    so credited Unsplash images gain a <figure> + <figcaption> credit
-    block. Priority on the template pipeline: applying after
-    `pictureify` ensures the <img> is already in its final form
-    (possibly inside a <picture>) before the credit wrap runs, but
-    the credit wrap targets `<img>` directly, so the ordering is
-    informational rather than a hard dependency.
+    Delivery templates pipe `body_html` through it before `pictureify`
+    so credited Unsplash images are wrapped in <figure> + <figcaption>
+    before the image element is replaced. Filter ordering is critical:
+    the wrap must run first, otherwise the <figure> would wrap a
+    <picture> structure (semantically broken HTML). The resulting
+    output is <figure><picture><source/><img/></picture><figcaption/></figure>.
 
     The filter is a no-op outside a Flask request context or when
     `g.site` is absent, so admin-side renders (which don't set a
