@@ -1440,3 +1440,96 @@ def patch_show_in_nav(site_slug: str, page_id: int) -> ResponseReturnValue:
         site=cell_site,
         page=cell_page,
     )
+
+
+@bp.route("/<int:page_id>/cell/menu-order", methods=["GET"])
+def menu_order_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the menu_order cell as an always-live number input.
+    Editor role required.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_menu_order_cell.html",
+            site=site,
+            page=page,
+            value=None,
+            error=None,
+        )
+
+
+@bp.route("/<int:page_id>/patch/menu-order", methods=["PATCH"])
+def patch_menu_order(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """PATCH the page menu_order. On success returns the updated cell partial;
+    on non-integer input returns the cell with an inline error so the
+    input stays in place without a full-page reload.
+    """
+    raw = (request.form.get("menu_order") or "").strip()
+    error: str | None = None
+    try:
+        value: int | None = int(raw)
+    except ValueError:
+        error = f"Menu order must be an integer, got {raw!r}"
+        value = None
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        if error is not None:
+            return render_template(
+                "admin/_page_menu_order_cell.html",
+                site=site,
+                page=page,
+                value=raw,
+                error=error,
+            )
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        assert value is not None  # narrowed by the try/except above
+        page.menu_order = value
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "menu_order", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_menu_order_cell.html",
+        site=cell_site,
+        page=cell_page,
+        value=None,
+        error=None,
+    )

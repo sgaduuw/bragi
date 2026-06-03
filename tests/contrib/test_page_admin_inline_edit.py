@@ -366,3 +366,56 @@ def test_patch_show_in_nav_requires_editor_role(admin_app: Flask, db_session: Se
         data={"_csrf_token": csrf},
     )
     assert resp.status_code == 403
+
+
+def test_menu_order_cell_renders_input(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/pages/{pid}/cell/menu-order")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'type="number"' in body
+    assert 'name="menu_order"' in body
+    assert 'value="10"' in body  # fixture seeds menu_order=10
+
+
+def test_patch_menu_order_changes_value(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{pid}/patch/menu-order",
+        data={"_csrf_token": csrf, "menu_order": "42"},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    new_order = db_session.execute(select(Page.menu_order).where(Page.id == pid)).scalar_one()
+    assert new_order == 42
+
+
+def test_patch_menu_order_rejects_non_integer(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{pid}/patch/menu-order",
+        data={"_csrf_token": csrf, "menu_order": "abc"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "inline-edit-error" in body
+
+
+def test_patch_menu_order_requires_editor_role(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{pid}/patch/menu-order",
+        data={"_csrf_token": csrf, "menu_order": "5"},
+    )
+    assert resp.status_code == 403
