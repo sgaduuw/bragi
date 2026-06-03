@@ -246,6 +246,16 @@ in place rather than duplicating them.
 Notion, Substack, and Medium importers are deferred to
 follow-up packages; no v1.x commitment.
 
+The admin now carries a site-scoped Import page at
+`/admin/sites/<slug>/import/` that lists every importer wired
+up with an admin form. Ghost is the first wired importer there,
+with a plan-then-apply browser flow (upload → review → apply or
+cancel) that mirrors LinkedIn's. The CLI invocations above
+continue to work; the admin route is an alternative surface for
+operators who prefer the browser. Hugo and WordPress remain
+CLI-only for now; they'll grow admin tiles in follow-up PRs via
+the new `register_importer_admin_tile` hookspec.
+
 ## Export (portability)
 
 `bragi export [--site <slug>] [--output <dir>]`
