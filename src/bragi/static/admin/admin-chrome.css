@@ -217,3 +217,18 @@ form button.danger:hover, .btn.danger:hover { background: #911; }
 .flash { padding: 0.5rem 0.75rem; margin-bottom: 1rem; border-radius: 4px; font-size: 0.9em; }
 .flash.error { background: #fde2e2; color: #8a1f1f; }
 .flash.success { background: #e3f5e1; color: #1f5a2a; }
+
+/* Inline-edit cells on the post/page admin overviews. Editable
+   cells get a subtle luminosity-only tint (darker in light mode,
+   lighter in dark mode); the cell currently being edited gets a
+   slightly stronger tint. Hue-free so themes don't fight. */
+td.is-editable { background: rgba(0, 0, 0, 0.04); cursor: pointer; }
+td.is-editing  { background: rgba(0, 0, 0, 0.08); }
+td.is-editing .inline-edit-hint  { font-size: 0.75em; color: #666; margin-top: 0.15rem; }
+td.is-editing .inline-edit-error { font-size: 0.75em; color: #b22; margin-top: 0.15rem; }
+@media (prefers-color-scheme: dark) {
+  td.is-editable { background: rgba(255, 255, 255, 0.06); }
+  td.is-editing  { background: rgba(255, 255, 255, 0.12); }
+  td.is-editing .inline-edit-hint  { color: #aaa; }
+  td.is-editing .inline-edit-error { color: #f88; }
+}
