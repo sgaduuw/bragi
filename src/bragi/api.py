@@ -22,7 +22,7 @@ What's covered:
   `OAuthProviderSpec`, `AuthMethodSpec`, `RedirectTarget`,
   `TransformRegistry`, `SearchBackendSpec`, `ThemeSpec`,
   `StorageBackendSpec`, `ImageProcessorSpec`, `ImagePickerTab`,
-  `InternalLinkResolution`, `NavNode`, `Crumb`,
+  `ImporterAdminTile`, `InternalLinkResolution`, `NavNode`, `Crumb`,
   `ResumeData`, `ResumeHeader`, `Position`, `Project`,
   `Education`, `SkillGroup`, `Certification`, `Language`,
   `ProfileLink`, `ChangeProposal`, `ImportPlan`,
@@ -301,6 +301,38 @@ class ImagePickerTab(BaseModel):
     """Set False to hide the tab (the picker filters disabled tabs
     out). Useful for plugins that load but only activate when
     configured."""
+
+
+class ImporterAdminTile(BaseModel):
+    """Card shown on the site-scoped import index page
+    (`/admin/sites/<slug>/import/`).
+
+    Plugins contributing an importer-admin surface return a tile
+    via `register_importer_admin_tile`; plugins without admin
+    wiring return `None` and don't show up on the index.
+    """
+
+    label: str
+    """Display title on the card."""
+
+    slug: str
+    """URL-safe id (e.g. `"ghost"`). Used as a CSS hook and an
+    in-DOM id; must be unique across contributing plugins."""
+
+    description: str
+    """One-sentence summary of what the importer does. Rendered
+    under the title on the card."""
+
+    start_endpoint: str
+    """Flask endpoint name to `url_for` for the card's
+    primary-action link (e.g. `"ghost_admin.upload"`). The
+    endpoint must accept `site_slug` as a route variable; the
+    index template passes it implicitly."""
+
+    enabled: bool = True
+    """Set to False to hide the card. Useful for plugins that
+    load but only activate when configured (e.g. an importer
+    that needs an API key)."""
 
 
 # ============================================================
@@ -666,6 +698,7 @@ __all__ = [
     "ImageMetadata",
     "ImagePickerTab",
     "ImageProcessorSpec",
+    "ImporterAdminTile",
     "ImportPlan",
     "ImportResult",
     "ImporterSpec",

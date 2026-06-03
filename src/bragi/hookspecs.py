@@ -28,6 +28,7 @@ from bragi.api import (
     ContentTypeSpec,
     ImagePickerTab,
     ImageProcessorSpec,
+    ImporterAdminTile,
     ImporterSpec,
     NavItem,
     OAuthProviderSpec,
@@ -378,6 +379,21 @@ def register_image_picker_tab() -> ImagePickerTab | None:
     not set). The picker template renders a tab nav when any
     plugin contributes a non-None tab; otherwise the dialog stays
     single-pane (no chrome cost).
+
+    Stability: covered by bragi's two-step deprecation policy
+    (see `bragi/api.py` top-of-module docstring).
+    """
+    ...
+
+
+@hookspec
+def register_importer_admin_tile() -> ImporterAdminTile | None:
+    """Contribute a tile to the site-scoped import index page.
+
+    Return an `ImporterAdminTile` to appear in the list; return
+    `None` to opt out (typical for importers that have a CLI but
+    not yet an admin form). The index renders only contributed-
+    and-enabled tiles.
 
     Stability: covered by bragi's two-step deprecation policy
     (see `bragi/api.py` top-of-module docstring).
