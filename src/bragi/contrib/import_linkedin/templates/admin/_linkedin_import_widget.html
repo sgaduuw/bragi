@@ -4,7 +4,18 @@
    Guard: only rendered when the page is already saved (has an id),
    so the url_for call is safe on the new-page form. #}
 {% if page.id %}
-<fieldset>
+<style>
+  /* `admin-chrome.css:192` makes every form `display: flex;
+     flex-direction: column`, which stretches submit buttons to
+     the column's full width. Constrain this widget's button to
+     its natural width and left-align it so it reads as a normal
+     "go" action instead of a giant bar. Button colors come from
+     the global `form button` rule (dark pill). */
+  .linkedin-import-widget button[type="submit"] {
+    align-self: flex-start;
+  }
+</style>
+<fieldset class="linkedin-import-widget">
   <legend>Import from LinkedIn</legend>
   <form method="post" enctype="multipart/form-data"
         action="{{ url_for('linkedin_admin.upload_and_plan',
