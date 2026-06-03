@@ -166,7 +166,9 @@ def _resolve_feature_image(
 
 def plan(path: Any) -> ImportPlan:
     data = load_export(path)
-    posts = [p for p in data.get("posts", []) if p.get("type", "post") == "post"]
+    entries = data.get("posts", [])
+    posts = [p for p in entries if p.get("type", "post") == "post"]
+    pages = [p for p in entries if p.get("type") == "page"]
     redirects = 0
     warnings: list[str] = []
     for post in posts:
@@ -180,9 +182,18 @@ def plan(path: Any) -> ImportPlan:
             redirects += 1
         if not post.get("html") and not post.get("lexical") and not post.get("mobiledoc"):
             warnings.append(f"post {slug!r}: empty body")
+    for page in pages:
+        slug = page.get("slug")
+        if not slug:
+            warnings.append(f"page {page.get('id')!r}: missing slug")
+            continue
+        if page.get("status") == "published":
+            redirects += 1
+        if not page.get("html") and not page.get("lexical") and not page.get("mobiledoc"):
+            warnings.append(f"page {slug!r}: empty body")
     tags = data.get("tags", [])
     return ImportPlan(
-        counts={"posts": len(posts), "tags": len(tags)},
+        counts={"posts": len(posts), "pages": len(pages), "tags": len(tags)},
         warnings=warnings,
         redirects=redirects,
     )

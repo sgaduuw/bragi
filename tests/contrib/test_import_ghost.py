@@ -134,7 +134,7 @@ def test_plan_counts_posts_and_redirects(tmp_path: Path) -> None:
         ],
     )
     result = plan(p)
-    assert result.counts == {"posts": 2, "tags": 0}
+    assert result.counts == {"posts": 2, "pages": 0, "tags": 0}
     # Only the published post adds a redirect entry.
     assert result.redirects == 1
 
@@ -956,3 +956,35 @@ def test_apply_page_feature_image_alt_text_round_trip(
             select(Attachment).where(Attachment.id == page.featured_image_id)
         ).scalar_one()
         assert att.alt_text == "Page cover"
+
+
+def test_plan_counts_posts_and_pages_separately(tmp_path: Path) -> None:
+    entries = [
+        {"id": "p1", "slug": "a", "type": "post", "status": "published", "html": "<p>x</p>"},
+        {"id": "p2", "slug": "b", "type": "post", "status": "published", "html": "<p>y</p>"},
+        {
+            "id": "g1",
+            "slug": "about",
+            "type": "page",
+            "status": "published",
+            "html": "<p>about</p>",
+        },
+        {
+            "id": "g2",
+            "slug": "contact",
+            "type": "page",
+            "status": "draft",
+            "html": "<p>contact</p>",
+        },
+        {
+            "id": "g3",
+            "slug": "x",
+            "type": "page",
+            "status": "published",
+            "html": "",
+        },  # empty body → warning
+    ]
+    export = _make_export(tmp_path, entries)
+    result = plan(export)
+    assert result.counts == {"posts": 2, "pages": 3, "tags": 0}
+    assert any("page 'x'" in w and "empty body" in w for w in result.warnings)
