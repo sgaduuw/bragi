@@ -334,8 +334,8 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
             .all()
         )
     if is_htmx():
-        return render_template("admin/_page_list_table.html", pages=pages)
-    return render_template("admin/page_list.html", pages=pages)
+        return render_template("admin/_page_list_table.html", pages=pages, site=site)
+    return render_template("admin/page_list.html", pages=pages, site=site)
 
 
 @bp.route("/new", methods=["GET", "POST"])
