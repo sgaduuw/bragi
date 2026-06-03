@@ -213,7 +213,9 @@ def test_apply_creates_post_with_markdown_body(
     )
     site = _detached_site(db_session_factory, site_id)
     result = apply(p, site, {})
-    assert result.counts == {"posts": 1, "posts_created": 1, "posts_updated": 0}
+    assert result.counts["posts"] == 1
+    assert result.counts["posts_created"] == 1
+    assert result.counts["posts_updated"] == 0
 
     with db_session_factory() as db:
         post = db.execute(select(Post)).scalar_one()
@@ -279,7 +281,9 @@ def test_apply_is_idempotent_via_source_id(
     p.write_text(json.dumps(payload))
 
     result = apply(p, site, {})
-    assert result.counts == {"posts": 1, "posts_created": 0, "posts_updated": 1}
+    assert result.counts["posts"] == 1
+    assert result.counts["posts_created"] == 0
+    assert result.counts["posts_updated"] == 1
     with db_session_factory() as db:
         rows = db.execute(select(Post)).scalars().all()
     assert len(rows) == 1
@@ -745,3 +749,210 @@ def test_resolve_feature_image_dedups_on_second_call_for_same_url(
     assert att2.id == att1.id
     assert att2.alt_text == "operator-edited alt"  # NOT clobbered to "second"
     assert call_count["n"] == 1  # Only the first call hit safe_get
+
+
+# ============================================================
+# Pages loop
+# ============================================================
+
+
+def _make_page(**overrides) -> dict[str, object]:
+    """Shorthand for a Ghost page entry; overrides win."""
+    base = {
+        "id": "gpage1",
+        "slug": "about",
+        "title": "About",
+        "status": "published",
+        "type": "page",
+        "html": "<p>About us.</p>",
+    }
+    base.update(overrides)
+    return base
+
+
+def _seed_site_for_pages(db_session_factory: sessionmaker[Session]) -> Site:
+    """Seed a User + Site + POST_INDEX page and return a detached Site.
+
+    Page-loop tests don't use the `site_id` fixture (which requires
+    `patched_session_locals` for test-scoped redirect URL resolution).
+    Instead each test creates its own session, seeds the minimum DB
+    state, and passes the detached Site object to `apply()`.
+
+    The site is refreshed via `db.get` after the final commit so all
+    column attributes are loaded before expunge; detached access to
+    `site.id`, `site.slug`, `site.theme` etc. then works without a
+    live session.
+    """
+    with db_session_factory() as db:
+        owner = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(owner)
+        db.flush()
+        site = Site(
+            slug="blog",
+            hostname="blog.example.com",
+            title="Blog",
+            canonical_url="https://blog.example.com",
+            owner_user_id=owner.id,
+        )
+        db.add(site)
+        db.flush()
+        seed_blog_index(db, site)
+        # Re-fetch after commit so attributes are loaded (not expired) before
+        # we detach the instance; detached access to site.id / site.slug /
+        # site.theme must not trigger lazy loading.
+        site = db.get(Site, site.id)
+        assert site is not None
+        db.expunge(site)
+        return site
+
+
+def test_apply_creates_page_with_markdown_body(
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    from bragi.core.models.page import Page, PageKind, PageStatus
+
+    site = _seed_site_for_pages(db_session_factory)
+    export = _make_export(tmp_path, [_make_page(meta_title="About | Custom")])
+    result = apply(export, site, {})
+    assert result.counts.get("pages_created") == 1
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+        assert page.kind == PageKind.STATIC
+        assert page.parent_id is None
+        assert page.status == PageStatus.PUBLISHED
+        assert page.title == "About"
+        assert page.meta_title == "About | Custom"
+        assert "About us" in page.body_markdown
+
+
+def test_apply_inserts_permalink_redirect_for_published_page(
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    """Published page with slug `about` is imported. Confirms the page
+    exists and is reachable after import."""
+    from bragi.core.models.page import Page
+
+    site = _seed_site_for_pages(db_session_factory)
+    export = _make_export(tmp_path, [_make_page(slug="about")])
+    apply(export, site, {})
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+        assert page is not None
+
+
+def test_apply_is_idempotent_for_pages_via_source_id(
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    from bragi.core.models.page import Page
+
+    site = _seed_site_for_pages(db_session_factory)
+    export = _make_export(tmp_path, [_make_page()])
+    apply(export, site, {})
+    result = apply(export, site, {})
+    assert result.counts.get("pages_created") == 0
+    assert result.counts.get("pages_updated") == 1
+    with db_session_factory() as db:
+        pages = db.execute(select(Page).where(Page.slug == "about")).scalars().all()
+        assert len(pages) == 1
+
+
+def test_apply_skips_page_when_slug_clashes_with_existing(
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    """Pre-seed a bragi page with slug `about` (no source_id, so the
+    importer won't match it by source_id). A new Ghost page also
+    slugged `about` (different ghost_id) must warn + skip rather
+    than crash on the UNIQUE constraint."""
+    from bragi.core.models.page import Page, PageKind, PageStatus
+
+    site = _seed_site_for_pages(db_session_factory)
+    with db_session_factory() as db:
+        site_row = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        owner = db.execute(select(User).order_by(User.id)).scalar_one()
+        existing = Page(
+            site_id=site_row.id,
+            slug="about",
+            title="About (manual)",
+            kind=PageKind.STATIC,
+            body_markdown="hand-typed",
+            body_html="<p>hand-typed</p>",
+            body_excerpt="",
+            author_id=owner.id,
+            status=PageStatus.PUBLISHED,
+        )
+        db.add(existing)
+        db.commit()
+    export = _make_export(tmp_path, [_make_page()])
+    result = apply(export, site, {})
+    assert any("slug already" in w for w in result.warnings)
+    with db_session_factory() as db:
+        rows = db.execute(select(Page).where(Page.slug == "about")).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].title == "About (manual)"  # Operator's page survived
+
+
+def test_apply_preserves_operator_fields_on_page_update(
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    """parent_id, kind, show_in_nav, menu_order are operator-managed:
+    they must NOT be reset on a re-import."""
+    from bragi.core.models.page import Page
+
+    site = _seed_site_for_pages(db_session_factory)
+    export = _make_export(tmp_path, [_make_page()])
+    apply(export, site, {})
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+        page.show_in_nav = False
+        page.menu_order = 42
+        db.commit()
+    apply(export, site, {})
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+        assert page.show_in_nav is False
+        assert page.menu_order == 42
+
+
+def test_apply_page_feature_image_alt_text_round_trip(
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bragi.core.models.attachment import Attachment
+    from bragi.core.models.page import Page
+
+    site = _seed_site_for_pages(db_session_factory)
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    monkeypatch.setattr(
+        ghost_importer,
+        "safe_get",
+        _fake_safe_get_factory(response_bytes=b"\x89PNG fake", content_type="image/png"),
+    )
+    export = _make_export(
+        tmp_path,
+        [
+            _make_page(
+                feature_image="https://cdn.ghost.test/page-cover.png",
+                feature_image_alt="Page cover",
+            ),
+        ],
+    )
+    apply(export, site, {})
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+        assert page.featured_image_id is not None
+        att = db.execute(
+            select(Attachment).where(Attachment.id == page.featured_image_id)
+        ).scalar_one()
+        assert att.alt_text == "Page cover"
