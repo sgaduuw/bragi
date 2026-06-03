@@ -298,3 +298,63 @@ def test_stash_ttl_sweep_removes_old_dirs(
 
     # The old stash should have been swept away.
     assert not old_stash.exists(), "old stash was not swept by the upload handler"
+
+
+# ============================================================
+# Zip path-traversal safety
+# ============================================================
+
+
+def test_zip_extract_blocks_sibling_directory_bypass(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+    tmp_path: Path,
+) -> None:
+    """A zip whose entries resolve to a sibling of the unpack root
+    (sharing a prefix but not a path component) must NOT escape the
+    unpack directory. Regression: a bare str.startswith() check is
+    vulnerable here because '/tmp/unpackedX' startswith '/tmp/unpacked'.
+    """
+    import zipfile
+
+    # Build a malicious zip with an entry that, when joined to
+    # 'unpacked/', resolves to the sibling 'unpackedX/'. We can't
+    # easily fake a path that resolves outside via '..' here because
+    # the entire stash root is under tmp; instead, the explicit
+    # threat we encode is: any extracted file must live strictly
+    # inside the unpacked directory, never a sibling whose name
+    # shares its prefix.
+    bad_zip = tmp_path / "evil.zip"
+    with zipfile.ZipFile(bad_zip, "w") as zf:
+        # Walk up one then into a sibling whose name starts with
+        # "unpacked" (the actual extract dir name). Without the
+        # separator-aware check, the resolved path passes the
+        # startswith test and writes outside.
+        zf.writestr("../unpackedX/owned.txt", "pwned")
+        # Also include a normal entry so the importer's detect()
+        # has something to react to (it will fail detect, which is
+        # fine — we only care about the traversal check).
+        zf.writestr("ghost.json", "{}")
+
+    client = admin_app.test_client()
+    _login(client)
+
+    csrf = csrf_token(client)
+    client.post(
+        "/admin/sites/blog/import/ghost/upload",
+        data={
+            "_csrf_token": csrf,
+            "file": (bad_zip.open("rb"), "evil.zip"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+
+    # No sibling-prefix dir should have been created next to any stash.
+    sibling_attempts = list(_isolated_stash_root.rglob("unpackedX"))
+    assert (
+        sibling_attempts == []
+    ), f"path-traversal: sibling-prefix dirs created: {sibling_attempts}"
+    # Nor any extracted file outside an actual 'unpacked' dir.
+    owned = list(_isolated_stash_root.rglob("owned.txt"))
+    assert owned == [], f"path-traversal: owned.txt extracted at {owned}"

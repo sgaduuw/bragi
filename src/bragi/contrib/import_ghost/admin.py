@@ -132,14 +132,16 @@ def upload(site_slug: str) -> ResponseReturnValue:
             uploaded.save(zip_path)
             unpacked = stash / "unpacked"
             unpacked.mkdir()
+            unpacked_root = unpacked.resolve()
             with zipfile.ZipFile(zip_path) as zf:
                 for member in zf.namelist():
                     # Reject path-traversal entries (absolute paths
                     # or components that escape the target directory).
-                    # Ghost exports are flat JSON files; anything
-                    # traversing out of the extract root is a red flag.
+                    # Use is_relative_to to avoid the sibling-directory
+                    # prefix bypass that a bare startswith allows
+                    # (e.g. /tmp/unpackedX vs /tmp/unpacked).
                     dest = (unpacked / member).resolve()
-                    if not str(dest).startswith(str(unpacked.resolve())):
+                    if not dest.is_relative_to(unpacked_root):
                         continue
                     zf.extract(member, unpacked)
             detect_path = unpacked
