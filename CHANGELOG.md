@@ -6,6 +6,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Site nav submenu: now opens automatically on hover after a 500 ms
+  delay (and closes 200 ms after the cursor leaves) as a progressive
+  enhancement, in addition to the existing click-to-toggle. Without
+  JavaScript the click still works. The submenu also picks up an
+  explicit background (`var(--bg, Canvas)`), border
+  (`var(--rule, ...)`), and a soft shadow so it no longer bleeds
+  visually into body content underneath. All four built-in themes
+  already set the `--bg` / `--rule` custom properties; third-party
+  themes that don't fall back to system colours.
+
 ## [1.24.0] - 2026-06-03
 
 ### Added

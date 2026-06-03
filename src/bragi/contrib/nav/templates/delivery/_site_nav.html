@@ -28,11 +28,20 @@
   .site-nav__submenu { list-style: none; padding: 0; margin: 0; }
   .site-nav__list { display: inline-flex; gap: 1.25rem; flex-wrap: wrap; }
   .site-nav__item { position: relative; }
+  /* The submenu floats above body content; it needs an explicit
+     background so text underneath doesn't bleed through. Themes
+     conventionally set `--bg` and `--rule` on `:root` (all four
+     built-ins do); we pull those with system-color fallbacks for
+     third-party themes that don't follow the convention. */
   .site-nav__submenu {
     position: absolute; top: 100%; left: 0;
-    min-width: 8rem; padding: 0.25rem 0;
+    min-width: 8rem; padding: 0.35rem 0;
+    background: var(--bg, Canvas);
+    border: 1px solid var(--rule, rgba(0, 0, 0, 0.15));
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 10;
   }
-  .site-nav__submenu li { padding: 0.15rem 0; }
+  .site-nav__submenu li { padding: 0.2rem 0.75rem; }
   /* Hide the browser's default disclosure triangle so themes
      own the caret look entirely. Scoped to .site-nav__summary
      to avoid leaking into theme content. */
@@ -68,4 +77,28 @@
     {% endfor %}
   </ul>
 </nav>
+<script>
+  /* Progressive enhancement: open the <details> submenu on hover
+     after a short delay, close after a forgiving delay. The
+     <summary> click handler is unchanged; without JS, click still
+     toggles the submenu. */
+  (function () {
+    'use strict';
+    var OPEN_DELAY_MS = 500;
+    var CLOSE_DELAY_MS = 200;
+    var items = document.querySelectorAll('.site-nav__details');
+    items.forEach(function (el) {
+      var openTimer, closeTimer;
+      el.addEventListener('mouseenter', function () {
+        clearTimeout(closeTimer);
+        if (el.open) return;
+        openTimer = setTimeout(function () { el.open = true; }, OPEN_DELAY_MS);
+      });
+      el.addEventListener('mouseleave', function () {
+        clearTimeout(openTimer);
+        closeTimer = setTimeout(function () { el.open = false; }, CLOSE_DELAY_MS);
+      });
+    });
+  })();
+</script>
 {% endif %}
