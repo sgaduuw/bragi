@@ -61,8 +61,17 @@ class AttachmentRendition(IdMixin, TimestampsMixin, Base):
     height: Mapped[int | None] = mapped_column(Integer, default=None)
     bytes_size: Mapped[int | None] = mapped_column(Integer, default=None)
     # Lifecycle: pending -> processing -> done | failed. Workers
-    # claim by UPDATE ... SET status='processing' WHERE id=? AND status='pending'.
+    # claim by UPDATE ... SET status='processing', claimed_at=now()
+    # WHERE id=? AND (status='pending' OR (status='processing' AND
+    # claimed_at < now() - reclaim_after)).
     status: Mapped[str] = mapped_column(String(16), default="pending")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(String(2048), default=None)
     processed_at: Mapped[datetime | None] = mapped_column(default=None)
+    # When the current worker claimed the row (i.e. flipped it to
+    # `processing`). NULL for `pending` / `done` / `failed` rows.
+    # The next worker tick reclaims `processing` rows whose
+    # `claimed_at` is older than
+    # `Settings.attachment_rendition_reclaim_after_seconds` so a
+    # crashed worker's orphaned rows don't sit forever.
+    claimed_at: Mapped[datetime | None] = mapped_column(default=None)

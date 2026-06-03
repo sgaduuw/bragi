@@ -7,6 +7,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Rendition worker: `AttachmentRendition` rows stuck in
+  `processing` after a worker crash are now reclaimed on the next
+  tick instead of sitting forever. The worker stamps a
+  `claimed_at` column when it flips a row to `processing`; the
+  next worker's claim query picks up `pending` rows plus any
+  `processing` row whose `claimed_at` is older than
+  `Settings.attachment_rendition_reclaim_after_seconds` (default
+  300s, env: `BRAGI_ATTACHMENT_RENDITION_RECLAIM_AFTER_SECONDS`).
+  Rendition generation is idempotent (same bytes at the same
+  storage key on a re-run), so the reclaim window is short. New
+  alembic migration `a523a7f5366b` adds the column. Closes #356.
 - Image renditions: Pillow resize now honours EXIF Orientation.
   Portrait phone shots ship raw pixels stored landscape with an
   EXIF Orientation hint; browsers honour the hint when displaying

@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import io
 import sys
+from datetime import timedelta
 from typing import Any
 
 import click
 from flask import current_app
 from flask.cli import with_appcontext
 from PIL import Image
+from sqlalchemy import and_ as sa_and
 from sqlalchemy import delete as sa_delete
+from sqlalchemy import or_ as sa_or
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -179,29 +182,48 @@ def reindex(site_slug: str | None, dry_run: bool) -> None:
 def process_renditions(limit: int | None) -> None:
     """Drain pending attachment rendition rows.
 
-    Claims up to `--limit` rows with `status='pending'` in a single
-    UPDATE, reads the parent attachment's original bytes, calls
-    `resize_and_encode(...)` per row's `(width, format)`, writes
-    the file via `store_rendition(...)`, then marks the row
-    `done`. Encoder / IO failures bump `attempts` and re-pend
-    until `Settings.attachment_rendition_max_attempts` (default 3),
-    after which the row is `failed`.
+    Claims up to `--limit` rows in one UPDATE: any `pending` row,
+    plus any `processing` row whose `claimed_at` is older than
+    `Settings.attachment_rendition_reclaim_after_seconds` (a
+    previous worker crashed mid-batch; the row's status never
+    advanced and would otherwise sit forever). Reads the parent
+    attachment's original bytes, calls `resize_and_encode(...)`
+    per row's `(width, format)`, writes the file via
+    `store_rendition(...)`, then marks the row `done`. Encoder /
+    IO failures bump `attempts` and re-pend until
+    `Settings.attachment_rendition_max_attempts` (default 3),
+    after which the row is `failed`. Rendition generation is
+    idempotent (re-running produces the same bytes at the same
+    storage key), so reclaim of a row that the previous worker
+    actually completed-but-didn't-commit just re-does the same
+    write.
     """
     batch = limit if limit is not None else settings.attachment_rendition_worker_batch
     max_attempts = settings.attachment_rendition_max_attempts
+    now = naive_utcnow()
+    reclaim_cutoff = now - timedelta(seconds=settings.attachment_rendition_reclaim_after_seconds)
 
     with SessionLocal() as db:
-        # Two-step claim: select ids of pending rows, then UPDATE
-        # them to `processing` in one statement so a parallel
-        # worker can't pick them up. SQLite has no SKIP LOCKED so
-        # the gap between SELECT and UPDATE is the small window
-        # the dev scheduler's single-worker assumption rests on;
-        # production can run multiple workers if the conditional
-        # UPDATE is honest about its WHERE.
+        # Two-step claim: select ids, then UPDATE them to
+        # `processing` (stamping `claimed_at` so the next tick can
+        # tell if THIS run later orphans them too) in one statement
+        # so a parallel worker can't pick them up. SQLite has no
+        # SKIP LOCKED so the gap between SELECT and UPDATE is the
+        # small window the dev scheduler's single-worker assumption
+        # rests on; production can run multiple workers if the
+        # conditional UPDATE is honest about its WHERE.
         pending_ids = list(
             db.execute(
                 select(AttachmentRendition.id)
-                .where(AttachmentRendition.status == "pending")
+                .where(
+                    sa_or(
+                        AttachmentRendition.status == "pending",
+                        sa_and(
+                            AttachmentRendition.status == "processing",
+                            AttachmentRendition.claimed_at < reclaim_cutoff,
+                        ),
+                    )
+                )
                 .order_by(AttachmentRendition.id)
                 .limit(batch)
             ).scalars()
@@ -213,9 +235,15 @@ def process_renditions(limit: int | None) -> None:
             update(AttachmentRendition)
             .where(
                 AttachmentRendition.id.in_(pending_ids),
-                AttachmentRendition.status == "pending",
+                sa_or(
+                    AttachmentRendition.status == "pending",
+                    sa_and(
+                        AttachmentRendition.status == "processing",
+                        AttachmentRendition.claimed_at < reclaim_cutoff,
+                    ),
+                ),
             )
-            .values(status="processing")
+            .values(status="processing", claimed_at=now)
         )
         db.commit()
 
@@ -264,11 +292,13 @@ def process_renditions(limit: int | None) -> None:
                 row.bytes_size = len(rendition_bytes)
                 row.status = "done"
                 row.processed_at = naive_utcnow()
+                row.claimed_at = None
                 done_count += 1
             except Exception as exc:  # noqa: BLE001 -- worker resilience
                 row.attempts += 1
                 row.last_error = str(exc)
                 row.status = "failed" if row.attempts >= max_attempts else "pending"
+                row.claimed_at = None
                 failed_count += 1
         db.commit()
 

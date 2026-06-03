@@ -134,9 +134,14 @@ class Settings(BaseSettings):
     # rendition rows one worker pass claims and encodes per
     # invocation; `max_attempts` is the retry ceiling before a row
     # is marked permanently failed (so a corrupt source doesn't
-    # spin the worker forever).
+    # spin the worker forever); `reclaim_after_seconds` is how
+    # long a `processing` row may sit before the next worker
+    # treats it as orphaned (crash recovery). Rendition generation
+    # is idempotent (re-running produces the same bytes at the
+    # same storage key), so we err on the short side: 5 minutes.
     attachment_rendition_worker_batch: int = 20
     attachment_rendition_max_attempts: int = 3
+    attachment_rendition_reclaim_after_seconds: int = 300
 
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake
