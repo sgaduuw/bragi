@@ -265,3 +265,62 @@ def test_patch_slug_requires_editor_role(admin_app: Flask, db_session: Session) 
         data={"_csrf_token": csrf, "slug": "whatever"},
     )
     assert resp.status_code == 403
+
+
+# ============================================================
+# GET /cell/status and PATCH /patch/status
+# ============================================================
+
+
+def test_status_cell_renders_live_select(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/pages/{pid}/cell/status")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "<select" in body
+    for status in ("draft", "published", "archived"):
+        assert f'value="{status}"' in body
+    assert 'hx-trigger="change"' in body
+
+
+def test_patch_status_changes_value(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{pid}/patch/status",
+        data={"_csrf_token": csrf, "status": "draft"},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    new_status = db_session.execute(select(Page.status).where(Page.id == pid)).scalar_one()
+    assert new_status == "draft"
+
+
+def test_patch_status_rejects_invalid(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{pid}/patch/status",
+        data={"_csrf_token": csrf, "status": "bogus"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "inline-edit-error" in body
+
+
+def test_patch_status_requires_editor_role(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{pid}/patch/status",
+        data={"_csrf_token": csrf, "status": "draft"},
+    )
+    assert resp.status_code == 403

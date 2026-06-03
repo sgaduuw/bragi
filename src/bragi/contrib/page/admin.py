@@ -1284,3 +1284,93 @@ def patch_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
         value=None,
         error=None,
     )
+
+
+# Pages support only three statuses: draft, published, archived.
+# There is no "scheduled" status (pages have no scheduled_for field)
+# and no first-publish side-effect (pages have no published_at field).
+_VALID_PAGE_STATUSES = frozenset({"draft", "published", "archived"})
+
+
+@bp.route("/<int:page_id>/cell/status", methods=["GET"])
+def status_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the status cell as an always-live select. Editor role required."""
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_status_cell.html",
+            site=site,
+            page=page,
+            error=None,
+        )
+
+
+@bp.route("/<int:page_id>/patch/status", methods=["PATCH"])
+def patch_status(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """PATCH the page status. On success returns the updated cell partial;
+    on validation failure returns the cell with an inline error so the
+    select stays in place without a full-page reload.
+    """
+    raw = (request.form.get("status") or "").strip()
+    error: str | None = None
+    if raw not in _VALID_PAGE_STATUSES:
+        error = f"Invalid status: {raw!r}"
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        if error is not None:
+            return render_template(
+                "admin/_page_status_cell.html",
+                site=site,
+                page=page,
+                error=error,
+            )
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        page.status = raw
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "status", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_status_cell.html",
+        site=cell_site,
+        page=cell_page,
+        error=None,
+    )
