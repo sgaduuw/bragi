@@ -194,7 +194,43 @@ def upload(site_slug: str) -> ResponseReturnValue:
 
 @bp.route("/review/<token>", methods=["GET"])
 def review(site_slug: str, token: str) -> ResponseReturnValue:
-    # Task 4 implements the full review surface. The route exists
-    # now so url_for('ghost_admin.review', ...) resolves in the
-    # POST handler above.
-    abort(501)
+    """Render the plan summary for an uploaded Ghost export.
+
+    A bogus or expired token redirects back to the upload page so
+    the operator can re-upload. A stash with an unreadable plan.json
+    is dropped to avoid leaving a broken half-state behind.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+
+    stash = _resolve_stash(token)
+    if stash is None:
+        flash("Import session expired or not found.", "error")
+        return redirect(url_for("ghost_admin.upload", site_slug=site_slug))
+
+    try:
+        plan_doc = json.loads((stash / "plan.json").read_text())
+    except Exception:
+        shutil.rmtree(stash, ignore_errors=True)
+        flash("Import plan unreadable.", "error")
+        return redirect(url_for("ghost_admin.upload", site_slug=site_slug))
+
+    return render_template(
+        "admin/import_ghost_review.html",
+        site_slug=site_slug,
+        token=token,
+        counts=plan_doc.get("counts") or {},
+        warnings=plan_doc.get("warnings") or [],
+        redirects=plan_doc.get("redirects") or 0,
+    )
+
+
+@bp.route("/apply/<token>", methods=["POST"])
+def apply(site_slug: str, token: str) -> ResponseReturnValue:
+    abort(501)  # filled in by Task 5
+
+
+@bp.route("/cancel/<token>", methods=["POST"])
+def cancel(site_slug: str, token: str) -> ResponseReturnValue:
+    abort(501)  # filled in by Task 6

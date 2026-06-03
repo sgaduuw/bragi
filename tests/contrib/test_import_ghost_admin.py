@@ -358,3 +358,57 @@ def test_zip_extract_blocks_sibling_directory_bypass(
     # Nor any extracted file outside an actual 'unpacked' dir.
     owned = list(_isolated_stash_root.rglob("owned.txt"))
     assert owned == [], f"path-traversal: owned.txt extracted at {owned}"
+
+
+# ============================================================
+# GET /review/<token>
+# ============================================================
+
+
+def test_review_renders_counts_and_warnings(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+) -> None:
+    """A pre-seeded stash + token → GET /review/<token> renders the
+    counts table and warnings panel."""
+    from bragi.contrib.import_ghost.admin import STASH_PREFIX
+
+    token = "abc123def4567890abc123def4567890"
+    stash = _isolated_stash_root / f"{STASH_PREFIX}{token}"
+    stash.mkdir()
+    (stash / "export.json").write_text("{}")
+    (stash / "plan.json").write_text(
+        json.dumps(
+            {
+                "counts": {"posts": 5, "pages": 3, "tags": 2},
+                "warnings": ["post 'x': missing slug", "page 'y': empty body"],
+                "redirects": 5,
+            }
+        )
+    )
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/import/ghost/review/{token}")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "5" in body and "posts" in body.lower()
+    assert "3" in body and "pages" in body.lower()
+    # Jinja2 auto-escapes single quotes as &#39; in HTML context.
+    assert "post &#39;x&#39;: missing slug" in body
+    assert "page &#39;y&#39;: empty body" in body
+
+
+def test_review_returns_to_upload_on_missing_stash(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+) -> None:
+    """A bogus token redirects to the upload page."""
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(
+        "/admin/sites/blog/import/ghost/review/bogus",
+        follow_redirects=False,
+    )
+    assert resp.status_code in (301, 302)
+    assert "/import/ghost/upload" in (resp.headers.get("Location") or "")
