@@ -1,0 +1,19 @@
+{# Inline status cell: always-live <select>. Changing the value
+   immediately fires PATCH via hx-trigger="change". No view/edit
+   mode swap. Transitioning to "scheduled" returns an error
+   pointing the operator at the full edit page (the date picker
+   for scheduled_for lives there). #}
+<td id="post-status-cell-{{ post.id }}" role="gridcell">
+  <form hx-patch="{{ url_for('post_admin.patch_status', site_slug=site.slug, post_id=post.id) }}"
+        hx-target="#post-status-cell-{{ post.id }}"
+        hx-swap="outerHTML"
+        style="margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <select name="status" hx-trigger="change" hx-include="closest form">
+      {% for s in ['draft', 'scheduled', 'published', 'archived'] %}
+        <option value="{{ s }}"{% if s == post.status %} selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
+  </form>
+</td>

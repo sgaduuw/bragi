@@ -809,6 +809,108 @@ def patch_slug(site_slug: str, post_id: int) -> ResponseReturnValue:
     )
 
 
+_VALID_POST_STATUSES = frozenset({"draft", "published", "archived"})
+# "scheduled" deliberately omitted from the overview inline-edit
+# path: it requires a `scheduled_for` datetime that's not entered
+# from the table. The full edit page handles that flow.
+
+
+@bp.route("/<int:post_id>/cell/status", methods=["GET"])
+def status_cell(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Render the status cell as an always-live <select>."""
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_status_cell.html",
+            site=site,
+            post=post,
+            error=None,
+        )
+
+
+@bp.route("/<int:post_id>/patch/status", methods=["PATCH"])
+def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """PATCH the post status. Invalid value -> error partial.
+    Scheduled transition -> error pointing at the full edit page.
+    On success, fires the first-publish hooks if applicable."""
+    raw = (request.form.get("status") or "").strip()
+    error: str | None = None
+    if raw == "scheduled":
+        error = (
+            "Cannot transition to scheduled from the overview; "
+            "use the full edit page to pick a scheduled_for date."
+        )
+    elif raw not in _VALID_POST_STATUSES:
+        error = f"Invalid status: {raw!r}"
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
+        if error is not None:
+            return render_template(
+                "admin/_status_cell.html",
+                site=site,
+                post=post,
+                error=error,
+            )
+
+        was_unpublished = post.status != PostStatus.PUBLISHED
+        becoming_published = raw == PostStatus.PUBLISHED
+        is_first_publish = was_unpublished and becoming_published
+
+        before = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
+        if is_first_publish and post.published_at is None:
+            post.published_at = naive_utcnow()
+        post.status = raw
+        db.commit()
+        db.refresh(post)
+        after = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        if is_first_publish:
+            pm.hook.on_post_published(item=post, session=db)
+        pm.hook.on_cache_purge(scope="post", key=str(post.id))
+
+        cell_site = site
+        cell_post = post
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="post",
+        target_id=post_id,
+        site_id=cell_site_id,
+        extra={"field": "status", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_status_cell.html",
+        site=cell_site,
+        post=cell_post,
+        error=None,
+    )
+
+
 @bp.route("/<int:post_id>/delete", methods=["POST"])
 def delete_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:

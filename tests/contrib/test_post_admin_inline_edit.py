@@ -318,3 +318,124 @@ def test_patch_slug_requires_editor_role(admin_app: Flask, db_session: Session) 
         data={"_csrf_token": csrf, "slug": "whatever"},
     )
     assert resp.status_code == 403
+
+
+# ============================================================
+# GET /cell/status (always-live <select>)
+# ============================================================
+
+
+def test_status_cell_renders_live_select(admin_app: Flask, db_session: Session) -> None:
+    """The status cell renders a <select> with the four enum values;
+    no view/edit-mode toggle."""
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{pid}/cell/status")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "<select" in body
+    for status in ("draft", "scheduled", "published", "archived"):
+        assert f'value="{status}"' in body
+    # hx-patch fires on change.
+    assert 'hx-trigger="change"' in body
+    assert "hx-patch" in body
+
+
+# ============================================================
+# PATCH /patch/status
+# ============================================================
+
+
+def test_patch_status_changes_value(admin_app: Flask, db_session: Session) -> None:
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/status",
+        data={"_csrf_token": csrf, "status": "draft"},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    new_status = db_session.execute(select(Post.status).where(Post.id == pid)).scalar_one()
+    assert new_status == "draft"
+
+
+def test_patch_status_first_publish_sets_published_at(
+    admin_app: Flask, db_session: Session
+) -> None:
+    """Transition to published when published_at is None stamps now."""
+    site_id = db_session.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+    ada_id = db_session.execute(select(User.id).where(User.email == EDITOR_EMAIL)).scalar_one()
+    draft = Post(
+        site_id=site_id,
+        author_id=ada_id,
+        title="Fresh",
+        slug="fresh-draft",
+        body_markdown="x",
+        body_html="<p>x</p>",
+        status=PostStatus.DRAFT,
+        published_at=None,
+    )
+    db_session.add(draft)
+    db_session.commit()
+    draft_id = draft.id
+
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{draft_id}/patch/status",
+        data={"_csrf_token": csrf, "status": "published"},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    pub_at = db_session.execute(select(Post.published_at).where(Post.id == draft_id)).scalar_one()
+    assert pub_at is not None
+
+
+def test_patch_status_rejects_invalid_value(admin_app: Flask, db_session: Session) -> None:
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/status",
+        data={"_csrf_token": csrf, "status": "bogus"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "inline-edit-error" in body
+
+
+def test_patch_status_rejects_scheduled_transition_inline(
+    admin_app: Flask, db_session: Session
+) -> None:
+    """Transitioning to `scheduled` from the overview is rejected;
+    the operator must use the full edit page (where the
+    scheduled_for date picker lives)."""
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/status",
+        data={"_csrf_token": csrf, "status": "scheduled"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "inline-edit-error" in body
+    assert "scheduled" in body.lower()
+
+
+def test_patch_status_requires_editor_role(admin_app: Flask, db_session: Session) -> None:
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/status",
+        data={"_csrf_token": csrf, "status": "draft"},
+    )
+    assert resp.status_code == 403
