@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.23.2 (2026-06-02).
+**Latest release:** 1.24.0 (2026-06-03).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -326,7 +326,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.23.2 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.24.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -460,6 +460,7 @@ bragi/
 │   │   └── useragent.py        # bot / browser / feed-reader classifier
 │   └── contrib/                # built-ins as plugins
 │       ├── activitypub/        # one fediverse actor per site (follow / undo / outbox fanout)
+│       ├── admin_imports/      # site-scoped admin importer index (tile aggregator)
 │       ├── analytics/          # per-site pageview sink + admin dashboard
 │       ├── anchors/            # heading id injection
 │       ├── api_tokens/         # personal access tokens + JSON REST surface
@@ -469,7 +470,7 @@ bragi/
 │       ├── auth_local/         # email + password + must-change rotation
 │       ├── embeds/             # external-content embeds (directive + providers + rerender)
 │       ├── highlight/          # Pygments html transform
-│       ├── import_ghost/       # Ghost JSON importer
+│       ├── import_ghost/       # Ghost JSON / ZIP importer (posts, pages, featured images)
 │       ├── import_hugo/        # Hugo content-tree importer
 │       ├── import_linkedin/    # LinkedIn data export (ZIP) importer for resume pages
 │       ├── import_wordpress/   # WordPress WXR XML importer
