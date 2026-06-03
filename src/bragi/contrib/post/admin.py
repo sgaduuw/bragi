@@ -595,6 +595,101 @@ def pin_toggle(site_slug: str, post_id: int) -> ResponseReturnValue:
     return redirect(url_for("post_admin.list_posts", site_slug=site_slug))
 
 
+@bp.route("/<int:post_id>/cell/title", methods=["GET"])
+def title_cell(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Render the title cell. ?mode=edit returns the edit-mode
+    partial (input + hx-patch form); default returns the display
+    partial (link to the full edit page). Editor role required.
+    """
+    mode = request.args.get("mode", "view")
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_title_cell.html",
+            site=site,
+            post=post,
+            mode=mode,
+            value=None,
+            error=None,
+        )
+
+
+@bp.route("/<int:post_id>/patch/title", methods=["PATCH"])
+def patch_title(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """PATCH the post title. On success returns the display-mode
+    partial; on validation failure returns the edit-mode partial
+    with `error` + the rejected `value` pre-filled."""
+    raw = (request.form.get("title") or "").strip()
+    error: str | None = None
+    if not raw:
+        error = "Title cannot be empty."
+    elif len(raw) > 255:
+        error = "Title must be 255 characters or fewer."
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
+        if error is not None:
+            return render_template(
+                "admin/_title_cell.html",
+                site=site,
+                post=post,
+                mode="edit",
+                value=raw,
+                error=error,
+            )
+
+        before = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
+        post.title = raw
+        db.commit()
+        db.refresh(post)
+        after = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="post", key=str(post.id))
+
+        cell_site = site
+        cell_post = post
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="post",
+        target_id=post_id,
+        site_id=cell_site_id,
+        extra={"field": "title", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_title_cell.html",
+        site=cell_site,
+        post=cell_post,
+        mode="view",
+        value=None,
+        error=None,
+    )
+
+
 @bp.route("/<int:post_id>/delete", methods=["POST"])
 def delete_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
