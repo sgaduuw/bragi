@@ -19,6 +19,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as a fallback when `feature_image` is empty. Failed image
   fetches surface as warnings; the post or page still imports
   without the image.
+- Admin import UI: site-scoped page at
+  `/admin/sites/<slug>/import/` lists every importer that's wired
+  up an admin form. Ghost is the first wired importer, with a
+  three-step flow: upload `.json` or `.zip` export → review plan
+  (counts, warnings) → apply (or cancel). The Ghost CLI continues
+  to work unchanged; the admin route is an alternative surface
+  for operators who prefer the browser. The stash directory uses
+  a hardened path-traversal check on ZIP extraction
+  (`Path.is_relative_to` against the resolved unpack root, not a
+  bare `str.startswith`). New `register_importer_admin_tile`
+  hookspec + `ImporterAdminTile` dataclass let future importer
+  plugins (Hugo, WordPress) wire up their own admin forms in
+  tiny follow-up PRs.
 
 ## [1.23.2] - 2026-06-02
 
