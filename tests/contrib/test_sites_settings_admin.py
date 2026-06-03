@@ -295,3 +295,15 @@ def test_settings_patch_requires_editor_role(admin_app: Flask) -> None:
         data={"_csrf_token": token, "setting_test_count": "1"},
     )
     assert resp.status_code == 403
+
+
+def test_sites_plugin_contributes_settings_nav_item() -> None:
+    """The sites plugin contributes a 'Settings' nav item with
+    scope='site' so it appears in the site-scoped chrome row."""
+    from bragi.api import NavItem
+    from bragi.contrib.sites.plugin import register_admin_nav
+
+    items = register_admin_nav()
+    assert any(
+        isinstance(i, NavItem) and i.label == "Settings" and i.scope == "site" for i in items
+    )
