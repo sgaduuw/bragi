@@ -20,11 +20,13 @@ from typing import Annotated, Any, get_args, get_origin
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
+from pydantic import TypeAdapter, ValidationError
 from pydantic.fields import FieldInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, SiteSetting, set_breadcrumbs
+from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -881,5 +883,96 @@ def settings(site_slug: str) -> ResponseReturnValue:
 
 @bp.route("/<site_slug>/settings/", methods=["PATCH"])
 def patch_settings(site_slug: str) -> ResponseReturnValue:
-    """PATCH handler implemented in Task 3."""
-    abort(501)
+    """Submit the settings form. All-or-nothing: any validation
+    error blocks the whole save and re-renders with field-level
+    errors."""
+    registered_settings = _collect_site_settings()
+    submitted: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+
+    for setting in registered_settings:
+        form_field = f"setting_{setting.key}"
+        widget = _setting_widget(setting)
+        if widget == "bool":
+            # An unchecked checkbox doesn't submit at all; treat
+            # missing as False.
+            raw_value: Any = form_field in request.form
+        elif form_field not in request.form:
+            # Field absent for a non-bool setting -> skip (no change).
+            continue
+        else:
+            raw_value = request.form[form_field]
+        try:
+            submitted[setting.key] = TypeAdapter(setting.type).validate_python(raw_value)
+        except ValidationError as exc:
+            # Surface the first error message; pydantic reports
+            # multiple but the input only displays one line.
+            errors[setting.key] = exc.errors()[0]["msg"]
+
+    with SessionLocal() as db:
+        # resolve_site_or_abort expunges the row so it can outlive
+        # the session (the chrome context processor reads g.current_site
+        # after the session closes). Re-fetch into the active session
+        # so writes are tracked by SQLAlchemy; same pattern as
+        # edit_site_current.
+        resolved = resolve_site_or_abort(db, site_slug)
+        require_role("editor", resolved.id)
+        site = db.execute(select(Site).where(Site.id == resolved.id)).scalar_one()
+
+        if errors:
+            current_values = dict(site.extra_settings or {})
+            # Override with the operator's submitted (pre-validation)
+            # raw values so the offending input shows what they typed.
+            for setting in registered_settings:
+                form_field = f"setting_{setting.key}"
+                if form_field in request.form:
+                    current_values[setting.key] = request.form[form_field]
+            return render_template(
+                "admin/sites_settings.html",
+                site=resolved,
+                settings=registered_settings,
+                current_values=current_values,
+                errors=errors,
+                setting_widget=_setting_widget,
+                setting_min=_setting_min,
+                setting_max=_setting_max,
+            ), 200
+
+        before = dict(site.extra_settings or {})
+        new_extra = dict(before)
+        changed_keys: list[str] = []
+        for key, value in submitted.items():
+            if new_extra.get(key) != value:
+                new_extra[key] = value
+                changed_keys.append(key)
+        site.extra_settings = new_extra
+        db.commit()
+        after = dict(site.extra_settings or {})
+        committed_site_id = site.id
+        site_slug_for_redirect = site.slug
+
+        # Fire on_site_updated hook only if it exists in the codebase.
+        pm = current_app.extensions["plugin_manager"]
+        if hasattr(pm.hook, "on_site_updated"):
+            pm.hook.on_site_updated(item=site, before=before, after=after, session=db)
+
+    # Audit log entry. SITE_UPDATED does not yet exist in AuditAction,
+    # so fall back to POST_UPDATED (the generic "content updated"
+    # action used elsewhere for similar non-post entities).
+    audit(
+        _audit_action_for_site_update(),
+        target_type="site",
+        target_id=committed_site_id,
+        site_id=committed_site_id,
+        extra={"changed_keys": sorted(changed_keys)},
+    )
+
+    flash("Settings saved.", "success")
+    return redirect(url_for("site_admin.settings", site_slug=site_slug_for_redirect))
+
+
+def _audit_action_for_site_update() -> str:
+    """Return AuditAction.SITE_UPDATED if defined; fall back to
+    POST_UPDATED otherwise. POST_UPDATED is used elsewhere as the
+    generic 'content updated' action."""
+    return getattr(AuditAction, "SITE_UPDATED", AuditAction.POST_UPDATED)

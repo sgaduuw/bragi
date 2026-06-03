@@ -173,3 +173,125 @@ def test_settings_get_hides_stale_keys(
     body = resp.get_data(as_text=True)
     assert "stale_key" not in body
     assert "ghost" not in body
+
+
+def test_settings_patch_happy_path_persists(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client)
+    resp = client.patch(
+        "/admin/sites/blog/settings/",
+        data={
+            "_csrf_token": token,
+            "setting_test_count": "42",
+            "setting_test_label": "world",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        assert site.extra_settings.get("test_count") == 42
+        assert site.extra_settings.get("test_label") == "world"
+
+
+def test_settings_patch_validation_error_blocks_save(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """An invalid value (negative int) blocks the whole save and
+    re-renders the form with the error; other fields' valid
+    submitted values are NOT persisted."""
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client)
+    resp = client.patch(
+        "/admin/sites/blog/settings/",
+        data={
+            "_csrf_token": token,
+            "setting_test_count": "-5",  # violates ge=0
+            "setting_test_label": "would-have-stuck",
+        },
+    )
+    assert resp.status_code == 200  # form re-rendered, not redirect
+    body = resp.get_data(as_text=True)
+    assert "inline-edit-error" in body
+    # The rejected value pre-filled.
+    assert 'value="-5"' in body
+    # Other field shows the user's input too.
+    assert 'value="would-have-stuck"' in body
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        assert "test_count" not in (site.extra_settings or {})
+        assert "test_label" not in (site.extra_settings or {})
+
+
+def test_settings_patch_typo_guard_ignores_unknown_form_keys(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """A submitted form field whose name does not map to any
+    registered setting is silently ignored (not persisted, not
+    an error)."""
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client)
+    resp = client.patch(
+        "/admin/sites/blog/settings/",
+        data={
+            "_csrf_token": token,
+            "setting_test_count": "8",
+            "setting_bogus_key": "should-be-ignored",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        assert site.extra_settings.get("test_count") == 8
+        assert "bogus_key" not in (site.extra_settings or {})
+
+
+def test_settings_patch_leaves_stale_keys_untouched(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Keys in extra_settings that no plugin registers are NOT
+    removed by a save (the handler only mutates registered keys)."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.extra_settings = {"stale_key": "preserved"}
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client)
+    client.patch(
+        "/admin/sites/blog/settings/",
+        data={
+            "_csrf_token": token,
+            "setting_test_count": "9",
+            "setting_test_label": "x",
+        },
+    )
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        assert site.extra_settings.get("stale_key") == "preserved"
+        assert site.extra_settings.get("test_count") == 9
+
+
+def test_settings_patch_requires_editor_role(admin_app: Flask) -> None:
+    client = admin_app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    token = csrf_token(client)
+    resp = client.patch(
+        "/admin/sites/blog/settings/",
+        data={"_csrf_token": token, "setting_test_count": "1"},
+    )
+    assert resp.status_code == 403
