@@ -1374,3 +1374,69 @@ def patch_status(site_slug: str, page_id: int) -> ResponseReturnValue:
         page=cell_page,
         error=None,
     )
+
+
+@bp.route("/<int:page_id>/cell/show-in-nav", methods=["GET"])
+def show_in_nav_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the show_in_nav toggle cell. Editor role required."""
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_show_in_nav_cell.html",
+            site=site,
+            page=page,
+        )
+
+
+@bp.route("/<int:page_id>/patch/show-in-nav", methods=["PATCH"])
+def patch_show_in_nav(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Flip page.show_in_nav. Returns the toggle-cell partial."""
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        page.show_in_nav = not page.show_in_nav
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "show_in_nav", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_show_in_nav_cell.html",
+        site=cell_site,
+        page=cell_page,
+    )

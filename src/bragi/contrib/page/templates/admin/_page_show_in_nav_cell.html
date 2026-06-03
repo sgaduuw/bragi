@@ -1,0 +1,12 @@
+{# Toggle show_in_nav. Renders a button labelled "Show" when the
+   page is currently hidden and "Hide" when it's currently shown.
+   Patterned after _pinned_cell.html. #}
+<td id="page-show-in-nav-cell-{{ page.id }}" role="gridcell">
+  <form hx-patch="{{ url_for('page_admin.patch_show_in_nav', site_slug=site.slug, page_id=page.id) }}"
+        hx-target="#page-show-in-nav-cell-{{ page.id }}"
+        hx-swap="outerHTML"
+        style="margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">{{ 'Hide' if page.show_in_nav else 'Show' }}</button>
+  </form>
+</td>

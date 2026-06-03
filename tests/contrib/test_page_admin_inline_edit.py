@@ -324,3 +324,45 @@ def test_patch_status_requires_editor_role(admin_app: Flask, db_session: Session
         data={"_csrf_token": csrf, "status": "draft"},
     )
     assert resp.status_code == 403
+
+
+def test_show_in_nav_cell_renders_button(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/pages/{pid}/cell/show-in-nav")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "<button" in body
+    # Page seeded with show_in_nav=True, so the button text reads "Hide".
+    assert "Hide" in body
+    assert "hx-patch" in body
+
+
+def test_patch_show_in_nav_flips_value(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{pid}/patch/show-in-nav",
+        data={"_csrf_token": csrf},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    new_value = db_session.execute(select(Page.show_in_nav).where(Page.id == pid)).scalar_one()
+    assert new_value is False
+    body = resp.get_data(as_text=True)
+    assert "Show" in body  # button now says "Show" (currently hidden)
+
+
+def test_patch_show_in_nav_requires_editor_role(admin_app: Flask, db_session: Session) -> None:
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{pid}/patch/show-in-nav",
+        data={"_csrf_token": csrf},
+    )
+    assert resp.status_code == 403
