@@ -46,7 +46,6 @@ from bragi.contrib.attachments.delivery import build_attachment_response
 from bragi.contrib.attachments.service import create_attachment_from_bytes
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
-from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.permissions import require_role, resolve_site_or_abort
@@ -527,17 +526,14 @@ def save_alt_text(site_slug: str, attachment_id: int) -> ResponseReturnValue:
         extra={"filename": filename, "field": "alt_text"},
     )
 
-    if is_htmx():
-        with SessionLocal() as db:
-            row = db.get(Attachment, attachment_id)
-            return render_template(
-                "admin/_attachment_row.html",
-                r=row,
-                missing_alt=True,
-                just_saved=True,
-            )
-    flash(f"Saved alt text for {filename}.", "success")
-    return redirect(url_for("attachment_admin.list_attachments", missing_alt="1"))
+    with SessionLocal() as db:
+        row = db.get(Attachment, attachment_id)
+        return render_template(
+            "admin/_attachment_row.html",
+            r=row,
+            missing_alt=True,
+            just_saved=True,
+        )
 
 
 @bp.route("/<int:attachment_id>/edit", methods=["GET", "POST"])

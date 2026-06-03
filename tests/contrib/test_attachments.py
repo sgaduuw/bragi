@@ -1421,26 +1421,6 @@ def test_missing_alt_count_surfaced_in_header(
     assert b"missing alt text (1)" in resp.data.lower()
 
 
-def test_save_alt_text_non_htmx_redirects(
-    admin_app: Flask,
-    db_session_factory: sessionmaker[Session],
-) -> None:
-    without_alt_id, _ = _seed_two_images_one_missing_alt(db_session_factory)
-    client = admin_app.test_client()
-    _login(client)
-    token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
-    resp = client.post(
-        f"/admin/sites/blog/attachments/{without_alt_id}/alt-text",
-        data={"alt_text": "A clarifying caption.", "_csrf_token": token},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 302
-    with db_session_factory() as db:
-        row = db.get(Attachment, without_alt_id)
-    assert row is not None
-    assert row.alt_text == "A clarifying caption."
-
-
 def test_save_alt_text_htmx_returns_row_partial(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
