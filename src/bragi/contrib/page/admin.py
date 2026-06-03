@@ -1064,3 +1064,99 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
     )
     flash("Revision restored.", "success")
     return redirect(url_for("page_admin.edit_page", page_id=restored_id))
+
+
+@bp.route("/<int:page_id>/cell/title", methods=["GET"])
+def title_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the title cell. ?mode=edit returns the edit-mode
+    partial (input + hx-patch form); default returns the display
+    partial (link to the full edit page). Editor role required.
+    """
+    mode = request.args.get("mode", "view")
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_title_cell.html",
+            site=site,
+            page=page,
+            mode=mode,
+            value=None,
+            error=None,
+        )
+
+
+@bp.route("/<int:page_id>/patch/title", methods=["PATCH"])
+def patch_title(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """PATCH the page title. On success returns the display-mode
+    partial; on validation failure returns the edit-mode partial
+    with `error` + the rejected `value` pre-filled.
+    """
+    raw = (request.form.get("title") or "").strip()
+    error: str | None = None
+    if not raw:
+        error = "Title cannot be empty."
+    elif len(raw) > 255:
+        error = "Title must be 255 characters or fewer."
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        if error is not None:
+            return render_template(
+                "admin/_page_title_cell.html",
+                site=site,
+                page=page,
+                mode="edit",
+                value=raw,
+                error=error,
+            )
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        page.title = raw
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,  # generic "content updated"; mirrors edit_page convention
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "title", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_title_cell.html",
+        site=cell_site,
+        page=cell_page,
+        mode="view",
+        value=None,
+        error=None,
+    )
