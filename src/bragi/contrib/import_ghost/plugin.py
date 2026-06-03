@@ -5,10 +5,17 @@ from __future__ import annotations
 import click
 from flask import Blueprint
 
-from bragi.api import ImporterSpec, hookimpl
+from bragi.api import ImporterAdminTile, ImporterSpec, hookimpl
 from bragi.contrib.import_ghost.admin import bp as ghost_admin_bp
 from bragi.contrib.import_ghost.cli import ghost_command
 from bragi.contrib.import_ghost.importer import apply, detect, plan
+
+__all__ = [
+    "register_admin_blueprint",
+    "register_cli_command",
+    "register_importer",
+    "register_importer_admin_tile",
+]
 
 
 @hookimpl
@@ -40,3 +47,17 @@ def register_cli_command(group: click.Group) -> None:
 def register_admin_blueprint() -> Blueprint:
     """Mount the Ghost upload/review Blueprint on the admin app."""
     return ghost_admin_bp
+
+
+@hookimpl
+def register_importer_admin_tile() -> ImporterAdminTile:
+    """Contribute the Ghost importer tile to the admin import index."""
+    return ImporterAdminTile(
+        label="Ghost",
+        slug="ghost",
+        description=(
+            "Import posts, pages, redirects, and featured images "
+            "from a Ghost JSON or ZIP export."
+        ),
+        start_endpoint="ghost_admin.upload",
+    )

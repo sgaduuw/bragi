@@ -660,3 +660,39 @@ def test_apply_handles_importer_exception(
     assert resp.status_code in (301, 302)
     assert "/import/ghost/upload" in (resp.headers.get("Location") or "")
     assert not stash.exists(), "apply exception path should drop the stash"
+
+
+# ============================================================
+# register_importer_admin_tile hookimpl + end-to-end pin
+# ============================================================
+
+
+def test_register_importer_admin_tile_returns_ghost_tile() -> None:
+    """The Ghost plugin contributes an `ImporterAdminTile` so the
+    shell renders a Ghost card on the import index."""
+    from bragi.api import ImporterAdminTile
+    from bragi.contrib.import_ghost.plugin import register_importer_admin_tile
+
+    tile = register_importer_admin_tile()
+    assert isinstance(tile, ImporterAdminTile)
+    assert tile.label == "Ghost"
+    assert tile.slug == "ghost"
+    assert tile.start_endpoint == "ghost_admin.upload"
+    assert "post" in tile.description.lower() or "page" in tile.description.lower()
+
+
+def test_import_index_lists_ghost_tile_end_to_end(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+) -> None:
+    """End-to-end pin: the running admin app's import index renders
+    the Ghost tile because the Ghost plugin's hookimpl is wired up
+    via the entry-point loader."""
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/import/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Ghost" in body
+    # The card links to the upload route.
+    assert "/admin/sites/blog/import/ghost/upload" in body
