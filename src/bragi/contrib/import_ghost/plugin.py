@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import click
+from flask import Blueprint
 
 from bragi.api import ImporterSpec, hookimpl
+from bragi.contrib.import_ghost.admin import bp as ghost_admin_bp
 from bragi.contrib.import_ghost.cli import ghost_command
 from bragi.contrib.import_ghost.importer import apply, detect, plan
 
@@ -32,3 +34,9 @@ def register_cli_command(group: click.Group) -> None:
         import_group = click.Group("import", help="Content import commands.")
         group.add_command(import_group)
     import_group.add_command(ghost_command)
+
+
+@hookimpl
+def register_admin_blueprint() -> Blueprint:
+    """Mount the Ghost upload/review Blueprint on the admin app."""
+    return ghost_admin_bp
