@@ -19,20 +19,29 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from markdownify import markdownify
 from sqlalchemy import select
 
 from bragi.api import ImportPlan, ImportResult
+from bragi.contrib.attachments.service import create_attachment_from_bytes
 from bragi.contrib.import_ghost.loader import load_export, looks_like_ghost
 from bragi.core.db import SessionLocal
+from bragi.core.http import safe_get
+from bragi.core.models.attachment import Attachment
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.redirect import Redirect, RedirectSource
+from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
 from bragi.core.render.markdown import make_excerpt, render_markdown
-from bragi.core.url import post_url_for
+from bragi.core.url import page_url_for, post_url_for
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 def detect(path: Any) -> bool:
@@ -62,6 +71,15 @@ def _status_from(ghost_status: str | None) -> str:
     return PostStatus.DRAFT
 
 
+def _page_status_from(ghost_status: str | None) -> str:
+    # Ghost pages can be "scheduled" but bragi's PageStatus has no
+    # scheduled concept for pages; treat them as drafts to be published
+    # explicitly, which is safer than publishing prematurely.
+    if ghost_status == "published":
+        return PageStatus.PUBLISHED
+    return PageStatus.DRAFT
+
+
 def _html_to_markdown(html: str) -> str:
     """Convert Ghost HTML to markdown.
 
@@ -74,9 +92,83 @@ def _html_to_markdown(html: str) -> str:
     return md.strip()
 
 
+def _basename_from_url(url: str) -> str | None:
+    """Extract the trailing path segment of a URL, defaulting to None
+    when the URL has no usable filename component. Used to give a
+    sensible display name to the created Attachment row."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    if not parsed.path:
+        return None
+    last = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    return last or None
+
+
+def _resolve_feature_image(
+    db: Session,
+    *,
+    site: Site,
+    url: str | None,
+    alt_text: str | None = None,
+) -> tuple[Attachment | None, str | None]:
+    """Fetch `url` and return (Attachment | None, warning_msg | None).
+
+    Empty / None URL is a silent no-op. Network / SSRF / parse errors
+    return (None, "feature image <url>: <reason>") so the caller can
+    surface them in the import warnings list. Successful fetches go
+    through the shared `create_attachment_from_bytes` helper, so
+    SHA-256 dedup is automatic: two posts pointing at the same
+    Ghost CDN URL share one Attachment row.
+
+    The created Attachment carries `external_source="ghost"` plus
+    `external_source_id=<original URL>`, so a re-import recognises
+    the already-fetched image via the composite index on
+    (site_id, external_source, external_source_id) and skips the
+    network call. `alt_text` is only applied on the FRESH-fetch
+    path; the dedup short-circuit returns the existing row
+    unchanged, preserving any operator edits to alt_text in the
+    bragi admin.
+    """
+    if not url:
+        return None, None
+    existing = db.execute(
+        select(Attachment)
+        .where(Attachment.site_id == site.id)
+        .where(Attachment.external_source == "ghost")
+        .where(Attachment.external_source_id == url)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing, None
+    try:
+        resp = safe_get(url, max_bytes=20_000_000)
+        resp.raise_for_status()
+        data = resp.content
+        content_type = resp.headers.get("Content-Type") or "application/octet-stream"
+        filename = _basename_from_url(url) or "ghost-feature-image"
+    except Exception as exc:
+        return None, f"feature image {url!r}: {exc}"
+    result = create_attachment_from_bytes(
+        db,
+        site_id=site.id,
+        site_slug=site.slug,
+        site_theme_slug=site.theme,
+        filename=filename,
+        content_type=content_type,
+        data=data,
+        external_source="ghost",
+        external_source_id=url,
+        alt_text=alt_text,
+    )
+    return result.attachment, None
+
+
 def plan(path: Any) -> ImportPlan:
     data = load_export(path)
-    posts = [p for p in data.get("posts", []) if p.get("type", "post") == "post"]
+    entries = data.get("posts", [])
+    posts = [p for p in entries if p.get("type", "post") == "post"]
+    pages = [p for p in entries if p.get("type") == "page"]
     redirects = 0
     warnings: list[str] = []
     for post in posts:
@@ -90,9 +182,18 @@ def plan(path: Any) -> ImportPlan:
             redirects += 1
         if not post.get("html") and not post.get("lexical") and not post.get("mobiledoc"):
             warnings.append(f"post {slug!r}: empty body")
+    for page in pages:
+        slug = page.get("slug")
+        if not slug:
+            warnings.append(f"page {page.get('id')!r}: missing slug")
+            continue
+        if page.get("status") == "published":
+            redirects += 1
+        if not page.get("html") and not page.get("lexical") and not page.get("mobiledoc"):
+            warnings.append(f"page {slug!r}: empty body")
     tags = data.get("tags", [])
     return ImportPlan(
-        counts={"posts": len(posts), "tags": len(tags)},
+        counts={"posts": len(posts), "pages": len(pages), "tags": len(tags)},
         warnings=warnings,
         redirects=redirects,
     )
@@ -152,7 +253,11 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
     data = load_export(path)
     posts_created = 0
     posts_updated = 0
+    pages_created = 0
+    pages_updated = 0
     redirects_inserted = 0
+    feature_images_fetched = 0
+    feature_images_failed = 0
     warnings: list[str] = []
 
     with SessionLocal() as db:
@@ -212,6 +317,8 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                     author_id=resolved_author_id,
                     status=status,
                     published_at=published_at,
+                    meta_title=raw_post.get("meta_title") or None,
+                    is_pinned=bool(raw_post.get("featured")),
                     meta_description=raw_post.get("meta_description") or None,
                     canonical_url=raw_post.get("canonical_url") or None,
                     source_id=ghost_id,
@@ -228,12 +335,25 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 existing.status = status
                 if published_at is not None:
                     existing.published_at = published_at
+                existing.meta_title = raw_post.get("meta_title") or None
+                existing.is_pinned = bool(raw_post.get("featured"))
                 existing.meta_description = raw_post.get("meta_description") or None
                 existing.canonical_url = raw_post.get("canonical_url") or None
                 existing.author_id = resolved_author_id
                 post = existing
                 posts_updated += 1
             db.flush()
+
+            fi_url = raw_post.get("feature_image") or raw_post.get("og_image")
+            fi_alt = raw_post.get("feature_image_alt")
+            fi_att, fi_warn = _resolve_feature_image(db, site=site, url=fi_url, alt_text=fi_alt)
+            if fi_warn:
+                warnings.append(f"post {slug!r}: {fi_warn}")
+            if fi_att is not None:
+                post.featured_image_id = fi_att.id
+                feature_images_fetched += 1
+            elif fi_url:
+                feature_images_failed += 1
 
             post.tags = post_tag_map.get(ghost_id, [])
 
@@ -269,6 +389,122 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                         clash.target = target
                         clash.status_code = 301
 
+        # ----------------------------------------------------------
+        # Pages loop. Ghost ships pages in the same `posts` array as
+        # posts, discriminated by `type`. Pages are flat (no parent
+        # hierarchy in the export), so every imported page gets
+        # `parent_id=None` and `kind=STATIC`. Operator-managed fields
+        # (`parent_id`, `kind`, `show_in_nav`, `menu_order`) are NEVER
+        # overwritten on re-import.
+        # ----------------------------------------------------------
+        for raw_page in data.get("posts", []):
+            if raw_page.get("type") != "page":
+                continue
+            ghost_id = raw_page.get("id")
+            slug = raw_page.get("slug")
+            if not ghost_id or not slug:
+                warnings.append(f"page {ghost_id!r}: missing slug")
+                continue
+            body_md = _html_to_markdown(raw_page.get("html") or "")
+            title = raw_page.get("title") or slug
+            status = _page_status_from(raw_page.get("status"))
+            resolved_author_id = _resolve_author(db, data, raw_page, author_id)
+
+            existing_page: Page | None = db.execute(
+                select(Page).where(Page.site_id == site_id, Page.source_id == ghost_id)
+            ).scalar_one_or_none()
+
+            if existing_page is None:
+                # Slug-clash pre-flight: warn + skip rather than
+                # raising on the (site_id, parent_id, slug) UNIQUE
+                # constraint.
+                clash_page = db.execute(
+                    select(Page).where(
+                        Page.site_id == site_id,
+                        Page.parent_id.is_(None),
+                        Page.slug == slug,
+                    )
+                ).scalar_one_or_none()
+                if clash_page is not None:
+                    warnings.append(
+                        f"page {slug!r}: slug already used by an existing page; skipped"
+                    )
+                    continue
+                page: Page = Page(
+                    site_id=site_id,
+                    parent_id=None,
+                    slug=slug,
+                    title=title,
+                    kind=PageKind.STATIC,
+                    body_markdown=body_md,
+                    body_html=render_markdown(body_md),
+                    body_excerpt=raw_page.get("custom_excerpt") or make_excerpt(body_md),
+                    author_id=resolved_author_id,
+                    status=status,
+                    meta_title=raw_page.get("meta_title") or None,
+                    meta_description=raw_page.get("meta_description") or None,
+                    canonical_url=raw_page.get("canonical_url") or None,
+                    source_id=ghost_id,
+                    source_meta={"importer": "ghost"},
+                )
+                db.add(page)
+                pages_created += 1
+            else:
+                # Ghost-sourced fields flow through; operator-managed
+                # fields (parent_id, kind, show_in_nav, menu_order)
+                # are NOT touched on re-import.
+                existing_page.slug = slug
+                existing_page.title = title
+                existing_page.body_markdown = body_md
+                existing_page.body_html = render_markdown(body_md)
+                existing_page.body_excerpt = raw_page.get("custom_excerpt") or make_excerpt(body_md)
+                existing_page.status = status
+                existing_page.meta_title = raw_page.get("meta_title") or None
+                existing_page.meta_description = raw_page.get("meta_description") or None
+                existing_page.canonical_url = raw_page.get("canonical_url") or None
+                existing_page.author_id = resolved_author_id
+                page = existing_page
+                pages_updated += 1
+            db.flush()
+
+            # Featured image (same helper as posts, same fallback shape).
+            fi_url = raw_page.get("feature_image") or raw_page.get("og_image")
+            fi_alt = raw_page.get("feature_image_alt")
+            fi_att, fi_warn = _resolve_feature_image(db, site=site, url=fi_url, alt_text=fi_alt)
+            if fi_warn:
+                warnings.append(f"page {slug!r}: {fi_warn}")
+            if fi_att is not None:
+                page.featured_image_id = fi_att.id
+                feature_images_fetched += 1
+            elif fi_url:
+                feature_images_failed += 1
+
+            # Permalink redirect.
+            if status == PageStatus.PUBLISHED:
+                target = page_url_for(page, db=db)
+                source_path = f"/{slug}/"
+                if source_path != target:
+                    clash = db.execute(
+                        select(Redirect).where(
+                            Redirect.site_id == site_id,
+                            Redirect.source_path == source_path,
+                        )
+                    ).scalar_one_or_none()
+                    if clash is None:
+                        db.add(
+                            Redirect(
+                                site_id=site_id,
+                                source_path=source_path,
+                                target=target,
+                                status_code=301,
+                                source=RedirectSource.IMPORT_GHOST,
+                            )
+                        )
+                        redirects_inserted += 1
+                    else:
+                        clash.target = target
+                        clash.status_code = 301
+
         db.commit()
 
     return ImportResult(
@@ -276,6 +512,11 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             "posts": posts_created + posts_updated,
             "posts_created": posts_created,
             "posts_updated": posts_updated,
+            "pages": pages_created + pages_updated,
+            "pages_created": pages_created,
+            "pages_updated": pages_updated,
+            "feature_images_fetched": feature_images_fetched,
+            "feature_images_failed": feature_images_failed,
         },
         warnings=warnings,
         redirects_inserted=redirects_inserted,

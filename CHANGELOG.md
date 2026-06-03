@@ -6,6 +6,47 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-06-03
+
+### Added
+- Ghost importer: now imports Ghost pages as bragi `STATIC`
+  pages (previously skipped). Both posts and pages also gain
+  featured-image handling — Ghost's `feature_image` URL is
+  downloaded into a bragi `Attachment` with the original
+  photographer caption (`feature_image_alt`) pinned as alt
+  text. Re-imports dedup by source URL so the same image is
+  only fetched once across the corpus. Four additional Ghost
+  fields are picked up: `meta_title` (both), `featured` →
+  `is_pinned` (posts only; pinned indefinitely), and `og_image`
+  as a fallback when `feature_image` is empty. Failed image
+  fetches surface as warnings; the post or page still imports
+  without the image.
+- Admin import UI: site-scoped page at
+  `/admin/sites/<slug>/import/` lists every importer that's wired
+  up an admin form. Ghost is the first wired importer, with a
+  three-step flow: upload `.json` or `.zip` export → review plan
+  (counts, warnings) → apply (or cancel). The Ghost CLI continues
+  to work unchanged; the admin route is an alternative surface
+  for operators who prefer the browser. The stash directory uses
+  a hardened path-traversal check on ZIP extraction
+  (`Path.is_relative_to` against the resolved unpack root, not a
+  bare `str.startswith`). New `register_importer_admin_tile`
+  hookspec + `ImporterAdminTile` dataclass let future importer
+  plugins (Hugo, WordPress) wire up their own admin forms in
+  tiny follow-up PRs.
+
+### Fixed
+- Admin form submit buttons no longer stretch to the column's full
+  width by default. The `form { flex-direction: column }` rule in
+  `admin-chrome.css` was stretching every direct-child submit
+  button into a giant bar; the same bug surfaced and was patched
+  per-form three times (Unsplash search, LinkedIn upload, Ghost
+  upload). Replaced the scattered scoped overrides with one global
+  rule that constrains `form > button` to natural width via
+  `align-self: flex-start`. Forms that genuinely want a hero/CTA
+  full-width submit can opt in with `class="full-width"`. Buttons
+  grouped under `.actions` are unaffected.
+
 ## [1.23.2] - 2026-06-02
 
 ### Fixed

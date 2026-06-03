@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.23.2 (2026-06-02).
+**Latest release:** 1.24.0 (2026-06-03).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -198,13 +198,20 @@ in place rather than duplicating them.
   skips the redirect emission for those. `tags:` lists upsert by
   slug. CLI: `bragi import hugo --site <slug> [--author <email>] [--dry-run] <path>`.
 - **Ghost**: parses the single-file JSON export
-  (`db[0].data.posts`). Bodies arrive as HTML and convert to
-  markdown via `markdownify(heading_style="ATX")`; tags come
-  from `data.tags` + `data.posts_tags`; authors match existing
+  (`db[0].data.posts`). Posts and pages both land: posts become
+  bragi Posts; pages become bragi `STATIC` pages with slug,
+  title, body, and `meta_title` preserved. Bodies arrive as HTML
+  and convert to markdown via `markdownify(heading_style="ATX")`; tags
+  come from `data.tags` + `data.posts_tags`; authors match existing
   Users by email (else fall back to the first user). For every
   published post a 301 lands from Ghost's permalink (`/<slug>/`)
   to bragi's canonical under the site's `post_index` page (e.g.
-  `/blog/<slug>/`) so legacy bookmarks survive. CLI:
+  `/blog/<slug>/`) so legacy bookmarks survive. Featured images
+  (`feature_image`, or `og_image` as fallback) are downloaded as
+  bragi `Attachment` rows; `feature_image_alt` becomes the alt
+  text. Additional fields picked up: `featured` sets `is_pinned`
+  on posts. Failed image downloads warn and continue without the
+  image. CLI:
   `bragi import ghost --site <slug> [--author <email>] [--dry-run] <path>`.
 - **WordPress**: parses WXR (WordPress eXtended RSS) XML
   exports. `wp:post_type=post` rows become Posts, `page` rows
@@ -238,6 +245,16 @@ in place rather than duplicating them.
 
 Notion, Substack, and Medium importers are deferred to
 follow-up packages; no v1.x commitment.
+
+The admin now carries a site-scoped Import page at
+`/admin/sites/<slug>/import/` that lists every importer wired
+up with an admin form. Ghost is the first wired importer there,
+with a plan-then-apply browser flow (upload → review → apply or
+cancel) that mirrors LinkedIn's. The CLI invocations above
+continue to work; the admin route is an alternative surface for
+operators who prefer the browser. Hugo and WordPress remain
+CLI-only for now; they'll grow admin tiles in follow-up PRs via
+the new `register_importer_admin_tile` hookspec.
 
 ## Export (portability)
 
@@ -309,7 +326,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.23.2 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.24.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -443,6 +460,7 @@ bragi/
 │   │   └── useragent.py        # bot / browser / feed-reader classifier
 │   └── contrib/                # built-ins as plugins
 │       ├── activitypub/        # one fediverse actor per site (follow / undo / outbox fanout)
+│       ├── admin_imports/      # site-scoped admin importer index (tile aggregator)
 │       ├── analytics/          # per-site pageview sink + admin dashboard
 │       ├── anchors/            # heading id injection
 │       ├── api_tokens/         # personal access tokens + JSON REST surface
@@ -452,7 +470,7 @@ bragi/
 │       ├── auth_local/         # email + password + must-change rotation
 │       ├── embeds/             # external-content embeds (directive + providers + rerender)
 │       ├── highlight/          # Pygments html transform
-│       ├── import_ghost/       # Ghost JSON importer
+│       ├── import_ghost/       # Ghost JSON / ZIP importer (posts, pages, featured images)
 │       ├── import_hugo/        # Hugo content-tree importer
 │       ├── import_linkedin/    # LinkedIn data export (ZIP) importer for resume pages
 │       ├── import_wordpress/   # WordPress WXR XML importer
