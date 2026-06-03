@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-06-03
+
 ### Added
 - Ghost importer: now imports Ghost pages as bragi `STATIC`
   pages (previously skipped). Both posts and pages also gain
