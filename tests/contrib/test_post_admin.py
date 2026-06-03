@@ -555,7 +555,7 @@ def test_pin_toggle_htmx_returns_updated_cell(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    resp = client.post(
+    resp = client.patch(
         f"/admin/sites/blog/posts/{pid}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -584,7 +584,7 @@ def test_pin_toggle_writes_audit_log(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    client.post(
+    client.patch(
         f"/admin/sites/blog/posts/{pid}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -634,7 +634,7 @@ def test_pin_toggle_cross_site_404(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/sites/blog/posts/")
-    resp = client.post(
+    resp = client.patch(
         f"/admin/sites/blog/posts/{foreign_id}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -659,7 +659,7 @@ def test_pin_toggle_writes_unpin_audit_log(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    client.post(
+    client.patch(
         f"/admin/sites/blog/posts/{pid}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -715,7 +715,7 @@ def test_pin_toggle_forbidden_for_non_member(
     )
 
     token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    resp = client.post(
+    resp = client.patch(
         f"/admin/sites/blog/posts/{pid}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},

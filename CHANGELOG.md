@@ -16,6 +16,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cold load, partial on swap) stays — that is the canonical
   full-page contract, not a no-JS courtesy. CONTEXT.md gained a
   per-side JS-posture carve-out explaining the split.
+- Admin htmx-driven mutations now use the RESTfully correct verb.
+  `pin_toggle` and the attachments alt-text save converted from
+  POST to PATCH (single-field updates). The templates' `hx-post`
+  attributes become `hx-patch`; the vestigial `<form method="post"
+  action=...>` fallback attributes were dropped (no-JS doesn't
+  work for these flows anyway). Other admin mutations (edit-form
+  submissions, delete buttons) remain POST because they're plain
+  HTML form submissions and the browser can't natively send PATCH
+  / DELETE from a form. Converting those would require rewiring
+  through htmx first; that bigger sweep isn't currently motivated
+  by anything.
 
 ### Added
 - Admin overview tables: inline-edit selected fields without

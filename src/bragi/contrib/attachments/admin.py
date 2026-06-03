@@ -496,15 +496,14 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
     return redirect(url_for("attachment_admin.list_attachments"))
 
 
-@bp.route("/<int:attachment_id>/alt-text", methods=["POST"])
+@bp.route("/<int:attachment_id>/alt-text", methods=["PATCH"])
 def save_alt_text(site_slug: str, attachment_id: int) -> ResponseReturnValue:
-    """Save just the alt text for one attachment (htmx-friendly).
+    """Save just the alt text for one attachment.
 
-    The bulk missing-alt view posts here inline so an operator can
-    fill in alt text on many rows without leaving the list page.
-    On htmx requests the row partial is returned so the
-    `hx-swap="outerHTML"` target replaces in place; on a non-htmx
-    submit the response redirects back to the list view.
+    JS-required admin: the bulk missing-alt view's inline forms are
+    hx-patch-driven so an operator can fill in alt text on many rows
+    without leaving the list page. The row partial is returned so
+    the `hx-swap="outerHTML"` target replaces in place.
     """
     alt_text = (request.form.get("alt_text") or "").strip() or None
     with SessionLocal() as db:

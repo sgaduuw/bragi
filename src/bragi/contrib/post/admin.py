@@ -549,12 +549,12 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     return redirect(url_for("post_admin.list_posts"))
 
 
-@bp.route("/<int:post_id>/pin-toggle", methods=["POST"])
+@bp.route("/<int:post_id>/pin-toggle", methods=["PATCH"])
 def pin_toggle(site_slug: str, post_id: int) -> ResponseReturnValue:
     """Flip Post.is_pinned and return the updated cell partial.
 
     JS-required admin: this route is only ever hit from an htmx
-    `hx-post` on the list-view button; the partial is what
+    `hx-patch` on the list-view button; the partial is what
     `hx-swap=outerHTML` consumes. Does not touch `pinned_until`;
     nuanced expiry timing belongs on the edit form.
     """
