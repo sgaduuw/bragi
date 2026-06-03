@@ -690,6 +690,125 @@ def patch_title(site_slug: str, post_id: int) -> ResponseReturnValue:
     )
 
 
+@bp.route("/<int:post_id>/cell/slug", methods=["GET"])
+def slug_cell(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Render the slug cell. ?mode=edit returns the edit-mode
+    partial; default returns the display partial."""
+    mode = request.args.get("mode", "view")
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_slug_cell.html",
+            site=site,
+            post=post,
+            mode=mode,
+            value=None,
+            error=None,
+        )
+
+
+@bp.route("/<int:post_id>/patch/slug", methods=["PATCH"])
+def patch_slug(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """PATCH the post slug. Empty -> error. Duplicate -> error with
+    an alternative suggestion (`slug-2`). Otherwise persists, fires
+    on_post_updated (the redirects plugin inserts a 301 from the
+    old URL), and returns the display partial."""
+    raw = (request.form.get("slug") or "").strip()
+    error: str | None = None
+    if not raw:
+        error = "Slug cannot be empty."
+    elif len(raw) > 255:
+        error = "Slug must be 255 characters or fewer."
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
+        if error is None and raw != post.slug:
+            # Sibling collision check.
+            existing = db.execute(
+                select(Post.id).where(
+                    Post.site_id == site.id,
+                    Post.slug == raw,
+                    Post.id != post.id,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                # Suggest a "-2" alternative; nudge upward if 2 is also taken.
+                suffix = 2
+                while True:
+                    candidate = f"{raw}-{suffix}"
+                    taken = db.execute(
+                        select(Post.id).where(
+                            Post.site_id == site.id,
+                            Post.slug == candidate,
+                        )
+                    ).scalar_one_or_none()
+                    if taken is None:
+                        break
+                    suffix += 1
+                error = f"Slug already taken: try {candidate}"
+
+        if error is not None:
+            return render_template(
+                "admin/_slug_cell.html",
+                site=site,
+                post=post,
+                mode="edit",
+                value=raw,
+                error=error,
+            )
+
+        before = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
+        post.slug = raw
+        db.commit()
+        db.refresh(post)
+        after = {
+            "slug": post.slug,
+            "title": post.title,
+            "status": post.status,
+            "is_pinned": post.is_pinned,
+            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="post", key=str(post.id))
+
+        cell_site = site
+        cell_post = post
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="post",
+        target_id=post_id,
+        site_id=cell_site_id,
+        extra={"field": "slug", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_slug_cell.html",
+        site=cell_site,
+        post=cell_post,
+        mode="view",
+        value=None,
+        error=None,
+    )
+
+
 @bp.route("/<int:post_id>/delete", methods=["POST"])
 def delete_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:

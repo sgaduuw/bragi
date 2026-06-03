@@ -19,10 +19,11 @@ from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.post import Post, PostStatus
+from bragi.core.models.redirect import Redirect
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.models.user_site_role import UserSiteRole
-from tests.conftest import csrf_token
+from tests.conftest import csrf_token, seed_blog_index
 
 EDITOR_EMAIL = "ada@example.com"
 AUTHOR_EMAIL = "bob@example.com"
@@ -69,6 +70,11 @@ def admin_app(
     )
     db_session.add(post)
     db_session.commit()
+
+    # A POST_INDEX page is required so post_url_for() returns a real
+    # path; without it the redirects plugin short-circuits on slug
+    # renames and no 301 is inserted.
+    seed_blog_index(db_session, site)
 
     yield create_admin_app()
 
@@ -169,5 +175,146 @@ def test_patch_title_requires_editor_role(admin_app: Flask, db_session: Session)
     resp = client.patch(
         f"/admin/sites/blog/posts/{pid}/patch/title",
         data={"_csrf_token": csrf, "title": "Sneaky"},
+    )
+    assert resp.status_code == 403
+
+
+# ============================================================
+# GET /cell/slug?mode={view|edit}
+# ============================================================
+
+
+def test_slug_cell_view_mode_renders_code(admin_app: Flask, db_session: Session) -> None:
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{pid}/cell/slug")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "hello-world" in body
+    assert "is-editable" in body
+    assert "dblclick" in body
+
+
+def test_slug_cell_edit_mode_renders_input(admin_app: Flask, db_session: Session) -> None:
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/posts/{pid}/cell/slug?mode=edit")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'name="slug"' in body
+    assert 'value="hello-world"' in body
+    assert "autofocus" in body
+
+
+# ============================================================
+# PATCH /patch/slug
+# ============================================================
+
+
+def test_patch_slug_happy_path_persists(admin_app: Flask, db_session: Session) -> None:
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/slug",
+        data={"_csrf_token": csrf, "slug": "hello-galaxy"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "hello-galaxy" in body
+    db_session.expire_all()
+    new_slug = db_session.execute(select(Post.slug).where(Post.id == pid)).scalar_one()
+    assert new_slug == "hello-galaxy"
+
+
+def test_patch_slug_rename_inserts_301(admin_app: Flask, db_session: Session) -> None:
+    """Renaming the slug fires on_post_updated which the redirects
+    plugin uses to insert a 301 from the old URL to the new
+    canonical."""
+    pid = _post_id(db_session)
+    site_id = db_session.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/slug",
+        data={"_csrf_token": csrf, "slug": "hello-galaxy"},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    redirects = (
+        db_session.execute(
+            select(Redirect).where(
+                Redirect.site_id == site_id,
+                Redirect.status_code == 301,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert any(
+        "hello-world" in r.source_path for r in redirects
+    ), f"expected a 301 from /hello-world/, got: {[r.source_path for r in redirects]}"
+
+
+def test_patch_slug_rejects_duplicate(admin_app: Flask, db_session: Session) -> None:
+    """Trying to set a slug already used by another post on the
+    same site returns the edit-mode partial with an error like
+    `Slug already taken: try my-slug-2`."""
+    site_id = db_session.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+    ada_id = db_session.execute(select(User.id).where(User.email == EDITOR_EMAIL)).scalar_one()
+    db_session.add(
+        Post(
+            site_id=site_id,
+            author_id=ada_id,
+            title="Sibling",
+            slug="sibling-slug",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            status=PostStatus.DRAFT,
+        )
+    )
+    db_session.commit()
+    pid = _post_id(db_session)
+
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/slug",
+        data={"_csrf_token": csrf, "slug": "sibling-slug"},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "inline-edit-error" in body
+    assert "already taken" in body.lower()
+    assert "sibling-slug-2" in body
+
+
+def test_patch_slug_rejects_empty(admin_app: Flask, db_session: Session) -> None:
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/slug",
+        data={"_csrf_token": csrf, "slug": ""},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "inline-edit-error" in body
+
+
+def test_patch_slug_requires_editor_role(admin_app: Flask, db_session: Session) -> None:
+    pid = _post_id(db_session)
+    client = admin_app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/posts/{pid}/patch/slug",
+        data={"_csrf_token": csrf, "slug": "whatever"},
     )
     assert resp.status_code == 403

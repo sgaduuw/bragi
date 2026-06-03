@@ -1,0 +1,31 @@
+{# Inline-edit slug cell. Display renders a <code> with the slug;
+   double-click / focused-Enter swaps to edit mode. The slug
+   rename hits the existing on_post_updated hook so the redirects
+   plugin auto-inserts a 301 from the old URL. #}
+<td id="post-slug-cell-{{ post.id }}"
+    class="is-editable{% if mode == 'edit' %} is-editing{% endif %}"
+    tabindex="0"
+    role="gridcell"
+    hx-get="{{ url_for('post_admin.slug_cell', site_slug=site.slug, post_id=post.id, mode='edit') }}"
+    hx-target="this"
+    hx-swap="outerHTML"
+    hx-trigger="dblclick, keyup[key=='Enter']">
+  {% if mode == 'edit' %}
+    <form hx-patch="{{ url_for('post_admin.patch_slug', site_slug=site.slug, post_id=post.id) }}"
+          hx-target="#post-slug-cell-{{ post.id }}"
+          hx-swap="outerHTML"
+          style="margin: 0;">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="text" name="slug" value="{{ value if value is not none else post.slug }}"
+             autofocus required maxlength="255"
+             hx-get="{{ url_for('post_admin.slug_cell', site_slug=site.slug, post_id=post.id, mode='view') }}"
+             hx-target="closest td"
+             hx-swap="outerHTML"
+             hx-trigger="keyup[key=='Escape']">
+      {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
+      <div class="inline-edit-hint">&#9166; save &middot; esc cancel</div>
+    </form>
+  {% else %}
+    <code>{{ post.slug }}</code>
+  {% endif %}
+</td>
