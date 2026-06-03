@@ -6,6 +6,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Image renditions: Pillow resize now honours EXIF Orientation.
+  Portrait phone shots ship raw pixels stored landscape with an
+  EXIF Orientation hint; browsers honour the hint when displaying
+  the original, so the upload looks correct, but bragi's
+  `resize_and_encode` (and `_resize` / `_probe`) were resampling
+  the raw bytes without consulting the hint, producing renditions
+  rotated 90° / 180° / 270°. Applied `PIL.ImageOps.exif_transpose`
+  before every read of `img.width` / `img.height` / `thumbnail()`.
+  Output bytes no longer carry an Orientation tag so the browser
+  doesn't double-rotate. The probe path also picks the correct
+  `width` / `height` now, so the rendition ladder targets the
+  right widths for portrait images instead of the raw-landscape
+  widths. **Backfill**: existing renditions of portrait images
+  need to be regenerated. After deploying, run the
+  `attachments.regenerate-all` admin button or CLI sweep to
+  re-mint affected rows.
+
 ### Changed
 - Admin posture: JS is now explicitly *required* on the admin side
   (delivery still keeps its full no-JS commitment). Stripped two
