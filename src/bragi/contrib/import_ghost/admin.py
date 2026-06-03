@@ -289,4 +289,16 @@ def apply(site_slug: str, token: str) -> ResponseReturnValue:
 
 @bp.route("/cancel/<token>", methods=["POST"])
 def cancel(site_slug: str, token: str) -> ResponseReturnValue:
-    abort(501)  # filled in by Task 6
+    """Discard a stashed Ghost-import session and return to the
+    importer index. Idempotent: a missing stash still flashes and
+    redirects cleanly so the operator's browser never sees a 500.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+
+    stash = _resolve_stash(token)
+    if stash is not None:
+        shutil.rmtree(stash, ignore_errors=True)
+    flash("Import cancelled.", "info")
+    return redirect(url_for("admin_imports.index", site_slug=site_slug))

@@ -545,3 +545,118 @@ def test_apply_returns_to_upload_on_missing_stash(
     )
     assert resp.status_code in (301, 302)
     assert "/import/ghost/upload" in (resp.headers.get("Location") or "")
+
+
+# ============================================================
+# POST /cancel/<token>
+# ============================================================
+
+
+def test_cancel_drops_stash_and_redirects(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+) -> None:
+    """A POST to cancel removes the stash and redirects to the
+    importer index (not to upload -- cancel is a cleaner exit)."""
+    from bragi.contrib.import_ghost.admin import STASH_PREFIX
+
+    # 32-hex token so it passes _resolve_stash's format check.
+    token = "c" * 32
+    stash = _isolated_stash_root / f"{STASH_PREFIX}{token}"
+    stash.mkdir()
+    (stash / "export.json").write_text("{}")
+    (stash / "plan.json").write_text("{}")
+
+    client = admin_app.test_client()
+    _login(client)
+
+    cancel_csrf = csrf_token(client, path=f"/admin/sites/blog/import/ghost/review/{token}")
+    resp = client.post(
+        f"/admin/sites/blog/import/ghost/cancel/{token}",
+        data={"_csrf_token": cancel_csrf},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (301, 302)
+    location = resp.headers.get("Location", "")
+    assert "/import/" in location, f"expected import-related redirect, got {location!r}"
+    assert not stash.exists(), "cancel should have removed the stash"
+
+
+def test_cancel_with_missing_stash_still_redirects(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+) -> None:
+    """Cancel against a bogus token redirects cleanly (no 500)."""
+    client = admin_app.test_client()
+    _login(client)
+    cancel_csrf = csrf_token(client)
+    resp = client.post(
+        "/admin/sites/blog/import/ghost/cancel/" + "d" * 32,
+        data={"_csrf_token": cancel_csrf},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (301, 302)
+
+
+# ============================================================
+# POST /apply/<token>: exception handling
+# ============================================================
+
+
+def test_apply_handles_importer_exception(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the importer's apply() raises, the stash is dropped, the
+    user is redirected back to upload, and the flash carries the
+    error message."""
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+
+    # First upload normally to produce a valid stash.
+    export_buf = _make_export(
+        [
+            {
+                "id": "gp1",
+                "slug": "a",
+                "title": "A",
+                "html": "<p>x</p>",
+                "status": "published",
+            }
+        ],
+    )
+    client = admin_app.test_client()
+    _login(client)
+    upload_csrf = csrf_token(client)
+    up = client.post(
+        "/admin/sites/blog/import/ghost/upload",
+        data={"_csrf_token": upload_csrf, "file": (export_buf, "export.json")},
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    assert up.status_code in (301, 302)
+    stash_token = up.headers["Location"].rsplit("/", 1)[-1]
+
+    from bragi.contrib.import_ghost.admin import STASH_PREFIX
+
+    stash = _isolated_stash_root / f"{STASH_PREFIX}{stash_token}"
+    assert stash.exists()
+
+    # Force importer.apply() to raise. The handler imports it inside
+    # the function body, so patching the source module is the
+    # right seam.
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("bragi.contrib.import_ghost.importer.apply", _boom)
+
+    apply_csrf = csrf_token(client, path=f"/admin/sites/blog/import/ghost/review/{stash_token}")
+    resp = client.post(
+        f"/admin/sites/blog/import/ghost/apply/{stash_token}",
+        data={"_csrf_token": apply_csrf},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (301, 302)
+    assert "/import/ghost/upload" in (resp.headers.get("Location") or "")
+    assert not stash.exists(), "apply exception path should drop the stash"
