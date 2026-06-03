@@ -1,0 +1,33 @@
+{# Inline-edit title cell. Display mode renders an <a> link to
+   the full edit page (preserves the primary click target);
+   double-click on the cell or focused-Enter swaps to edit mode
+   via hx-get ?mode=edit. Edit mode renders an autofocus input
+   wrapped in a hx-patch form; Enter submits; Esc reverts via a
+   keyup[key=='Escape'] hx-get back to view mode. #}
+<td id="post-title-cell-{{ post.id }}"
+    class="is-editable{% if mode == 'edit' %} is-editing{% endif %}"
+    tabindex="0"
+    role="gridcell"
+    hx-get="{{ url_for('post_admin.title_cell', site_slug=site.slug, post_id=post.id, mode='edit') }}"
+    hx-target="this"
+    hx-swap="outerHTML"
+    hx-trigger="dblclick, keyup[key=='Enter']">
+  {% if mode == 'edit' %}
+    <form hx-patch="{{ url_for('post_admin.patch_title', site_slug=site.slug, post_id=post.id) }}"
+          hx-target="#post-title-cell-{{ post.id }}"
+          hx-swap="outerHTML"
+          style="margin: 0;">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="text" name="title" value="{{ value if value is not none else post.title }}"
+             autofocus required maxlength="255"
+             hx-get="{{ url_for('post_admin.title_cell', site_slug=site.slug, post_id=post.id, mode='view') }}"
+             hx-target="closest td"
+             hx-swap="outerHTML"
+             hx-trigger="keyup[key=='Escape']">
+      {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
+      <div class="inline-edit-hint">&#9166; save &middot; esc cancel</div>
+    </form>
+  {% else %}
+    <a href="{{ url_for('post_admin.edit_post', site_slug=site.slug, post_id=post.id) }}">{{ post.title }}</a>
+  {% endif %}
+</td>

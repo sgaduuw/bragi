@@ -1,0 +1,16 @@
+{# Always-live menu_order input. Enter submits the new value;
+   blur leaves the user's entered text in place (the input is
+   never swapped out of edit mode). Right-aligned to match the
+   existing list-table column. #}
+<td id="page-menu-order-cell-{{ page.id }}" role="gridcell" style="text-align: right;">
+  <form hx-patch="{{ url_for('page_admin.patch_menu_order', site_slug=site.slug, page_id=page.id) }}"
+        hx-target="#page-menu-order-cell-{{ page.id }}"
+        hx-swap="outerHTML"
+        style="margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="number" name="menu_order"
+           value="{{ value if value is not none else page.menu_order }}"
+           style="width: 5em; text-align: right;">
+    {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
+  </form>
+</td>

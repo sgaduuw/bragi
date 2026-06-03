@@ -6,6 +6,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Admin overview tables: inline-edit selected fields without
+  opening the full edit page. Posts: title, slug, status (the
+  existing Pinned toggle is unchanged). Pages: title, slug,
+  status, show_in_nav, menu_order. Free-text fields (title, slug)
+  swap to an input on double-click or focused-Enter; Enter saves,
+  Esc reverts. Slug renames still insert a 301 from the old
+  canonical via the existing `on_post_updated` hook (which
+  dispatches by isinstance for both Post and Page). Status /
+  show_in_nav / menu_order are always-live inputs / toggles.
+  Editor role required on every PATCH route; author role gets
+  403. New routes use real PATCH (the existing `pin_toggle`
+  stays POST for now; #350 tracks RESTifying the rest of the
+  admin). A small JS shim (`inline-edit.js`) handles
+  autofocus-on-htmx-swap so the input is ready to type into
+  when it appears. #351 tracks propagating the
+  JS-required-for-admin decision across the rest of the admin.
+
 ### Changed
 - Site nav submenu: now opens automatically on hover after a 500 ms
   delay (and closes 200 ms after the cursor leaves) as a progressive
