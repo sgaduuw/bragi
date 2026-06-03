@@ -9,14 +9,22 @@ content URLs except plugin-specific paths (`/feed.xml`, etc.).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 import jinja2
 from flask import Blueprint, current_app, g, make_response, render_template, request
+from pydantic import Field
 from sqlalchemy import or_, select
 from werkzeug.wrappers import Response
 
-from bragi.api import ContentTypeSpec, FieldSpec, InternalLinkResolution, NavItem, hookimpl
+from bragi.api import (
+    ContentTypeSpec,
+    FieldSpec,
+    InternalLinkResolution,
+    NavItem,
+    SiteSetting,
+    hookimpl,
+)
 from bragi.contrib.page.admin import bp as page_admin_bp
 from bragi.contrib.page.delivery import bp as page_delivery_bp
 from bragi.contrib.page.delivery import render_post_index_page
@@ -319,3 +327,30 @@ def register_admin_nav() -> list[NavItem]:
             scope="site",
         ),
     ]
+
+
+@hookimpl(specname="register_site_setting")
+def _register_pinned_autoadvance_seconds() -> SiteSetting:
+    return SiteSetting(
+        key="pinned_autoadvance_seconds",
+        type=Annotated[int, Field(ge=0)],
+        default=7,
+        label="Pinned carousel auto-advance (seconds)",
+        help_text=(
+            "How long each pinned post stays visible before the carousel "
+            "advances. 0 disables auto-advance."
+        ),
+    )
+
+
+@hookimpl(specname="register_site_setting")
+def _register_posts_per_page() -> SiteSetting:
+    return SiteSetting(
+        key="posts_per_page",
+        type=Annotated[int, Field(gt=0)],
+        default=10,
+        label="Posts per page",
+        help_text=(
+            "Number of posts on a single listing page (index, tag, " "archive). Must be > 0."
+        ),
+    )
