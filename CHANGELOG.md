@@ -6,6 +6,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Ghost importer: now imports Ghost pages as bragi `STATIC`
+  pages (previously skipped). Both posts and pages also gain
+  featured-image handling — Ghost's `feature_image` URL is
+  downloaded into a bragi `Attachment` with the original
+  photographer caption (`feature_image_alt`) pinned as alt
+  text. Re-imports dedup by source URL so the same image is
+  only fetched once across the corpus. Four additional Ghost
+  fields are picked up: `meta_title` (both), `featured` →
+  `is_pinned` (posts only; pinned indefinitely), and `og_image`
+  as a fallback when `feature_image` is empty. Failed image
+  fetches surface as warnings; the post or page still imports
+  without the image.
+
 ## [1.23.2] - 2026-06-02
 
 ### Fixed
