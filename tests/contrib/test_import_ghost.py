@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from bragi.contrib.import_ghost import importer as ghost_importer
 from bragi.contrib.import_ghost.importer import apply, detect, plan
 from bragi.contrib.import_ghost.loader import load_export, looks_like_ghost
+from bragi.core.models.attachment import Attachment
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.redirect import Redirect, RedirectSource
 from bragi.core.models.site import Site
@@ -411,3 +414,188 @@ def test_importer_registered_in_admin_app() -> None:
     app = create_admin_app()
     names = {imp.name for imp in app.extensions["registry"].importers}
     assert "ghost" in names
+
+
+# ============================================================
+# _resolve_feature_image helper
+# ============================================================
+
+
+def _fake_safe_get_factory(
+    *,
+    response_bytes: bytes = b"",
+    content_type: str = "image/jpeg",
+    status_code: int = 200,
+    raise_exc: Exception | None = None,
+):
+    """Build a callable mimicking bragi.core.http.safe_get's signature."""
+
+    def _fake(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        if raise_exc is not None:
+            raise raise_exc
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.content = response_bytes
+        resp.headers = {"Content-Type": content_type}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    return _fake
+
+
+def test_resolve_feature_image_returns_none_for_empty_url(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+
+    owner = User(email="x@example.test", display_name="X", is_active=True)
+    db_session.add(owner)
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=owner.id,
+    )
+    db_session.add(site)
+    db_session.commit()
+
+    att, warn = ghost_importer._resolve_feature_image(
+        db_session, site=site, url=None, alt_text=None
+    )
+    assert att is None
+    assert warn is None
+    att, warn = ghost_importer._resolve_feature_image(db_session, site=site, url="", alt_text=None)
+    assert att is None
+    assert warn is None
+
+
+def test_resolve_feature_image_creates_attachment_with_alt_text(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+
+    owner = User(email="x@example.test", display_name="X", is_active=True)
+    db_session.add(owner)
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=owner.id,
+    )
+    db_session.add(site)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        ghost_importer,
+        "safe_get",
+        _fake_safe_get_factory(response_bytes=b"\x89PNG fake", content_type="image/png"),
+    )
+    att, warn = ghost_importer._resolve_feature_image(
+        db_session,
+        site=site,
+        url="https://cdn.ghost.test/cover.png",
+        alt_text="A mountain",
+    )
+    assert warn is None
+    assert att is not None
+    assert att.external_source == "ghost"
+    assert att.external_source_id == "https://cdn.ghost.test/cover.png"
+    assert att.alt_text == "A mountain"
+    assert att.content_type == "image/png"
+
+
+def test_resolve_feature_image_returns_warning_on_fetch_failure(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+
+    owner = User(email="x@example.test", display_name="X", is_active=True)
+    db_session.add(owner)
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=owner.id,
+    )
+    db_session.add(site)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        ghost_importer,
+        "safe_get",
+        _fake_safe_get_factory(raise_exc=RuntimeError("upstream 404")),
+    )
+    att, warn = ghost_importer._resolve_feature_image(
+        db_session,
+        site=site,
+        url="https://cdn.ghost.test/dead.jpg",
+        alt_text=None,
+    )
+    assert att is None
+    assert warn is not None
+    assert "https://cdn.ghost.test/dead.jpg" in warn
+    assert db_session.execute(select(Attachment)).scalars().first() is None
+
+
+def test_resolve_feature_image_dedups_on_second_call_for_same_url(
+    db_session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Second call with the same URL returns the existing Attachment
+    without re-fetching. Preserves any operator edits to alt_text on
+    the first attachment."""
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+
+    owner = User(email="x@example.test", display_name="X", is_active=True)
+    db_session.add(owner)
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=owner.id,
+    )
+    db_session.add(site)
+    db_session.commit()
+
+    call_count = {"n": 0}
+
+    def _counting_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        call_count["n"] += 1
+        resp = MagicMock()
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(ghost_importer, "safe_get", _counting_safe_get)
+
+    att1, _ = ghost_importer._resolve_feature_image(
+        db_session, site=site, url="https://cdn.ghost.test/c.png", alt_text="first"
+    )
+    db_session.commit()
+    # Operator edits alt_text via admin between imports.
+    att1.alt_text = "operator-edited alt"
+    db_session.commit()
+
+    att2, _ = ghost_importer._resolve_feature_image(
+        db_session, site=site, url="https://cdn.ghost.test/c.png", alt_text="second"
+    )
+    assert att2 is not None
+    assert att2.id == att1.id
+    assert att2.alt_text == "operator-edited alt"  # NOT clobbered to "second"
+    assert call_count["n"] == 1  # Only the first call hit safe_get

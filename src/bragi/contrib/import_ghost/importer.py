@@ -19,20 +19,28 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from markdownify import markdownify
 from sqlalchemy import select
 
 from bragi.api import ImportPlan, ImportResult
+from bragi.contrib.attachments.service import create_attachment_from_bytes
 from bragi.contrib.import_ghost.loader import load_export, looks_like_ghost
 from bragi.core.db import SessionLocal
+from bragi.core.http import safe_get
+from bragi.core.models.attachment import Attachment
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.redirect import Redirect, RedirectSource
+from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.url import post_url_for
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 def detect(path: Any) -> bool:
@@ -72,6 +80,78 @@ def _html_to_markdown(html: str) -> str:
     """
     md: str = markdownify(html or "", heading_style="ATX")
     return md.strip()
+
+
+def _basename_from_url(url: str) -> str | None:
+    """Extract the trailing path segment of a URL, defaulting to None
+    when the URL has no usable filename component. Used to give a
+    sensible display name to the created Attachment row."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    if not parsed.path:
+        return None
+    last = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    return last or None
+
+
+def _resolve_feature_image(
+    db: Session,
+    *,
+    site: Site,
+    url: str | None,
+    alt_text: str | None = None,
+) -> tuple[Attachment | None, str | None]:
+    """Fetch `url` and return (Attachment | None, warning_msg | None).
+
+    Empty / None URL is a silent no-op. Network / SSRF / parse errors
+    return (None, "feature image <url>: <reason>") so the caller can
+    surface them in the import warnings list. Successful fetches go
+    through the shared `create_attachment_from_bytes` helper, so
+    SHA-256 dedup is automatic: two posts pointing at the same
+    Ghost CDN URL share one Attachment row.
+
+    The created Attachment carries `external_source="ghost"` plus
+    `external_source_id=<original URL>`, so a re-import recognises
+    the already-fetched image via the composite index on
+    (site_id, external_source, external_source_id) and skips the
+    network call. `alt_text` is only applied on the FRESH-fetch
+    path; the dedup short-circuit returns the existing row
+    unchanged, preserving any operator edits to alt_text in the
+    bragi admin.
+    """
+    if not url:
+        return None, None
+    existing = db.execute(
+        select(Attachment)
+        .where(Attachment.site_id == site.id)
+        .where(Attachment.external_source == "ghost")
+        .where(Attachment.external_source_id == url)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing, None
+    try:
+        resp = safe_get(url, max_bytes=20_000_000)
+        resp.raise_for_status()
+        data = resp.content
+        content_type = resp.headers.get("Content-Type") or "application/octet-stream"
+        filename = _basename_from_url(url) or "ghost-feature-image"
+    except Exception as exc:
+        return None, f"feature image {url!r}: {exc}"
+    result = create_attachment_from_bytes(
+        db,
+        site_id=site.id,
+        site_slug=site.slug,
+        site_theme_slug=site.theme,
+        filename=filename,
+        content_type=content_type,
+        data=data,
+        external_source="ghost",
+        external_source_id=url,
+        alt_text=alt_text,
+    )
+    return result.attachment, None
 
 
 def plan(path: Any) -> ImportPlan:
