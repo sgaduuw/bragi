@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+{% block title %}Review Ghost import &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Review Ghost import</h1>
+<p style="color: #555;">
+  Nothing has been written yet. Apply the import below to create
+  the rows, or cancel to discard the uploaded file.
+</p>
+
+<table style="margin: 1rem 0; border-collapse: collapse;">
+  <thead>
+    <tr><th style="text-align: left;">Item</th><th style="text-align: right;">Count</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Posts</td><td style="text-align: right;">{{ counts.get('posts', 0) }}</td></tr>
+    <tr><td>Pages</td><td style="text-align: right;">{{ counts.get('pages', 0) }}</td></tr>
+    <tr><td>Tags</td><td style="text-align: right;">{{ counts.get('tags', 0) }}</td></tr>
+    <tr><td>Redirects</td><td style="text-align: right;">{{ redirects }}</td></tr>
+  </tbody>
+</table>
+
+{% if warnings %}
+  {% set _warnings_open = warnings | length <= 5 %}
+  <details {% if _warnings_open %}open{% endif %} style="margin-bottom: 1rem;">
+    <summary>Warnings ({{ warnings | length }})</summary>
+    <ul>
+      {% for w in warnings %}<li>{{ w }}</li>{% endfor %}
+    </ul>
+  </details>
+{% else %}
+  <p style="color: #666;">No warnings.</p>
+{% endif %}
+
+<div style="display: flex; gap: 0.5rem;">
+  <form method="post"
+        action="{{ url_for('ghost_admin.apply', site_slug=site_slug, token=token) }}"
+        style="margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Apply import</button>
+  </form>
+  <form method="post"
+        action="{{ url_for('ghost_admin.cancel', site_slug=site_slug, token=token) }}"
+        style="margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="secondary">Cancel</button>
+  </form>
+</div>
+{% endblock %}

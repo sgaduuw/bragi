@@ -1,0 +1,34 @@
+{% extends "admin/base.html" %}
+{% block title %}Ghost import done &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Imported</h1>
+<p style="color: #555;">
+  Took {{ '%.1f' | format(duration_seconds) }} seconds.
+</p>
+
+<table style="margin: 1rem 0; border-collapse: collapse;">
+  <tbody>
+    <tr><td>Posts created</td><td style="text-align: right;">{{ counts.get('posts_created', 0) }}</td></tr>
+    <tr><td>Posts updated</td><td style="text-align: right;">{{ counts.get('posts_updated', 0) }}</td></tr>
+    <tr><td>Pages created</td><td style="text-align: right;">{{ counts.get('pages_created', 0) }}</td></tr>
+    <tr><td>Pages updated</td><td style="text-align: right;">{{ counts.get('pages_updated', 0) }}</td></tr>
+    <tr><td>Featured images fetched</td><td style="text-align: right;">{{ counts.get('feature_images_fetched', 0) }}</td></tr>
+    <tr><td>Featured images failed</td><td style="text-align: right;">{{ counts.get('feature_images_failed', 0) }}</td></tr>
+    <tr><td>Redirects inserted</td><td style="text-align: right;">{{ redirects_inserted }}</td></tr>
+  </tbody>
+</table>
+
+{% if warnings %}
+  {% set _warnings_open = warnings | length <= 5 %}
+  <details {% if _warnings_open %}open{% endif %} style="margin-bottom: 1rem;">
+    <summary>Warnings ({{ warnings | length }})</summary>
+    <ul>
+      {% for w in warnings %}<li>{{ w }}</li>{% endfor %}
+    </ul>
+  </details>
+{% endif %}
+
+<p>
+  <a href="{{ url_for('admin_imports.index', site_slug=site_slug) }}">Back to import</a>
+</p>
+{% endblock %}
