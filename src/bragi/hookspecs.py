@@ -34,6 +34,7 @@ from bragi.api import (
     OAuthProviderSpec,
     RedirectTarget,
     SearchBackendSpec,
+    SiteSetting,
     StorageBackendSpec,
     ThemeSpec,
 )
@@ -394,6 +395,32 @@ def register_importer_admin_tile() -> ImporterAdminTile | None:
     `None` to opt out (typical for importers that have a CLI but
     not yet an admin form). The index renders only contributed-
     and-enabled tiles.
+
+    Stability: covered by bragi's two-step deprecation policy
+    (see `bragi/api.py` top-of-module docstring).
+    """
+    ...
+
+
+@hookspec
+def register_site_setting() -> SiteSetting | None:
+    """Contribute one `Site.extra_settings` key to the admin
+    settings page.
+
+    Plugins with multiple keys register one hookimpl per key
+    using `@hookimpl(specname="register_site_setting")` on
+    distinctly-named functions:
+
+        @hookimpl(specname="register_site_setting")
+        def _register_posts_per_page() -> SiteSetting:
+            return SiteSetting(...)
+
+        @hookimpl(specname="register_site_setting")
+        def _register_pinned_autoadvance() -> SiteSetting:
+            return SiteSetting(...)
+
+    Return `None` to opt out at runtime (e.g., the plugin loads
+    but the operator hasn't configured a prerequisite).
 
     Stability: covered by bragi's two-step deprecation policy
     (see `bragi/api.py` top-of-module docstring).
