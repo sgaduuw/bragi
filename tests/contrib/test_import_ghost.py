@@ -549,6 +549,152 @@ def test_resolve_feature_image_returns_warning_on_fetch_failure(
     assert db_session.execute(select(Attachment)).scalars().first() is None
 
 
+# ============================================================
+# Posts loop: meta_title, featured, og_image fallback, feature_image
+# ============================================================
+
+
+def test_apply_maps_meta_title_for_posts(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    """Ghost `meta_title` flows through to bragi `Post.meta_title`."""
+    posts = [
+        {
+            "id": "gp1",
+            "slug": "hello",
+            "title": "Hello",
+            "status": "published",
+            "type": "post",
+            "html": "<p>hi</p>",
+            "meta_title": "Hello (custom title)",
+        }
+    ]
+    export = _make_export(tmp_path, posts)
+    site = _detached_site(db_session_factory, site_id)
+    apply(export, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        assert post.meta_title == "Hello (custom title)"
+
+
+def test_apply_maps_featured_flag_to_is_pinned(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    posts = [
+        {
+            "id": "gp1",
+            "slug": "pinned",
+            "title": "Pinned",
+            "status": "published",
+            "type": "post",
+            "html": "<p>x</p>",
+            "featured": True,
+        },
+        {
+            "id": "gp2",
+            "slug": "ordinary",
+            "title": "Ordinary",
+            "status": "published",
+            "type": "post",
+            "html": "<p>y</p>",
+            "featured": False,
+        },
+    ]
+    export = _make_export(tmp_path, posts)
+    site = _detached_site(db_session_factory, site_id)
+    apply(export, site, {})
+    with db_session_factory() as db:
+        pinned = db.execute(select(Post).where(Post.slug == "pinned")).scalar_one()
+        ordinary = db.execute(select(Post).where(Post.slug == "ordinary")).scalar_one()
+        assert pinned.is_pinned is True
+        assert pinned.pinned_until is None
+        assert ordinary.is_pinned is False
+
+
+def test_apply_downloads_feature_image_and_links_attachment(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    monkeypatch.setattr(
+        ghost_importer,
+        "safe_get",
+        _fake_safe_get_factory(response_bytes=b"\x89PNG fake", content_type="image/png"),
+    )
+    posts = [
+        {
+            "id": "gp1",
+            "slug": "with-cover",
+            "title": "With Cover",
+            "status": "published",
+            "type": "post",
+            "html": "<p>x</p>",
+            "feature_image": "https://cdn.ghost.test/cover.png",
+            "feature_image_alt": "A cover photo",
+        }
+    ]
+    export = _make_export(tmp_path, posts)
+    site = _detached_site(db_session_factory, site_id)
+    apply(export, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "with-cover")).scalar_one()
+        assert post.featured_image_id is not None
+        att = db.execute(
+            select(Attachment).where(Attachment.id == post.featured_image_id)
+        ).scalar_one()
+        assert att.external_source == "ghost"
+        assert att.alt_text == "A cover photo"
+
+
+def test_apply_falls_back_to_og_image_when_feature_image_missing(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    captured = {"url": None}
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        captured["url"] = url
+        resp = MagicMock()
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(ghost_importer, "safe_get", _capturing_safe_get)
+    posts = [
+        {
+            "id": "gp1",
+            "slug": "og-only",
+            "title": "OG only",
+            "status": "published",
+            "type": "post",
+            "html": "<p>x</p>",
+            "feature_image": None,
+            "og_image": "https://cdn.ghost.test/og.jpg",
+        }
+    ]
+    export = _make_export(tmp_path, posts)
+    site = _detached_site(db_session_factory, site_id)
+    apply(export, site, {})
+    assert captured["url"] == "https://cdn.ghost.test/og.jpg"
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "og-only")).scalar_one()
+        assert post.featured_image_id is not None
+
+
 def test_resolve_feature_image_dedups_on_second_call_for_same_url(
     db_session: Session,
     tmp_path: Path,

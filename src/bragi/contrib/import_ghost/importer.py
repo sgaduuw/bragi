@@ -233,6 +233,8 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
     posts_created = 0
     posts_updated = 0
     redirects_inserted = 0
+    feature_images_fetched = 0
+    feature_images_failed = 0
     warnings: list[str] = []
 
     with SessionLocal() as db:
@@ -292,6 +294,8 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                     author_id=resolved_author_id,
                     status=status,
                     published_at=published_at,
+                    meta_title=raw_post.get("meta_title") or None,
+                    is_pinned=bool(raw_post.get("featured")),
                     meta_description=raw_post.get("meta_description") or None,
                     canonical_url=raw_post.get("canonical_url") or None,
                     source_id=ghost_id,
@@ -308,12 +312,25 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 existing.status = status
                 if published_at is not None:
                     existing.published_at = published_at
+                existing.meta_title = raw_post.get("meta_title") or None
+                existing.is_pinned = bool(raw_post.get("featured"))
                 existing.meta_description = raw_post.get("meta_description") or None
                 existing.canonical_url = raw_post.get("canonical_url") or None
                 existing.author_id = resolved_author_id
                 post = existing
                 posts_updated += 1
             db.flush()
+
+            fi_url = raw_post.get("feature_image") or raw_post.get("og_image")
+            fi_alt = raw_post.get("feature_image_alt")
+            fi_att, fi_warn = _resolve_feature_image(db, site=site, url=fi_url, alt_text=fi_alt)
+            if fi_warn:
+                warnings.append(f"post {slug!r}: {fi_warn}")
+            if fi_att is not None:
+                post.featured_image_id = fi_att.id
+                feature_images_fetched += 1
+            elif fi_url:
+                feature_images_failed += 1
 
             post.tags = post_tag_map.get(ghost_id, [])
 
