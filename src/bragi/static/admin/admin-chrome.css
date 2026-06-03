@@ -18,6 +18,19 @@ body {
   color: #222;
 }
 
+/* Sticky wrapper: rows 1 + 2 cling to the top together as the
+   page scrolls. The wrapper has no background of its own; each
+   row paints its own. z-index keeps the nav above any
+   positioned page content (the dropdown panels inside the nav
+   also rely on it -- they are stacked relative to the
+   wrapper). Breadcrumbs and the mobile drawer sit outside the
+   wrapper and stay in normal flow. */
+.admin-nav-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
 /* Nav rows (desktop) */
 .admin-nav-row-1,
 .admin-nav-row-2 {

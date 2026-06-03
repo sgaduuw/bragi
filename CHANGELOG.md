@@ -6,6 +6,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Admin chrome: the two-row global + site nav now sticks to the
+  top as the page scrolls. Breadcrumbs (row 3) stay in normal
+  flow. Implemented by wrapping rows 1 + 2 in a new
+  `.admin-nav-sticky` container with `position: sticky; top: 0;
+  z-index: 100`. The hidden hamburger checkbox and the mobile
+  drawer remain siblings (the wrapper sits between them in
+  document order) so the `#nav-toggle:checked ~
+  .admin-nav-drawer` sibling-combinator selector still toggles
+  the mobile drawer correctly.
+
 ### Fixed
 - Rendition worker: `AttachmentRendition` rows stuck in
   `processing` after a worker crash are now reclaimed on the next

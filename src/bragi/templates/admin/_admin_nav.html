@@ -30,6 +30,14 @@
 
 <input type="checkbox" id="nav-toggle" aria-hidden="true">
 
+{# Sticky nav: rows 1 + 2 stick to the top together while the page
+   scrolls. Breadcrumbs (below) and the mobile drawer stay in
+   normal flow. `#nav-toggle` and `.admin-nav-drawer` remain
+   siblings (the wrapper sits between them in document order) so
+   the `#nav-toggle:checked ~ .admin-nav-drawer` selector still
+   matches. #}
+<div class="admin-nav-sticky">
+
 {# Row 1: global #}
 <nav class="admin-nav-row-1" aria-label="Global navigation">
   <span class="brand">bragi</span>
@@ -101,6 +109,8 @@
     {{ render_groups(site_nav_groups) }}
   </nav>
 {% endif %}
+
+</div>{# /.admin-nav-sticky #}
 
 {# Mobile drawer: same items as the two rows, stacked #}
 <div class="admin-nav-drawer" aria-label="Mobile navigation">
