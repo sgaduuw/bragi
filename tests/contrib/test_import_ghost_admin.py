@@ -412,3 +412,136 @@ def test_review_returns_to_upload_on_missing_stash(
     )
     assert resp.status_code in (301, 302)
     assert "/import/ghost/upload" in (resp.headers.get("Location") or "")
+
+
+# ============================================================
+# POST /apply/<token>
+# ============================================================
+
+
+def test_apply_runs_importer_and_drops_stash(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Apply executes the importer end-to-end: posts land, stash gone,
+    result template renders."""
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    export_buf = _make_export(
+        [
+            {
+                "id": "gp1",
+                "slug": "hello",
+                "title": "Hello",
+                "html": "<p>x</p>",
+                "status": "published",
+            }
+        ],
+    )
+
+    client = admin_app.test_client()
+    _login(client)
+
+    # Upload first.
+    upload_token = csrf_token(client)
+    up = client.post(
+        "/admin/sites/blog/import/ghost/upload",
+        data={"_csrf_token": upload_token, "file": (export_buf, "export.json")},
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    assert up.status_code in (301, 302)
+    stash_token = up.headers["Location"].rsplit("/", 1)[-1]
+
+    from bragi.contrib.import_ghost.admin import STASH_PREFIX
+
+    stash = _isolated_stash_root / f"{STASH_PREFIX}{stash_token}"
+    assert stash.exists()
+
+    # Apply. Need a CSRF token for the apply form.
+    apply_csrf = csrf_token(client, path=f"/admin/sites/blog/import/ghost/review/{stash_token}")
+    resp = client.post(
+        f"/admin/sites/blog/import/ghost/apply/{stash_token}",
+        data={"_csrf_token": apply_csrf},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    body = resp.get_data(as_text=True)
+    assert "Imported" in body or "imported" in body.lower()
+
+    # Stash gone.
+    assert not stash.exists(), "apply should have dropped the stash"
+
+
+def test_apply_uses_logged_in_user_as_author(
+    admin_app: Flask,
+    db_session: Session,
+    _isolated_stash_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The created Post's author_id matches the logged-in operator (Ada)."""
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+
+    # Find Ada's user id (the admin_app fixture seeds her).
+    from sqlalchemy import select
+
+    ada = db_session.execute(select(User).where(User.email == EMAIL)).scalar_one()
+    ada_id = ada.id
+
+    export_buf = _make_export(
+        [
+            {
+                "id": "gp1",
+                "slug": "x",
+                "title": "X",
+                "html": "<p>y</p>",
+                "status": "published",
+            }
+        ],
+    )
+
+    client = admin_app.test_client()
+    _login(client)
+
+    upload_csrf = csrf_token(client)
+    up = client.post(
+        "/admin/sites/blog/import/ghost/upload",
+        data={"_csrf_token": upload_csrf, "file": (export_buf, "export.json")},
+        content_type="multipart/form-data",
+        follow_redirects=False,
+    )
+    stash_token = up.headers["Location"].rsplit("/", 1)[-1]
+
+    apply_csrf = csrf_token(client, path=f"/admin/sites/blog/import/ghost/review/{stash_token}")
+    client.post(
+        f"/admin/sites/blog/import/ghost/apply/{stash_token}",
+        data={"_csrf_token": apply_csrf},
+        follow_redirects=False,
+    )
+
+    from bragi.core.models.post import Post
+
+    post = db_session.execute(select(Post).where(Post.slug == "x")).scalar_one()
+    assert post.author_id == ada_id
+
+
+def test_apply_returns_to_upload_on_missing_stash(
+    admin_app: Flask,
+    _isolated_stash_root: Path,
+) -> None:
+    """A bogus token on apply redirects to /upload."""
+    client = admin_app.test_client()
+    _login(client)
+
+    apply_csrf = csrf_token(client)
+    resp = client.post(
+        # Use 32 hex chars so the format check doesn't reject it before
+        # the stash-not-found path runs.
+        "/admin/sites/blog/import/ghost/apply/" + "0" * 32,
+        data={"_csrf_token": apply_csrf},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (301, 302)
+    assert "/import/ghost/upload" in (resp.headers.get("Location") or "")

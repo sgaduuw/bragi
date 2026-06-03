@@ -228,7 +228,63 @@ def review(site_slug: str, token: str) -> ResponseReturnValue:
 
 @bp.route("/apply/<token>", methods=["POST"])
 def apply(site_slug: str, token: str) -> ResponseReturnValue:
-    abort(501)  # filled in by Task 5
+    """Run the importer against the stashed export and render the
+    result page. Always drops the stash on the way out.
+    """
+    from bragi.contrib.import_ghost.importer import apply as run_apply
+    from bragi.core.security import current_user
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        # resolve_site_or_abort already expunges the site so it survives
+        # the session block; no explicit expunge needed here.
+
+    stash = _resolve_stash(token)
+    if stash is None:
+        flash("Import session expired or not found.", "error")
+        return redirect(url_for("ghost_admin.upload", site_slug=site_slug))
+
+    # Determine the source path: a direct .json or an unpacked zip dir.
+    source_path: Path | None = None
+    if (stash / "export.json").exists():
+        source_path = stash / "export.json"
+    elif (stash / "unpacked").is_dir():
+        source_path = stash / "unpacked"
+    if source_path is None:
+        shutil.rmtree(stash, ignore_errors=True)
+        flash("Stashed export unreadable.", "error")
+        return redirect(url_for("ghost_admin.upload", site_slug=site_slug))
+
+    user = current_user()
+    if user is None:
+        # require_role should have aborted already, but defend
+        # against any path that bypasses the auth check.
+        shutil.rmtree(stash, ignore_errors=True)
+        abort(401)
+    author_id = user.id
+
+    try:
+        result = run_apply(source_path, site, {"author_id": author_id})
+    except Exception as exc:
+        log.warning(
+            "import_ghost: apply() raised on stash %s",
+            stash,
+            exc_info=True,
+        )
+        flash(f"Import failed: {exc}", "error")
+        return redirect(url_for("ghost_admin.upload", site_slug=site_slug))
+    finally:
+        shutil.rmtree(stash, ignore_errors=True)
+
+    return render_template(
+        "admin/import_ghost_result.html",
+        site_slug=site_slug,
+        counts=result.counts,
+        warnings=list(result.warnings),
+        redirects_inserted=result.redirects_inserted,
+        duration_seconds=result.duration_seconds,
+    )
 
 
 @bp.route("/cancel/<token>", methods=["POST"])
