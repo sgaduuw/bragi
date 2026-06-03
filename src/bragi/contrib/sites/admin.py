@@ -16,14 +16,15 @@ goes through the CLI.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, get_args, get_origin
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
+from pydantic.fields import FieldInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from bragi.api import Crumb, set_breadcrumbs
+from bragi.api import Crumb, SiteSetting, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -31,7 +32,7 @@ from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
-from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
+from bragi.core.permissions import accessible_sites_for, require_role, resolve_site_or_abort
 from bragi.core.renditions import smallest_webp_storage_key
 from bragi.core.security import current_user, is_superuser
 from bragi.core.storage import remove_rendition
@@ -53,7 +54,9 @@ bp = Blueprint(
 # `resolve_site_or_abort`). Everything else (create, edit hostname,
 # deactivate, alias-swap) stays superuser-only because those are
 # platform-level changes that touch DNS and shared infra.
-_MEMBER_READABLE_ENDPOINTS = frozenset({"list_sites", "site_dashboard"})
+_MEMBER_READABLE_ENDPOINTS = frozenset(
+    {"list_sites", "site_dashboard", "settings", "patch_settings"}
+)
 
 
 @bp.before_request
@@ -770,3 +773,113 @@ def remove_alias(site_id: int, alias_id: int) -> ResponseReturnValue:
         db.commit()
         flash(f"Alias {hostname} removed.", "success")
     return redirect(url_for("site_admin.edit_site", site_id=site_id))
+
+
+# ---------------------------------------------------------------------------
+# Per-site extra_settings admin
+# ---------------------------------------------------------------------------
+
+
+def _unwrap_annotated(tp: Any) -> tuple[type, list[Any]]:
+    """Return `(base_type, metadata_list)` for a possibly-Annotated
+    declared type. For a bare `int`, returns `(int, [])`. For
+    `Annotated[int, Field(ge=0)]`, returns `(int, [FieldInfo(...)])`."""
+    if get_origin(tp) is Annotated:
+        args = get_args(tp)
+        return args[0], list(args[1:])
+    return tp, []
+
+
+def _setting_widget(setting: SiteSetting) -> str:
+    """Pick the HTML input widget for `setting`. Returns one of
+    `'int'`, `'bool'`, `'str'`."""
+    base, _ = _unwrap_annotated(setting.type)
+    if base is bool:
+        return "bool"
+    if base is int:
+        return "int"
+    return "str"
+
+
+def _setting_min(setting: SiteSetting) -> int | float | None:
+    """If the Annotated metadata carries a pydantic ge/gt
+    constraint, return the integer/float min for the HTML `min`
+    attribute. Otherwise None."""
+    _, meta = _unwrap_annotated(setting.type)
+    for m in meta:
+        if isinstance(m, FieldInfo):
+            for c in m.metadata:
+                ge: int | float | None = getattr(c, "ge", None)
+                gt: int | float | None = getattr(c, "gt", None)
+                if ge is not None:
+                    return ge
+                if gt is not None:
+                    return gt + 1 if isinstance(gt, int) else gt
+    return None
+
+
+def _setting_max(setting: SiteSetting) -> int | float | None:
+    """If the Annotated metadata carries a pydantic le/lt
+    constraint, return the integer/float max for the HTML `max`
+    attribute. Otherwise None."""
+    _, meta = _unwrap_annotated(setting.type)
+    for m in meta:
+        if isinstance(m, FieldInfo):
+            for c in m.metadata:
+                le: int | float | None = getattr(c, "le", None)
+                lt: int | float | None = getattr(c, "lt", None)
+                if le is not None:
+                    return le
+                if lt is not None:
+                    return lt - 1 if isinstance(lt, int) else lt
+    return None
+
+
+def _collect_site_settings() -> list[SiteSetting]:
+    """Pull every registered SiteSetting from the plugin manager,
+    filter out None / disabled, dedupe by key (later contributions
+    of the same key are dropped with a warning)."""
+    pm = current_app.extensions["plugin_manager"]
+    raw = pm.hook.register_site_setting()
+    seen: set[str] = set()
+    out: list[SiteSetting] = []
+    for s in raw:
+        if s is None or not s.enabled:
+            continue
+        if s.key in seen:
+            current_app.logger.warning(
+                "site setting key %r registered more than once; later contribution dropped",
+                s.key,
+            )
+            continue
+        seen.add(s.key)
+        out.append(s)
+    return out
+
+
+@bp.route("/<site_slug>/settings/", methods=["GET"])
+def settings(site_slug: str) -> ResponseReturnValue:
+    """Render the per-site extra_settings form."""
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        current_values = dict(site.extra_settings or {})
+        site_for_template = site
+
+    registered_settings = _collect_site_settings()
+    return render_template(
+        "admin/sites_settings.html",
+        site=site_for_template,
+        settings=registered_settings,
+        current_values=current_values,
+        errors={},
+        setting_widget=_setting_widget,
+        setting_min=_setting_min,
+        setting_max=_setting_max,
+    )
+
+
+@bp.route("/<site_slug>/settings/", methods=["PATCH"])
+def patch_settings(site_slug: str) -> ResponseReturnValue:
+    """PATCH handler implemented in Task 3."""
+    abort(501)
