@@ -551,13 +551,12 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
 
 @bp.route("/<int:post_id>/pin-toggle", methods=["POST"])
 def pin_toggle(site_slug: str, post_id: int) -> ResponseReturnValue:
-    """Flip Post.is_pinned via an htmx-friendly POST.
+    """Flip Post.is_pinned and return the updated cell partial.
 
-    The list-view button posts here and (for htmx requests) gets
-    the updated cell back for `hx-swap=outerHTML`. Plain (non-htmx)
-    submitters get a redirect to the list. Does not touch
-    `pinned_until`; nuanced expiry timing belongs on the edit
-    form.
+    JS-required admin: this route is only ever hit from an htmx
+    `hx-post` on the list-view button; the partial is what
+    `hx-swap=outerHTML` consumes. Does not touch `pinned_until`;
+    nuanced expiry timing belongs on the edit form.
     """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
@@ -575,12 +574,9 @@ def pin_toggle(site_slug: str, post_id: int) -> ResponseReturnValue:
         db.commit()
 
         toggled_site_id = site.id
-        # Render the partial inside the session so SQLAlchemy
-        # relationship access (e.g. any lazy-load the template
-        # needs) still has a live connection.
-        htmx_resp = (
-            render_template("admin/_pinned_cell.html", post=post, site=site) if is_htmx() else None
-        )
+        # Render inside the session so any lazy SQLAlchemy
+        # relationship access in the template has a live connection.
+        cell_resp = render_template("admin/_pinned_cell.html", post=post, site=site)
 
     audit(
         AuditAction.POST_PINNED if not before_pinned else AuditAction.POST_UNPINNED,
@@ -590,9 +586,7 @@ def pin_toggle(site_slug: str, post_id: int) -> ResponseReturnValue:
         extra={"before": before_pinned, "after": not before_pinned},
     )
 
-    if htmx_resp is not None:
-        return htmx_resp
-    return redirect(url_for("post_admin.list_posts", site_slug=site_slug))
+    return cell_resp
 
 
 @bp.route("/<int:post_id>/cell/title", methods=["GET"])

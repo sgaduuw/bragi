@@ -6,6 +6,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Admin posture: JS is now explicitly *required* on the admin side
+  (delivery still keeps its full no-JS commitment). Stripped two
+  vestigial no-JS redirect fallbacks: `pin_toggle` and the
+  attachments alt-text update now return the cell partial
+  unconditionally instead of branching on `is_htmx()` for a
+  redirect+flash. The htmx-dispatch in list views (full page on
+  cold load, partial on swap) stays — that is the canonical
+  full-page contract, not a no-JS courtesy. CONTEXT.md gained a
+  per-side JS-posture carve-out explaining the split.
+
 ### Added
 - Admin overview tables: inline-edit selected fields without
   opening the full edit page. Posts: title, slug, status (the
