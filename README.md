@@ -198,13 +198,20 @@ in place rather than duplicating them.
   skips the redirect emission for those. `tags:` lists upsert by
   slug. CLI: `bragi import hugo --site <slug> [--author <email>] [--dry-run] <path>`.
 - **Ghost**: parses the single-file JSON export
-  (`db[0].data.posts`). Bodies arrive as HTML and convert to
-  markdown via `markdownify(heading_style="ATX")`; tags come
-  from `data.tags` + `data.posts_tags`; authors match existing
+  (`db[0].data.posts`). Posts and pages both land: posts become
+  bragi Posts; pages become bragi `STATIC` pages with slug,
+  title, body, and `meta_title` preserved. Bodies arrive as HTML
+  and convert to markdown via `markdownify(heading_style="ATX")`; tags
+  come from `data.tags` + `data.posts_tags`; authors match existing
   Users by email (else fall back to the first user). For every
   published post a 301 lands from Ghost's permalink (`/<slug>/`)
   to bragi's canonical under the site's `post_index` page (e.g.
-  `/blog/<slug>/`) so legacy bookmarks survive. CLI:
+  `/blog/<slug>/`) so legacy bookmarks survive. Featured images
+  (`feature_image`, or `og_image` as fallback) are downloaded as
+  bragi `Attachment` rows; `feature_image_alt` becomes the alt
+  text. Additional fields picked up: `featured` sets `is_pinned`
+  on posts. Failed image downloads warn and continue without the
+  image. CLI:
   `bragi import ghost --site <slug> [--author <email>] [--dry-run] <path>`.
 - **WordPress**: parses WXR (WordPress eXtended RSS) XML
   exports. `wp:post_type=post` rows become Posts, `page` rows
