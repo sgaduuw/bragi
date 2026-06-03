@@ -202,6 +202,14 @@ form button, .btn {
   background: #222; color: #fff; border: 0; border-radius: 4px;
   text-decoration: none; display: inline-block; line-height: 1.4;
 }
+/* The `form { flex-direction: column }` rule above stretches every
+   direct-child element to the column's full width, which makes
+   single-submit forms render their button as a giant bar. Constrain
+   direct-child submit buttons to their natural width and left-align
+   them; opt back into stretching with `.full-width` when a hero/CTA
+   button is what you actually want. Buttons grouped under `.actions`
+   are unaffected because they're not direct children of the form. */
+form > button:not(.full-width) { align-self: flex-start; }
 form button.danger, .btn.danger { background: #b22; }
 form button.secondary, .btn.secondary { background: #888; }
 form button:hover, .btn:hover { background: #444; }
