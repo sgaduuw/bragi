@@ -1429,7 +1429,7 @@ def test_save_alt_text_htmx_returns_row_partial(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
-    resp = client.post(
+    resp = client.patch(
         f"/admin/sites/blog/attachments/{without_alt_id}/alt-text",
         data={"alt_text": "Hero shot of the lake.", "_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -1450,7 +1450,7 @@ def test_save_alt_text_empty_string_clears(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
-    client.post(
+    client.patch(
         f"/admin/sites/blog/attachments/{with_alt_id}/alt-text",
         data={"alt_text": "", "_csrf_token": token},
     )

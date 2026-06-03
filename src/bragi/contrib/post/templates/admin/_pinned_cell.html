@@ -1,12 +1,13 @@
-{# Inline pinned-cell partial. Returned by pin_toggle for htmx
-   clients; included by _post_list_table.html for full-page renders.
-   Stable id so hx-swap=outerHTML targets the same node it came from. #}
+{# Inline pinned-cell partial. Returned by pin_toggle and
+   included by _post_list_table.html for first render. Stable id
+   so hx-swap=outerHTML targets the same node it came from. JS-
+   required admin: this form is hx-patch-driven; no native form
+   `method`/`action` fallback since the browser can't natively
+   send PATCH from a <form> submit. #}
 <td class="pinned-cell" id="pinned-cell-{{ post.id }}">
-  <form method="post"
-        hx-post="{{ url_for('post_admin.pin_toggle', site_slug=site.slug, post_id=post.id) }}"
+  <form hx-patch="{{ url_for('post_admin.pin_toggle', site_slug=site.slug, post_id=post.id) }}"
         hx-target="#pinned-cell-{{ post.id }}"
         hx-swap="outerHTML"
-        action="{{ url_for('post_admin.pin_toggle', site_slug=site.slug, post_id=post.id) }}"
         style="display: inline; margin: 0;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="{{ 'btn-pinned' if post.is_pinned else 'btn-unpinned' }}">
