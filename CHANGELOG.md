@@ -6,6 +6,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.25.1] - 2026-06-04
+
+### Fixed
+- Post and page excerpts now render as plain text (link labels,
+  unescaped punctuation, no leftover markdown syntax) instead of
+  the raw markdown source. Symptom: Ghost-imported blogs showed
+  `HAProxy 1\.9` and `[rfc8297](https://...)` in listing previews
+  because `markdownify` aggressively escapes any character that
+  could look like markdown syntax. The new `make_excerpt` renders
+  the source through the markdown renderer, strips HTML tags, and
+  truncates the resulting plain text. Existing posts have their
+  broken excerpts cached in the DB and won't self-heal until
+  edit-saved; operators can run
+  `bragi rebuild-excerpts [--site <slug>] [--dry-run]` (or click
+  "Rebuild excerpts" in the site-edit "Maintenance" section) to
+  recompute every row in one pass.
+
 ## [1.25.0] - 2026-06-04
 
 ### Added
