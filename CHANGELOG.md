@@ -6,6 +6,120 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-06-04
+
+### Added
+- Per-site `Site.extra_settings` is now editable from the
+  existing site-edit page (`/admin/sites/<id>/edit`) instead
+  of `flask shell`. The 5 plugin-contributed keys
+  (`pinned_autoadvance_seconds`, `posts_per_page`,
+  `related_posts_count`, `tag_segment`, `indexnow_key`)
+  render in a new "Plugin settings" fieldset above Aliases.
+  New `register_site_setting` hookspec + `SiteSetting`
+  pydantic dataclass let third-party plugins contribute
+  their own keys; plugins with multiple keys register one
+  hookimpl per key via the
+  `@hookimpl(specname="register_site_setting")` convention.
+  The dataclass validates its declared default against the
+  declared type at construction time. All-or-nothing save:
+  any field's validation error blocks the whole save and
+  re-renders with field-level errors. Unknown keys in
+  submitted form payloads are ignored (typo guard); keys
+  already in `extra_settings` that no plugin registers are
+  hidden from the form and left untouched on save. Closes
+  #272.
+
+### Changed
+- Admin chrome: the two-row global + site nav now sticks to the
+  top as the page scrolls. Breadcrumbs (row 3) stay in normal
+  flow. Implemented by wrapping rows 1 + 2 in a new
+  `.admin-nav-sticky` container with `position: sticky; top: 0;
+  z-index: 100`. The hidden hamburger checkbox and the mobile
+  drawer remain siblings (the wrapper sits between them in
+  document order) so the `#nav-toggle:checked ~
+  .admin-nav-drawer` sibling-combinator selector still toggles
+  the mobile drawer correctly.
+
+### Fixed
+- Rendition worker: `AttachmentRendition` rows stuck in
+  `processing` after a worker crash are now reclaimed on the next
+  tick instead of sitting forever. The worker stamps a
+  `claimed_at` column when it flips a row to `processing`; the
+  next worker's claim query picks up `pending` rows plus any
+  `processing` row whose `claimed_at` is older than
+  `Settings.attachment_rendition_reclaim_after_seconds` (default
+  300s, env: `BRAGI_ATTACHMENT_RENDITION_RECLAIM_AFTER_SECONDS`).
+  Rendition generation is idempotent (same bytes at the same
+  storage key on a re-run), so the reclaim window is short. New
+  alembic migration `a523a7f5366b` adds the column. Closes #356.
+- Image renditions: Pillow resize now honours EXIF Orientation.
+  Portrait phone shots ship raw pixels stored landscape with an
+  EXIF Orientation hint; browsers honour the hint when displaying
+  the original, so the upload looks correct, but bragi's
+  `resize_and_encode` (and `_resize` / `_probe`) were resampling
+  the raw bytes without consulting the hint, producing renditions
+  rotated 90° / 180° / 270°. Applied `PIL.ImageOps.exif_transpose`
+  before every read of `img.width` / `img.height` / `thumbnail()`.
+  Output bytes no longer carry an Orientation tag so the browser
+  doesn't double-rotate. The probe path also picks the correct
+  `width` / `height` now, so the rendition ladder targets the
+  right widths for portrait images instead of the raw-landscape
+  widths. **Backfill**: existing renditions of portrait images
+  need to be regenerated. After deploying, run the
+  `attachments.regenerate-all` admin button or CLI sweep to
+  re-mint affected rows.
+
+### Changed
+- Admin posture: JS is now explicitly *required* on the admin side
+  (delivery still keeps its full no-JS commitment). Stripped two
+  vestigial no-JS redirect fallbacks: `pin_toggle` and the
+  attachments alt-text update now return the cell partial
+  unconditionally instead of branching on `is_htmx()` for a
+  redirect+flash. The htmx-dispatch in list views (full page on
+  cold load, partial on swap) stays — that is the canonical
+  full-page contract, not a no-JS courtesy. CONTEXT.md gained a
+  per-side JS-posture carve-out explaining the split.
+- Admin htmx-driven mutations now use the RESTfully correct verb.
+  `pin_toggle` and the attachments alt-text save converted from
+  POST to PATCH (single-field updates). The templates' `hx-post`
+  attributes become `hx-patch`; the vestigial `<form method="post"
+  action=...>` fallback attributes were dropped (no-JS doesn't
+  work for these flows anyway). Other admin mutations (edit-form
+  submissions, delete buttons) remain POST because they're plain
+  HTML form submissions and the browser can't natively send PATCH
+  / DELETE from a form. Converting those would require rewiring
+  through htmx first; that bigger sweep isn't currently motivated
+  by anything.
+
+### Added
+- Admin overview tables: inline-edit selected fields without
+  opening the full edit page. Posts: title, slug, status (the
+  existing Pinned toggle is unchanged). Pages: title, slug,
+  status, show_in_nav, menu_order. Free-text fields (title, slug)
+  swap to an input on double-click or focused-Enter; Enter saves,
+  Esc reverts. Slug renames still insert a 301 from the old
+  canonical via the existing `on_post_updated` hook (which
+  dispatches by isinstance for both Post and Page). Status /
+  show_in_nav / menu_order are always-live inputs / toggles.
+  Editor role required on every PATCH route; author role gets
+  403. New routes use real PATCH (the existing `pin_toggle`
+  stays POST for now; #350 tracks RESTifying the rest of the
+  admin). A small JS shim (`inline-edit.js`) handles
+  autofocus-on-htmx-swap so the input is ready to type into
+  when it appears. #351 tracks propagating the
+  JS-required-for-admin decision across the rest of the admin.
+
+### Changed
+- Site nav submenu: now opens automatically on hover after a 500 ms
+  delay (and closes 200 ms after the cursor leaves) as a progressive
+  enhancement, in addition to the existing click-to-toggle. Without
+  JavaScript the click still works. The submenu also picks up an
+  explicit background (`var(--bg, Canvas)`), border
+  (`var(--rule, ...)`), and a soft shadow so it no longer bleeds
+  visually into body content underneath. All four built-in themes
+  already set the `--bg` / `--rule` custom properties; third-party
+  themes that don't fall back to system colours.
+
 ## [1.24.0] - 2026-06-03
 
 ### Added

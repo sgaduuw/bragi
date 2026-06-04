@@ -17,12 +17,12 @@
   <tbody>
     {% for page in pages %}
     <tr>
-      <td><a href="{{ url_for('page_admin.edit_page', page_id=page.id) }}">{{ page.title }}</a></td>
-      <td><code>{{ page.slug }}</code></td>
+      {% include "admin/_page_title_cell.html" %}
+      {% include "admin/_page_slug_cell.html" %}
       <td>{{ page.parent_id or '(root)' }}</td>
-      <td>{{ page.status }}</td>
-      <td>{{ '✓' if page.show_in_nav else '—' }}</td>
-      <td style="text-align: right;">{{ page.menu_order }}</td>
+      {% include "admin/_page_status_cell.html" %}
+      {% include "admin/_page_show_in_nav_cell.html" %}
+      {% include "admin/_page_menu_order_cell.html" %}
       <td>{{ page.updated_at.strftime('%Y-%m-%d') }}</td>
       <td>
         <form method="post"

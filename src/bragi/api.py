@@ -24,7 +24,7 @@ What's covered:
   `StorageBackendSpec`, `ImageProcessorSpec`, `ImagePickerTab`,
   `ImporterAdminTile`, `InternalLinkResolution`, `NavNode`, `Crumb`,
   `ResumeData`, `ResumeHeader`, `Position`, `Project`,
-  `Education`, `SkillGroup`, `Certification`, `Language`,
+  `Education`, `SiteSetting`, `SkillGroup`, `Certification`, `Language`,
   `ProfileLink`, `ChangeProposal`, `ImportPlan`,
   `ImportResult`.
 - The `set_breadcrumbs(*crumbs: Crumb) -> None` helper,
@@ -83,7 +83,15 @@ from uuid import uuid4
 
 import jinja2
 import pluggy
-from pydantic import BaseModel, Field, HttpUrl, StringConstraints
+from pydantic import (
+    BaseModel,
+    Field,
+    HttpUrl,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from bragi.core.breadcrumbs import Crumb, set_breadcrumbs
 
@@ -333,6 +341,64 @@ class ImporterAdminTile(BaseModel):
     """Set to False to hide the card. Useful for plugins that
     load but only activate when configured (e.g. an importer
     that needs an API key)."""
+
+
+class SiteSetting(BaseModel):
+    """A plugin-contributed key in `Site.extra_settings`.
+
+    bragi unwraps `type` via `pydantic.TypeAdapter` to validate
+    incoming form values and pick the admin input widget.
+    Constraints (ranges, regex, enums) ride along inside
+    `Annotated[..., Field(...)]`.
+
+    The declared `default` is validated against `type` at
+    construction time via a model validator so a plugin
+    shipping `default=-5` with `type=Annotated[int, Field(ge=0)]`
+    fails fast at import time, not silently at save time.
+
+    Plugins with multiple settings register one hookimpl per
+    setting using `@hookimpl(specname="register_site_setting")`
+    on distinctly-named functions.
+    """
+
+    key: str
+    """Unique key in extra_settings dict. Convention:
+    `^[a-z_][a-z0-9_]*$`."""
+
+    type: Any
+    """Python type or `Annotated[type, Field(...)]`. Used by the
+    admin form to pick the input widget (`int` -> number,
+    `bool` -> checkbox, `str` -> text) and to coerce + validate
+    incoming form values."""
+
+    default: Any
+    """Value used at render time when the key is absent from
+    `Site.extra_settings`. Validated against `type` at
+    SiteSetting construction time (unless enabled=False)."""
+
+    label: str
+    """Form field label (display)."""
+
+    help_text: str
+    """Rendered below the input."""
+
+    enabled: bool = True
+    """Set to False to suppress the row and skip default-against-
+    type validation. Useful for plugins that load but only
+    activate when configured elsewhere."""
+
+    @model_validator(mode="after")
+    def _validate_default_against_type(self) -> SiteSetting:
+        if not self.enabled:
+            return self
+        try:
+            TypeAdapter(self.type).validate_python(self.default)
+        except ValidationError as exc:
+            raise ValueError(
+                f"SiteSetting {self.key!r}: default {self.default!r} "
+                f"does not satisfy declared type: {exc}"
+            ) from exc
+        return self
 
 
 # ============================================================
@@ -716,6 +782,7 @@ __all__ = [
     "SearchHit",
     "SearchResults",
     "set_breadcrumbs",
+    "SiteSetting",
     "SkillGroup",
     "StorageBackendSpec",
     "ThemeSpec",

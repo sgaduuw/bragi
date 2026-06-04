@@ -12,11 +12,9 @@
   <td><small>{{ r.content_type }}</small></td>
   {% if missing_alt %}
     <td colspan="2">
-      <form hx-post="{{ url_for('attachment_admin.save_alt_text', attachment_id=r.id) }}"
+      <form hx-patch="{{ url_for('attachment_admin.save_alt_text', attachment_id=r.id) }}"
             hx-target="#attachment-row-{{ r.id }}"
             hx-swap="outerHTML"
-            method="post"
-            action="{{ url_for('attachment_admin.save_alt_text', attachment_id=r.id) }}"
             style="display: flex; gap: 0.5rem; align-items: center; margin: 0;">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="text" name="alt_text" maxlength="512"

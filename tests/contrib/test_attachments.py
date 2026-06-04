@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.admin import create_admin_app
@@ -1421,26 +1421,6 @@ def test_missing_alt_count_surfaced_in_header(
     assert b"missing alt text (1)" in resp.data.lower()
 
 
-def test_save_alt_text_non_htmx_redirects(
-    admin_app: Flask,
-    db_session_factory: sessionmaker[Session],
-) -> None:
-    without_alt_id, _ = _seed_two_images_one_missing_alt(db_session_factory)
-    client = admin_app.test_client()
-    _login(client)
-    token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
-    resp = client.post(
-        f"/admin/sites/blog/attachments/{without_alt_id}/alt-text",
-        data={"alt_text": "A clarifying caption.", "_csrf_token": token},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 302
-    with db_session_factory() as db:
-        row = db.get(Attachment, without_alt_id)
-    assert row is not None
-    assert row.alt_text == "A clarifying caption."
-
-
 def test_save_alt_text_htmx_returns_row_partial(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
@@ -1449,7 +1429,7 @@ def test_save_alt_text_htmx_returns_row_partial(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
-    resp = client.post(
+    resp = client.patch(
         f"/admin/sites/blog/attachments/{without_alt_id}/alt-text",
         data={"alt_text": "Hero shot of the lake.", "_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -1470,7 +1450,7 @@ def test_save_alt_text_empty_string_clears(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/sites/blog/attachments/?missing_alt=1")
-    client.post(
+    client.patch(
         f"/admin/sites/blog/attachments/{with_alt_id}/alt-text",
         data={"alt_text": "", "_csrf_token": token},
     )
@@ -2243,6 +2223,150 @@ def test_process_renditions_respects_batch_limit(
         )
     assert len(done) == 2
     assert len(pending) == 7
+
+
+def test_process_renditions_reclaims_stale_processing_rows(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A row stuck in `processing` with a `claimed_at` older than the
+    reclaim window gets reclaimed by the next worker tick. Pins the
+    fix for #356: a worker crashing mid-batch left rows stuck
+    forever; the new tick picks them up and either completes them
+    or re-pends/fails them so they always make progress.
+    """
+    from datetime import timedelta
+
+    from click.testing import CliRunner
+
+    from bragi.contrib.attachments.cli import media_group
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+    from bragi.core.time import naive_utcnow
+
+    # Short reclaim window so the test doesn't have to sleep.
+    monkeypatch.setattr("bragi.settings.settings.attachment_rendition_reclaim_after_seconds", 1)
+
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
+    data = _make_png(width=2000, height=1000)
+    client.post(
+        "/admin/sites/blog/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(data), "hero.png"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+
+    # Simulate a worker crash: pick one of the freshly-enqueued
+    # pending rows and force it to `processing` with a stale
+    # `claimed_at`. The remaining rows stay `pending`.
+    stale_claimed_at = naive_utcnow() - timedelta(minutes=10)
+    with db_session_factory() as db:
+        stale_row_id = (
+            db.execute(
+                select(AttachmentRendition.id)
+                .where(AttachmentRendition.status == "pending")
+                .order_by(AttachmentRendition.id)
+                .limit(1)
+            )
+            .scalars()
+            .one()
+        )
+        db.execute(
+            update(AttachmentRendition)
+            .where(AttachmentRendition.id == stale_row_id)
+            .values(status="processing", claimed_at=stale_claimed_at)
+        )
+        db.commit()
+
+    runner = CliRunner()
+    with admin_app.app_context():
+        result = runner.invoke(media_group, ["process-renditions"])
+    assert result.exit_code == 0, result.output
+
+    # The stale row was reclaimed and either completed or, in the
+    # worst case, re-pended/failed. What matters is that its status
+    # advanced beyond `processing` (i.e. it got picked up).
+    with db_session_factory() as db:
+        row = db.get(AttachmentRendition, stale_row_id)
+        assert row is not None
+        assert (
+            row.status != "processing"
+        ), f"reclaim never picked up the orphaned row; status still {row.status!r}"
+        # Successful happy-path also clears claimed_at.
+        if row.status == "done":
+            assert row.claimed_at is None
+
+
+def test_process_renditions_does_not_reclaim_fresh_processing_rows(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A row whose `claimed_at` is INSIDE the reclaim window must
+    NOT be poached by a parallel worker tick. Pins the safety
+    guarantee: only ORPHANED rows get reclaimed; rows another
+    worker is actively processing are left alone.
+    """
+    from click.testing import CliRunner
+
+    from bragi.contrib.attachments.cli import media_group
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+    from bragi.core.time import naive_utcnow
+
+    # Generous reclaim window so a fresh row stays inside it.
+    monkeypatch.setattr("bragi.settings.settings.attachment_rendition_reclaim_after_seconds", 600)
+
+    site_id = _blog_id(db_session_factory)
+    fresh_claim = naive_utcnow()
+    with db_session_factory() as db:
+        attachment = Attachment(
+            site_id=site_id,
+            filename="x.png",
+            content_type="image/png",
+            size_bytes=10,
+            storage_key="d" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(attachment)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=attachment.id,
+                size_label="320w",
+                format="webp",
+                content_type="image/webp",
+                status="processing",
+                claimed_at=fresh_claim,
+            )
+        )
+        db.commit()
+        row_id = (
+            db.execute(select(AttachmentRendition.id).order_by(AttachmentRendition.id.desc()))
+            .scalars()
+            .first()
+        )
+
+    runner = CliRunner()
+    with admin_app.app_context():
+        result = runner.invoke(media_group, ["process-renditions"])
+    assert result.exit_code == 0, result.output
+    # No pending rows, so the worker has nothing to drain.
+    assert "no pending renditions" in result.output
+
+    with db_session_factory() as db:
+        row = db.get(AttachmentRendition, row_id)
+        assert row is not None
+        assert row.status == "processing"
+        assert row.claimed_at == fresh_claim
 
 
 def test_regenerate_missing_enqueues_for_site_only(

@@ -23,7 +23,7 @@ import click
 from flask import Blueprint, current_app
 from sqlalchemy import select
 
-from bragi.api import hookimpl
+from bragi.api import SiteSetting, hookimpl
 from bragi.contrib.indexnow.cli import indexnow_group
 from bragi.contrib.indexnow.client import submit
 from bragi.contrib.indexnow.views import bp as indexnow_bp
@@ -140,12 +140,28 @@ def register_cli_command(group: click.Group) -> None:
     group.add_command(indexnow_group)
 
 
+@hookimpl
+def register_site_setting() -> SiteSetting:
+    return SiteSetting(
+        key="indexnow_key",
+        type=str,
+        default="",
+        label="IndexNow key",
+        help_text=(
+            "API key for push-crawl pings (Bing, Yandex, Seznam). "
+            "Unset disables the plugin. Use `bragi indexnow setup` "
+            "to generate one."
+        ),
+    )
+
+
 __all__ = [
     "on_post_deleted",
     "on_post_published",
     "on_post_updated",
     "register_cli_command",
     "register_delivery_blueprint",
+    "register_site_setting",
 ]
 
 

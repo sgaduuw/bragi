@@ -18,7 +18,7 @@ from __future__ import annotations
 import io
 import logging
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from bragi.api import ImageMetadata, ImageProcessorSpec
 
@@ -52,7 +52,14 @@ def _can_process(content_type: str) -> bool:
 def _probe(data: bytes) -> ImageMetadata | None:
     try:
         with Image.open(io.BytesIO(data)) as img:
-            return ImageMetadata(width=img.width, height=img.height, format=img.format)
+            # Apply EXIF orientation so width / height reflect the
+            # visually-correct dimensions of the displayed image, not
+            # the raw pixel buffer. Portrait phone shots ship raw
+            # pixels landscape with an Orientation tag; without this
+            # transpose, `width` and `height` come back swapped and
+            # the rendition ladder picks the wrong target widths.
+            oriented = ImageOps.exif_transpose(img) or img
+            return ImageMetadata(width=oriented.width, height=oriented.height, format=img.format)
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         # Truncated upload, wrong content-type guess, or a format
         # Pillow can't decode. Return None so the upload still
@@ -75,16 +82,22 @@ def _resize(data: bytes, target_width: int) -> bytes | None:
         return None
     try:
         with Image.open(io.BytesIO(data)) as img:
-            if img.width <= target_width:
+            save_format = img.format or "PNG"
+            # Apply EXIF orientation so renditions match how the
+            # original visually displays; without this step a portrait
+            # phone photo with Orientation=6 in EXIF comes out rotated
+            # 90° because the browser's auto-rotate is consumed at
+            # display time on the original, not at resample time here.
+            oriented = ImageOps.exif_transpose(img) or img
+            if oriented.width <= target_width:
                 # Don't upscale; the source already covers this slot.
                 return None
             # Preserve aspect ratio. thumbnail() rescales in place
             # and is high-quality (LANCZOS by default in Pillow 10+).
-            target_height = round(img.height * target_width / img.width)
-            resized = img.copy()
+            target_height = round(oriented.height * target_width / oriented.width)
+            resized = oriented.copy()
             resized.thumbnail((target_width, target_height))
             out = io.BytesIO()
-            save_format = img.format or "PNG"
             # JPEGs default to quality=75; bump to 85 for sharper
             # renditions at the cost of a few KB. Other formats
             # use Pillow defaults.
@@ -171,10 +184,17 @@ def resize_and_encode(
         return None
     try:
         with Image.open(io.BytesIO(data)) as img:
-            if img.width <= target_width:
+            # Apply EXIF orientation so renditions match how the
+            # original visually displays; see _resize for the full
+            # rationale. Captures img.format before the transpose
+            # because exif_transpose returns a fresh Image without
+            # the format attribute.
+            source_format = img.format
+            oriented = ImageOps.exif_transpose(img) or img
+            if oriented.width <= target_width:
                 return None
-            target_height = round(img.height * target_width / img.width)
-            resized = img.copy()
+            target_height = round(oriented.height * target_width / oriented.width)
+            resized = oriented.copy()
             resized.thumbnail((target_width, target_height))
 
             if target_format == "original":
@@ -182,7 +202,7 @@ def resize_and_encode(
                 # canonical truth for what the file is; Pillow's
                 # in-bytes probe is the fallback for callers that
                 # don't have a content_type to hand.
-                save_format = _format_for_content_type(source_content_type) or img.format
+                save_format = _format_for_content_type(source_content_type) or source_format
             else:
                 save_format = _PIL_FORMAT_BY_TARGET.get(target_format)
             if save_format is None:

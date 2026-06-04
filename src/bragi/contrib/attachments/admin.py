@@ -46,7 +46,6 @@ from bragi.contrib.attachments.delivery import build_attachment_response
 from bragi.contrib.attachments.service import create_attachment_from_bytes
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
-from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.permissions import require_role, resolve_site_or_abort
@@ -497,15 +496,14 @@ def upload_attachment(site_slug: str) -> ResponseReturnValue:
     return redirect(url_for("attachment_admin.list_attachments"))
 
 
-@bp.route("/<int:attachment_id>/alt-text", methods=["POST"])
+@bp.route("/<int:attachment_id>/alt-text", methods=["PATCH"])
 def save_alt_text(site_slug: str, attachment_id: int) -> ResponseReturnValue:
-    """Save just the alt text for one attachment (htmx-friendly).
+    """Save just the alt text for one attachment.
 
-    The bulk missing-alt view posts here inline so an operator can
-    fill in alt text on many rows without leaving the list page.
-    On htmx requests the row partial is returned so the
-    `hx-swap="outerHTML"` target replaces in place; on a non-htmx
-    submit the response redirects back to the list view.
+    JS-required admin: the bulk missing-alt view's inline forms are
+    hx-patch-driven so an operator can fill in alt text on many rows
+    without leaving the list page. The row partial is returned so
+    the `hx-swap="outerHTML"` target replaces in place.
     """
     alt_text = (request.form.get("alt_text") or "").strip() or None
     with SessionLocal() as db:
@@ -527,17 +525,14 @@ def save_alt_text(site_slug: str, attachment_id: int) -> ResponseReturnValue:
         extra={"filename": filename, "field": "alt_text"},
     )
 
-    if is_htmx():
-        with SessionLocal() as db:
-            row = db.get(Attachment, attachment_id)
-            return render_template(
-                "admin/_attachment_row.html",
-                r=row,
-                missing_alt=True,
-                just_saved=True,
-            )
-    flash(f"Saved alt text for {filename}.", "success")
-    return redirect(url_for("attachment_admin.list_attachments", missing_alt="1"))
+    with SessionLocal() as db:
+        row = db.get(Attachment, attachment_id)
+        return render_template(
+            "admin/_attachment_row.html",
+            r=row,
+            missing_alt=True,
+            just_saved=True,
+        )
 
 
 @bp.route("/<int:attachment_id>/edit", methods=["GET", "POST"])

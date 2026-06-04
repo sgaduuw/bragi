@@ -1,0 +1,18 @@
+{# Inline status cell for pages: always-live <select> over the
+   three valid statuses. Changing the value fires PATCH via
+   hx-trigger="change". Pages have no "scheduled" status and no
+   first-publish side-effect (no published_at field). #}
+<td id="page-status-cell-{{ page.id }}" role="gridcell">
+  <form hx-patch="{{ url_for('page_admin.patch_status', site_slug=site.slug, page_id=page.id) }}"
+        hx-target="#page-status-cell-{{ page.id }}"
+        hx-swap="outerHTML"
+        style="margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <select name="status" hx-trigger="change" hx-include="closest form">
+      {% for s in ['draft', 'published', 'archived'] %}
+        <option value="{{ s }}"{% if s == page.status %} selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
+  </form>
+</td>

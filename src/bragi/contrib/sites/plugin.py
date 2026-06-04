@@ -38,6 +38,8 @@ def register_admin_nav() -> list[NavItem]:
     lands on `site_admin.edit_site_current` which resolves the
     site through the admin's site-resolver middleware and renders
     the same form `edit_site(site_id)` does for the global path.
+    Plugin-contributed settings appear as a fieldset on this same
+    page; there is no separate settings sub-page.
     """
     return [
         NavItem(

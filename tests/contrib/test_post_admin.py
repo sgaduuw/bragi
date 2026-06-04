@@ -555,7 +555,7 @@ def test_pin_toggle_htmx_returns_updated_cell(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    resp = client.post(
+    resp = client.patch(
         f"/admin/sites/blog/posts/{pid}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -584,7 +584,7 @@ def test_pin_toggle_writes_audit_log(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    client.post(
+    client.patch(
         f"/admin/sites/blog/posts/{pid}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -598,28 +598,6 @@ def test_pin_toggle_writes_audit_log(
             .limit(1)
         ).scalar_one()
     assert row.action == "post.pinned"
-
-
-def test_pin_toggle_non_htmx_redirects_to_list(
-    admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> None:
-    with db_session_factory() as db:
-        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
-        post.status = PostStatus.PUBLISHED
-        post.published_at = datetime(2026, 5, 1, 12, 0)
-        db.commit()
-        pid = post.id
-
-    client = admin_app.test_client()
-    _login(client)
-    token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    resp = client.post(
-        f"/admin/sites/blog/posts/{pid}/pin-toggle",
-        data={"_csrf_token": token},
-        follow_redirects=False,
-    )
-    assert resp.status_code in (302, 303)
-    assert "/admin/sites/blog/posts" in resp.headers["Location"]
 
 
 def test_pin_toggle_cross_site_404(
@@ -656,7 +634,7 @@ def test_pin_toggle_cross_site_404(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path="/admin/sites/blog/posts/")
-    resp = client.post(
+    resp = client.patch(
         f"/admin/sites/blog/posts/{foreign_id}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -681,7 +659,7 @@ def test_pin_toggle_writes_unpin_audit_log(
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    client.post(
+    client.patch(
         f"/admin/sites/blog/posts/{pid}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},
@@ -737,7 +715,7 @@ def test_pin_toggle_forbidden_for_non_member(
     )
 
     token = csrf_token(client, path=f"/admin/sites/blog/posts/{pid}/edit")
-    resp = client.post(
+    resp = client.patch(
         f"/admin/sites/blog/posts/{pid}/pin-toggle",
         data={"_csrf_token": token},
         headers={"HX-Request": "true"},

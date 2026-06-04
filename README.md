@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.24.0 (2026-06-03).
+**Latest release:** 1.25.0 (2026-06-04).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -75,8 +75,8 @@ and ARM homelabs run natively rather than through QEMU emulation.
 - **Related posts at end of article.** Tag-overlap ranks
   same-site published posts ("more shared tags wins, recency
   ties"); rendered as a "You may also like" aside under the body.
-  Per-site count override via `Site.extra_settings["related_posts_count"]`
-  (default 3); zero-tag posts render no aside.
+  Per-site count override via `/admin/sites/<slug>/settings/`
+  (`related_posts_count`, default 3); zero-tag posts render no aside.
 - **Chronological archive.** `<post_index>/archive/` lists years
   with counts (newest first); drilling in shows months for that
   year, then posts in that month (oldest first, journal-style).
@@ -326,7 +326,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.24.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.25.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start

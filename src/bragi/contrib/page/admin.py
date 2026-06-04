@@ -334,8 +334,8 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
             .all()
         )
     if is_htmx():
-        return render_template("admin/_page_list_table.html", pages=pages)
-    return render_template("admin/page_list.html", pages=pages)
+        return render_template("admin/_page_list_table.html", pages=pages, site=site)
+    return render_template("admin/page_list.html", pages=pages, site=site)
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -1064,3 +1064,472 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
     )
     flash("Revision restored.", "success")
     return redirect(url_for("page_admin.edit_page", page_id=restored_id))
+
+
+@bp.route("/<int:page_id>/cell/title", methods=["GET"])
+def title_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the title cell. ?mode=edit returns the edit-mode
+    partial (input + hx-patch form); default returns the display
+    partial (link to the full edit page). Editor role required.
+    """
+    mode = request.args.get("mode", "view")
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_title_cell.html",
+            site=site,
+            page=page,
+            mode=mode,
+            value=None,
+            error=None,
+        )
+
+
+@bp.route("/<int:page_id>/patch/title", methods=["PATCH"])
+def patch_title(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """PATCH the page title. On success returns the display-mode
+    partial; on validation failure returns the edit-mode partial
+    with `error` + the rejected `value` pre-filled.
+    """
+    raw = (request.form.get("title") or "").strip()
+    error: str | None = None
+    if not raw:
+        error = "Title cannot be empty."
+    elif len(raw) > 255:
+        error = "Title must be 255 characters or fewer."
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        if error is not None:
+            return render_template(
+                "admin/_page_title_cell.html",
+                site=site,
+                page=page,
+                mode="edit",
+                value=raw,
+                error=error,
+            )
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        page.title = raw
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,  # generic "content updated"; mirrors edit_page convention
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "title", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_title_cell.html",
+        site=cell_site,
+        page=cell_page,
+        mode="view",
+        value=None,
+        error=None,
+    )
+
+
+@bp.route("/<int:page_id>/cell/slug", methods=["GET"])
+def slug_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the slug cell. ?mode=edit returns the edit-mode
+    partial (input + hx-patch form); default returns the display
+    partial (code element). Editor role required.
+    """
+    mode = request.args.get("mode", "view")
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_slug_cell.html",
+            site=site,
+            page=page,
+            mode=mode,
+            value=None,
+            error=None,
+        )
+
+
+@bp.route("/<int:page_id>/patch/slug", methods=["PATCH"])
+def patch_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """PATCH the page slug. On success returns the display-mode
+    partial and fires on_post_updated (which inserts a 301 redirect
+    from the old URL). On validation failure or slug collision returns
+    the edit-mode partial with `error` and the rejected `value`.
+    """
+    raw = (request.form.get("slug") or "").strip()
+    error: str | None = None
+    if not raw:
+        error = "Slug cannot be empty."
+    elif len(raw) > 255:
+        error = "Slug must be 255 characters or fewer."
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        if error is None and raw != page.slug:
+            existing = db.execute(
+                select(Page.id).where(
+                    Page.site_id == site.id,
+                    Page.slug == raw,
+                    Page.id != page.id,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                suffix = 2
+                while True:
+                    candidate = f"{raw}-{suffix}"
+                    taken = db.execute(
+                        select(Page.id).where(
+                            Page.site_id == site.id,
+                            Page.slug == candidate,
+                        )
+                    ).scalar_one_or_none()
+                    if taken is None:
+                        break
+                    suffix += 1
+                error = f"Slug already taken: try {candidate}"
+
+        if error is not None:
+            return render_template(
+                "admin/_page_slug_cell.html",
+                site=site,
+                page=page,
+                mode="edit",
+                value=raw,
+                error=error,
+            )
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        page.slug = raw
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        # on_post_updated handles both Post and Page items; the
+        # redirects plugin subscriber inserts a 301 from the old
+        # page URL when the slug changes (EXACT for STATIC pages,
+        # PREFIX for POST_INDEX pages).
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "slug", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_slug_cell.html",
+        site=cell_site,
+        page=cell_page,
+        mode="view",
+        value=None,
+        error=None,
+    )
+
+
+# Pages support only three statuses: draft, published, archived.
+# There is no "scheduled" status (pages have no scheduled_for field)
+# and no first-publish side-effect (pages have no published_at field).
+_VALID_PAGE_STATUSES = frozenset({"draft", "published", "archived"})
+
+
+@bp.route("/<int:page_id>/cell/status", methods=["GET"])
+def status_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the status cell as an always-live select. Editor role required."""
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_status_cell.html",
+            site=site,
+            page=page,
+            error=None,
+        )
+
+
+@bp.route("/<int:page_id>/patch/status", methods=["PATCH"])
+def patch_status(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """PATCH the page status. On success returns the updated cell partial;
+    on validation failure returns the cell with an inline error so the
+    select stays in place without a full-page reload.
+    """
+    raw = (request.form.get("status") or "").strip()
+    error: str | None = None
+    if raw not in _VALID_PAGE_STATUSES:
+        error = f"Invalid status: {raw!r}"
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        if error is not None:
+            return render_template(
+                "admin/_page_status_cell.html",
+                site=site,
+                page=page,
+                error=error,
+            )
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        page.status = raw
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "status", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_status_cell.html",
+        site=cell_site,
+        page=cell_page,
+        error=None,
+    )
+
+
+@bp.route("/<int:page_id>/cell/show-in-nav", methods=["GET"])
+def show_in_nav_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the show_in_nav toggle cell. Editor role required."""
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_show_in_nav_cell.html",
+            site=site,
+            page=page,
+        )
+
+
+@bp.route("/<int:page_id>/patch/show-in-nav", methods=["PATCH"])
+def patch_show_in_nav(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Flip page.show_in_nav. Returns the toggle-cell partial."""
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        page.show_in_nav = not page.show_in_nav
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "show_in_nav", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_show_in_nav_cell.html",
+        site=cell_site,
+        page=cell_page,
+    )
+
+
+@bp.route("/<int:page_id>/cell/menu-order", methods=["GET"])
+def menu_order_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the menu_order cell as an always-live number input.
+    Editor role required.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        return render_template(
+            "admin/_page_menu_order_cell.html",
+            site=site,
+            page=page,
+            value=None,
+            error=None,
+        )
+
+
+@bp.route("/<int:page_id>/patch/menu-order", methods=["PATCH"])
+def patch_menu_order(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """PATCH the page menu_order. On success returns the updated cell partial;
+    on non-integer input returns the cell with an inline error so the
+    input stays in place without a full-page reload.
+    """
+    raw = (request.form.get("menu_order") or "").strip()
+    error: str | None = None
+    try:
+        value: int | None = int(raw)
+    except ValueError:
+        error = f"Menu order must be an integer, got {raw!r}"
+        value = None
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        if error is not None:
+            return render_template(
+                "admin/_page_menu_order_cell.html",
+                site=site,
+                page=page,
+                value=raw,
+                error=error,
+            )
+
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+        assert value is not None  # narrowed by the try/except above
+        page.menu_order = value
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "show_in_nav": page.show_in_nav,
+            "menu_order": page.menu_order,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "menu_order", "before": before, "after": after},
+    )
+    return render_template(
+        "admin/_page_menu_order_cell.html",
+        site=cell_site,
+        page=cell_page,
+        value=None,
+        error=None,
+    )
