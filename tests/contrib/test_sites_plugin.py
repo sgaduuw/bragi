@@ -2,7 +2,7 @@
 
 Covers:
 - register_admin_nav returns the documented NavItem set
-  (Sites global + Site settings site-scoped).
+  (Sites global + Site settings site-scoped; no separate Settings entry).
 - edit_site_current resolves the site from the URL slug and renders
   the same form as edit_site(site_id); the shared helper extraction
   must be behaviour-preserving.
@@ -74,11 +74,11 @@ def _login(client: FlaskClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_register_admin_nav_returns_three_items() -> None:
+def test_register_admin_nav_returns_two_items() -> None:
     items = register_admin_nav()
-    assert len(items) == 3
+    assert len(items) == 2
     labels = [i.label for i in items]
-    assert labels == ["Sites", "Site settings", "Settings"]
+    assert labels == ["Sites", "Site settings"]
 
 
 def test_sites_nav_item_is_global_section_site() -> None:

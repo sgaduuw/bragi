@@ -1,4 +1,17 @@
-"""Tests for the per-site extra_settings admin page."""
+"""Tests for plugin settings integrated into the site edit form.
+
+The standalone /admin/sites/<slug>/settings/ page was folded into the
+existing /admin/sites/<id>/edit page. These tests verify:
+
+- GET renders plugin-settings rows with current values (or defaults).
+- POST persists plugin-setting values alongside core site fields.
+- Validation error on a plugin-setting blocks the whole save and
+  re-renders the form with an inline error (all-or-nothing).
+- Unknown form keys (typo guard) are silently ignored.
+- Pre-existing unregistered extra_settings keys survive a save.
+- The role-gate enforced by the edit page applies (only superusers
+  can reach the edit form; role-gate was already on the edit page).
+"""
 
 from __future__ import annotations
 
@@ -19,11 +32,9 @@ from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
-from bragi.core.models.user_site_role import UserSiteRole
 from tests.conftest import csrf_token
 
-EDITOR_EMAIL = "ada@example.com"
-AUTHOR_EMAIL = "bob@example.com"
+EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
 
 
@@ -64,12 +75,10 @@ def admin_app(
     patched_session_locals: sessionmaker[Session],
     _fake_setting_plugin: object,
 ) -> Iterator[Flask]:
-    """Admin app seeded with one Site, an editor (Ada), an author
-    (Bob), and the temporary _fake_setting_plugin registered."""
-    owner = User(email="owner@example.com", display_name="Owner", is_active=True)
-    ada = User(email=EDITOR_EMAIL, display_name="Ada", is_active=True)
-    bob = User(email=AUTHOR_EMAIL, display_name="Bob", is_active=True)
-    db_session.add_all([owner, ada, bob])
+    """Admin app seeded with one Site, a superuser (Ada), and the
+    temporary _fake_setting_plugin registered."""
+    ada = User(email=EMAIL, display_name="Ada", is_active=True, is_superuser=True)
+    db_session.add(ada)
     db_session.flush()
 
     site = Site(
@@ -77,15 +86,12 @@ def admin_app(
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
-        owner_user_id=owner.id,
+        owner_user_id=ada.id,
     )
     db_session.add(site)
     db_session.flush()
 
     db_session.add(LocalCredential(user_id=ada.id, password_hash=hash_password(PASSWORD)))
-    db_session.add(LocalCredential(user_id=bob.id, password_hash=hash_password(PASSWORD)))
-    db_session.add(UserSiteRole(user_id=ada.id, site_id=site.id, role="editor"))
-    db_session.add(UserSiteRole(user_id=bob.id, site_id=site.id, role="author"))
     db_session.commit()
 
     app = create_admin_app()
@@ -97,20 +103,49 @@ def admin_app(
         pm.unregister(_fake_setting_plugin)
 
 
-def _login(client: FlaskClient, email: str = EDITOR_EMAIL) -> None:
+def _login(client: FlaskClient) -> None:
     token = csrf_token(client)
     client.post(
         "/auth/login",
-        data={"email": email, "password": PASSWORD, "_csrf_token": token},
+        data={"email": EMAIL, "password": PASSWORD, "_csrf_token": token},
     )
 
 
-def test_settings_get_renders_one_row_per_registered_setting(
+def _site_id(db_session_factory: sessionmaker[Session]) -> int:
+    with db_session_factory() as db:
+        return db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+
+
+def _edit_url(site_id: int) -> str:
+    return f"/admin/sites/{site_id}/edit"
+
+
+def _base_post_data(token: str) -> dict[str, str]:
+    """Minimum valid payload for the site edit form."""
+    return {
+        "_csrf_token": token,
+        "slug": "blog",
+        "hostname": "blog.example.com",
+        "title": "Blog",
+        "locale": "en",
+        "timezone": "UTC",
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET: renders plugin-settings rows
+# ---------------------------------------------------------------------------
+
+
+def test_edit_get_renders_one_row_per_registered_setting(
     admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
 ) -> None:
+    """Both registered settings appear in the edit form."""
+    site_id = _site_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/sites/blog/settings/")
+    resp = client.get(_edit_url(site_id))
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert 'name="setting_test_count"' in body
@@ -119,45 +154,39 @@ def test_settings_get_renders_one_row_per_registered_setting(
     assert "A str setting." in body
 
 
-def test_settings_get_falls_back_to_default_for_absent_key(
+def test_edit_get_falls_back_to_default_for_absent_key(
     admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
 ) -> None:
-    """No values in extra_settings yet -> inputs show the declared
-    defaults."""
+    """No values in extra_settings yet -> inputs show the declared defaults."""
+    site_id = _site_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/sites/blog/settings/")
+    resp = client.get(_edit_url(site_id))
     body = resp.get_data(as_text=True)
     assert 'value="7"' in body
     assert 'value="hello"' in body
 
 
-def test_settings_get_reflects_current_extra_settings_value(
+def test_edit_get_reflects_current_extra_settings_value(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
-    """A value present in extra_settings overrides the declared
-    default in the rendered input."""
+    """A value present in extra_settings overrides the declared default."""
     with db_session_factory() as db:
         site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
         site.extra_settings = {"test_count": 42, "test_label": "world"}
         db.commit()
+    site_id = _site_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/sites/blog/settings/")
+    resp = client.get(_edit_url(site_id))
     body = resp.get_data(as_text=True)
     assert 'value="42"' in body
     assert 'value="world"' in body
 
 
-def test_settings_get_requires_editor_role(admin_app: Flask) -> None:
-    client = admin_app.test_client()
-    _login(client, email=AUTHOR_EMAIL)
-    resp = client.get("/admin/sites/blog/settings/")
-    assert resp.status_code == 403
-
-
-def test_settings_get_hides_stale_keys(
+def test_edit_get_hides_stale_keys(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
@@ -167,30 +196,34 @@ def test_settings_get_hides_stale_keys(
         site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
         site.extra_settings = {"stale_key": "ghost"}
         db.commit()
+    site_id = _site_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/sites/blog/settings/")
+    resp = client.get(_edit_url(site_id))
     body = resp.get_data(as_text=True)
     assert "stale_key" not in body
     assert "ghost" not in body
 
 
-def test_settings_patch_happy_path_persists(
+# ---------------------------------------------------------------------------
+# POST: happy path persists plugin-settings alongside core fields
+# ---------------------------------------------------------------------------
+
+
+def test_edit_post_happy_path_persists_plugin_settings(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
+    """A valid POST with both core fields and plugin-setting fields
+    persists both to the database."""
+    site_id = _site_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client)
-    resp = client.patch(
-        "/admin/sites/blog/settings/",
-        data={
-            "_csrf_token": token,
-            "setting_test_count": "42",
-            "setting_test_label": "world",
-        },
-        follow_redirects=False,
-    )
+    data = _base_post_data(token)
+    data["setting_test_count"] = "42"
+    data["setting_test_label"] = "world"
+    resp = client.post(_edit_url(site_id), data=data, follow_redirects=False)
     assert resp.status_code in (302, 303)
 
     with db_session_factory() as db:
@@ -199,30 +232,32 @@ def test_settings_patch_happy_path_persists(
         assert site.extra_settings.get("test_label") == "world"
 
 
-def test_settings_patch_validation_error_blocks_save(
+# ---------------------------------------------------------------------------
+# POST: validation error blocks the whole save (all-or-nothing)
+# ---------------------------------------------------------------------------
+
+
+def test_edit_post_validation_error_blocks_save(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
-    """An invalid value (negative int) blocks the whole save and
-    re-renders the form with the error; other fields' valid
-    submitted values are NOT persisted."""
+    """An invalid plugin-setting value blocks the whole save and
+    re-renders the form with the inline error; core fields also do
+    NOT commit when the plugin-setting is invalid."""
+    site_id = _site_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client)
-    resp = client.patch(
-        "/admin/sites/blog/settings/",
-        data={
-            "_csrf_token": token,
-            "setting_test_count": "-5",  # violates ge=0
-            "setting_test_label": "would-have-stuck",
-        },
-    )
+    data = _base_post_data(token)
+    data["setting_test_count"] = "-5"  # violates ge=0
+    data["setting_test_label"] = "would-have-stuck"
+    resp = client.post(_edit_url(site_id), data=data)
     assert resp.status_code == 200  # form re-rendered, not redirect
     body = resp.get_data(as_text=True)
     assert "inline-edit-error" in body
     # The rejected value pre-filled.
     assert 'value="-5"' in body
-    # Other field shows the user's input too.
+    # Other submitted value visible too.
     assert 'value="would-have-stuck"' in body
 
     with db_session_factory() as db:
@@ -231,25 +266,25 @@ def test_settings_patch_validation_error_blocks_save(
         assert "test_label" not in (site.extra_settings or {})
 
 
-def test_settings_patch_typo_guard_ignores_unknown_form_keys(
+# ---------------------------------------------------------------------------
+# POST: typo guard and stale-key preservation
+# ---------------------------------------------------------------------------
+
+
+def test_edit_post_typo_guard_ignores_unknown_form_keys(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
-    """A submitted form field whose name does not map to any
-    registered setting is silently ignored (not persisted, not
-    an error)."""
+    """A submitted form field whose name does not map to any registered
+    setting is silently ignored (not persisted, not an error)."""
+    site_id = _site_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client)
-    resp = client.patch(
-        "/admin/sites/blog/settings/",
-        data={
-            "_csrf_token": token,
-            "setting_test_count": "8",
-            "setting_bogus_key": "should-be-ignored",
-        },
-        follow_redirects=False,
-    )
+    data = _base_post_data(token)
+    data["setting_test_count"] = "8"
+    data["setting_bogus_key"] = "should-be-ignored"
+    resp = client.post(_edit_url(site_id), data=data, follow_redirects=False)
     assert resp.status_code in (302, 303)
     with db_session_factory() as db:
         site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
@@ -257,53 +292,27 @@ def test_settings_patch_typo_guard_ignores_unknown_form_keys(
         assert "bogus_key" not in (site.extra_settings or {})
 
 
-def test_settings_patch_leaves_stale_keys_untouched(
+def test_edit_post_leaves_stale_keys_untouched(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
 ) -> None:
-    """Keys in extra_settings that no plugin registers are NOT
-    removed by a save (the handler only mutates registered keys)."""
+    """Keys in extra_settings that no plugin registers are NOT removed
+    by a save (the handler only mutates registered keys)."""
     with db_session_factory() as db:
         site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
         site.extra_settings = {"stale_key": "preserved"}
         db.commit()
 
+    site_id = _site_id(db_session_factory)
     client = admin_app.test_client()
     _login(client)
     token = csrf_token(client)
-    client.patch(
-        "/admin/sites/blog/settings/",
-        data={
-            "_csrf_token": token,
-            "setting_test_count": "9",
-            "setting_test_label": "x",
-        },
-    )
+    data = _base_post_data(token)
+    data["setting_test_count"] = "9"
+    data["setting_test_label"] = "x"
+    client.post(_edit_url(site_id), data=data)
 
     with db_session_factory() as db:
         site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
         assert site.extra_settings.get("stale_key") == "preserved"
         assert site.extra_settings.get("test_count") == 9
-
-
-def test_settings_patch_requires_editor_role(admin_app: Flask) -> None:
-    client = admin_app.test_client()
-    _login(client, email=AUTHOR_EMAIL)
-    token = csrf_token(client)
-    resp = client.patch(
-        "/admin/sites/blog/settings/",
-        data={"_csrf_token": token, "setting_test_count": "1"},
-    )
-    assert resp.status_code == 403
-
-
-def test_sites_plugin_contributes_settings_nav_item() -> None:
-    """The sites plugin contributes a 'Settings' nav item with
-    scope='site' so it appears in the site-scoped chrome row."""
-    from bragi.api import NavItem
-    from bragi.contrib.sites.plugin import register_admin_nav
-
-    items = register_admin_nav()
-    assert any(
-        isinstance(i, NavItem) and i.label == "Settings" and i.scope == "site" for i in items
-    )

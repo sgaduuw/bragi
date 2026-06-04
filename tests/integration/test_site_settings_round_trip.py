@@ -1,5 +1,5 @@
-"""End-to-end: the admin settings page actually changes downstream
-delivery behavior."""
+"""End-to-end: editing plugin settings via the site edit form actually
+changes downstream delivery behavior."""
 
 from __future__ import annotations
 
@@ -38,9 +38,8 @@ def apps(
 ) -> Iterator[tuple[Flask, Flask]]:
     """Seed an editor, a site, a post_index page, and 5 published
     posts. Yield both the admin and delivery apps."""
-    owner = User(email="owner@example.com", display_name="Owner", is_active=True)
-    ada = User(email=EDITOR_EMAIL, display_name="Ada", is_active=True)
-    db_session.add_all([owner, ada])
+    ada = User(email=EDITOR_EMAIL, display_name="Ada", is_active=True, is_superuser=True)
+    db_session.add(ada)
     db_session.flush()
 
     site = Site(
@@ -48,7 +47,7 @@ def apps(
         hostname="blog.example.com",
         title="Blog",
         canonical_url="https://blog.example.com",
-        owner_user_id=owner.id,
+        owner_user_id=ada.id,
     )
     db_session.add(site)
     db_session.flush()
@@ -105,13 +104,26 @@ def test_setting_change_visible_to_delivery(
 ) -> None:
     admin_app, delivery_app = apps
 
-    # PATCH posts_per_page=2 via the admin settings endpoint.
+    # Fetch the site's id for the edit URL, then POST posts_per_page=2
+    # via the merged site edit form (plugin settings now live there).
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site_id = site.id
+
     admin_client = admin_app.test_client()
     _login(admin_client)
     token = csrf_token(admin_client)
-    resp = admin_client.patch(
-        "/admin/sites/blog/settings/",
-        data={"_csrf_token": token, "setting_posts_per_page": "2"},
+    resp = admin_client.post(
+        f"/admin/sites/{site_id}/edit",
+        data={
+            "_csrf_token": token,
+            "slug": "blog",
+            "hostname": "blog.example.com",
+            "title": "Blog",
+            "locale": "en",
+            "timezone": "UTC",
+            "setting_posts_per_page": "2",
+        },
         follow_redirects=False,
     )
     assert resp.status_code in (302, 303), resp.get_data(as_text=True)

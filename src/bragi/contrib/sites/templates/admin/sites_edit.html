@@ -117,6 +117,50 @@
   </fieldset>
   {% endif %}
 
+  {% if is_edit and settings %}
+  <fieldset class="plugin-settings-group">
+    <legend>Plugin settings</legend>
+    <p style="color: #666; margin: 0 0 0.75rem;">
+      Per-site tunables contributed by plugins. Unset keys fall back to
+      the plugin's default.
+    </p>
+    {% for setting in settings %}
+      {% set raw = current_setting_values.get(setting.key, setting.default) %}
+      {% set widget = setting_widget(setting) %}
+      <fieldset>
+        <label for="setting-{{ setting.key }}">{{ setting.label }}</label>
+        {% if widget == 'bool' %}
+          <input type="checkbox"
+                 id="setting-{{ setting.key }}"
+                 name="setting_{{ setting.key }}"
+                 value="1"
+                 {% if raw %}checked{% endif %}>
+        {% elif widget == 'int' %}
+          <input type="number"
+                 id="setting-{{ setting.key }}"
+                 name="setting_{{ setting.key }}"
+                 value="{{ raw }}"
+                 {% if setting_min(setting) is not none %}min="{{ setting_min(setting) }}"{% endif %}
+                 {% if setting_max(setting) is not none %}max="{{ setting_max(setting) }}"{% endif %}
+                 style="width: 6em;">
+        {% else %}
+          <input type="text"
+                 id="setting-{{ setting.key }}"
+                 name="setting_{{ setting.key }}"
+                 value="{{ raw }}">
+        {% endif %}
+        {% if setting_errors and setting_errors.get(setting.key) %}
+          <div class="inline-edit-error">{{ setting_errors[setting.key] }}</div>
+        {% endif %}
+        <div class="setting-help">
+          {{ setting.help_text }}
+          <span class="setting-default">· default: {{ setting.default if setting.default != '' else '(unset)' }}</span>
+        </div>
+      </fieldset>
+    {% endfor %}
+  </fieldset>
+  {% endif %}
+
   <div class="actions">
     <button type="submit">{{ 'Save' if is_edit else 'Create' }}</button>
     <a href="{{ url_for('site_admin.list_sites') }}" class="btn secondary">Cancel</a>

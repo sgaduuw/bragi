@@ -26,7 +26,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, SiteSetting, set_breadcrumbs
-from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -34,7 +33,7 @@ from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
-from bragi.core.permissions import accessible_sites_for, require_role, resolve_site_or_abort
+from bragi.core.permissions import accessible_sites_for, resolve_site_or_abort
 from bragi.core.renditions import smallest_webp_storage_key
 from bragi.core.security import current_user, is_superuser
 from bragi.core.storage import remove_rendition
@@ -56,9 +55,7 @@ bp = Blueprint(
 # `resolve_site_or_abort`). Everything else (create, edit hostname,
 # deactivate, alias-swap) stays superuser-only because those are
 # platform-level changes that touch DNS and shared infra.
-_MEMBER_READABLE_ENDPOINTS = frozenset(
-    {"list_sites", "site_dashboard", "settings", "patch_settings"}
-)
+_MEMBER_READABLE_ENDPOINTS = frozenset({"list_sites", "site_dashboard"})
 
 
 @bp.before_request
@@ -581,6 +578,8 @@ def _render_edit_form(site: Site, db: Session, form_action: str) -> ResponseRetu
             .all()
         )
         home_pages = _published_pages_for(db, site.id)
+        registered_settings = _collect_site_settings()
+        current_setting_values = dict(site.extra_settings or {})
         return render_template(
             "admin/sites_edit.html",
             site=site,
@@ -595,6 +594,12 @@ def _render_edit_form(site: Site, db: Session, form_action: str) -> ResponseRetu
             default_featured_image_thumb_key=_default_featured_image_thumb_key(
                 db, form["default_featured_image_id"], site.id
             ),
+            settings=registered_settings,
+            current_setting_values=current_setting_values,
+            setting_errors={},
+            setting_widget=_setting_widget,
+            setting_min=_setting_min,
+            setting_max=_setting_max,
         )
 
     form = _form_from_request()
@@ -611,9 +616,42 @@ def _render_edit_form(site: Site, db: Session, form_action: str) -> ResponseRetu
     if default_featured_image_err is not None:
         errors.append(default_featured_image_err)
     home_pages = _published_pages_for(db, site.id)
-    if errors:
-        for err in errors:
+
+    # Parse and validate plugin-setting fields from the submitted form.
+    registered_settings = _collect_site_settings()
+    submitted_settings: dict[str, Any] = {}
+    setting_errors: dict[str, str] = {}
+    # Track raw submitted values so errored inputs pre-fill correctly.
+    submitted_setting_raws: dict[str, Any] = {}
+
+    for setting in registered_settings:
+        form_field = f"setting_{setting.key}"
+        widget = _setting_widget(setting)
+        if widget == "bool":
+            # An unchecked checkbox doesn't appear in the form payload at
+            # all; treat missing as False.
+            raw_value: Any = form_field in request.form
+        elif form_field not in request.form:
+            # Non-bool field absent from the payload; skip (no change).
+            continue
+        else:
+            raw_value = request.form[form_field]
+        submitted_setting_raws[setting.key] = raw_value
+        try:
+            submitted_settings[setting.key] = TypeAdapter(setting.type).validate_python(raw_value)
+        except ValidationError as exc:
+            setting_errors[setting.key] = exc.errors()[0]["msg"]
+
+    def _re_render_with_errors(
+        core_errors: list[str], s_errors: dict[str, str]
+    ) -> ResponseReturnValue:
+        for err in core_errors:
             flash(err, "error")
+        # Build current_setting_values for the re-render: start from
+        # DB values, override with whatever the operator typed so their
+        # input survives the round-trip even in error state.
+        current_vals = dict(site.extra_settings or {})
+        current_vals.update(submitted_setting_raws)
         return render_template(
             "admin/sites_edit.html",
             site=site,
@@ -627,7 +665,16 @@ def _render_edit_form(site: Site, db: Session, form_action: str) -> ResponseRetu
             default_featured_image_thumb_key=_default_featured_image_thumb_key(
                 db, form["default_featured_image_id"], site.id
             ),
+            settings=registered_settings,
+            current_setting_values=current_vals,
+            setting_errors=s_errors,
+            setting_widget=_setting_widget,
+            setting_min=_setting_min,
+            setting_max=_setting_max,
         )
+
+    if errors or setting_errors:
+        return _re_render_with_errors(errors, setting_errors)
 
     # Uniqueness checks excluding the row being edited.
     for column, value in (("slug", form["slug"]), ("hostname", form["hostname"])):
@@ -649,6 +696,12 @@ def _render_edit_form(site: Site, db: Session, form_action: str) -> ResponseRetu
                 default_featured_image_thumb_key=_default_featured_image_thumb_key(
                     db, form["default_featured_image_id"], site.id
                 ),
+                settings=registered_settings,
+                current_setting_values=dict(site.extra_settings or {}),
+                setting_errors={},
+                setting_widget=_setting_widget,
+                setting_min=_setting_min,
+                setting_max=_setting_max,
             )
 
     old_home_page_id = site.home_page_id
@@ -671,6 +724,15 @@ def _render_edit_form(site: Site, db: Session, form_action: str) -> ResponseRetu
     # transaction so a half-applied state (site updated but
     # redirect stale) can never be observed.
     _sync_home_page_redirect(db, site.id, old_home_page_id, home_page_value)
+
+    # Apply validated plugin-settings changes (diff-only: only mutate
+    # keys that actually changed, leave unregistered stale keys alone).
+    if submitted_settings:
+        new_extra = dict(site.extra_settings or {})
+        for key, value in submitted_settings.items():
+            new_extra[key] = value
+        site.extra_settings = new_extra
+
     db.commit()
     flash(f"Site '{form['slug']}' updated.", "success")
 
@@ -857,122 +919,3 @@ def _collect_site_settings() -> list[SiteSetting]:
         seen.add(s.key)
         out.append(s)
     return out
-
-
-@bp.route("/<site_slug>/settings/", methods=["GET"])
-def settings(site_slug: str) -> ResponseReturnValue:
-    """Render the per-site extra_settings form."""
-    with SessionLocal() as db:
-        site = resolve_site_or_abort(db, site_slug)
-        require_role("editor", site.id)
-        current_values = dict(site.extra_settings or {})
-        site_for_template = site
-
-    registered_settings = _collect_site_settings()
-    return render_template(
-        "admin/sites_settings.html",
-        site=site_for_template,
-        settings=registered_settings,
-        current_values=current_values,
-        errors={},
-        setting_widget=_setting_widget,
-        setting_min=_setting_min,
-        setting_max=_setting_max,
-    )
-
-
-@bp.route("/<site_slug>/settings/", methods=["PATCH"])
-def patch_settings(site_slug: str) -> ResponseReturnValue:
-    """Submit the settings form. All-or-nothing: any validation
-    error blocks the whole save and re-renders with field-level
-    errors."""
-    registered_settings = _collect_site_settings()
-    submitted: dict[str, Any] = {}
-    errors: dict[str, str] = {}
-
-    for setting in registered_settings:
-        form_field = f"setting_{setting.key}"
-        widget = _setting_widget(setting)
-        if widget == "bool":
-            # An unchecked checkbox doesn't submit at all; treat
-            # missing as False.
-            raw_value: Any = form_field in request.form
-        elif form_field not in request.form:
-            # Field absent for a non-bool setting -> skip (no change).
-            continue
-        else:
-            raw_value = request.form[form_field]
-        try:
-            submitted[setting.key] = TypeAdapter(setting.type).validate_python(raw_value)
-        except ValidationError as exc:
-            # Surface the first error message; pydantic reports
-            # multiple but the input only displays one line.
-            errors[setting.key] = exc.errors()[0]["msg"]
-
-    with SessionLocal() as db:
-        # resolve_site_or_abort expunges the row so it can outlive
-        # the session (the chrome context processor reads g.current_site
-        # after the session closes). Re-fetch into the active session
-        # so writes are tracked by SQLAlchemy; same pattern as
-        # edit_site_current.
-        resolved = resolve_site_or_abort(db, site_slug)
-        require_role("editor", resolved.id)
-        site = db.execute(select(Site).where(Site.id == resolved.id)).scalar_one()
-
-        if errors:
-            current_values = dict(site.extra_settings or {})
-            # Override with the operator's submitted (pre-validation)
-            # raw values so the offending input shows what they typed.
-            for setting in registered_settings:
-                form_field = f"setting_{setting.key}"
-                if form_field in request.form:
-                    current_values[setting.key] = request.form[form_field]
-            return render_template(
-                "admin/sites_settings.html",
-                site=resolved,
-                settings=registered_settings,
-                current_values=current_values,
-                errors=errors,
-                setting_widget=_setting_widget,
-                setting_min=_setting_min,
-                setting_max=_setting_max,
-            ), 200
-
-        before = dict(site.extra_settings or {})
-        new_extra = dict(before)
-        changed_keys: list[str] = []
-        for key, value in submitted.items():
-            if new_extra.get(key) != value:
-                new_extra[key] = value
-                changed_keys.append(key)
-        site.extra_settings = new_extra
-        db.commit()
-        after = dict(site.extra_settings or {})
-        committed_site_id = site.id
-        site_slug_for_redirect = site.slug
-
-        # Fire on_site_updated hook only if it exists in the codebase.
-        pm = current_app.extensions["plugin_manager"]
-        if hasattr(pm.hook, "on_site_updated"):
-            pm.hook.on_site_updated(item=site, before=before, after=after, session=db)
-
-    # Audit log entry. SITE_UPDATED does not yet exist in AuditAction,
-    # so fall back to POST_UPDATED (the generic "content updated"
-    # action used elsewhere for similar non-post entities).
-    audit(
-        _audit_action_for_site_update(),
-        target_type="site",
-        target_id=committed_site_id,
-        site_id=committed_site_id,
-        extra={"changed_keys": sorted(changed_keys)},
-    )
-
-    flash("Settings saved.", "success")
-    return redirect(url_for("site_admin.settings", site_slug=site_slug_for_redirect))
-
-
-def _audit_action_for_site_update() -> str:
-    """Return AuditAction.SITE_UPDATED if defined; fall back to
-    POST_UPDATED otherwise. POST_UPDATED is used elsewhere as the
-    generic 'content updated' action."""
-    return getattr(AuditAction, "SITE_UPDATED", AuditAction.POST_UPDATED)
