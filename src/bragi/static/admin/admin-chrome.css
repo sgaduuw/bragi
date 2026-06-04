@@ -245,3 +245,10 @@ td.is-editing .inline-edit-error { font-size: 0.75em; color: #b22; margin-top: 0
   td.is-editing .inline-edit-hint  { color: #aaa; }
   td.is-editing .inline-edit-error { color: #f88; }
 }
+
+/* Site settings page: help and default-hint typography. */
+.setting-help { font-size: 0.8em; color: #666; margin-top: 0.15rem; }
+.setting-default { opacity: 0.6; }
+@media (prefers-color-scheme: dark) {
+  .setting-help { color: #aaa; }
+}

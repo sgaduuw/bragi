@@ -2,7 +2,7 @@
 
 Covers:
 - register_admin_nav returns the documented NavItem set
-  (Sites global + Site settings site-scoped).
+  (Sites global + Site settings site-scoped; no separate Settings entry).
 - edit_site_current resolves the site from the URL slug and renders
   the same form as edit_site(site_id); the shared helper extraction
   must be behaviour-preserving.

@@ -6,6 +6,27 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Per-site `Site.extra_settings` is now editable from the
+  existing site-edit page (`/admin/sites/<id>/edit`) instead
+  of `flask shell`. The 5 plugin-contributed keys
+  (`pinned_autoadvance_seconds`, `posts_per_page`,
+  `related_posts_count`, `tag_segment`, `indexnow_key`)
+  render in a new "Plugin settings" fieldset above Aliases.
+  New `register_site_setting` hookspec + `SiteSetting`
+  pydantic dataclass let third-party plugins contribute
+  their own keys; plugins with multiple keys register one
+  hookimpl per key via the
+  `@hookimpl(specname="register_site_setting")` convention.
+  The dataclass validates its declared default against the
+  declared type at construction time. All-or-nothing save:
+  any field's validation error blocks the whole save and
+  re-renders with field-level errors. Unknown keys in
+  submitted form payloads are ignored (typo guard); keys
+  already in `extra_settings` that no plugin registers are
+  hidden from the form and left untouched on save. Closes
+  #272.
+
 ### Changed
 - Admin chrome: the two-row global + site nav now sticks to the
   top as the page scrolls. Breadcrumbs (row 3) stay in normal

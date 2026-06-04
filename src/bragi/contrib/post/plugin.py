@@ -17,14 +17,22 @@ registers a delivery Blueprint or a `resolve_home` impl.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import Annotated, Any
 
 import click
 import jinja2
 from flask import Blueprint, g, has_app_context, render_template
+from pydantic import Field
 from sqlalchemy import or_, select
 
-from bragi.api import ContentTypeSpec, FieldSpec, InternalLinkResolution, NavItem, hookimpl
+from bragi.api import (
+    ContentTypeSpec,
+    FieldSpec,
+    InternalLinkResolution,
+    NavItem,
+    SiteSetting,
+    hookimpl,
+)
 from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.contrib.post.cli import scheduled_publish
 from bragi.contrib.post.delivery import bp as post_templates_bp
@@ -236,3 +244,28 @@ def register_admin_nav() -> list[NavItem]:
             scope="site",
         ),
     ]
+
+
+@hookimpl(specname="register_site_setting")
+def _register_related_posts_count() -> SiteSetting:
+    return SiteSetting(
+        key="related_posts_count",
+        type=Annotated[int, Field(gt=0)],
+        default=3,
+        label="Related posts count",
+        help_text='How many "You may also like" cards render under each post.',
+    )
+
+
+@hookimpl(specname="register_site_setting")
+def _register_tag_segment() -> SiteSetting:
+    return SiteSetting(
+        key="tag_segment",
+        type=Annotated[str, Field(pattern=r"^[a-z0-9-]+$")],
+        default="tag",
+        label="Tag URL segment",
+        help_text=(
+            "URL segment for tag listings (/blog/<segment>/python/). "
+            "Lowercase letters, digits, hyphens."
+        ),
+    )
