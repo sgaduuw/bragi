@@ -74,11 +74,11 @@ def _login(client: FlaskClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_register_admin_nav_returns_two_items() -> None:
+def test_register_admin_nav_returns_three_items() -> None:
     items = register_admin_nav()
-    assert len(items) == 2
+    assert len(items) == 3
     labels = [i.label for i in items]
-    assert labels == ["Sites", "Site settings"]
+    assert labels == ["Sites", "Site settings", "Settings"]
 
 
 def test_sites_nav_item_is_global_section_site() -> None:
