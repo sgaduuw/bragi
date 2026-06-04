@@ -3570,3 +3570,161 @@ def test_picker_passes_site_slug_to_template_context_for_plugin_tabs(
     # (not the broken `/admin/sites//unsplash/search`).
     assert "/admin/sites/blog/unsplash/search" in body
     assert "/admin/sites//unsplash/search" not in body
+
+
+# --------------------------- thumbnail column ---------------------------
+
+
+def test_list_renders_thumbnail_for_image_with_done_webp(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """An image attachment with a done WebP rendition renders a
+    thumbnail <img> in the leftmost column of the list."""
+    site_id = _blog_id(db_session_factory)
+    with db_session_factory() as db:
+        attachment = Attachment(
+            site_id=site_id,
+            filename="hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=10000,
+            storage_key="a" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(attachment)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=attachment.id,
+                size_label="320w",
+                format="webp",
+                storage_key=f"{'a' * 64}/320/webp",
+                content_type="image/webp",
+                width=320,
+                height=160,
+                bytes_size=8000,
+                status="done",
+            )
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    # The thumbnail URL contains the smallest done WebP storage key.
+    assert f"{'a' * 64}/320/webp" in body
+    # And the IMG tag is rendered with lazy loading.
+    assert 'loading="lazy"' in body
+
+
+def test_list_renders_placeholder_for_non_image(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """A non-image attachment (no width) renders no <img>, just
+    the placeholder cell."""
+    site_id = _blog_id(db_session_factory)
+    with db_session_factory() as db:
+        db.add(
+            Attachment(
+                site_id=site_id,
+                filename="report.pdf",
+                content_type="application/pdf",
+                size_bytes=10000,
+                storage_key="b" * 64,
+                width=None,
+                height=None,
+            )
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/")
+    body = resp.get_data(as_text=True)
+    # The row for report.pdf is present.
+    assert "report.pdf" in body
+    # No lazy-loaded <img> appears at all (the only row is non-image).
+    assert 'loading="lazy"' not in body
+
+
+def test_list_renders_placeholder_for_image_without_done_rendition(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """An image attachment whose WebP renditions are still pending
+    renders no thumbnail (placeholder cell only)."""
+    site_id = _blog_id(db_session_factory)
+    with db_session_factory() as db:
+        attachment = Attachment(
+            site_id=site_id,
+            filename="hero.jpg",
+            content_type="image/jpeg",
+            size_bytes=10000,
+            storage_key="c" * 64,
+            width=2000,
+            height=1000,
+        )
+        db.add(attachment)
+        db.flush()
+        db.add(
+            AttachmentRendition(
+                attachment_id=attachment.id,
+                size_label="320w",
+                format="webp",
+                storage_key=None,
+                content_type="image/webp",
+                status="pending",
+            )
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/")
+    body = resp.get_data(as_text=True)
+    assert "hero.jpg" in body
+    # No thumb URL because the rendition isn't done yet.
+    assert f"{'c' * 64}/320/webp" not in body
+    assert 'loading="lazy"' not in body
+
+
+def test_list_pagination_links_render_when_more_pages(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """Seeding >PAGE_SIZE attachments yields a 'Next' link on
+    page 1 and a 'Previous' link on page 2."""
+    site_id = _blog_id(db_session_factory)
+    # PAGE_SIZE is 50; seed 51 rows to force two pages.
+    with db_session_factory() as db:
+        for n in range(51):
+            db.add(
+                Attachment(
+                    site_id=site_id,
+                    filename=f"file-{n}.bin",
+                    content_type="application/octet-stream",
+                    size_bytes=10,
+                    storage_key=f"{n:064d}",
+                )
+            )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/attachments/")
+    body = resp.get_data(as_text=True)
+    assert "Next" in body
+    assert "page=2" in body
+
+    resp = client.get("/admin/sites/blog/attachments/?page=2")
+    body = resp.get_data(as_text=True)
+    assert "Previous" in body
+    assert "page=1" in body

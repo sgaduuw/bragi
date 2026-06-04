@@ -70,6 +70,7 @@
 <table>
   <thead>
     <tr>
+      <th></th>{# thumbnail column #}
       <th>Filename</th>
       <th>Type</th>
       {% if missing_alt %}
@@ -88,13 +89,17 @@
   </tbody>
 </table>
 
-<nav style="margin-top: 1rem;">
+<nav style="margin-top: 1rem; display: flex; gap: 1rem; align-items: center;">
   {% if page > 1 %}
-    <a class="btn secondary" href="{{ url_for('attachment_admin.list_attachments', page=page-1, missing_alt='1' if missing_alt else None) }}">&laquo; Prev</a>
+    <a href="{{ url_for('attachment_admin.list_attachments', site_slug=request.view_args['site_slug'], page=page - 1, missing_alt='1' if missing_alt else none) }}">← Previous</a>
+  {% else %}
+    <span style="opacity: 0.5;">← Previous</span>
   {% endif %}
-  <span style="margin: 0 1rem;">Page {{ page }}</span>
+  <span>Page {{ page }}</span>
   {% if has_more %}
-    <a class="btn secondary" href="{{ url_for('attachment_admin.list_attachments', page=page+1, missing_alt='1' if missing_alt else None) }}">Next &raquo;</a>
+    <a href="{{ url_for('attachment_admin.list_attachments', site_slug=request.view_args['site_slug'], page=page + 1, missing_alt='1' if missing_alt else none) }}">Next →</a>
+  {% else %}
+    <span style="opacity: 0.5;">Next →</span>
   {% endif %}
 </nav>
 {% else %}
