@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.25.1] - 2026-06-04
+
 ### Fixed
 - Post and page excerpts now render as plain text (link labels,
   unescaped punctuation, no leftover markdown syntax) instead of
