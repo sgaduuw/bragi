@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.24.0 (2026-06-03).
+**Latest release:** 1.25.0 (2026-06-04).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -326,7 +326,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.24.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.25.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start

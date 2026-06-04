@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-06-04
+
 ### Added
 - Per-site `Site.extra_settings` is now editable from the
   existing site-edit page (`/admin/sites/<id>/edit`) instead
