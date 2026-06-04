@@ -168,6 +168,24 @@
 </form>
 
 {% if is_edit %}
+<section class="maintenance">
+  <h2>Maintenance</h2>
+  <p style="color: #666; font-size: 0.9em;">
+    One-shot site-wide cleanups. Run on demand.
+  </p>
+  <form method="post"
+        action="{{ url_for('site_admin.rebuild_excerpts', site_id=site.id) }}"
+        style="display: inline;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Rebuild excerpts</button>
+  </form>
+  <p style="color: #666; font-size: 0.85em; margin-top: 0.3rem;">
+    Recompute the short summary for every post and page on this
+    site. Useful after an import or after fixing the excerpt-rendering
+    logic.
+  </p>
+</section>
+
 <section class="aliases">
   <h2>Hostname aliases</h2>
   <p>Extra hostnames that resolve to this site. Useful for legacy

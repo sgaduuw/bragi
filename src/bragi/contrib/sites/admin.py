@@ -825,6 +825,36 @@ def add_alias(site_id: int) -> ResponseReturnValue:
     return redirect(url_for("site_admin.edit_site", site_id=site_id))
 
 
+@bp.route("/<int:site_id>/rebuild-excerpts", methods=["POST"])
+def rebuild_excerpts(site_id: int) -> ResponseReturnValue:
+    """Trigger a rebuild of all post + page excerpts for this site.
+
+    Useful after an import that left excerpts in a degraded state
+    (the Ghost importer's markdownify over-escapes characters; old
+    excerpts that ran through the prior make_excerpt logic still
+    carry the backslashes). Recomputes via the current
+    `make_excerpt`. Idempotent. Same gate as the rest of the
+    site-edit page (superuser).
+    """
+    from bragi.core.render.excerpts import rebuild_excerpts as _rebuild
+
+    with SessionLocal() as db:
+        site = db.get(Site, site_id)
+        if site is None:
+            flash("Site not found.", "error")
+            return redirect(url_for("site_admin.list_sites"))
+        counts = _rebuild(db, site_id=site_id)
+        db.commit()
+
+    flash(
+        f"Rebuilt excerpts: {counts['posts_changed']} post(s), "
+        f"{counts['pages_changed']} page(s) updated "
+        f"(of {counts['posts_scanned']} + {counts['pages_scanned']} scanned).",
+        "success",
+    )
+    return redirect(url_for("site_admin.edit_site", site_id=site_id))
+
+
 @bp.route("/<int:site_id>/aliases/<int:alias_id>/remove", methods=["POST"])
 def remove_alias(site_id: int, alias_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:

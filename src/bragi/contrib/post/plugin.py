@@ -34,7 +34,7 @@ from bragi.api import (
     hookimpl,
 )
 from bragi.contrib.post.admin import bp as post_admin_bp
-from bragi.contrib.post.cli import scheduled_publish
+from bragi.contrib.post.cli import rebuild_excerpts_cmd, scheduled_publish
 from bragi.contrib.post.delivery import bp as post_templates_bp
 from bragi.contrib.post.related import related_posts_count_for, related_posts_for
 from bragi.core.db import SessionLocal
@@ -223,13 +223,15 @@ def register_template_globals(env: jinja2.Environment) -> None:
 
 @hookimpl
 def register_cli_command(group: click.Group) -> None:
-    """Add `bragi scheduled-publish`.
+    """Add `bragi scheduled-publish` and `bragi rebuild-excerpts`.
 
-    Lives on the post plugin because it operates on Post lifecycle
-    state. The task-runner sidecar invokes it on a cadence (see
-    `docker/scheduler.sh`).
+    Both live on the post plugin because they operate on Post
+    (and Page) content state. The task-runner sidecar invokes
+    `scheduled-publish` on a cadence (see `docker/scheduler.sh`);
+    `rebuild-excerpts` is a one-shot maintenance command.
     """
     group.add_command(scheduled_publish)
+    group.add_command(rebuild_excerpts_cmd)
 
 
 @hookimpl
