@@ -6,6 +6,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Attachments admin list: leftmost column now shows a small
+  thumbnail (~48px) for image rows backed by the existing 320w
+  WebP rendition. Non-image rows and image rows whose
+  renditions haven't drained yet render a placeholder cell.
+  Same builder as the image-picker library page -- no extra
+  rendition work. Pagination footer gained explicit
+  `← Previous` / `Next →` links (the underlying `?page=N`
+  routing was already in place).
+
 ## [1.25.1] - 2026-06-04
 
 ### Fixed
