@@ -131,6 +131,41 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         rows = db.execute(rows_query.limit(PAGE_SIZE).offset(offset)).scalars().all()
         peek = db.execute(peek_query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
         has_more = peek is not None
+
+        # Per-row smallest-done-WebP rendition key, for the
+        # thumbnail column. Mirrors the same builder used by the
+        # picker page so list + picker stay aligned. Non-image
+        # rows (no width on the Attachment) and image rows whose
+        # WebP renditions haven't drained yet get no entry in
+        # this dict; the template renders a placeholder cell for
+        # the empty case.
+        thumb_storage_key_by_id: dict[int, str] = {}
+        if rows:
+            webp_keys_by_id: dict[int, list[tuple[int, str]]] = {}
+            rendition_rows = (
+                db.execute(
+                    select(AttachmentRendition)
+                    .where(
+                        AttachmentRendition.status == "done",
+                        AttachmentRendition.format == "webp",
+                        AttachmentRendition.attachment_id.in_([r.id for r in rows]),
+                    )
+                    .order_by(
+                        AttachmentRendition.attachment_id,
+                        AttachmentRendition.width.asc(),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for rr in rendition_rows:
+                if rr.storage_key is None or rr.width is None:
+                    continue
+                webp_keys_by_id.setdefault(rr.attachment_id, []).append((rr.width, rr.storage_key))
+            for att_id, ladder in webp_keys_by_id.items():
+                # ladder ordered by width ASC; pick the smallest.
+                thumb_storage_key_by_id[att_id] = ladder[0][1]
+
         missing_alt_count = db.execute(
             select(func.count())
             .select_from(Attachment)
@@ -173,6 +208,7 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         pending_rendition_count=pending_rendition_count,
         done_rendition_count=done_rendition_count,
         failed_rendition_count=failed_rendition_count,
+        thumb_storage_key_by_id=thumb_storage_key_by_id,
     )
 
 

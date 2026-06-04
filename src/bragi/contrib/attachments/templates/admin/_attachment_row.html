@@ -3,6 +3,21 @@
    (inline textarea + Save button). Wrapped in a stable id so the
    htmx response from /alt-text can swap it in place. #}
 <tr id="attachment-row-{{ r.id }}">
+  <td style="width: 56px;">
+    {% set thumb_key = thumb_storage_key_by_id.get(r.id) if thumb_storage_key_by_id is defined else none %}
+    {% if thumb_key %}
+      <img src="{{ url_for('attachment_admin.serve_attachment_bytes',
+                           site_slug=request.view_args['site_slug'],
+                           storage_key=thumb_key) }}"
+           alt="{{ r.alt_text or '' }}"
+           loading="lazy"
+           style="width: 48px; height: 48px; object-fit: cover;
+                  background: #f0f0f0; border-radius: 2px;">
+    {% else %}
+      <div style="width: 48px; height: 48px; background: #f0f0f0;
+                  border-radius: 2px;"></div>
+    {% endif %}
+  </td>
   <td>
     <code>{{ r.filename }}</code>
     {% if r.width and r.height %}
