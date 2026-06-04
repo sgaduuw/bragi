@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-06-04
+
 ### Changed
 - Attachments admin list: leftmost column now shows a small
   thumbnail (~48px) for image rows backed by the existing 320w
