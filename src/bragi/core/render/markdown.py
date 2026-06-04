@@ -112,10 +112,35 @@ def render_markdown(text: str) -> str:
 
 
 def make_excerpt(text: str, *, max_chars: int = 200) -> str:
-    """Crude excerpt: first `max_chars` of the markdown source,
-    stripped. Used as the default OG description and list-page
-    summary. Replace with smarter logic when there's a need."""
-    snippet = text.strip().replace("\n", " ")
+    """Plain-text excerpt of `text`, capped at `max_chars`.
+
+    Renders the markdown source to HTML, strips all tags, collapses
+    whitespace, and truncates. This gives a clean plain-text preview
+    for list pages and OG descriptions -- no leftover `\\.` escapes
+    from the importer, no raw `[label](url)` link syntax, no
+    code-fence backticks.
+
+    The link label survives (the URL is dropped). Block-level
+    structure (headings, list items) collapses to plain text.
+    """
+    if not text or not text.strip():
+        return ""
+    html = render_markdown(text)
+    # Strip tags via stdlib html.parser; avoids adding a BeautifulSoup
+    # dependency for what is two lines of stdlib.
+    from html.parser import HTMLParser
+
+    class _TextExtractor(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.parts: list[str] = []
+
+        def handle_data(self, data: str) -> None:
+            self.parts.append(data)
+
+    parser = _TextExtractor()
+    parser.feed(html)
+    snippet = " ".join(" ".join(parser.parts).split())
     if len(snippet) <= max_chars:
         return snippet
     return snippet[:max_chars].rstrip() + "..."

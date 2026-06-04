@@ -19,6 +19,7 @@ from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageKind, PageStatus
+from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.core.models.site_alias import SiteAlias
@@ -1120,3 +1121,48 @@ def test_theme_same_save_is_idempotent_for_renditions(
     # 9 done rows, no pending - same as before.
     assert len(rows) == 9
     assert all(r.status == "done" for r in rows)
+
+
+# ============================================================
+# Rebuild excerpts admin button (#rebuild-excerpts)
+# ============================================================
+
+
+def test_rebuild_excerpts_button_recomputes_and_redirects(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """POSTing to the rebuild-excerpts endpoint recomputes stale
+    excerpt rows for the site and redirects back to the edit page
+    with a flash message."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site_id = site.id
+        owner_id = site.owner_user_id
+        db.add(
+            Post(
+                site_id=site_id,
+                author_id=owner_id,
+                title="Test post",
+                slug="test-post",
+                body_markdown=r"HAProxy 1\.9 was released.",
+                body_html="<p>HAProxy 1.9 was released.</p>",
+                body_excerpt=r"HAProxy 1\.9 was released.",  # stale broken value
+                status=PostStatus.PUBLISHED,
+            )
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/{site_id}/edit")
+    resp = client.post(
+        f"/admin/sites/{site_id}/rebuild-excerpts",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert f"/admin/sites/{site_id}/edit" in resp.headers["Location"]
+
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "test-post")).scalar_one()
+    assert post.body_excerpt == "HAProxy 1.9 was released."

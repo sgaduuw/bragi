@@ -97,3 +97,42 @@ def scheduled_publish(dry_run: bool) -> None:
         if failed:
             msg += f", {len(failed)} failed"
         click.echo(f"{msg}.")
+
+
+@click.command("rebuild-excerpts")
+@click.option("--site", "site_slug", default=None, help="Limit to one site slug.")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Report what would change without writing rows.",
+)
+@with_appcontext
+def rebuild_excerpts_cmd(site_slug: str | None, dry_run: bool) -> None:
+    """One-shot rebuild of `body_excerpt` for Posts and Pages.
+
+    Use after fixing/changing the excerpt-rendering logic, or after
+    a content import that left excerpts in a degraded state. Walks
+    every row (optionally filtered to one site), recomputes the
+    excerpt via `make_excerpt`, persists only when the value changed.
+    """
+    from bragi.core.models.site import Site
+    from bragi.core.render.excerpts import rebuild_excerpts as _rebuild
+
+    with SessionLocal() as db:
+        site_id: int | None = None
+        if site_slug is not None:
+            site = db.execute(select(Site).where(Site.slug == site_slug)).scalar_one_or_none()
+            if site is None:
+                click.echo(f"No site with slug {site_slug!r}.", err=True)
+                raise SystemExit(1)
+            site_id = site.id
+
+        counts = _rebuild(db, site_id=site_id, dry_run=dry_run)
+        if not dry_run:
+            db.commit()
+
+    verb = "would update" if dry_run else "updated"
+    click.echo(
+        f"Posts: scanned {counts['posts_scanned']}, {verb} {counts['posts_changed']}. "
+        f"Pages: scanned {counts['pages_scanned']}, {verb} {counts['pages_changed']}."
+    )
