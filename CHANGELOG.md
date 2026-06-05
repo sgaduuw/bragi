@@ -6,6 +6,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.27.2] - 2026-06-05
+
+### Fixed
+
+- `tests/contrib/test_unsplash_plugin.py` is now robust to the
+  developer having a `.env` containing `BRAGI_UNSPLASH_ACCESS_KEY`.
+  `_env_file=None` is passed to `Settings()` in both tests to
+  disable dotenv loading; the field defaults to None when the env
+  var is absent. CI was unaffected (no `.env` there); local dev
+  was the only failure surface.
+
 ## [1.27.1] - 2026-06-05
 
 Release-engineering patch: container build path rewritten to consume

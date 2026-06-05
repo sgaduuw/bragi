@@ -14,7 +14,11 @@ def test_image_picker_tab_returns_none_when_access_key_unset(
     monkeypatch.delenv("BRAGI_UNSPLASH_ACCESS_KEY", raising=False)
     from bragi.settings import Settings
 
-    settings = Settings()
+    # _env_file=None tells pydantic-settings to skip dotenv loading so a
+    # developer's local .env containing BRAGI_UNSPLASH_ACCESS_KEY doesn't
+    # shadow the monkeypatched env-var removal. Test passes on CI either
+    # way (no .env there); the override makes it pass locally too.
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
     tab = _get_image_picker_tab(settings)
     assert tab is None
 
@@ -25,7 +29,9 @@ def test_image_picker_tab_returns_tab_when_access_key_set(
     monkeypatch.setenv("BRAGI_UNSPLASH_ACCESS_KEY", "test-key")
     from bragi.settings import Settings
 
-    settings = Settings()
+    # _env_file=None for symmetry with the negative-case sibling; the
+    # monkeypatch.setenv above is what drives the field to "test-key".
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
     tab = _get_image_picker_tab(settings)
     assert tab is not None
     assert tab.label == "Unsplash"
