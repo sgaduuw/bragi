@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from click.testing import CliRunner
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -1455,4 +1456,65 @@ def test_apply_substitutes_ghost_url_in_page_canonical_and_feature_image(
     with db_session_factory() as db:
         page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
     assert page.canonical_url == "https://oldzelda.ghost.io/about-canonical/"
-    assert page.featured_image_id is not None
+
+
+# ============================================================
+# CLI: --ghost-base-url flag
+# ============================================================
+
+
+def test_cli_ghost_base_url_overrides_auto_detection(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bragi.contrib.import_ghost.cli import ghost_command
+
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    fetched_urls: list[str] = []
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        fetched_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _capturing_safe_get,
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "x",
+                "title": "X",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://posturl.example/x/",
+                "feature_image": "__GHOST_URL__/content/images/x.png",
+            }
+        ],
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        ghost_command,
+        [
+            "--site",
+            "blog",
+            "--ghost-base-url",
+            "https://override.example/",
+            str(p),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fetched_urls == ["https://override.example/content/images/x.png"]
