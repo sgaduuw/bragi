@@ -1369,3 +1369,90 @@ def test_apply_cli_base_url_override_wins_over_post_url(
     apply(p, site, {"ghost_base_url": "https://override.example/"})
 
     assert fetched_urls == ["https://override.example/content/images/x.png"]
+
+
+# ============================================================
+# apply(): pages-loop substitution
+# ============================================================
+
+
+def test_apply_strips_ghost_url_in_page_body(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    from bragi.core.models.page import Page
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "type": "page",
+                "slug": "about",
+                "title": "About",
+                "html": '<p>Read <a href="__GHOST_URL__/policy/">policy</a>.</p>',
+                "status": "published",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+    assert "__GHOST_URL__" not in page.body_markdown
+    assert "__GHOST_URL__" not in page.body_html
+    assert "/policy/" in page.body_markdown
+
+
+def test_apply_substitutes_ghost_url_in_page_canonical_and_feature_image(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bragi.core.models.page import Page
+
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    fetched_urls: list[str] = []
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        fetched_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _capturing_safe_get,
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "type": "page",
+                "slug": "about",
+                "title": "About",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://oldzelda.ghost.io/about/",
+                "canonical_url": "__GHOST_URL__/about-canonical/",
+                "feature_image": "__GHOST_URL__/content/images/page.png",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+
+    assert fetched_urls == ["https://oldzelda.ghost.io/content/images/page.png"]
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+    assert page.canonical_url == "https://oldzelda.ghost.io/about-canonical/"
+    assert page.featured_image_id is not None

@@ -480,10 +480,18 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             if not ghost_id or not slug:
                 warnings.append(f"page {ghost_id!r}: missing slug")
                 continue
-            body_md = _html_to_markdown(raw_page.get("html") or "")
+            body_md = _html_to_markdown(_strip_placeholder(raw_page.get("html") or ""))
             title = raw_page.get("title") or slug
             status = _page_status_from(raw_page.get("status"))
             resolved_author_id = _resolve_author(db, data, raw_page, author_id)
+            custom_excerpt_clean = _strip_placeholder(raw_page.get("custom_excerpt") or "") or None
+            meta_description_clean = (
+                _strip_placeholder(raw_page.get("meta_description") or "") or None
+            )
+            raw_canonical = raw_page.get("canonical_url") or ""
+            if ghost_base_url is None and "__GHOST_URL__" in raw_canonical:
+                unresolved_url_fields += 1
+            canonical_url_clean = _sub_placeholder_in_url(raw_canonical, ghost_base_url) or None
 
             existing_page: Page | None = db.execute(
                 select(Page).where(Page.site_id == site_id, Page.source_id == ghost_id)
@@ -513,12 +521,12 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                     kind=PageKind.STATIC,
                     body_markdown=body_md,
                     body_html=render_markdown(body_md),
-                    body_excerpt=raw_page.get("custom_excerpt") or make_excerpt(body_md),
+                    body_excerpt=custom_excerpt_clean or make_excerpt(body_md),
                     author_id=resolved_author_id,
                     status=status,
                     meta_title=raw_page.get("meta_title") or None,
-                    meta_description=raw_page.get("meta_description") or None,
-                    canonical_url=raw_page.get("canonical_url") or None,
+                    meta_description=meta_description_clean,
+                    canonical_url=canonical_url_clean,
                     source_id=ghost_id,
                     source_meta={"importer": "ghost"},
                 )
@@ -532,18 +540,21 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 existing_page.title = title
                 existing_page.body_markdown = body_md
                 existing_page.body_html = render_markdown(body_md)
-                existing_page.body_excerpt = raw_page.get("custom_excerpt") or make_excerpt(body_md)
+                existing_page.body_excerpt = custom_excerpt_clean or make_excerpt(body_md)
                 existing_page.status = status
                 existing_page.meta_title = raw_page.get("meta_title") or None
-                existing_page.meta_description = raw_page.get("meta_description") or None
-                existing_page.canonical_url = raw_page.get("canonical_url") or None
+                existing_page.meta_description = meta_description_clean
+                existing_page.canonical_url = canonical_url_clean
                 existing_page.author_id = resolved_author_id
                 page = existing_page
                 pages_updated += 1
             db.flush()
 
             # Featured image (same helper as posts, same fallback shape).
-            fi_url = raw_page.get("feature_image") or raw_page.get("og_image")
+            raw_fi_url = raw_page.get("feature_image") or raw_page.get("og_image") or ""
+            if ghost_base_url is None and "__GHOST_URL__" in raw_fi_url:
+                unresolved_url_fields += 1
+            fi_url = _sub_placeholder_in_url(raw_fi_url, ghost_base_url) or None
             fi_alt = raw_page.get("feature_image_alt")
             fi_att, fi_warn = _resolve_feature_image(db, site=site, url=fi_url, alt_text=fi_alt)
             if fi_warn:
