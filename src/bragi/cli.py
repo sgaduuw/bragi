@@ -2,8 +2,8 @@
 
 Plugins extend this group via the `register_cli_command` hook.
 Core maintenance commands (session purge, db vacuum, backup,
-export) live here directly because they operate on core
-infrastructure, not plugin-owned data.
+export, and migrations) live here directly because they operate on
+core infrastructure, not plugin-owned data.
 
 Invoke as `bragi <subcommand>` (the console script registered in
 pyproject.toml's [project.scripts]). The legacy
@@ -156,6 +156,52 @@ def db_analyze() -> None:
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.execute(text("ANALYZE"))
     click.echo("db analyze: ok")
+
+
+@db_group.command("upgrade")
+@click.argument("revision", default="head")
+def db_upgrade(revision: str) -> None:
+    """Apply pending migrations up to REVISION (default: head).
+
+    Wraps `alembic upgrade` and resolves the migration scripts from
+    the bundled `bragi.alembic` package, so this works from any
+    working directory regardless of where bragi-cms was pip-installed.
+
+    REVISION is an alembic revision identifier or `head`. Examples:
+    `bragi db upgrade` (same as `bragi db upgrade head`),
+    `bragi db upgrade +1`, `bragi db upgrade abc123ef`.
+    """
+    from alembic import command as alembic_cmd
+    from alembic.config import Config
+
+    # `bragi:alembic` is the package-relative script_location;
+    # alembic resolves it via importlib.resources so no cwd dependency.
+    cfg = Config()
+    cfg.set_main_option("script_location", "bragi:alembic")
+    if db_url := settings.database_url:
+        cfg.set_main_option("sqlalchemy.url", db_url)
+    alembic_cmd.upgrade(cfg, revision)
+    click.echo(f"db upgrade to {revision!r}: ok")
+
+
+@db_group.command("downgrade")
+@click.argument("revision")
+def db_downgrade(revision: str) -> None:
+    """Revert migrations down to REVISION.
+
+    REVISION must be an alembic revision identifier or `base`.
+    Examples: `bragi db downgrade -1`, `bragi db downgrade base`.
+    Destructive: confirm the migration is reversible before running.
+    """
+    from alembic import command as alembic_cmd
+    from alembic.config import Config
+
+    cfg = Config()
+    cfg.set_main_option("script_location", "bragi:alembic")
+    if db_url := settings.database_url:
+        cfg.set_main_option("sqlalchemy.url", db_url)
+    alembic_cmd.downgrade(cfg, revision)
+    click.echo(f"db downgrade to {revision!r}: ok")
 
 
 @db_group.command("vacuum")
