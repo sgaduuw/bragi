@@ -24,7 +24,7 @@
 #
 # Web containers gate their start on this script's healthcheck (see
 # compose.yml). The sentinel `/data/.migrated` is touched once the
-# initial `alembic upgrade head` succeeds.
+# initial `bragi db upgrade` succeeds.
 
 set -u
 
@@ -115,7 +115,7 @@ ALEMBIC_RETRY_DELAY=${ALEMBIC_RETRY_DELAY:-15}
 attempt=1
 while true; do
     log "alembic: attempt $attempt of $ALEMBIC_MAX_ATTEMPTS"
-    if alembic upgrade head; then
+    if bragi db upgrade; then
         log "alembic: ok (attempt $attempt)"
         # Healthcheck sentinel: the web containers' depends_on uses
         # condition: service_healthy and a `test -f /data/.migrated`

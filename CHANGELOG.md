@@ -6,6 +6,28 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.27.4] - 2026-06-05
+
+Hotfix: restore the `bragi-tasks` sidecar's migration step after the
+PyPI-image cutover. v1.27.1's minimal Dockerfile shape dropped the
+project-root `alembic.ini` from the image, so `scheduler.sh`'s bare
+`alembic upgrade head` invocation failed with `No 'script_location'
+key found in configuration` on every container start. The sidecar
+crashlooped, scheduled tasks (publish, embeds, webmentions,
+ActivityPub, renditions, db analyze, vacuum) never ran. Admin and
+delivery web containers still came up because the `/data/.migrated`
+sentinel from the prior deploy persisted on the volume.
+
+### Fixed
+
+- `docker/scheduler.sh` now invokes `bragi db upgrade` instead of
+  bare `alembic upgrade head`. The `bragi db upgrade` CLI command
+  (added in v1.27.0) wraps alembic against the wheel-bundled
+  `bragi:alembic` scripts and works from any cwd without an
+  `alembic.ini` on disk -- the canonical migration entry-point for
+  the PyPI-installed image shape. The bare alembic CLI continues to
+  work in dev against the project-root `alembic.ini`.
+
 ## [1.27.3] - 2026-06-05
 
 ### Fixed
