@@ -68,16 +68,19 @@ jobs:
       # to surface the new version on the install path. Poll until it's
       # reachable so the subsequent `pip install` inside Docker doesn't
       # race the propagation.
+      # PyPI's JSON endpoint returns 200 well before `pip install` can
+      # resolve the wheel from every CDN node. v1.27.2's publish-docker
+      # failed at ~60s; doubling the budget gives the slow nodes time.
       - name: Wait for PyPI propagation
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             if curl -fsSI "https://pypi.org/pypi/bragi-cms/${{ steps.version.outputs.version }}/json" > /dev/null 2>&1; then
               echo "bragi-cms==${{ steps.version.outputs.version }} reachable on PyPI"
               exit 0
             fi
             sleep 2
           done
-          echo "PyPI did not surface bragi-cms==${{ steps.version.outputs.version }} after 60s"
+          echo "PyPI did not surface bragi-cms==${{ steps.version.outputs.version }} after 120s"
           exit 1
 
       # QEMU registers binfmt handlers for foreign architectures

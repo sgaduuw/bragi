@@ -6,6 +6,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.27.3] - 2026-06-05
+
+### Fixed
+
+- Release workflow's PyPI propagation poll window doubled from 60s
+  to 120s. v1.27.2's first publish-docker attempt failed at ~60s
+  when the CDN node serving `pip install` lagged the JSON metadata
+  endpoint's 200; the re-run succeeded. The wider budget makes the
+  workflow robust to CDN-node lag at no cost on the common path.
+
 ## [1.27.2] - 2026-06-05
 
 ### Fixed
