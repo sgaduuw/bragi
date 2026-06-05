@@ -358,11 +358,15 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             if not ghost_id or not slug:
                 warnings.append(f"post {ghost_id!r}: missing slug")
                 continue
-            body_md = _html_to_markdown(raw_post.get("html") or "")
+            body_md = _html_to_markdown(_strip_placeholder(raw_post.get("html") or ""))
             title = raw_post.get("title") or slug
             status = _status_from(raw_post.get("status"))
             published_at = _parsed_iso(raw_post.get("published_at"))
             resolved_author_id = _resolve_author(db, data, raw_post, author_id)
+            custom_excerpt_clean = _strip_placeholder(raw_post.get("custom_excerpt") or "") or None
+            meta_description_clean = (
+                _strip_placeholder(raw_post.get("meta_description") or "") or None
+            )
 
             existing = db.execute(
                 select(Post).where(Post.site_id == site_id, Post.source_id == ghost_id)
@@ -375,13 +379,13 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                     title=title,
                     body_markdown=body_md,
                     body_html=render_markdown(body_md),
-                    body_excerpt=raw_post.get("custom_excerpt") or make_excerpt(body_md),
+                    body_excerpt=custom_excerpt_clean or make_excerpt(body_md),
                     author_id=resolved_author_id,
                     status=status,
                     published_at=published_at,
                     meta_title=raw_post.get("meta_title") or None,
                     is_pinned=bool(raw_post.get("featured")),
-                    meta_description=raw_post.get("meta_description") or None,
+                    meta_description=meta_description_clean,
                     canonical_url=raw_post.get("canonical_url") or None,
                     source_id=ghost_id,
                     source_meta={"importer": "ghost"},
@@ -393,13 +397,13 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 existing.title = title
                 existing.body_markdown = body_md
                 existing.body_html = render_markdown(body_md)
-                existing.body_excerpt = raw_post.get("custom_excerpt") or make_excerpt(body_md)
+                existing.body_excerpt = custom_excerpt_clean or make_excerpt(body_md)
                 existing.status = status
                 if published_at is not None:
                     existing.published_at = published_at
                 existing.meta_title = raw_post.get("meta_title") or None
                 existing.is_pinned = bool(raw_post.get("featured"))
-                existing.meta_description = raw_post.get("meta_description") or None
+                existing.meta_description = meta_description_clean
                 existing.canonical_url = raw_post.get("canonical_url") or None
                 existing.author_id = resolved_author_id
                 post = existing

@@ -1089,3 +1089,120 @@ def test_derive_ghost_base_url_returns_none_when_no_sources() -> None:
 def test_derive_ghost_base_url_returns_none_for_unusable_posts() -> None:
     data = {"posts": [{"url": None}, {"url": ""}, {"url": "not-a-url"}]}
     assert ghost_importer._derive_ghost_base_url(data, None) is None
+
+
+# ============================================================
+# apply(): body-side substitution
+# ============================================================
+
+
+def test_apply_strips_ghost_url_in_body(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "linker",
+                "title": "Linker",
+                "html": '<p>See <a href="__GHOST_URL__/other/">other</a>.</p>',
+                "status": "published",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert "__GHOST_URL__" not in post.body_markdown
+    assert "__GHOST_URL__" not in post.body_html
+    assert "/other/" in post.body_markdown
+
+
+def test_apply_strips_ghost_url_in_custom_excerpt(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "excerpter",
+                "title": "Excerpter",
+                "html": "<p>body</p>",
+                "status": "published",
+                "custom_excerpt": "See __GHOST_URL__/other/ for details.",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert "__GHOST_URL__" not in (post.body_excerpt or "")
+    assert "/other/" in (post.body_excerpt or "")
+
+
+def test_apply_strips_ghost_url_in_meta_description(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "metad",
+                "title": "Metad",
+                "html": "<p>body</p>",
+                "status": "published",
+                "meta_description": "See __GHOST_URL__/policy/ for the full policy.",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert "__GHOST_URL__" not in (post.meta_description or "")
+    assert "/policy/" in (post.meta_description or "")
+
+
+def test_apply_substitutes_inside_pre_code_documented_limitation(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    """Naive string replace also strips the token inside <pre>/<code>.
+    Documented limitation; this test pins the behaviour so changing
+    it is a conscious choice."""
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "doc-ghost",
+                "title": "Documenting Ghost",
+                "html": (
+                    "<p>Ghost has a placeholder:</p>" "<pre><code>__GHOST_URL__/foo</code></pre>"
+                ),
+                "status": "published",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    # The literal token is stripped even inside the code block.
+    assert "__GHOST_URL__" not in post.body_markdown
