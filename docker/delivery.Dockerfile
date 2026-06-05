@@ -1,45 +1,28 @@
 # syntax=docker/dockerfile:1.7
-# Multi-stage build for bragi-delivery. Same shape as admin.Dockerfile;
-# CMD is the only deliberate difference.
+# bragi-delivery container. Consumes bragi-cms from PyPI; build-arg
+# BRAGI_VERSION pins the wheel version at build time. See
+# docker/admin.Dockerfile for the admin sibling; CMD is the only
+# deliberate difference.
 
-FROM python:3.12-slim AS build
-
-ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    POETRY_VIRTUALENVS_CREATE=false
-
-# Poetry 2.x split `poetry export` out into the poetry-plugin-export
-# package; pin both so the build stays deterministic across upstream
-# version bumps.
-RUN pip install --no-cache-dir "poetry>=2.0,<3.0" "poetry-plugin-export>=1.8"
-
-WORKDIR /app
-COPY pyproject.toml poetry.lock* ./
-RUN poetry export -f requirements.txt --without-hashes --only main > requirements.txt
-
-
-FROM python:3.12-slim
+ARG BRAGI_VERSION
+FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
-COPY --from=build /app/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
 
-COPY src/ ./src/
-COPY alembic.ini ./
-COPY alembic/ ./alembic/
-COPY pyproject.toml README.md ./
+ARG BRAGI_VERSION
+RUN test -n "${BRAGI_VERSION}" \
+    || (echo "BRAGI_VERSION build-arg is required" && exit 1)
+RUN pip install --no-cache-dir "bragi-cms==${BRAGI_VERSION}"
 
-RUN pip install --no-deps -e .
-
-# Drop root for the runtime (same as admin). Even though delivery
-# is read-only at the schema level, a worker RCE under uid 0 still
-# escapes into the /data volume with root privileges. The UID is
-# pinned (`--uid 1000`) and identical to admin.Dockerfile so the
-# shared /data volume is writable from both containers regardless
-# of base-image drift in the system-uid range.
+# Drop root (same as admin). Delivery doesn't ship scheduler.sh.
+# Even though delivery is read-only at the schema level, a worker
+# RCE under uid 0 still escapes into the /data volume with root
+# privileges. The UID is pinned to 1000, identical to admin, so
+# the shared /data volume is writable from both regardless of
+# base-image drift in the system-uid range.
 RUN useradd --system --create-home --shell /usr/sbin/nologin --uid 1000 bragi \
     && mkdir -p /data \
     && chown -R bragi:bragi /app /data

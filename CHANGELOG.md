@@ -6,6 +6,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.27.1] - 2026-06-05
+
+Release-engineering patch: container build path rewritten to consume
+the PyPI-published wheel; base image bumped to Python 3.14.
+
+### Changed
+
+- Container build now consumes the PyPI-published `bragi-cms` wheel
+  instead of building from the source checkout. The Dockerfiles drop
+  to ~15 lines each (`FROM python:3.14-slim`, `pip install bragi-cms==X.Y.Z`,
+  user setup, CMD). Bumps the runtime base from 3.12 to 3.14, aligning
+  with `pyproject.toml`'s `python = "^3.14"` constraint that was drifted
+  on the previous build path.
+- Release-time CI consolidated into a single `release.yml` workflow with
+  sequential `publish-pypi` then `publish-docker` jobs. `docker.yml`
+  removed. Container images now fan out from the GitHub Release event
+  rather than the tag push, giving the PyPI publish a chance to
+  propagate before the container build's `pip install` runs.
+
 ## [1.27.0] - 2026-06-05
 
 First PyPI-published version of bragi. Distribution name is `bragi-cms`

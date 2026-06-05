@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.27.0 (2026-06-05).
+**Latest release:** 1.27.1 (2026-06-05).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -30,9 +30,11 @@ See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
 
 Releases follow git-flow with `develop` as the default branch.
 Container images ship to GHCR as `bragi-admin:vX.Y.Z` and
-`bragi-delivery:vX.Y.Z` on every tag push, as multi-arch manifest
-lists covering `linux/amd64` and `linux/arm64`. `docker pull`
-resolves the right variant for the host architecture
+`bragi-delivery:vX.Y.Z` on every GitHub Release, as multi-arch
+manifest lists covering `linux/amd64` and `linux/arm64`. The
+`release.yml` workflow publishes the PyPI wheel first, then builds
+images that consume it via `pip install bragi-cms==X.Y.Z`. `docker
+pull` resolves the right variant for the host architecture
 automatically; Apple Silicon laptops, Ampere / Graviton servers,
 and ARM homelabs run natively rather than through QEMU emulation.
 
