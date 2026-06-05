@@ -1206,3 +1206,166 @@ def test_apply_substitutes_inside_pre_code_documented_limitation(
         post = db.execute(select(Post)).scalar_one()
     # The literal token is stripped even inside the code block.
     assert "__GHOST_URL__" not in post.body_markdown
+
+
+# ============================================================
+# apply(): URL-side substitution
+# ============================================================
+
+
+def test_apply_substitutes_ghost_url_in_canonical_url(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "canonix",
+                "title": "Canonix",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://oldzelda.ghost.io/canonix/",
+                "canonical_url": "__GHOST_URL__/another/",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert post.canonical_url == "https://oldzelda.ghost.io/another/"
+
+
+def test_apply_fetches_feature_image_via_derived_base_url(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    fetched_urls: list[str] = []
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        fetched_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _capturing_safe_get,
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "feat-img",
+                "title": "Feat Img",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://oldzelda.ghost.io/feat-img/",
+                "feature_image": "__GHOST_URL__/content/images/2026/06/x.png",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    result = apply(p, site, {})
+
+    assert fetched_urls == ["https://oldzelda.ghost.io/content/images/2026/06/x.png"]
+    assert result.counts.get("feature_images_fetched") == 1
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+        att = db.execute(select(Attachment)).scalar_one()
+    assert post.featured_image_id == att.id
+
+
+def test_apply_feature_image_no_base_url_emits_aggregated_warning(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No posts[*].url, no CLI override; feature_image has the
+    placeholder. The per-image fetch warning still fires; an
+    additional aggregated warning calls out the root cause once."""
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _fake_safe_get_factory(raise_exc=RuntimeError("not-a-real-url")),
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "feat-img",
+                "title": "Feat Img",
+                "html": "<p>body</p>",
+                "status": "published",
+                "feature_image": "__GHOST_URL__/content/images/x.png",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    result = apply(p, site, {})
+
+    assert result.counts.get("feature_images_failed") == 1
+    aggregated = [w for w in result.warnings if "could not derive Ghost base URL" in w]
+    assert len(aggregated) == 1
+    assert "1 URL field" in aggregated[0]
+
+
+def test_apply_cli_base_url_override_wins_over_post_url(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    fetched_urls: list[str] = []
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        fetched_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _capturing_safe_get,
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "ovr",
+                "title": "Ovr",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://posturl.example/ovr/",
+                "feature_image": "__GHOST_URL__/content/images/x.png",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {"ghost_base_url": "https://override.example/"})
+
+    assert fetched_urls == ["https://override.example/content/images/x.png"]

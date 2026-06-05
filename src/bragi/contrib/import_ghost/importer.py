@@ -313,6 +313,8 @@ def _resolve_author(
 def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
     start = time.monotonic()
     data = load_export(path)
+    ghost_base_url = _derive_ghost_base_url(data, options.get("ghost_base_url"))
+    unresolved_url_fields = 0
     posts_created = 0
     posts_updated = 0
     pages_created = 0
@@ -367,6 +369,10 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             meta_description_clean = (
                 _strip_placeholder(raw_post.get("meta_description") or "") or None
             )
+            raw_canonical = raw_post.get("canonical_url") or ""
+            if ghost_base_url is None and "__GHOST_URL__" in raw_canonical:
+                unresolved_url_fields += 1
+            canonical_url_clean = _sub_placeholder_in_url(raw_canonical, ghost_base_url) or None
 
             existing = db.execute(
                 select(Post).where(Post.site_id == site_id, Post.source_id == ghost_id)
@@ -386,7 +392,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                     meta_title=raw_post.get("meta_title") or None,
                     is_pinned=bool(raw_post.get("featured")),
                     meta_description=meta_description_clean,
-                    canonical_url=raw_post.get("canonical_url") or None,
+                    canonical_url=canonical_url_clean,
                     source_id=ghost_id,
                     source_meta={"importer": "ghost"},
                 )
@@ -404,13 +410,16 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 existing.meta_title = raw_post.get("meta_title") or None
                 existing.is_pinned = bool(raw_post.get("featured"))
                 existing.meta_description = meta_description_clean
-                existing.canonical_url = raw_post.get("canonical_url") or None
+                existing.canonical_url = canonical_url_clean
                 existing.author_id = resolved_author_id
                 post = existing
                 posts_updated += 1
             db.flush()
 
-            fi_url = raw_post.get("feature_image") or raw_post.get("og_image")
+            raw_fi_url = raw_post.get("feature_image") or raw_post.get("og_image") or ""
+            if ghost_base_url is None and "__GHOST_URL__" in raw_fi_url:
+                unresolved_url_fields += 1
+            fi_url = _sub_placeholder_in_url(raw_fi_url, ghost_base_url) or None
             fi_alt = raw_post.get("feature_image_alt")
             fi_att, fi_warn = _resolve_feature_image(db, site=site, url=fi_url, alt_text=fi_alt)
             if fi_warn:
@@ -571,6 +580,14 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                         clash.target = target
                         clash.status_code = 301
 
+        if unresolved_url_fields:
+            warnings.append(
+                f"could not derive Ghost base URL "
+                f"(no usable `posts[*].url` and no --ghost-base-url override); "
+                f"{unresolved_url_fields} URL field"
+                f"{'s' if unresolved_url_fields != 1 else ''} "
+                f"stripped to relative paths and feature_image fetches will fail"
+            )
         db.commit()
 
     return ImportResult(
