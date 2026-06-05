@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.26.0 (2026-06-04).
+**Latest release:** 1.27.0 (2026-06-05).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -326,7 +326,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.26.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.27.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `alembic upgrade head` on start
@@ -458,6 +458,7 @@ bragi/
 │   │   ├── time.py             # aware_utcnow
 │   │   ├── url.py              # URL helpers
 │   │   └── useragent.py        # bot / browser / feed-reader classifier
+│   ├── alembic/                # migrations bundled in wheel (bragi:alembic)
 │   └── contrib/                # built-ins as plugins
 │       ├── activitypub/        # one fediverse actor per site (follow / undo / outbox fanout)
 │       ├── admin_imports/      # site-scoped admin importer index (tile aggregator)
@@ -492,9 +493,9 @@ bragi/
 │       ├── theme_terminal/     # monospace dev-focused theme (slug "terminal")
 │       ├── themes/             # file-based theme registry + admin picker
 │       └── webmentions/        # indieweb send + receive + admin moderation
-├── alembic/                    # migrations
+├── alembic/                    # alembic.ini + dev shim (script_location = bragi:alembic)
 ├── docker/                     # admin.Dockerfile, delivery.Dockerfile
-├── .github/workflows/          # ci.yml, docker.yml
+├── .github/workflows/          # ci.yml, docker.yml, release.yml
 └── tests/
     ├── unit/                   # pure logic, no DB
     ├── contrib/                # one file per built-in plugin
@@ -665,8 +666,15 @@ Production images are tagged `bragi-admin:vX.Y.Z` and
 the `docker.yml` workflow on git tag push as multi-arch manifest
 lists covering `linux/amd64` and `linux/arm64`.
 
-PyPI publication is not on the path (the `bragi` distribution name
-is held by an unrelated project); ship is container-only.
+From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
+`bragi` name is held by The Managarm Project's IDL):
+
+```sh
+pip install bragi-cms==1.27.0
+```
+
+The import path stays `import bragi`. Container images remain the
+primary deploy artefact for operators who want pre-built images.
 
 ## License
 
