@@ -104,6 +104,30 @@ def _strip_placeholder(value: str) -> str:
     return value.replace("__GHOST_URL__", "")
 
 
+def _sub_placeholder_in_url(value: str, base_url: str | None) -> str:
+    """Substitute `__GHOST_URL__` in a URL-shaped field.
+
+    Ghost stores feature_image, og_image, and sometimes canonical_url
+    as `__GHOST_URL__/content/images/yyyy/mm/foo.png`. The downstream
+    `safe_get` fetch needs an absolute URL with scheme and host;
+    `<link rel=canonical>` needs to render as an absolute URL too. We
+    substitute the placeholder with the derived Ghost site URL
+    (`<scheme>://<host>`), trailing slash stripped to avoid the
+    `https://host//content/...` double-slash trap.
+
+    When `base_url` is `None` (no `posts[*].url` and no CLI override),
+    the substitution becomes empty: the URL drops to a site-relative
+    path. `_resolve_feature_image`'s existing fail-soft path then
+    404s in `safe_get` with the same warning it surfaces today; an
+    additional aggregated warning is emitted in `apply()` so the
+    operator sees the root cause.
+    """
+    if not value or "__GHOST_URL__" not in value:
+        return value
+    replacement = (base_url or "").rstrip("/")
+    return value.replace("__GHOST_URL__", replacement)
+
+
 def _basename_from_url(url: str) -> str | None:
     """Extract the trailing path segment of a URL, defaulting to None
     when the URL has no usable filename component. Used to give a

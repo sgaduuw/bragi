@@ -1011,3 +1011,38 @@ def test_strip_placeholder_passthrough_when_absent() -> None:
 
 def test_strip_placeholder_empty_input() -> None:
     assert ghost_importer._strip_placeholder("") == ""
+
+
+# ============================================================
+# __GHOST_URL__ placeholder substitution: URL bucket
+# ============================================================
+
+
+def test_sub_placeholder_in_url_with_base_url() -> None:
+    result = ghost_importer._sub_placeholder_in_url(
+        "__GHOST_URL__/content/images/x.png", "https://old.ghost.io"
+    )
+    assert result == "https://old.ghost.io/content/images/x.png"
+
+
+def test_sub_placeholder_in_url_strips_trailing_slash_from_base() -> None:
+    result = ghost_importer._sub_placeholder_in_url(
+        "__GHOST_URL__/content/images/x.png", "https://old.ghost.io/"
+    )
+    assert result == "https://old.ghost.io/content/images/x.png"
+
+
+def test_sub_placeholder_in_url_none_base_yields_site_relative() -> None:
+    result = ghost_importer._sub_placeholder_in_url("__GHOST_URL__/x", None)
+    assert result == "/x"
+
+
+def test_sub_placeholder_in_url_passthrough_when_no_placeholder() -> None:
+    result = ghost_importer._sub_placeholder_in_url(
+        "https://cdn.example.com/x.png", "https://old.ghost.io"
+    )
+    assert result == "https://cdn.example.com/x.png"
+
+
+def test_sub_placeholder_in_url_empty_input() -> None:
+    assert ghost_importer._sub_placeholder_in_url("", "https://old.ghost.io") == ""
