@@ -92,6 +92,18 @@ def _html_to_markdown(html: str) -> str:
     return md.strip()
 
 
+def _strip_placeholder(value: str) -> str:
+    """Drop the literal `__GHOST_URL__` token from text content.
+
+    Ghost stores the placeholder in body HTML, custom_excerpt, and
+    meta_description as a stand-in for the site URL it substitutes
+    on its own render. Removing it yields site-relative URLs
+    (`/foo/`), which match bragi's delivery routing on the post's
+    own site and stay portable across hostname changes.
+    """
+    return value.replace("__GHOST_URL__", "")
+
+
 def _basename_from_url(url: str) -> str | None:
     """Extract the trailing path segment of a URL, defaulting to None
     when the URL has no usable filename component. Used to give a

@@ -988,3 +988,26 @@ def test_plan_counts_posts_and_pages_separately(tmp_path: Path) -> None:
     result = plan(export)
     assert result.counts == {"posts": 2, "pages": 3, "tags": 0}
     assert any("page 'x'" in w and "empty body" in w for w in result.warnings)
+
+
+# ============================================================
+# __GHOST_URL__ placeholder substitution: text bucket
+# ============================================================
+
+
+def test_strip_placeholder_drops_token_keeping_path() -> None:
+    assert ghost_importer._strip_placeholder("foo __GHOST_URL__/bar baz") == "foo /bar baz"
+
+
+def test_strip_placeholder_multiple_occurrences() -> None:
+    src = '<a href="__GHOST_URL__/a">A</a> <a href="__GHOST_URL__/b">B</a>'
+    assert ghost_importer._strip_placeholder(src) == '<a href="/a">A</a> <a href="/b">B</a>'
+
+
+def test_strip_placeholder_passthrough_when_absent() -> None:
+    result = ghost_importer._strip_placeholder("plain text without token")
+    assert result == "plain text without token"
+
+
+def test_strip_placeholder_empty_input() -> None:
+    assert ghost_importer._strip_placeholder("") == ""
