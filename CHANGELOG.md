@@ -6,6 +6,28 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Distribution name changed from `bragi` to `bragi-cms` on PyPI (the
+  `bragi` name is held by The Managarm Project's IDL). Import path
+  stays `import bragi`; console scripts `bragi`, `bragi-admin`, and
+  `bragi-delivery` are unchanged. Operators write
+  `pip install bragi-cms==X.Y.Z`.
+- Alembic migrations moved from the project root `alembic/` directory
+  into the `bragi` Python package (`src/bragi/alembic/`) so they ship
+  inside the wheel and are accessible after `pip install bragi-cms`.
+  The `alembic.ini` `script_location` updated to `bragi:alembic`
+  (package-relative, supported since alembic 1.7).
+- New CLI commands `bragi db upgrade [REVISION]` and
+  `bragi db downgrade REVISION` wrap alembic using the bundled
+  migration scripts; works from any working directory after a wheel
+  install. The `alembic` CLI with `alembic.ini` remains supported for
+  development workflows.
+
+### Added
+- `.github/workflows/release.yml`: publishes `bragi-cms` to PyPI on
+  every GitHub Release via OIDC Trusted Publishers (no API token in
+  GitHub secrets). v1.27.0 will be the first PyPI-published release.
+
 ## [1.26.0] - 2026-06-04
 
 ### Changed

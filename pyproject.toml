@@ -1,13 +1,14 @@
 [project]
-name = "bragi"
+# Distribution name is `bragi-cms` because the `bragi` name on PyPI
+# is held by The Managarm Project's IDL. Import path stays `import bragi`.
+# See _claude/CONTEXT.md "PyPI publication as bragi-cms" for the rationale.
+name = "bragi-cms"
 version = "1.26.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12,<4"
-# Not published to PyPI; ship via Docker on GHCR. The `bragi`
-# distribution name is held by an unrelated project.
 dependencies = [
     "flask (>=3.0,<4.0)",
     "sqlalchemy (>=2.0,<3.0)",
@@ -121,6 +122,15 @@ no_implicit_optional = true
 [[tool.mypy.overrides]]
 module = "bragi.hookspecs"
 disable_error_code = ["empty-body"]
+
+# Alembic migration scripts are generated code. They predate the
+# move of alembic/ into src/bragi/ and were never written for
+# strict mypy. The env.py has one intentional None assignment for
+# the pre-import fallback. Exclude the whole subtree rather than
+# annotate generated scripts.
+[[tool.mypy.overrides]]
+module = ["bragi.alembic.*", "bragi.alembic.env", "bragi.alembic.versions.*"]
+ignore_errors = true
 
 # Libraries without type stubs.
 [[tool.mypy.overrides]]
