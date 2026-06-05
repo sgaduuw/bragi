@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.27.3 (2026-06-05).
+**Latest release:** 1.27.4 (2026-06-05).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -328,10 +328,10 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.27.3 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.27.4 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
-A `bragi-tasks` sidecar owns `alembic upgrade head` on start
+A `bragi-tasks` sidecar owns `bragi db upgrade` on start
 (touching `/data/.migrated` once the schema is current), then
 enters a sleeper loop that dispatches periodic CMS commands:
 `scheduled-publish` (flips drafts whose `scheduled_for` has
@@ -378,7 +378,7 @@ both `admin` and `delivery` run as a non-root `bragi` user
 on the compose services so an in-flight outbound POST
 (webmention sender, AP delivery) has up to 25 s to return on
 `docker compose stop` before SIGKILL fires; the `bragi-tasks`
-sidecar retries `alembic upgrade head` with backoff
+sidecar retries `bragi db upgrade` with backoff
 (`ALEMBIC_MAX_ATTEMPTS=5`, `ALEMBIC_RETRY_DELAY=15`, in seconds) and exits
 0 after exhausting attempts so a broken migration shows as a
 clean `Exited (0)` rather than livelocking the deploy.
@@ -672,7 +672,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.27.3
+pip install bragi-cms==1.27.4
 ```
 
 The import path stays `import bragi`. Container images remain the
