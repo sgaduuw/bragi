@@ -128,6 +128,32 @@ def _sub_placeholder_in_url(value: str, base_url: str | None) -> str:
     return value.replace("__GHOST_URL__", replacement)
 
 
+def _derive_ghost_base_url(data: dict[str, Any], cli_override: str | None) -> str | None:
+    """Resolve the Ghost site base URL for URL-field substitution.
+
+    Resolution order:
+
+    1. CLI `--ghost-base-url` value (if provided), trailing slash
+       stripped. Operator intent wins.
+    2. First non-empty `posts[*].url` from the export that parses
+       to a `(scheme, netloc)` tuple. Ghost includes a fully
+       qualified URL on every post, so this covers the common
+       case with zero operator configuration.
+    3. `None`. `_sub_placeholder_in_url` then falls back to
+       site-relative; `apply()` emits an aggregated warning.
+    """
+    if cli_override:
+        return cli_override.rstrip("/")
+    for raw in data.get("posts", []) or []:
+        candidate = raw.get("url") if isinstance(raw, dict) else None
+        if not isinstance(candidate, str) or not candidate:
+            continue
+        parsed = urlparse(candidate)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    return None
+
+
 def _basename_from_url(url: str) -> str | None:
     """Extract the trailing path segment of a URL, defaulting to None
     when the URL has no usable filename component. Used to give a

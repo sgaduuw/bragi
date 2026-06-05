@@ -1046,3 +1046,46 @@ def test_sub_placeholder_in_url_passthrough_when_no_placeholder() -> None:
 
 def test_sub_placeholder_in_url_empty_input() -> None:
     assert ghost_importer._sub_placeholder_in_url("", "https://old.ghost.io") == ""
+
+
+# ============================================================
+# __GHOST_URL__ placeholder substitution: base URL derivation
+# ============================================================
+
+
+def test_derive_ghost_base_url_cli_override_wins() -> None:
+    data = {"posts": [{"url": "https://posturl.ghost.io/foo/"}]}
+    assert (
+        ghost_importer._derive_ghost_base_url(data, "https://override.example/")
+        == "https://override.example"
+    )
+
+
+def test_derive_ghost_base_url_strips_trailing_slash_from_cli_override() -> None:
+    data: dict[str, object] = {"posts": []}
+    assert (
+        ghost_importer._derive_ghost_base_url(data, "https://override.example/")
+        == "https://override.example"
+    )
+
+
+def test_derive_ghost_base_url_from_first_usable_post_url() -> None:
+    data = {
+        "posts": [
+            {"url": None},
+            {"url": ""},
+            {"url": "https://oldzelda.ghost.io/spirit-temple/"},
+            {"url": "https://later.example/x/"},
+        ]
+    }
+    assert ghost_importer._derive_ghost_base_url(data, None) == "https://oldzelda.ghost.io"
+
+
+def test_derive_ghost_base_url_returns_none_when_no_sources() -> None:
+    data: dict[str, object] = {"posts": []}
+    assert ghost_importer._derive_ghost_base_url(data, None) is None
+
+
+def test_derive_ghost_base_url_returns_none_for_unusable_posts() -> None:
+    data = {"posts": [{"url": None}, {"url": ""}, {"url": "not-a-url"}]}
+    assert ghost_importer._derive_ghost_base_url(data, None) is None
