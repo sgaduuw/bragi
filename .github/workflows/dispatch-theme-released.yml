@@ -1,0 +1,47 @@
+name: Dispatch bragi-released to a theme
+
+# Manual-fire helper. Same App-auth + dispatch step as the
+# notify-themes job in release.yml; runs on workflow_dispatch only.
+#
+# Use cases:
+# 1. Smoke-test App permissions after initial setup.
+# 2. Re-fire a dispatch that a previous release missed (e.g. transient
+#    GitHub API error during the release.yml notify-themes matrix).
+# 3. Backfill: notify a newly-added theme repo about the latest bragi
+#    release without waiting for the next release cycle.
+
+on:
+  workflow_dispatch:
+    inputs:
+      theme:
+        description: 'Theme repo name (e.g. bragi-theme-zelda)'
+        required: true
+        type: string
+      version:
+        description: 'Bragi version to send in the payload (no v prefix, e.g. 1.27.6)'
+        required: true
+        type: string
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint App installation token
+        uses: actions/create-github-app-token@v2
+        id: token
+        with:
+          app-id: ${{ vars.THEME_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.THEME_DISPATCH_APP_KEY }}
+          owner: sgaduuw
+          repositories: ${{ inputs.theme }}
+
+      - name: Dispatch bragi-released
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          gh api \
+            -X POST \
+            /repos/sgaduuw/${{ inputs.theme }}/dispatches \
+            -f event_type=bragi-released \
+            -F 'client_payload[version]=${{ inputs.version }}'
+          echo "Dispatched bragi-released v${{ inputs.version }} to sgaduuw/${{ inputs.theme }}"
