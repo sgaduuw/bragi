@@ -6,6 +6,35 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.27.5] - 2026-06-06
+
+### Fixed
+
+- `import_ghost` now substitutes Ghost's `__GHOST_URL__` placeholder
+  on import (#376). Text-shaped fields (post / page body HTML,
+  custom_excerpt, meta_description) get the token stripped, yielding
+  site-relative URLs like `/<old-permalink>/`. URL-shaped fields
+  (feature_image, og_image, canonical_url) get the token substituted
+  with the Ghost site URL, derived from the first non-empty
+  `posts[*].url` in the export, or from the new `--ghost-base-url`
+  CLI override. Recovery for already-imported sites: re-run
+  `bragi import ghost <export.json> --site <slug>` against the same
+  site; the importer is idempotent on `(site_id, source_id)` so the
+  re-run cleans bodies and re-fetches feature images with the
+  substituted absolute URL. Re-import overwrites any post-import
+  edits to Ghost-sourced fields (body, title, status, meta,
+  canonical_url, feature_image), and may create a second Attachment
+  row for the re-fetched feature image (dedup is by external_source_id
+  value, which changes when the placeholder is substituted; orphan
+  rows can be cleaned later).
+
+### Known limitations
+
+- The placeholder substitution is a naive string replace, so the
+  literal token inside `<pre>` / `<code>` blocks is stripped too. A
+  post documenting Ghost itself loses the literal `__GHOST_URL__` in
+  code samples; restore via the admin editor after import.
+
 ## [1.27.4] - 2026-06-05
 
 Hotfix: restore the `bragi-tasks` sidecar's migration step after the

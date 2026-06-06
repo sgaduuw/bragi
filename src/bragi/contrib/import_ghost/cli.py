@@ -26,10 +26,26 @@ from bragi.core.models.user import User
     default=None,
     help="Email of the fallback author; first user in DB if omitted.",
 )
+@click.option(
+    "--ghost-base-url",
+    "ghost_base_url",
+    default=None,
+    help=(
+        "Override the Ghost site URL used to substitute __GHOST_URL__ "
+        "in feature_image, og_image, and canonical_url. By default the "
+        "host is parsed from the first non-empty posts[*].url in the "
+        "export; pass this flag when the export lacks post URLs or "
+        "you need a different host."
+    ),
+)
 @click.option("--dry-run", is_flag=True, help="Plan only; don't write rows.")
 @click.argument("source_path", type=click.Path(exists=True))
 def ghost_command(
-    site_slug: str, author_email: str | None, dry_run: bool, source_path: str
+    site_slug: str,
+    author_email: str | None,
+    ghost_base_url: str | None,
+    dry_run: bool,
+    source_path: str,
 ) -> None:
     if not detect(source_path):
         click.echo(f"{source_path!r} does not look like a Ghost export.", err=True)
@@ -64,6 +80,8 @@ def ghost_command(
     options: dict[str, object] = {}
     if author_id is not None:
         options["author_id"] = author_id
+    if ghost_base_url:
+        options["ghost_base_url"] = ghost_base_url
     result_apply = apply(source_path, site, options)
     click.echo(
         f"Imported {result_apply.counts.get('posts', 0)} posts "

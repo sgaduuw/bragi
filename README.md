@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.27.4 (2026-06-05).
+**Latest release:** 1.27.5 (2026-06-06).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -213,8 +213,21 @@ in place rather than duplicating them.
   bragi `Attachment` rows; `feature_image_alt` becomes the alt
   text. Additional fields picked up: `featured` sets `is_pinned`
   on posts. Failed image downloads warn and continue without the
-  image. CLI:
-  `bragi import ghost --site <slug> [--author <email>] [--dry-run] <path>`.
+  image. `__GHOST_URL__` placeholders in post / page bodies,
+  excerpts, and meta descriptions are stripped to site-relative
+  URLs. The same placeholder in `feature_image`, `og_image`, and
+  `canonical_url` is substituted with the Ghost site URL (derived
+  from the first non-empty `posts[*].url` in the export). CLI:
+
+  ```sh
+  # Common case: auto-detects the Ghost site URL from posts[*].url.
+  bragi import ghost --site <slug> [--author <email>] [--dry-run] <path>
+
+  # When the export lacks post URLs (rare on older exports) or you
+  # want the substituted base URL to point at a different host:
+  bragi import ghost --site <slug> --ghost-base-url https://oldsite.ghost.io \
+      [--author <email>] [--dry-run] <path>
+  ```
 - **WordPress**: parses WXR (WordPress eXtended RSS) XML
   exports. `wp:post_type=post` rows become Posts, `page` rows
   become Pages; bodies are converted from WordPress HTML to
@@ -328,7 +341,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.27.4 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.27.5 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -672,7 +685,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.27.4
+pip install bragi-cms==1.27.5
 ```
 
 The import path stays `import bragi`. Container images remain the
