@@ -147,3 +147,38 @@ jobs:
             BRAGI_VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  notify-themes:
+    needs: publish-docker
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false           # one theme failing must not block siblings
+      matrix:
+        theme:
+          - bragi-theme-zelda
+    steps:
+      - name: Mint App installation token
+        uses: actions/create-github-app-token@v2
+        id: token
+        with:
+          app-id: ${{ vars.THEME_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.THEME_DISPATCH_APP_KEY }}
+          owner: sgaduuw
+          repositories: ${{ matrix.theme }}
+
+      - name: Resolve version from release tag
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch bragi-released
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          gh api \
+            -X POST \
+            /repos/sgaduuw/${{ matrix.theme }}/dispatches \
+            -f event_type=bragi-released \
+            -F 'client_payload[version]=${{ steps.version.outputs.version }}'
+          echo "Dispatched bragi-released v${{ steps.version.outputs.version }} to sgaduuw/${{ matrix.theme }}"
