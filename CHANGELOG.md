@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.27.6] - 2026-06-06
+
 ### Changed
 
 - Release workflow's "Wait for PyPI propagation" step now probes
