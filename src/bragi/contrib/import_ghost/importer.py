@@ -92,6 +92,68 @@ def _html_to_markdown(html: str) -> str:
     return md.strip()
 
 
+def _strip_placeholder(value: str) -> str:
+    """Drop the literal `__GHOST_URL__` token from text content.
+
+    Ghost stores the placeholder in body HTML, custom_excerpt, and
+    meta_description as a stand-in for the site URL it substitutes
+    on its own render. Removing it yields site-relative URLs
+    (`/foo/`), which match bragi's delivery routing on the post's
+    own site and stay portable across hostname changes.
+    """
+    return value.replace("__GHOST_URL__", "")
+
+
+def _sub_placeholder_in_url(value: str, base_url: str | None) -> str:
+    """Substitute `__GHOST_URL__` in a URL-shaped field.
+
+    Ghost stores feature_image, og_image, and sometimes canonical_url
+    as `__GHOST_URL__/content/images/yyyy/mm/foo.png`. The downstream
+    `safe_get` fetch needs an absolute URL with scheme and host;
+    `<link rel=canonical>` needs to render as an absolute URL too. We
+    substitute the placeholder with the derived Ghost site URL
+    (`<scheme>://<host>`), trailing slash stripped to avoid the
+    `https://host//content/...` double-slash trap.
+
+    When `base_url` is `None` (no `posts[*].url` and no CLI override),
+    the substitution becomes empty: the URL drops to a site-relative
+    path. `_resolve_feature_image`'s existing fail-soft path then
+    404s in `safe_get` with the same warning it surfaces today; an
+    additional aggregated warning is emitted in `apply()` so the
+    operator sees the root cause.
+    """
+    if not value or "__GHOST_URL__" not in value:
+        return value
+    replacement = (base_url or "").rstrip("/")
+    return value.replace("__GHOST_URL__", replacement)
+
+
+def _derive_ghost_base_url(data: dict[str, Any], cli_override: str | None) -> str | None:
+    """Resolve the Ghost site base URL for URL-field substitution.
+
+    Resolution order:
+
+    1. CLI `--ghost-base-url` value (if provided), trailing slash
+       stripped. Operator intent wins.
+    2. First non-empty `posts[*].url` from the export that parses
+       to a `(scheme, netloc)` tuple. Ghost includes a fully
+       qualified URL on every post, so this covers the common
+       case with zero operator configuration.
+    3. `None`. `_sub_placeholder_in_url` then falls back to
+       site-relative; `apply()` emits an aggregated warning.
+    """
+    if cli_override:
+        return cli_override.rstrip("/")
+    for raw in data.get("posts", []) or []:
+        candidate = raw.get("url") if isinstance(raw, dict) else None
+        if not isinstance(candidate, str) or not candidate:
+            continue
+        parsed = urlparse(candidate)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    return None
+
+
 def _basename_from_url(url: str) -> str | None:
     """Extract the trailing path segment of a URL, defaulting to None
     when the URL has no usable filename component. Used to give a
@@ -251,6 +313,8 @@ def _resolve_author(
 def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
     start = time.monotonic()
     data = load_export(path)
+    ghost_base_url = _derive_ghost_base_url(data, options.get("ghost_base_url"))
+    unresolved_url_fields = 0
     posts_created = 0
     posts_updated = 0
     pages_created = 0
@@ -296,11 +360,19 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             if not ghost_id or not slug:
                 warnings.append(f"post {ghost_id!r}: missing slug")
                 continue
-            body_md = _html_to_markdown(raw_post.get("html") or "")
+            body_md = _html_to_markdown(_strip_placeholder(raw_post.get("html") or ""))
             title = raw_post.get("title") or slug
             status = _status_from(raw_post.get("status"))
             published_at = _parsed_iso(raw_post.get("published_at"))
             resolved_author_id = _resolve_author(db, data, raw_post, author_id)
+            custom_excerpt_clean = _strip_placeholder(raw_post.get("custom_excerpt") or "") or None
+            meta_description_clean = (
+                _strip_placeholder(raw_post.get("meta_description") or "") or None
+            )
+            raw_canonical = raw_post.get("canonical_url") or ""
+            if ghost_base_url is None and "__GHOST_URL__" in raw_canonical:
+                unresolved_url_fields += 1
+            canonical_url_clean = _sub_placeholder_in_url(raw_canonical, ghost_base_url) or None
 
             existing = db.execute(
                 select(Post).where(Post.site_id == site_id, Post.source_id == ghost_id)
@@ -313,14 +385,14 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                     title=title,
                     body_markdown=body_md,
                     body_html=render_markdown(body_md),
-                    body_excerpt=raw_post.get("custom_excerpt") or make_excerpt(body_md),
+                    body_excerpt=custom_excerpt_clean or make_excerpt(body_md),
                     author_id=resolved_author_id,
                     status=status,
                     published_at=published_at,
                     meta_title=raw_post.get("meta_title") or None,
                     is_pinned=bool(raw_post.get("featured")),
-                    meta_description=raw_post.get("meta_description") or None,
-                    canonical_url=raw_post.get("canonical_url") or None,
+                    meta_description=meta_description_clean,
+                    canonical_url=canonical_url_clean,
                     source_id=ghost_id,
                     source_meta={"importer": "ghost"},
                 )
@@ -331,20 +403,23 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 existing.title = title
                 existing.body_markdown = body_md
                 existing.body_html = render_markdown(body_md)
-                existing.body_excerpt = raw_post.get("custom_excerpt") or make_excerpt(body_md)
+                existing.body_excerpt = custom_excerpt_clean or make_excerpt(body_md)
                 existing.status = status
                 if published_at is not None:
                     existing.published_at = published_at
                 existing.meta_title = raw_post.get("meta_title") or None
                 existing.is_pinned = bool(raw_post.get("featured"))
-                existing.meta_description = raw_post.get("meta_description") or None
-                existing.canonical_url = raw_post.get("canonical_url") or None
+                existing.meta_description = meta_description_clean
+                existing.canonical_url = canonical_url_clean
                 existing.author_id = resolved_author_id
                 post = existing
                 posts_updated += 1
             db.flush()
 
-            fi_url = raw_post.get("feature_image") or raw_post.get("og_image")
+            raw_fi_url = raw_post.get("feature_image") or raw_post.get("og_image") or ""
+            if ghost_base_url is None and "__GHOST_URL__" in raw_fi_url:
+                unresolved_url_fields += 1
+            fi_url = _sub_placeholder_in_url(raw_fi_url, ghost_base_url) or None
             fi_alt = raw_post.get("feature_image_alt")
             fi_att, fi_warn = _resolve_feature_image(db, site=site, url=fi_url, alt_text=fi_alt)
             if fi_warn:
@@ -405,10 +480,18 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             if not ghost_id or not slug:
                 warnings.append(f"page {ghost_id!r}: missing slug")
                 continue
-            body_md = _html_to_markdown(raw_page.get("html") or "")
+            body_md = _html_to_markdown(_strip_placeholder(raw_page.get("html") or ""))
             title = raw_page.get("title") or slug
             status = _page_status_from(raw_page.get("status"))
             resolved_author_id = _resolve_author(db, data, raw_page, author_id)
+            custom_excerpt_clean = _strip_placeholder(raw_page.get("custom_excerpt") or "") or None
+            meta_description_clean = (
+                _strip_placeholder(raw_page.get("meta_description") or "") or None
+            )
+            raw_canonical = raw_page.get("canonical_url") or ""
+            if ghost_base_url is None and "__GHOST_URL__" in raw_canonical:
+                unresolved_url_fields += 1
+            canonical_url_clean = _sub_placeholder_in_url(raw_canonical, ghost_base_url) or None
 
             existing_page: Page | None = db.execute(
                 select(Page).where(Page.site_id == site_id, Page.source_id == ghost_id)
@@ -438,12 +521,12 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                     kind=PageKind.STATIC,
                     body_markdown=body_md,
                     body_html=render_markdown(body_md),
-                    body_excerpt=raw_page.get("custom_excerpt") or make_excerpt(body_md),
+                    body_excerpt=custom_excerpt_clean or make_excerpt(body_md),
                     author_id=resolved_author_id,
                     status=status,
                     meta_title=raw_page.get("meta_title") or None,
-                    meta_description=raw_page.get("meta_description") or None,
-                    canonical_url=raw_page.get("canonical_url") or None,
+                    meta_description=meta_description_clean,
+                    canonical_url=canonical_url_clean,
                     source_id=ghost_id,
                     source_meta={"importer": "ghost"},
                 )
@@ -457,18 +540,21 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 existing_page.title = title
                 existing_page.body_markdown = body_md
                 existing_page.body_html = render_markdown(body_md)
-                existing_page.body_excerpt = raw_page.get("custom_excerpt") or make_excerpt(body_md)
+                existing_page.body_excerpt = custom_excerpt_clean or make_excerpt(body_md)
                 existing_page.status = status
                 existing_page.meta_title = raw_page.get("meta_title") or None
-                existing_page.meta_description = raw_page.get("meta_description") or None
-                existing_page.canonical_url = raw_page.get("canonical_url") or None
+                existing_page.meta_description = meta_description_clean
+                existing_page.canonical_url = canonical_url_clean
                 existing_page.author_id = resolved_author_id
                 page = existing_page
                 pages_updated += 1
             db.flush()
 
             # Featured image (same helper as posts, same fallback shape).
-            fi_url = raw_page.get("feature_image") or raw_page.get("og_image")
+            raw_fi_url = raw_page.get("feature_image") or raw_page.get("og_image") or ""
+            if ghost_base_url is None and "__GHOST_URL__" in raw_fi_url:
+                unresolved_url_fields += 1
+            fi_url = _sub_placeholder_in_url(raw_fi_url, ghost_base_url) or None
             fi_alt = raw_page.get("feature_image_alt")
             fi_att, fi_warn = _resolve_feature_image(db, site=site, url=fi_url, alt_text=fi_alt)
             if fi_warn:
@@ -505,6 +591,15 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                         clash.target = target
                         clash.status_code = 301
 
+        if unresolved_url_fields:
+            warnings.append(
+                f"could not derive Ghost base URL "
+                f"(no usable `posts[*].url` and no --ghost-base-url override); "
+                f"{unresolved_url_fields} URL field"
+                f"{'s' if unresolved_url_fields != 1 else ''} "
+                f"stripped to relative paths; any feature_image fetches that "
+                f"depended on the placeholder will fail"
+            )
         db.commit()
 
     return ImportResult(

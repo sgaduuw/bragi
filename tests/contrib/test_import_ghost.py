@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from click.testing import CliRunner
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -988,3 +989,590 @@ def test_plan_counts_posts_and_pages_separately(tmp_path: Path) -> None:
     result = plan(export)
     assert result.counts == {"posts": 2, "pages": 3, "tags": 0}
     assert any("page 'x'" in w and "empty body" in w for w in result.warnings)
+
+
+# ============================================================
+# __GHOST_URL__ placeholder substitution: text bucket
+# ============================================================
+
+
+def test_strip_placeholder_drops_token_keeping_path() -> None:
+    assert ghost_importer._strip_placeholder("foo __GHOST_URL__/bar baz") == "foo /bar baz"
+
+
+def test_strip_placeholder_multiple_occurrences() -> None:
+    src = '<a href="__GHOST_URL__/a">A</a> <a href="__GHOST_URL__/b">B</a>'
+    assert ghost_importer._strip_placeholder(src) == '<a href="/a">A</a> <a href="/b">B</a>'
+
+
+def test_strip_placeholder_passthrough_when_absent() -> None:
+    result = ghost_importer._strip_placeholder("plain text without token")
+    assert result == "plain text without token"
+
+
+def test_strip_placeholder_empty_input() -> None:
+    assert ghost_importer._strip_placeholder("") == ""
+
+
+# ============================================================
+# __GHOST_URL__ placeholder substitution: URL bucket
+# ============================================================
+
+
+def test_sub_placeholder_in_url_with_base_url() -> None:
+    result = ghost_importer._sub_placeholder_in_url(
+        "__GHOST_URL__/content/images/x.png", "https://old.ghost.io"
+    )
+    assert result == "https://old.ghost.io/content/images/x.png"
+
+
+def test_sub_placeholder_in_url_strips_trailing_slash_from_base() -> None:
+    result = ghost_importer._sub_placeholder_in_url(
+        "__GHOST_URL__/content/images/x.png", "https://old.ghost.io/"
+    )
+    assert result == "https://old.ghost.io/content/images/x.png"
+
+
+def test_sub_placeholder_in_url_none_base_yields_site_relative() -> None:
+    result = ghost_importer._sub_placeholder_in_url("__GHOST_URL__/x", None)
+    assert result == "/x"
+
+
+def test_sub_placeholder_in_url_passthrough_when_no_placeholder() -> None:
+    result = ghost_importer._sub_placeholder_in_url(
+        "https://cdn.example.com/x.png", "https://old.ghost.io"
+    )
+    assert result == "https://cdn.example.com/x.png"
+
+
+def test_sub_placeholder_in_url_empty_input() -> None:
+    assert ghost_importer._sub_placeholder_in_url("", "https://old.ghost.io") == ""
+
+
+# ============================================================
+# __GHOST_URL__ placeholder substitution: base URL derivation
+# ============================================================
+
+
+def test_derive_ghost_base_url_cli_override_wins() -> None:
+    data = {"posts": [{"url": "https://posturl.ghost.io/foo/"}]}
+    assert (
+        ghost_importer._derive_ghost_base_url(data, "https://override.example/")
+        == "https://override.example"
+    )
+
+
+def test_derive_ghost_base_url_strips_trailing_slash_from_cli_override() -> None:
+    data: dict[str, object] = {"posts": []}
+    assert (
+        ghost_importer._derive_ghost_base_url(data, "https://override.example/")
+        == "https://override.example"
+    )
+
+
+def test_derive_ghost_base_url_from_first_usable_post_url() -> None:
+    data = {
+        "posts": [
+            {"url": None},
+            {"url": ""},
+            {"url": "https://oldzelda.ghost.io/spirit-temple/"},
+            {"url": "https://later.example/x/"},
+        ]
+    }
+    assert ghost_importer._derive_ghost_base_url(data, None) == "https://oldzelda.ghost.io"
+
+
+def test_derive_ghost_base_url_returns_none_when_no_sources() -> None:
+    data: dict[str, object] = {"posts": []}
+    assert ghost_importer._derive_ghost_base_url(data, None) is None
+
+
+def test_derive_ghost_base_url_returns_none_for_unusable_posts() -> None:
+    data = {"posts": [{"url": None}, {"url": ""}, {"url": "not-a-url"}]}
+    assert ghost_importer._derive_ghost_base_url(data, None) is None
+
+
+# ============================================================
+# apply(): body-side substitution
+# ============================================================
+
+
+def test_apply_strips_ghost_url_in_body(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "linker",
+                "title": "Linker",
+                "html": '<p>See <a href="__GHOST_URL__/other/">other</a>.</p>',
+                "status": "published",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert "__GHOST_URL__" not in post.body_markdown
+    assert "__GHOST_URL__" not in post.body_html
+    assert "/other/" in post.body_markdown
+
+
+def test_apply_strips_ghost_url_in_custom_excerpt(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "excerpter",
+                "title": "Excerpter",
+                "html": "<p>body</p>",
+                "status": "published",
+                "custom_excerpt": "See __GHOST_URL__/other/ for details.",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert "__GHOST_URL__" not in (post.body_excerpt or "")
+    assert "/other/" in (post.body_excerpt or "")
+
+
+def test_apply_strips_ghost_url_in_meta_description(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "metad",
+                "title": "Metad",
+                "html": "<p>body</p>",
+                "status": "published",
+                "meta_description": "See __GHOST_URL__/policy/ for the full policy.",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert "__GHOST_URL__" not in (post.meta_description or "")
+    assert "/policy/" in (post.meta_description or "")
+
+
+def test_apply_substitutes_inside_pre_code_documented_limitation(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    """Naive string replace also strips the token inside <pre>/<code>.
+    Documented limitation; this test pins the behaviour so changing
+    it is a conscious choice."""
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "doc-ghost",
+                "title": "Documenting Ghost",
+                "html": (
+                    "<p>Ghost has a placeholder:</p>" "<pre><code>__GHOST_URL__/foo</code></pre>"
+                ),
+                "status": "published",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    # The literal token is stripped even inside the code block.
+    assert "__GHOST_URL__" not in post.body_markdown
+
+
+# ============================================================
+# apply(): URL-side substitution
+# ============================================================
+
+
+def test_apply_substitutes_ghost_url_in_canonical_url(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "canonix",
+                "title": "Canonix",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://oldzelda.ghost.io/canonix/",
+                "canonical_url": "__GHOST_URL__/another/",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert post.canonical_url == "https://oldzelda.ghost.io/another/"
+
+
+def test_apply_fetches_feature_image_via_derived_base_url(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    fetched_urls: list[str] = []
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        fetched_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _capturing_safe_get,
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "feat-img",
+                "title": "Feat Img",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://oldzelda.ghost.io/feat-img/",
+                "feature_image": "__GHOST_URL__/content/images/2026/06/x.png",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    result = apply(p, site, {})
+
+    assert fetched_urls == ["https://oldzelda.ghost.io/content/images/2026/06/x.png"]
+    assert result.counts.get("feature_images_fetched") == 1
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+        att = db.execute(select(Attachment)).scalar_one()
+    assert post.featured_image_id == att.id
+
+
+def test_apply_feature_image_no_base_url_emits_aggregated_warning(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No posts[*].url, no CLI override; feature_image has the
+    placeholder. The per-image fetch warning still fires; an
+    additional aggregated warning calls out the root cause once."""
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _fake_safe_get_factory(raise_exc=RuntimeError("not-a-real-url")),
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "feat-img",
+                "title": "Feat Img",
+                "html": "<p>body</p>",
+                "status": "published",
+                "feature_image": "__GHOST_URL__/content/images/x.png",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    result = apply(p, site, {})
+
+    assert result.counts.get("feature_images_failed") == 1
+    aggregated = [w for w in result.warnings if "could not derive Ghost base URL" in w]
+    assert len(aggregated) == 1
+    assert "1 URL field" in aggregated[0]
+
+
+def test_apply_cli_base_url_override_wins_over_post_url(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    fetched_urls: list[str] = []
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        fetched_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _capturing_safe_get,
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "ovr",
+                "title": "Ovr",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://posturl.example/ovr/",
+                "feature_image": "__GHOST_URL__/content/images/x.png",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {"ghost_base_url": "https://override.example/"})
+
+    assert fetched_urls == ["https://override.example/content/images/x.png"]
+
+
+# ============================================================
+# apply(): pages-loop substitution
+# ============================================================
+
+
+def test_apply_strips_ghost_url_in_page_body(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> None:
+    from bragi.core.models.page import Page
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "type": "page",
+                "slug": "about",
+                "title": "About",
+                "html": '<p>Read <a href="__GHOST_URL__/policy/">policy</a>.</p>',
+                "status": "published",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+    assert "__GHOST_URL__" not in page.body_markdown
+    assert "__GHOST_URL__" not in page.body_html
+    assert "/policy/" in page.body_markdown
+
+
+def test_apply_substitutes_ghost_url_in_page_canonical_and_feature_image(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bragi.core.models.page import Page
+
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    fetched_urls: list[str] = []
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        fetched_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _capturing_safe_get,
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "type": "page",
+                "slug": "about",
+                "title": "About",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://oldzelda.ghost.io/about/",
+                "canonical_url": "__GHOST_URL__/about-canonical/",
+                "feature_image": "__GHOST_URL__/content/images/page.png",
+            }
+        ],
+    )
+    site = _detached_site(db_session_factory, site_id)
+    apply(p, site, {})
+
+    assert fetched_urls == ["https://oldzelda.ghost.io/content/images/page.png"]
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+    assert page.canonical_url == "https://oldzelda.ghost.io/about-canonical/"
+
+
+# ============================================================
+# CLI: --ghost-base-url flag
+# ============================================================
+
+
+def test_cli_ghost_base_url_overrides_auto_detection(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bragi.contrib.import_ghost.cli import ghost_command
+
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    fetched_urls: list[str] = []
+
+    def _capturing_safe_get(url, *, headers=None, params=None, max_bytes=None, **kwargs):
+        fetched_urls.append(url)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"\x89PNG fake"
+        resp.headers = {"Content-Type": "image/png"}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _capturing_safe_get,
+    )
+
+    p = _make_export(
+        tmp_path,
+        [
+            {
+                "id": "gp1",
+                "slug": "x",
+                "title": "X",
+                "html": "<p>body</p>",
+                "status": "published",
+                "url": "https://posturl.example/x/",
+                "feature_image": "__GHOST_URL__/content/images/x.png",
+            }
+        ],
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        ghost_command,
+        [
+            "--site",
+            "blog",
+            "--ghost-base-url",
+            "https://override.example/",
+            str(p),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fetched_urls == ["https://override.example/content/images/x.png"]
+
+
+def test_apply_re_import_substitutes_in_update_branch_idempotently(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pins zelda's recovery procedure: re-importing an export with
+    `__GHOST_URL__` placeholders cleans bodies via the
+    `existing.body_markdown = body_md` UPDATE branch, and a second
+    re-import is a net no-op on the substituted output."""
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _fake_safe_get_factory(response_bytes=b"\x89PNG fake", content_type="image/png"),
+    )
+
+    payload_post = {
+        "id": "gp1",
+        "slug": "x",
+        "title": "X",
+        "html": '<p>See <a href="__GHOST_URL__/y/">y</a>.</p>',
+        "status": "published",
+        "url": "https://oldzelda.ghost.io/x/",
+        "custom_excerpt": "see __GHOST_URL__/y/ for more",
+        "canonical_url": "__GHOST_URL__/canonical/",
+        "feature_image": "__GHOST_URL__/content/images/x.png",
+    }
+    p = _make_export(tmp_path, [payload_post])
+
+    site = _detached_site(db_session_factory, site_id)
+
+    # First import: creates row, with substitutions applied via the create branch.
+    first = apply(p, site, {})
+    assert first.counts["posts_created"] == 1
+    assert first.counts["posts_updated"] == 0
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    first_body_md = post.body_markdown
+    first_canonical = post.canonical_url
+    first_excerpt = post.body_excerpt
+    assert "__GHOST_URL__" not in first_body_md
+    assert "__GHOST_URL__" not in (first_excerpt or "")
+    assert first_canonical == "https://oldzelda.ghost.io/canonical/"
+
+    # Second import: hits the update branch. Substitutions must stay clean
+    # and the persisted values must match the first import (no drift).
+    second = apply(p, site, {})
+    assert second.counts["posts_created"] == 0
+    assert second.counts["posts_updated"] == 1
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert post.body_markdown == first_body_md
+    assert post.body_excerpt == first_excerpt
+    assert post.canonical_url == first_canonical
+    assert "__GHOST_URL__" not in post.body_html
