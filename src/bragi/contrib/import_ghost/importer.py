@@ -597,7 +597,8 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
                 f"(no usable `posts[*].url` and no --ghost-base-url override); "
                 f"{unresolved_url_fields} URL field"
                 f"{'s' if unresolved_url_fields != 1 else ''} "
-                f"stripped to relative paths and feature_image fetches will fail"
+                f"stripped to relative paths; any feature_image fetches that "
+                f"depended on the placeholder will fail"
             )
         db.commit()
 

@@ -1518,3 +1518,61 @@ def test_cli_ghost_base_url_overrides_auto_detection(
 
     assert result.exit_code == 0, result.output
     assert fetched_urls == ["https://override.example/content/images/x.png"]
+
+
+def test_apply_re_import_substitutes_in_update_branch_idempotently(
+    tmp_path: Path,
+    site_id: int,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pins zelda's recovery procedure: re-importing an export with
+    `__GHOST_URL__` placeholders cleans bodies via the
+    `existing.body_markdown = body_md` UPDATE branch, and a second
+    re-import is a net no-op on the substituted output."""
+    monkeypatch.setattr("bragi.settings.settings.attachments_root", str(tmp_path))
+    monkeypatch.setattr(
+        "bragi.contrib.import_ghost.importer.safe_get",
+        _fake_safe_get_factory(response_bytes=b"\x89PNG fake", content_type="image/png"),
+    )
+
+    payload_post = {
+        "id": "gp1",
+        "slug": "x",
+        "title": "X",
+        "html": '<p>See <a href="__GHOST_URL__/y/">y</a>.</p>',
+        "status": "published",
+        "url": "https://oldzelda.ghost.io/x/",
+        "custom_excerpt": "see __GHOST_URL__/y/ for more",
+        "canonical_url": "__GHOST_URL__/canonical/",
+        "feature_image": "__GHOST_URL__/content/images/x.png",
+    }
+    p = _make_export(tmp_path, [payload_post])
+
+    site = _detached_site(db_session_factory, site_id)
+
+    # First import: creates row, with substitutions applied via the create branch.
+    first = apply(p, site, {})
+    assert first.counts["posts_created"] == 1
+    assert first.counts["posts_updated"] == 0
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    first_body_md = post.body_markdown
+    first_canonical = post.canonical_url
+    first_excerpt = post.body_excerpt
+    assert "__GHOST_URL__" not in first_body_md
+    assert "__GHOST_URL__" not in (first_excerpt or "")
+    assert first_canonical == "https://oldzelda.ghost.io/canonical/"
+
+    # Second import: hits the update branch. Substitutions must stay clean
+    # and the persisted values must match the first import (no drift).
+    second = apply(p, site, {})
+    assert second.counts["posts_created"] == 0
+    assert second.counts["posts_updated"] == 1
+    with db_session_factory() as db:
+        post = db.execute(select(Post)).scalar_one()
+    assert post.body_markdown == first_body_md
+    assert post.body_excerpt == first_excerpt
+    assert post.canonical_url == first_canonical
+    assert "__GHOST_URL__" not in post.body_html
