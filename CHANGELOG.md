@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.27.5] - 2026-06-06
+
 ### Fixed
 
 - `import_ghost` now substitutes Ghost's `__GHOST_URL__` placeholder
