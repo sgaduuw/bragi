@@ -6,6 +6,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.27.6] - 2026-06-06
+
+### Changed
+
+- Release workflow's "Wait for PyPI propagation" step now probes
+  with `pip download --no-deps` against the resolver path the
+  docker build is about to take, instead of a `curl` against the
+  JSON metadata endpoint. The old probe reported 200 well before
+  pip's CDN node could actually resolve the wheel, causing
+  back-to-back `publish-docker` failures on v1.27.2, v1.27.4, and
+  v1.27.5 even at a 120s budget. The new probe polls at 10s
+  intervals for up to 10 minutes, succeeding only when a real `pip
+  download` resolves and fetches the wheel; until then the
+  workflow logs one heartbeat per attempt so operators watching
+  the run can see the propagation status. No operator-facing
+  workflow shape change.
+
 ## [1.27.5] - 2026-06-06
 
 ### Fixed

@@ -64,23 +64,35 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      # PyPI publish job succeeded but the CDN may take a few seconds
-      # to surface the new version on the install path. Poll until it's
-      # reachable so the subsequent `pip install` inside Docker doesn't
-      # race the propagation.
-      # PyPI's JSON endpoint returns 200 well before `pip install` can
-      # resolve the wheel from every CDN node. v1.27.2's publish-docker
-      # failed at ~60s; doubling the budget gives the slow nodes time.
+      # The publish-pypi job above succeeded, but the pip resolver
+      # behind `pip install` lags PyPI's JSON metadata at busy CDN
+      # nodes. v1.27.2, v1.27.4, and v1.27.5 all saw the docker job's
+      # `pip install` race the propagation while the old probe (curl
+      # against the JSON endpoint) already reported 200. Probe with
+      # pip itself so the gate exercises the same resolver path the
+      # docker build is about to take; only when pip can actually
+      # resolve AND fetch the wheel do we proceed. The temporary
+      # download directory is discarded; this step does not pre-warm
+      # any pip cache the docker build reads.
       - name: Wait for PyPI propagation
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
           for i in $(seq 1 60); do
-            if curl -fsSI "https://pypi.org/pypi/bragi-cms/${{ steps.version.outputs.version }}/json" > /dev/null 2>&1; then
-              echo "bragi-cms==${{ steps.version.outputs.version }} reachable on PyPI"
+            rm -rf /tmp/pypi-check
+            mkdir -p /tmp/pypi-check
+            if python3 -m pip download \
+                --no-deps \
+                --quiet \
+                --dest /tmp/pypi-check \
+                "bragi-cms==${VERSION}" 2>/dev/null; then
+              echo "bragi-cms==${VERSION} resolvable on PyPI (attempt ${i})"
+              rm -rf /tmp/pypi-check
               exit 0
             fi
-            sleep 2
+            echo "attempt ${i}: bragi-cms==${VERSION} not yet resolvable on PyPI"
+            sleep 10
           done
-          echo "PyPI did not surface bragi-cms==${{ steps.version.outputs.version }} after 120s"
+          echo "PyPI did not surface bragi-cms==${VERSION} after 600s; check publish-pypi step output and re-run this job"
           exit 1
 
       # QEMU registers binfmt handlers for foreign architectures
