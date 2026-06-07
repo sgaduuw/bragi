@@ -5,8 +5,15 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from bragi.api import AdminNotice
-from bragi.core.admin_notices import collect_notices
+from bragi.core.admin_notices import _cache_clear, collect_notices
+
+
+@pytest.fixture(autouse=True)
+def clear_notice_cache() -> None:
+    _cache_clear()
 
 
 class FakeSite:
@@ -21,8 +28,9 @@ class FakeUser:
 
 def _pm_with(notices: list[AdminNotice]) -> Any:
     pm = MagicMock()
-    pm.hook.admin_notices.return_value = [notices]
-    pm.list_name_plugin.return_value = [("plug", object())]
+    fake_plugin = MagicMock()
+    fake_plugin.admin_notices = lambda site, _n=notices: list(_n)
+    pm.list_name_plugin.return_value = [("plug", fake_plugin)]
     return pm
 
 

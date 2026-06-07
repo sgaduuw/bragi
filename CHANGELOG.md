@@ -31,8 +31,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `bragi.contrib.sites`'s site dashboard renders notices through
   `collect_notices` instead of the previous inline
-  `home_status == 'welcome_fallback'` banner. Operator-visible
-  output is unchanged; the implementation is now hook-driven and
+  `home_status == 'welcome_fallback'` banner. The replacement is
+  also a small UX upgrade: same title and body text, but rendered
+  as a card with a dedicated "Site settings →" CTA button and
+  `dismissible=False` so an editor can't accidentally hide a
+  broken-home-page warning. Implementation is now hook-driven and
   testable in isolation.
 
 ### Migrations

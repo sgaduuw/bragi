@@ -21,7 +21,7 @@ cross-worker staleness on the order of the TTL. Same trade-off as
 
 from __future__ import annotations
 
-import functools
+import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from bragi.api import AdminNotice
+
+log = logging.getLogger(__name__)
 
 _NOTICE_CACHE_TTL = 30
 """Cache TTL in seconds. Plugin hookimpls run at most once per
@@ -68,7 +70,15 @@ def _current_generation(*, site_id: int) -> int:
     return window * 1_000_003 + epoch  # 1_000_003 is prime, prevents collisions
 
 
-@functools.lru_cache(maxsize=1024)
+# Manual dict-backed cache (functools.lru_cache can't be used here: the
+# producer thunk is built fresh on every collect_notices call, so its
+# identity would always differ and the lru_cache would never hit. The
+# producer is a value to invoke on miss, not part of the identity of
+# the entry).
+_NOTICE_CACHE_MAX_ENTRIES = 1024
+_notice_cache: dict[tuple[str, int, int], tuple[AdminNotice, ...]] = {}
+
+
 def _cached_plugin_notices(
     plugin_name: str,
     site_id: int,
@@ -77,13 +87,29 @@ def _cached_plugin_notices(
 ) -> tuple[AdminNotice, ...]:
     """Cached call into one plugin's admin_notices hookimpl.
 
-    The producer is a thunk closing over (plugin's hookimpl, site).
-    Within a (plugin_name, site_id, generation) triple, the producer
-    runs at most once per worker. The generation argument is what
-    makes the LRU expire naturally -- same args + different generation
-    is a different cache key.
+    Cache key is ``(plugin_name, site_id, generation)``. Within a
+    triple, the producer runs at most once per worker. The
+    ``generation`` argument advances at TTL boundaries OR on explicit
+    ``invalidate_admin_notices`` calls -- both naturally evict.
     """
-    return producer()
+    key = (plugin_name, site_id, generation)
+    cached = _notice_cache.get(key)
+    if cached is not None:
+        return cached
+    result = producer()
+    _notice_cache[key] = result
+    # Crude eviction: when over the cap, drop the oldest half. dict
+    # preserves insertion order so this is FIFO. Good enough; the
+    # generation key naturally limits steady-state growth.
+    if len(_notice_cache) > _NOTICE_CACHE_MAX_ENTRIES:
+        for k in list(_notice_cache.keys())[: _NOTICE_CACHE_MAX_ENTRIES // 2]:
+            del _notice_cache[k]
+    return result
+
+
+def _cache_clear() -> None:
+    """Clear the per-process notice cache. For test isolation."""
+    _notice_cache.clear()
 
 
 def invalidate_admin_notices(site: Any) -> None:
@@ -135,8 +161,36 @@ def collect_notices(
     current app + ``SessionLocal``.
     """
     pm = pm or _resolve_plugin_manager()
-    raw: list[list[AdminNotice]] = pm.hook.admin_notices(site=site)
-    flat = [n for sub in raw if sub for n in sub]
+    site_id = int(site.id)
+    generation = _current_generation(site_id=site_id)
+    flat: list[AdminNotice] = []
+    for name, plugin in pm.list_name_plugin():
+        if not hasattr(plugin, "admin_notices"):
+            continue
+
+        # Lambda captures `plugin` by default-argument so a later loop
+        # iteration's `plugin` reassignment doesn't change what this
+        # closure invokes. `site` is captured by closure (only one site
+        # per collect_notices call).
+        def _producer(p: Any = plugin) -> tuple[AdminNotice, ...]:
+            result = p.admin_notices(site=site) or []
+            return tuple(result)
+
+        try:
+            plugin_notices = _cached_plugin_notices(
+                name,
+                site_id,
+                generation,
+                _producer,
+            )
+        except Exception:
+            log.warning(
+                "admin_notices hookimpl in plugin %r raised; skipping for this render",
+                name,
+                exc_info=True,
+            )
+            continue
+        flat.extend(plugin_notices)
 
     if not flat:
         return []

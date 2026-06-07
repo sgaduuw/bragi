@@ -5,8 +5,15 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from bragi.api import AdminNotice
-from bragi.core.admin_notices import collect_notices, collect_notices_for_index
+from bragi.core.admin_notices import _cache_clear, collect_notices, collect_notices_for_index
+
+
+@pytest.fixture(autouse=True)
+def clear_notice_cache() -> None:
+    _cache_clear()
 
 
 def _notice(key: str, severity: str) -> AdminNotice:
@@ -24,13 +31,15 @@ class FakeUser:
 
 
 def _make_pm(returns_per_plugin: list[list[AdminNotice]]) -> Any:
-    """Build a fake pluggy PluginManager whose hook.admin_notices returns
-    a flat list-of-lists (one list per plugin)."""
+    """Build a fake pluggy PluginManager whose plugins each have an
+    ``admin_notices`` callable returning the notices for that plugin."""
     pm = MagicMock()
-    pm.hook.admin_notices.return_value = returns_per_plugin
-    pm.list_name_plugin.return_value = [
-        (f"plug{i}", object()) for i, _ in enumerate(returns_per_plugin)
-    ]
+    name_plugin_pairs = []
+    for i, notices in enumerate(returns_per_plugin):
+        fake_plugin = MagicMock()
+        fake_plugin.admin_notices = lambda site, _n=notices: list(_n)
+        name_plugin_pairs.append((f"plug{i}", fake_plugin))
+    pm.list_name_plugin.return_value = name_plugin_pairs
     return pm
 
 

@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
+from bragi.core.admin_notices import _cache_clear
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
@@ -33,6 +34,18 @@ from tests.conftest import csrf_token
 
 EDITOR_EMAIL = "editor@example.com"
 PASSWORD = "hunter2-but-longer-please"
+
+
+@pytest.fixture(autouse=True)
+def clear_notice_cache() -> None:
+    """Reset the process-global notice cache between tests.
+
+    The cache keys include site_id + generation. Integration tests reuse
+    low PKs (often 1) across tests that each build a fresh DB. Without
+    this fixture, a later test can hit a stale cache entry from an
+    earlier test's site with the same id.
+    """
+    _cache_clear()
 
 
 def _login_editor(client: FlaskClient) -> None:

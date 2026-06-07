@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from bragi.api import AdminNotice
 from bragi.core.admin_notices import (
+    _cache_clear,
     _cached_plugin_notices,
     _current_generation,
     invalidate_admin_notices,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_notice_cache() -> None:
+    _cache_clear()
 
 
 def _stub_notice(key: str) -> AdminNotice:
@@ -22,7 +30,7 @@ class FakeSite:
 
 
 def test_cache_returns_same_result_within_ttl_window() -> None:
-    _cached_plugin_notices.cache_clear()
+    _cache_clear()
     # The cache runs the supplied callable on miss, stores the result.
     calls: list[int] = []
 
@@ -38,7 +46,7 @@ def test_cache_returns_same_result_within_ttl_window() -> None:
 
 
 def test_cache_isolation_across_sites() -> None:
-    _cached_plugin_notices.cache_clear()
+    _cache_clear()
 
     def producer_for(site_id: int):
         def _p() -> tuple[AdminNotice, ...]:
@@ -55,7 +63,7 @@ def test_cache_isolation_across_sites() -> None:
 
 
 def test_cache_isolation_across_plugins() -> None:
-    _cached_plugin_notices.cache_clear()
+    _cache_clear()
 
     def producer_a() -> tuple[AdminNotice, ...]:
         return (_stub_notice("a.x"),)
@@ -71,7 +79,7 @@ def test_cache_isolation_across_plugins() -> None:
 
 
 def test_invalidate_admin_notices_bumps_generation_for_one_site() -> None:
-    _cached_plugin_notices.cache_clear()
+    _cache_clear()
 
     g1_before = _current_generation(site_id=1)
     g2_before = _current_generation(site_id=2)
