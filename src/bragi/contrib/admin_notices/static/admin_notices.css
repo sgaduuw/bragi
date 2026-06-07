@@ -42,6 +42,9 @@
 
 /* ---------- Notice rail (sticky on per-site pages) ---------- */
 .notice-rail {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: #fff8c5;
   border-bottom: 1px solid #d1bd06;
   padding: 0.4rem 1rem;
