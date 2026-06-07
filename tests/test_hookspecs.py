@@ -29,6 +29,8 @@ DAY_ONE_HOOKS: frozenset[str] = frozenset(
         "on_user_login",
         # Redirects
         "resolve_redirect",
+        # Home page dispatch
+        "claims_root_route",
         # Admin UI
         "admin_notices",
         "register_admin_blueprint",

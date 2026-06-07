@@ -4,6 +4,27 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] - 2026-06-07
+
+### Added
+
+- `claims_root_route(site) -> bool | None` hookspec in
+  `bragi.hookspecs`. Plugins (typically themes) return True if they
+  handle `/` for this site, so the admin chrome can tell when a
+  theme-provided home overrides the default welcome fallback.
+  Stability-contract covered.
+
+### Changed
+
+- `bragi.contrib.admin_notices`'s welcome-fallback detector now
+  consults `claims_root_route` instead of the v1.28.1 heuristic
+  ("any non-default `site.theme` suppresses"). Custom themes that
+  don't implement the new hook will now correctly fire the
+  welcome_fallback notice if their site is otherwise unconfigured:
+  the v1.28.1 false-negative protection is gone. Themes that
+  override `/` should add a `claims_root_route` hookimpl returning
+  True; see bragi-theme-zelda for the reference shape. Closes #389.
+
 ## [1.28.1] - 2026-06-07
 
 ### Fixed
