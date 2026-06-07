@@ -14,7 +14,7 @@
     {% for notice in rail_notices %}
       {% set cta_href = url_for(notice.cta_endpoint, **notice.cta_endpoint_kwargs)
                          if notice.cta_endpoint else None %}
-      <li class="notice-rail__item notice-rail__item--{{ notice.severity }}">
+      <li class="notice-rail__item notice-rail__item--{{ notice.severity | replace('_', '-') }}">
         {% if cta_href %}<a href="{{ cta_href }}">{{ notice.title }}</a>
         {% else %}<span>{{ notice.title }}</span>{% endif %}
       </li>

@@ -126,9 +126,9 @@ def test_dashboard_renders_welcome_fallback_card_on_fresh_site(
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "Visitors are seeing the default welcome page" in body
-    # Severity class uses the raw severity string: "action_required" with
-    # an underscore, matching notice.severity in _notice_card.html.
-    assert "notice-card--action_required" in body
+    # Severity class converts underscores to dashes via Jinja replace filter
+    # so "action_required" renders as the BEM-convention "action-required".
+    assert "notice-card--action-required" in body
 
 
 def test_dashboard_omits_welcome_fallback_card_when_home_configured(

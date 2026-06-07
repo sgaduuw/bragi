@@ -6,7 +6,7 @@
 #}
 {% set cta_href = url_for(notice.cta_endpoint, **notice.cta_endpoint_kwargs)
                    if notice.cta_endpoint else None %}
-<article class="notice-card notice-card--{{ notice.severity }}"
+<article class="notice-card notice-card--{{ notice.severity | replace('_', '-') }}"
          id="notice-{{ notice.key | replace('.', '-') }}">
   <div class="notice-card__header">
     <span class="notice-card__icon" aria-hidden="true">{% if notice.severity == "action_required" %}!{% elif notice.severity == "warn" %}⚠{% elif notice.severity == "status" %}…{% else %}i{% endif %}</span>
