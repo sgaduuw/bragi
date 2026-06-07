@@ -240,6 +240,29 @@ def resolve_home(site: Any) -> Any:
     ...
 
 
+@hookspec(firstresult=True)
+def claims_root_route(site: Any) -> bool | None:
+    """Plugins (typically themes) return True if they handle ``/``
+    for this site. Cheap predicate -- do NOT run rendering, DB
+    queries, or anything expensive inside the impl; this hook is
+    called from contexts that may not have a Flask request context
+    and where heavy work would be wasteful.
+
+    Used by ``bragi.contrib.admin_notices``'s welcome-fallback
+    detector to suppress false positives for sites with
+    theme-provided homes (the detector can't safely call
+    ``resolve_home`` itself because that hookspec renders templates
+    and may fail outside a delivery request).
+
+    Return None for sites you don't claim. Return True for sites
+    you handle. False is rarely useful; prefer None for "not my
+    concern" so multiple plugins compose cleanly via firstresult.
+
+    Stability: covered by bragi's two-step deprecation policy.
+    """
+    ...
+
+
 # ============================================================
 # Admin UI
 # ============================================================

@@ -27,7 +27,8 @@ What's covered:
   `Education`, `SiteSetting`, `SkillGroup`, `Certification`, `Language`,
   `ProfileLink`, `ChangeProposal`, `ImportPlan`,
   `ImportResult`.
-- The `admin_notices` hookspec (see `bragi/hookspecs.py`).
+- The `admin_notices` and `claims_root_route` hookspecs (see
+  `bragi/hookspecs.py`).
 - The `invalidate_admin_notices(site) -> None` helper,
   re-exported from `bragi.core.admin_notices` as the public
   escape hatch for plugins that resolve an ``action_required``

@@ -68,6 +68,14 @@ def test_admin_notices_hookspec_signature_stable() -> None:
     assert list(pm.hook.admin_notices.spec.argnames) == ["site"]
 
 
+def test_claims_root_route_hookspec_signature_stable() -> None:
+    """claims_root_route accepts exactly one parameter: site."""
+    from bragi.plugins import create_plugin_manager
+
+    pm = create_plugin_manager()
+    assert list(pm.hook.claims_root_route.spec.argnames) == ["site"]
+
+
 def test_welcome_fallback_hookimpl_returns_notice_when_site_is_broken(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
