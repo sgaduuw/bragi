@@ -9,7 +9,6 @@ Layered:
 from __future__ import annotations
 
 import dataclasses
-import inspect
 
 import pytest
 
@@ -40,8 +39,13 @@ def test_admin_notice_dataclass_is_frozen() -> None:
 
 
 def test_admin_notices_hookspec_signature_stable() -> None:
-    """admin_notices accepts exactly one parameter: site."""
-    from bragi.hookspecs import admin_notices
+    """admin_notices accepts exactly one parameter: site.
 
-    sig = inspect.signature(admin_notices)
-    assert list(sig.parameters) == ["site"]
+    Goes through pluggy's introspection rather than importing from
+    bragi.hookspecs directly (the latter violates the plugin-boundary
+    convention that plugin authors don't import that module).
+    """
+    from bragi.plugins import create_plugin_manager
+
+    pm = create_plugin_manager()
+    assert list(pm.hook.admin_notices.spec.argnames) == ["site"]
