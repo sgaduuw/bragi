@@ -6,6 +6,39 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `AdminNotice` dataclass and `admin_notices` hookspec in
+  `bragi.api` / `bragi.hookspecs`. Plugins return per-site
+  operator-attention notices; bragi renders them on the per-site
+  dashboard (full cards), the sticky rail on per-site admin pages
+  (action_required + status), and the global admin index (per-site
+  severity dots). Stability-contract docstring + a contract
+  regression test land alongside the surface.
+- `bragi.contrib.admin_notices` plugin: dismiss + snooze admin
+  routes backed by `admin_notice_dismissals`, the three shared
+  templates (`_notice_card.html`, `_notice_rail.html`,
+  `_notice_dots.html`), `admin_notices.css`, and the in-tree
+  `welcome_fallback` hookimpl (migrated from `bragi.contrib.sites`).
+- `bragi.api.invalidate_admin_notices(site)` escape hatch for
+  plugins that resolve an action_required notice via a known
+  admin action (e.g. a theme calling it after a state change).
+- Per-(plugin, site, generation) LRU notice cache with 30s TTL,
+  explicit invalidation, and per-worker semantics matching the
+  established `bragi_theme_zelda.rom.cache` pattern.
+
+### Changed
+
+- `bragi.contrib.sites`'s site dashboard renders notices through
+  `collect_notices` instead of the previous inline
+  `home_status == 'welcome_fallback'` banner. Operator-visible
+  output is unchanged; the implementation is now hook-driven and
+  testable in isolation.
+
+### Migrations
+
+- `admin_notice_dismissals` table (one alembic revision).
+
 ## [1.27.6] - 2026-06-06
 
 ### Changed
