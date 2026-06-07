@@ -13,14 +13,9 @@
   {% if not site.active %}<span class="flash error" style="margin-left: 0.5rem; padding: 0.1rem 0.5rem;">inactive</span>{% endif %}
 </p>
 
-{% if home_status == 'welcome_fallback' %}
-<div class="flash info" style="margin: 1rem 0;">
-  <strong>Visitors are seeing the default welcome page.</strong>
-  This site has no <code>/</code> handler configured. Set a
-  homepage in <a href="{{ url_for('site_admin.edit_site', site_id=site.id) }}">site settings</a>,
-  or publish a page of kind <code>post_index</code> and promote it.
-</div>
-{% endif %}
+{% for notice in notices %}
+  {% include "admin/_notice_card.html" ignore missing %}
+{% endfor %}
 
 {% if site_nav_items %}
 <section style="margin-top: 1.5rem;">
