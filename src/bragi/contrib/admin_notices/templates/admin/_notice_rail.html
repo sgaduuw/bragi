@@ -1,0 +1,24 @@
+{# Sticky thin rail rendered on per-site admin pages.
+
+   Shows action_required + status notices only (info/warn live on the
+   dashboard). No dismiss controls in the rail.
+
+   Expects in context:
+     - notices: list[AdminNotice]
+     - site: current Site
+#}
+{% set rail_notices = notices | selectattr("severity", "in", ["action_required", "status"]) | list %}
+{% if rail_notices %}
+<aside class="notice-rail" role="region" aria-label="Site notices">
+  <ul class="notice-rail__list">
+    {% for notice in rail_notices %}
+      {% set cta_href = url_for(notice.cta_endpoint, **notice.cta_endpoint_kwargs)
+                         if notice.cta_endpoint else None %}
+      <li class="notice-rail__item notice-rail__item--{{ notice.severity | replace('_', '-') }}">
+        {% if cta_href %}<a href="{{ cta_href }}">{{ notice.title }}</a>
+        {% else %}<span>{{ notice.title }}</span>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</aside>
+{% endif %}

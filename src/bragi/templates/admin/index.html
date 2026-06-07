@@ -6,6 +6,32 @@
   bragi admin, v{{ version }}.
 </p>
 
+{# Per-site cards: one per accessible site, with notice dots so
+   the operator can spot action-required or warning conditions at
+   a glance without navigating into each dashboard. #}
+{% if user_visible_sites %}
+<section style="margin-top: 2rem;">
+  <h2 style="font-size: 1rem; text-transform: uppercase; letter-spacing: 0.08em; color: #666;">
+    Sites
+  </h2>
+  <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; margin-top: 0.75rem;">
+    {% for site in user_visible_sites %}
+    <li>
+      <a href="{{ url_for('site_admin.site_dashboard', site_slug=site.slug) }}"
+         style="display: flex; align-items: center; gap: 0.5rem; padding: 1rem; border: 1px solid #ddd; border-radius: 6px; text-decoration: none; color: #222; background: #fafafa;">
+        <strong style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          {{ site.title or site.hostname }}
+        </strong>
+        {% with summary = notice_summaries.get(site.id) %}
+          {% include "admin/_notice_dots.html" ignore missing %}
+        {% endwith %}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if global_nav_items %}
 <section style="margin-top: 2rem;">
   <h2 style="font-size: 1rem; text-transform: uppercase; letter-spacing: 0.08em; color: #666;">

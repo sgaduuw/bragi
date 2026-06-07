@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, SiteSetting, set_breadcrumbs
+from bragi.core.admin_notices import collect_notices
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -408,29 +409,14 @@ def site_dashboard(site_slug: str) -> ResponseReturnValue:
     """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
-        # The "/" handler check is config-quality info for the
-        # admin: if no home_page_id is set and the site has no
-        # POST_INDEX page, visitors see theme_default's welcome
-        # stub. A banner on the dashboard surfaces that fact so
-        # the operator notices.
-        has_post_index = (
-            db.execute(
-                select(Page.id).where(
-                    Page.site_id == site.id,
-                    Page.kind == PageKind.POST_INDEX,
-                    Page.status == PageStatus.PUBLISHED,
-                )
-            ).first()
-            is not None
-        )
-        home_status = (
-            "welcome_fallback" if site.home_page_id is None and not has_post_index else "configured"
-        )
+    # Notices are collected after the session closes so collect_notices
+    # opens its own session only if it needs to query dismissals.
+    notices = collect_notices(site, current_user())
     return render_template(
         "admin/site_dashboard.html",
         site=site,
         is_superuser=is_superuser(),
-        home_status=home_status,
+        notices=notices,
     )
 
 

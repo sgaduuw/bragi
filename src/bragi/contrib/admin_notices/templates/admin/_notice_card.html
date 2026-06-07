@@ -1,0 +1,38 @@
+{# Render one AdminNotice as a full card. Used on the per-site dashboard.
+
+   Expects in context:
+     - notice: bragi.api.AdminNotice
+     - site: the current Site (for CTA url_for resolution + dismiss/snooze URLs)
+#}
+{% set cta_href = url_for(notice.cta_endpoint, **notice.cta_endpoint_kwargs)
+                   if notice.cta_endpoint else None %}
+<article class="notice-card notice-card--{{ notice.severity | replace('_', '-') }}"
+         id="notice-{{ notice.key | replace('.', '-') }}">
+  <div class="notice-card__header">
+    <span class="notice-card__icon" aria-hidden="true">{% if notice.severity == "action_required" %}!{% elif notice.severity == "warn" %}⚠{% elif notice.severity == "status" %}…{% else %}i{% endif %}</span>
+    <h3 class="notice-card__title">
+      {% if cta_href %}<a href="{{ cta_href }}">{{ notice.title }}</a>
+      {% else %}{{ notice.title }}{% endif %}
+    </h3>
+    {% if notice.dismissible %}
+      <div class="notice-card__actions">
+        <button type="button"
+                class="notice-card__snooze"
+                hx-post="{{ url_for('admin_notices.snooze_notice', site_slug=site.slug, notice_key=notice.key) }}"
+                hx-vals='{"hours": 24}'
+                hx-target="closest .notice-card"
+                hx-swap="delete">Snooze 24h</button>
+        <button type="button"
+                class="notice-card__dismiss"
+                aria-label="Dismiss notice"
+                hx-post="{{ url_for('admin_notices.dismiss_notice', site_slug=site.slug, notice_key=notice.key) }}"
+                hx-target="closest .notice-card"
+                hx-swap="delete">&times;</button>
+      </div>
+    {% endif %}
+  </div>
+  {% if notice.body %}<p class="notice-card__body">{{ notice.body }}</p>{% endif %}
+  {% if cta_href and notice.cta_label %}
+    <a class="notice-card__cta" href="{{ cta_href }}">{{ notice.cta_label }} &rarr;</a>
+  {% endif %}
+</article>

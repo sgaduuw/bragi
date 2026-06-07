@@ -30,6 +30,7 @@ DAY_ONE_HOOKS: frozenset[str] = frozenset(
         # Redirects
         "resolve_redirect",
         # Admin UI
+        "admin_notices",
         "register_admin_blueprint",
         "register_delivery_blueprint",
         "register_admin_nav",
