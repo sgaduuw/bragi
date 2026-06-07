@@ -49,3 +49,44 @@ def test_admin_notices_hookspec_signature_stable() -> None:
 
     pm = create_plugin_manager()
     assert list(pm.hook.admin_notices.spec.argnames) == ["site"]
+
+
+def test_welcome_fallback_hookimpl_returns_notice_when_site_is_broken(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When _is_welcome_fallback returns True, the hookimpl emits the
+    sites.welcome_fallback action_required notice."""
+    from bragi.contrib.admin_notices import plugin as adn_plugin
+
+    class FakeSite:
+        id = 7
+        home_page_id = None
+
+    monkeypatch.setattr(
+        "bragi.contrib.admin_notices.plugin._is_welcome_fallback",
+        lambda site: True,
+    )
+    notices = adn_plugin.admin_notices(site=FakeSite())
+    assert len(notices) == 1
+    n = notices[0]
+    assert n.key == "sites.welcome_fallback"
+    assert n.severity == "action_required"
+    assert n.dismissible is False
+    assert n.cta_endpoint == "site_admin.edit_site"
+    assert n.cta_endpoint_kwargs == {"site_id": 7}
+
+
+def test_welcome_fallback_hookimpl_returns_empty_when_site_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from bragi.contrib.admin_notices import plugin as adn_plugin
+
+    class FakeSite:
+        id = 8
+        home_page_id = 42
+
+    monkeypatch.setattr(
+        "bragi.contrib.admin_notices.plugin._is_welcome_fallback",
+        lambda site: False,
+    )
+    assert adn_plugin.admin_notices(site=FakeSite()) == []
