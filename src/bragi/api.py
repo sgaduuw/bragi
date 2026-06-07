@@ -17,7 +17,7 @@ What's covered:
   `bragi/hookspecs.py`. Hook names, parameter names, and
   parameter types are stable. Internal call-ordering and
   bracketing helpers are not.
-- The spec types defined below: `FieldSpec`,
+- The spec types defined below: `AdminNotice`, `FieldSpec`,
   `ContentTypeSpec`, `ImporterSpec`, `NavItem`,
   `OAuthProviderSpec`, `AuthMethodSpec`, `RedirectTarget`,
   `TransformRegistry`, `SearchBackendSpec`, `ThemeSpec`,
@@ -27,6 +27,7 @@ What's covered:
   `Education`, `SiteSetting`, `SkillGroup`, `Certification`, `Language`,
   `ProfileLink`, `ChangeProposal`, `ImportPlan`,
   `ImportResult`.
+- The `admin_notices` hookspec (see `bragi/hookspecs.py`).
 - The `set_breadcrumbs(*crumbs: Crumb) -> None` helper,
   re-exported from `bragi.core.breadcrumbs` so admin views in
   third-party plugins can declare their breadcrumb chains
@@ -78,7 +79,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 import jinja2
@@ -279,6 +280,60 @@ class NavItem:
     # when the user is in a site context (URL contains <site_slug>),
     # and their endpoint resolves with site_slug from the request.
     scope: str = "global"
+
+
+@dataclass(frozen=True)
+class AdminNotice:
+    """A site-scoped notice rendered in the admin chrome.
+
+    Plugins return notices when something needs operator attention
+    (``action_required``), is in flight (``status``), or warrants a
+    heads-up (``warn`` / ``info``). Return an empty list when nothing's
+    pressing.
+
+    Notices are cached per (site, plugin) for a short TTL, so hookimpls
+    run roughly once per (site, plugin, ~30s) per worker rather than
+    once per admin request — but should still be cheap (a few ms each)
+    since the cache is per-worker.
+
+    Stability: covered by bragi's two-step deprecation policy.
+    """
+
+    key: str
+    """Unique stable key, conventionally ``<plugin>.<kind>``
+    (e.g. ``zelda.rom_required``, ``sites.welcome_fallback``,
+    ``webmentions.pending_count``). Used by the dismissal table;
+    changing the key resurfaces a dismissed notice."""
+
+    severity: Literal["info", "warn", "action_required", "status"]
+    """``info``: passing FYI. ``warn``: something is off but the site
+    is working. ``action_required``: operator must act. ``status``: a
+    job is in flight; notice resolves when the job completes."""
+
+    title: str
+    """Short headline (~60 chars), plain text. Rendered escaped."""
+
+    body: str | None = None
+    """Optional one or two sentences, plain text. Rendered escaped.
+    For progress/status notices, this is where ``Hugo import 45/120``
+    goes."""
+
+    cta_label: str | None = None
+    """Button text, if the notice has an action. Pair with
+    ``cta_endpoint``."""
+
+    cta_endpoint: str | None = None
+    """Flask endpoint name to ``url_for``. Resolved with
+    ``cta_endpoint_kwargs``."""
+
+    cta_endpoint_kwargs: dict[str, Any] = field(default_factory=dict)
+    """kwargs for ``url_for(cta_endpoint, **kwargs)``. Typically
+    carries ``site_slug`` or ``site_id``."""
+
+    dismissible: bool = True
+    """Whether the chrome renders dismiss/snooze controls. The
+    framework still won't drop ``dismissible=False`` notices even if
+    a dismissal row exists; this is the broken-site escape hatch."""
 
 
 class ImagePickerTab(BaseModel):
@@ -752,6 +807,7 @@ class ResumeData(BaseModel):
 
 __all__ = [
     "hookimpl",
+    "AdminNotice",
     "AnalyticsEvent",
     "AuthMethodSpec",
     "Certification",

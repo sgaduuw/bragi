@@ -23,6 +23,7 @@ import pluggy
 from flask import Blueprint, Flask
 
 from bragi.api import (
+    AdminNotice,
     AnalyticsEvent,
     AuthMethodSpec,
     ContentTypeSpec,
@@ -276,6 +277,26 @@ def register_admin_nav() -> list[NavItem]:
     """Return navigation entries for the admin sidebar. A plugin
     contributing multiple sections returns multiple NavItems in
     one list.
+    """
+    ...
+
+
+@hookspec
+def admin_notices(site: Any) -> list[AdminNotice]:
+    """Return zero or more AdminNotice records for this site.
+
+    Called by the admin chrome to render per-site notices on:
+    - the per-site dashboard (full cards),
+    - the global admin index (aggregated counts per site),
+    - the sticky notice rail on per-site admin pages
+      (``action_required`` + ``status`` only).
+
+    Returns are cached per (site, plugin) for ~30s; plugins should
+    still keep hookimpls cheap because the cache is per-worker.
+
+    Return an empty list (NOT ``None``) when nothing's pressing.
+
+    Stability: covered by bragi's two-step deprecation policy.
     """
     ...
 
