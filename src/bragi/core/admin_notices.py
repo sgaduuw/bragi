@@ -140,15 +140,33 @@ def collect_notices(
     if not flat:
         return []
 
-    session = session or _resolve_session()
+    if session is not None:
+        return _filter_and_sort(flat, session, user_id=user.id, site_id=site.id)
+
+    with _resolve_session() as managed:
+        return _filter_and_sort(flat, managed, user_id=user.id, site_id=site.id)
+
+
+def _filter_and_sort(
+    flat: list[AdminNotice],
+    session: Any,
+    *,
+    user_id: int,
+    site_id: int,
+) -> list[AdminNotice]:
+    """Apply the dismissal filter and severity sort. Shared between the
+    test-injected-session path and the production session-context-managed
+    path."""
     dismissed_keys = _query_dismissed_keys(
         session,
-        user_id=user.id,
-        site_id=site.id,
+        user_id=user_id,
+        site_id=site_id,
         notice_keys=[n.key for n in flat],
     )
-
-    visible = [n for n in flat if not n.dismissible or n.key not in dismissed_keys]
+    visible = [
+        n for n in flat
+        if not n.dismissible or n.key not in dismissed_keys
+    ]
     visible.sort(key=lambda n: _SEVERITY_RANK[n.severity])
     return visible
 
