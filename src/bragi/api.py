@@ -28,6 +28,11 @@ What's covered:
   `ProfileLink`, `ChangeProposal`, `ImportPlan`,
   `ImportResult`.
 - The `admin_notices` hookspec (see `bragi/hookspecs.py`).
+- The `invalidate_admin_notices(site) -> None` helper,
+  re-exported from `bragi.core.admin_notices` as the public
+  escape hatch for plugins that resolve an ``action_required``
+  notice via a known admin action and need to evict the cache
+  immediately rather than waiting for the next TTL boundary.
 - The `set_breadcrumbs(*crumbs: Crumb) -> None` helper,
   re-exported from `bragi.core.breadcrumbs` so admin views in
   third-party plugins can declare their breadcrumb chains
@@ -94,6 +99,7 @@ from pydantic import (
     model_validator,
 )
 
+from bragi.core.admin_notices import invalidate_admin_notices
 from bragi.core.breadcrumbs import Crumb, set_breadcrumbs
 
 hookimpl = pluggy.HookimplMarker("bragi")
@@ -837,6 +843,7 @@ __all__ = [
     "SearchBackendSpec",
     "SearchHit",
     "SearchResults",
+    "invalidate_admin_notices",
     "set_breadcrumbs",
     "SiteSetting",
     "SkillGroup",

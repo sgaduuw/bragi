@@ -25,9 +25,10 @@ import functools
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from bragi.api import AdminNotice
+if TYPE_CHECKING:
+    from bragi.api import AdminNotice
 
 _NOTICE_CACHE_TTL = 30
 """Cache TTL in seconds. Plugin hookimpls run at most once per
