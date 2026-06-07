@@ -17,16 +17,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
+from bragi.core.models._mixins import IdMixin
+from bragi.core.time import naive_utcnow
 
 
-class AdminNoticeDismissal(Base):
+class AdminNoticeDismissal(IdMixin, Base):
     __tablename__ = "admin_notice_dismissals"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
@@ -42,7 +43,7 @@ class AdminNoticeDismissal(Base):
     FUTURE -> snoozed until this timestamp.
     PAST -> expired snooze (treated as not-dismissed)."""
 
-    dismissed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    dismissed_at: Mapped[datetime] = mapped_column(default=naive_utcnow)
 
     __table_args__ = (
         UniqueConstraint(
