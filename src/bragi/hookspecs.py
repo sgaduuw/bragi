@@ -255,8 +255,11 @@ def claims_root_route(site: Any) -> bool | None:
     and may fail outside a delivery request).
 
     Return None for sites you don't claim. Return True for sites
-    you handle. False is rarely useful; prefer None for "not my
-    concern" so multiple plugins compose cleanly via firstresult.
+    you handle. False is rarely useful and is actively risky here:
+    with ``firstresult=True``, the first non-None return wins, so a
+    False return blocks any later plugin from claiming the site.
+    Prefer None for "not my concern" so multiple plugins compose
+    cleanly.
 
     Stability: covered by bragi's two-step deprecation policy.
     """
