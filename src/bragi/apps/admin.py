@@ -377,11 +377,12 @@ def create_admin_app() -> Flask:
     def _inject_admin_notices() -> dict[str, object]:
         from flask import current_app
 
+        from bragi.api import AdminNotice
         from bragi.core.admin_notices import collect_notices
 
         site = getattr(g, "current_site", None)
         user = current_user()
-        notices: list[object] = []
+        notices: list[AdminNotice] = []
         if site is not None and user is not None:
             notices = collect_notices(site, user)
 

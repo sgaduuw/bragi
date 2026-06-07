@@ -11,10 +11,11 @@ dashboard.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from flask import Blueprint, abort, redirect, request, url_for
 from sqlalchemy import select
+from werkzeug.wrappers import Response
 
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
@@ -81,8 +82,8 @@ def _write_dismissal(
     site_slug: str,
     notice_key: str,
     *,
-    dismissed_until,  # type: ignore[no-untyped-def]
-):
+    dismissed_until: datetime | None,
+) -> Response | tuple[str, int]:
     """Shared implementation for dismiss and snooze.
 
     Uses a SELECT-then-UPDATE pattern to make the write idempotent: a

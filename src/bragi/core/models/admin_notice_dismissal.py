@@ -47,7 +47,9 @@ class AdminNoticeDismissal(IdMixin, Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "user_id", "site_id", "notice_key",
+            "user_id",
+            "site_id",
+            "notice_key",
             name="uq_admin_notice_dismissal_user_site_key",
         ),
     )

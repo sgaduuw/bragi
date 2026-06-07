@@ -6,7 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from bragi.api import AdminNotice
-from bragi.core.admin_notices import collect_notices
+from bragi.core.admin_notices import collect_notices, collect_notices_for_index
 
 
 def _notice(key: str, severity: str) -> AdminNotice:
@@ -76,15 +76,15 @@ def test_collect_sort_order_is_severity_descending() -> None:
     ]
 
 
-from bragi.core.admin_notices import collect_notices_for_index
-
-
 def test_collect_for_index_returns_dict_of_summaries() -> None:
     pm = _make_pm([[_notice("a.1", "action_required")]])
     session = MagicMock()
     session.scalars.return_value.all.return_value = []
     result = collect_notices_for_index(
-        [FakeSite(1)], FakeUser(), pm=pm, session=session,
+        [FakeSite(1)],
+        FakeUser(),
+        pm=pm,
+        session=session,
     )
     assert set(result) == {1}
     s = result[1]
@@ -94,17 +94,24 @@ def test_collect_for_index_returns_dict_of_summaries() -> None:
 
 
 def test_collect_for_index_counts_by_severity() -> None:
-    pm = _make_pm([[
-        _notice("a", "action_required"),
-        _notice("b", "action_required"),
-        _notice("c", "warn"),
-        _notice("d", "status"),
-        _notice("e", "info"),
-    ]])
+    pm = _make_pm(
+        [
+            [
+                _notice("a", "action_required"),
+                _notice("b", "action_required"),
+                _notice("c", "warn"),
+                _notice("d", "status"),
+                _notice("e", "info"),
+            ]
+        ]
+    )
     session = MagicMock()
     session.scalars.return_value.all.return_value = []
     result = collect_notices_for_index(
-        [FakeSite(1)], FakeUser(), pm=pm, session=session,
+        [FakeSite(1)],
+        FakeUser(),
+        pm=pm,
+        session=session,
     )
     s = result[1]
     assert s.action_required_count == 2

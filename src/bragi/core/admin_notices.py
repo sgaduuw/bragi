@@ -164,10 +164,7 @@ def _filter_and_sort(
         site_id=site_id,
         notice_keys=[n.key for n in flat],
     )
-    visible = [
-        n for n in flat
-        if not n.dismissible or n.key not in dismissed_keys
-    ]
+    visible = [n for n in flat if not n.dismissible or n.key not in dismissed_keys]
     visible.sort(key=lambda n: _SEVERITY_RANK[n.severity])
     return visible
 

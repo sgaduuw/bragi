@@ -43,6 +43,7 @@ def test_cache_isolation_across_sites() -> None:
     def producer_for(site_id: int):
         def _p() -> tuple[AdminNotice, ...]:
             return (_stub_notice(f"p.s{site_id}"),)
+
         return _p
 
     g1 = _current_generation(site_id=1)
