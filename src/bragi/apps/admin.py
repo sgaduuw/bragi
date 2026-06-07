@@ -403,9 +403,23 @@ def create_admin_app() -> Flask:
     # logout button, and flash slot show up. The page itself is a
     # sections grid derived from `nav_items`, so it self-updates
     # when plugins add new admin surfaces.
+    #
+    # notice_summaries: per-site NoticeSummary for the dot indicators
+    # shown in each site card. Skipped when no user is logged in (the
+    # login redirect fires before this runs in practice, but the guard
+    # is defensive).
     @app.route("/")
     def index() -> str:
-        return render_template("admin/index.html", version=__version__)
+        from bragi.core.admin_notices import collect_notices_for_index
+
+        user = current_user()
+        sites = accessible_sites_for(user)
+        notice_summaries = collect_notices_for_index(sites, user) if user is not None else {}
+        return render_template(
+            "admin/index.html",
+            version=__version__,
+            notice_summaries=notice_summaries,
+        )
 
     return app
 
