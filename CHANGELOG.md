@@ -4,6 +4,21 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.1] - 2026-06-07
+
+### Fixed
+
+- `_is_welcome_fallback` no longer fires on sites with a non-default
+  custom theme. The detector previously checked only `home_page_id`
+  + published-`post_index` presence, missing the case where a theme's
+  `resolve_home` hookspec owns `/` (e.g. bragi-theme-zelda's pause-menu
+  inventory page). The bad UX was self-inflicted: an
+  action_required-`dismissible=False` notice that the operator could
+  not hide. A heuristic suppress on non-default `site.theme` ships as
+  the v1.28.1 band-aid; the proper fix in v1.29.0 adds a new
+  `claims_root_route` hookspec for themes/plugins to opt in
+  declaratively. Closes #389.
+
 ## [1.28.0] - 2026-06-07
 
 ### Added
