@@ -98,3 +98,105 @@ def invalidate_admin_notices(site: Any) -> None:
     """
     site_id = int(site.id)
     _invalidation_epochs[site_id] = _invalidation_epochs.get(site_id, 0) + 1
+
+
+# ---------------------------------------------------------------------------
+# Severity rank used for sorting: lower number = higher priority.
+# The four values mirror ``AdminNotice.severity``'s Literal type.
+# ---------------------------------------------------------------------------
+
+_SEVERITY_RANK = {
+    "action_required": 0,
+    "warn": 1,
+    "status": 2,
+    "info": 3,
+}
+
+
+def collect_notices(
+    site: Any,
+    user: Any,
+    *,
+    pm: Any | None = None,
+    session: Any | None = None,
+) -> list[AdminNotice]:
+    """Aggregate per-site notices, filter operator dismissals, sort.
+
+    Calls ``pm.hook.admin_notices(site=site)`` (or the app's plugin
+    manager if ``pm`` is None), flattens the list-of-lists, queries
+    ``admin_notice_dismissals`` for this user x site x the notice
+    keys actually in play, drops dismissed notices (except those
+    marked ``dismissible=False`` -- those always survive), and sorts
+    the result by severity (action_required > warn > status > info).
+
+    The ``pm`` and ``session`` kwargs are test seams; production
+    callers leave them None and the function resolves them from the
+    current app + ``SessionLocal``.
+    """
+    pm = pm or _resolve_plugin_manager()
+    raw: list[list[AdminNotice]] = pm.hook.admin_notices(site=site)
+    flat = [n for sub in raw if sub for n in sub]
+
+    if not flat:
+        return []
+
+    session = session or _resolve_session()
+    dismissed_keys = _query_dismissed_keys(
+        session,
+        user_id=user.id,
+        site_id=site.id,
+        notice_keys=[n.key for n in flat],
+    )
+
+    visible = [n for n in flat if not n.dismissible or n.key not in dismissed_keys]
+    visible.sort(key=lambda n: _SEVERITY_RANK[n.severity])
+    return visible
+
+
+def _query_dismissed_keys(
+    session: Any,
+    *,
+    user_id: int,
+    site_id: int,
+    notice_keys: list[str],
+) -> set[str]:
+    """Return the subset of ``notice_keys`` currently dismissed for this user.
+
+    "Currently dismissed" means a row exists with ``dismissed_until``
+    NULL (permanent) OR ``dismissed_until > now`` (active snooze).
+    Expired snoozes (``dismissed_until`` in the past) are treated as
+    not-dismissed.
+
+    ``dismissed_until`` is stored as a naive UTC datetime (bragi's
+    convention; see ``bragi.core.time``), so the comparison uses
+    ``naive_utcnow()`` rather than a tz-aware value to stay consistent
+    with the column type.
+    """
+    from sqlalchemy import or_, select
+
+    from bragi.core.models.admin_notice_dismissal import AdminNoticeDismissal
+    from bragi.core.time import naive_utcnow
+
+    now = naive_utcnow()
+    stmt = select(AdminNoticeDismissal.notice_key).where(
+        AdminNoticeDismissal.user_id == user_id,
+        AdminNoticeDismissal.site_id == site_id,
+        AdminNoticeDismissal.notice_key.in_(notice_keys),
+        or_(
+            AdminNoticeDismissal.dismissed_until.is_(None),
+            AdminNoticeDismissal.dismissed_until > now,
+        ),
+    )
+    return set(session.scalars(stmt).all())
+
+
+def _resolve_plugin_manager() -> Any:
+    from flask import current_app
+
+    return current_app.extensions["plugin_manager"]
+
+
+def _resolve_session() -> Any:
+    from bragi.core.db import SessionLocal
+
+    return SessionLocal()
