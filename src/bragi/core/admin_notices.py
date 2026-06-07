@@ -208,6 +208,33 @@ def _query_dismissed_keys(
     return set(session.scalars(stmt).all())
 
 
+def collect_notices_for_index(
+    sites: list[Any],
+    user: Any,
+    *,
+    pm: Any | None = None,
+    session: Any | None = None,
+) -> dict[int, NoticeSummary]:
+    """Per-site notice summaries for the global admin index.
+
+    Returns a ``dict[site_id, NoticeSummary]``. Each summary respects
+    the current user's dismissals -- what the index dots show matches
+    what the operator will actually see on the per-site dashboard.
+    """
+    out: dict[int, NoticeSummary] = {}
+    for site in sites:
+        visible = collect_notices(site, user, pm=pm, session=session)
+        ar = sum(1 for n in visible if n.severity == "action_required")
+        wr = sum(1 for n in visible if n.severity == "warn")
+        st = sum(1 for n in visible if n.severity == "status")
+        out[int(site.id)] = NoticeSummary(
+            action_required_count=ar,
+            warn_count=wr,
+            status_count=st,
+        )
+    return out
+
+
 def _resolve_plugin_manager() -> Any:
     from flask import current_app
 
