@@ -18,6 +18,7 @@ from bragi.core.models.activitypub import (
     ActivityPubOutboxStatus,
     SiteKeypair,
 )
+from bragi.core.models.admin_notice_dismissal import AdminNoticeDismissal
 from bragi.core.models.analytics_event import AnalyticsEvent
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
@@ -49,6 +50,7 @@ __all__ = [
     "ActivityPubFollower",
     "ActivityPubOutbox",
     "ActivityPubOutboxStatus",
+    "AdminNoticeDismissal",
     "AnalyticsEvent",
     "Attachment",
     "AttachmentRendition",

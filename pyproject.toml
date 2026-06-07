@@ -3,7 +3,7 @@
 # is held by The Managarm Project's IDL. Import path stays `import bragi`.
 # See _claude/CONTEXT.md "PyPI publication as bragi-cms" for the rationale.
 name = "bragi-cms"
-version = "1.27.6"
+version = "1.28.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
@@ -76,6 +76,7 @@ api_tokens = "bragi.contrib.api_tokens.plugin"
 webmentions = "bragi.contrib.webmentions.plugin"
 activitypub = "bragi.contrib.activitypub.plugin"
 admin_imports = "bragi.contrib.admin_imports.plugin"
+admin_notices = "bragi.contrib.admin_notices.plugin"
 unsplash = "bragi.contrib.unsplash.plugin"
 
 # Poetry-specific build layout: src-layout package discovery. PEP

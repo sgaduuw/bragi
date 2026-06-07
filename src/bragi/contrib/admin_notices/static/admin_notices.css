@@ -1,0 +1,65 @@
+/* ---------- Notice cards (per-site dashboard) ---------- */
+.notice-card {
+  border: 1px solid #d0d7de;
+  border-left: 4px solid #d0d7de;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  background: #fff;
+}
+.notice-card--action-required { border-left-color: #d1242f; }
+.notice-card--warn            { border-left-color: #bf8700; }
+.notice-card--status          { border-left-color: #0969da; }
+.notice-card--info            { border-left-color: #57606a; }
+
+.notice-card__header {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.notice-card__icon {
+  display: inline-grid; place-items: center;
+  width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  background: #eaeef2; color: #57606a; font-weight: bold;
+}
+.notice-card--action-required .notice-card__icon { background: #d1242f; color: #fff; }
+.notice-card--warn .notice-card__icon            { background: #bf8700; color: #fff; }
+.notice-card__title { margin: 0; flex: 1; font-size: 1rem; }
+.notice-card__title a { color: inherit; text-decoration: none; }
+.notice-card__title a:hover { text-decoration: underline; }
+.notice-card__actions { display: flex; gap: 0.25rem; }
+.notice-card__snooze,
+.notice-card__dismiss {
+  border: 1px solid #d0d7de; background: #f6f8fa;
+  border-radius: 4px; padding: 0.2rem 0.5rem;
+  font-size: 0.75rem; cursor: pointer;
+}
+.notice-card__body { margin: 0.5rem 0; color: #57606a; }
+.notice-card__cta {
+  display: inline-block; margin-top: 0.5rem;
+  padding: 0.4rem 0.9rem; background: #1f883d; color: #fff;
+  border-radius: 6px; text-decoration: none; font-weight: 500;
+}
+.notice-card--action-required .notice-card__cta { background: #cf222e; }
+
+/* ---------- Notice rail (sticky on per-site pages) ---------- */
+.notice-rail {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff8c5;
+  border-bottom: 1px solid #d1bd06;
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+}
+.notice-rail__list { list-style: none; display: flex; gap: 1rem; margin: 0; padding: 0; }
+.notice-rail__item--action-required::before { content: "! "; color: #d1242f; font-weight: bold; }
+.notice-rail__item--status::before { content: "… "; color: #0969da; font-weight: bold; }
+.notice-rail__item a { color: inherit; }
+
+/* ---------- Notice dots (global admin index) ---------- */
+.notice-dots { display: inline-flex; gap: 0.2rem; vertical-align: middle; }
+.notice-dot {
+  display: inline-block;
+  width: 0.6rem; height: 0.6rem; border-radius: 50%;
+}
+.notice-dot--action-required { background: #d1242f; }
+.notice-dot--warn            { background: #bf8700; }

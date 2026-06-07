@@ -1,0 +1,19 @@
+{# Per-site coloured dots on the global admin index.
+
+   Expects in context:
+     - summary: NoticeSummary  (action_required_count, warn_count, status_count)
+#}
+{% if summary and (summary.action_required_count > 0 or summary.warn_count > 0) %}
+<span class="notice-dots">
+  {% if summary.action_required_count > 0 %}
+    <span class="notice-dot notice-dot--action-required"
+          title="{{ summary.action_required_count }} action required"
+          aria-label="{{ summary.action_required_count }} action required"></span>
+  {% endif %}
+  {% if summary.warn_count > 0 %}
+    <span class="notice-dot notice-dot--warn"
+          title="{{ summary.warn_count }} warnings"
+          aria-label="{{ summary.warn_count }} warnings"></span>
+  {% endif %}
+</span>
+{% endif %}

@@ -7,6 +7,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}bragi admin{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('admin_static.static', filename='admin-chrome.css') }}">
+  {# notices_css_url is injected by _inject_admin_notices (admin.py)
+     only when the admin_notices blueprint is registered. When the
+     plugin is disabled the variable is None and the link is omitted. #}
+  {% if notices_css_url %}
+    <link rel="stylesheet" href="{{ notices_css_url }}">
+  {% endif %}
   {% block head_extra %}{% endblock %}
 </head>
 <body>
@@ -17,6 +23,13 @@
         <div class="flash {{ category }}">{{ msg }}</div>
       {% endfor %}
     {% endwith %}
+    {# Sticky notice rail: shown on per-site pages (g.current_site is
+       set) when action_required or status notices are active. The
+       `ignore missing` guard keeps the page renderable when the
+       admin_notices plugin is disabled and the template is absent. #}
+    {% if g.current_site %}
+      {% include "admin/_notice_rail.html" ignore missing %}
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   {# htmx, CDN-hosted for v1. Self-hosted bundle (and a
