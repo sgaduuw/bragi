@@ -25,6 +25,21 @@ from bragi.core.time import naive_utcnow
 
 ALLOWED_SNOOZE_HOURS = {1, 4, 24, 168}
 
+# Separate static-only blueprint with no URL-variable prefix so that
+# url_for('admin_notices_static.static', filename='admin_notices.css')
+# resolves cleanly.  Flask wires a blueprint's `static` endpoint through
+# its url_prefix; a prefix that contains a variable (e.g. <site_slug>)
+# makes the static endpoint require that variable too, breaking url_for
+# calls made outside a per-site request context (e.g. in base.html's
+# <head>).  Splitting the static serve into its own prefix-free blueprint
+# is the standard Flask pattern for this shape.
+bp_static = Blueprint(
+    "admin_notices_static",
+    __name__,
+    static_folder="static",
+    static_url_path="/admin/notices/static",
+)
+
 bp = Blueprint(
     "admin_notices",
     __name__,

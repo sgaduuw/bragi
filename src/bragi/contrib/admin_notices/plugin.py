@@ -42,8 +42,17 @@ def admin_notices(site: Any) -> list[AdminNotice]:
 
 
 @hookimpl
-def register_admin_blueprint() -> Blueprint:
-    """Register the dismiss/snooze admin blueprint."""
-    from bragi.contrib.admin_notices.views import bp
+def register_admin_blueprint() -> list[Blueprint]:
+    """Register the dismiss/snooze routes and the static-asset blueprint.
 
-    return bp
+    Two blueprints are returned:
+    - ``admin_notices``: dismiss/snooze POST routes under
+      ``/admin/sites/<site_slug>/notices/``.
+    - ``admin_notices_static``: static-file serve at
+      ``/admin/notices/static/`` (no URL variable in the prefix, so
+      ``url_for('admin_notices_static.static', filename='...')`` resolves
+      cleanly from any request context, including base.html's <head>).
+    """
+    from bragi.contrib.admin_notices.views import bp, bp_static
+
+    return [bp, bp_static]

@@ -362,6 +362,43 @@ def create_admin_app() -> Flask:
             "current_user_display_name": session.get("user_display_name"),
         }
 
+    # Inject collect_notices into every per-site admin render so the
+    # sticky notice rail in base.html has its data available without
+    # each view having to pass it explicitly. Returns an empty list
+    # when there is no site context (global admin pages like Sites
+    # list, Sessions, Audit) or when no user is logged in, so the
+    # template can use `{% if notices %}` without extra guards.
+    #
+    # Also injects `notices_css_url`: the URL to admin_notices.css, or
+    # None when the plugin is not registered. base.html uses this to
+    # link the stylesheet without a hard-coded endpoint that would
+    # raise BuildError if the plugin were disabled.
+    @app.context_processor
+    def _inject_admin_notices() -> dict[str, object]:
+        from flask import current_app
+
+        from bragi.core.admin_notices import collect_notices
+
+        site = getattr(g, "current_site", None)
+        user = current_user()
+        notices: list[object] = []
+        if site is not None and user is not None:
+            notices = collect_notices(site, user)
+
+        # Build the CSS URL only when the admin_notices_static blueprint is
+        # active; url_for raises BuildError for unknown endpoints.
+        # admin_notices_static is registered alongside admin_notices by
+        # the plugin's register_admin_blueprint hookimpl; it carries a
+        # prefix-free static folder so the endpoint resolves without
+        # requiring a site_slug variable.
+        notices_css_url: str | None = None
+        if "admin_notices_static" in current_app.blueprints:
+            from flask import url_for as _url_for
+
+            notices_css_url = _url_for("admin_notices_static.static", filename="admin_notices.css")
+
+        return {"notices": notices, "notices_css_url": notices_css_url}
+
     # Index renders through the admin base template so the nav,
     # logout button, and flash slot show up. The page itself is a
     # sections grid derived from `nav_items`, so it self-updates
