@@ -970,15 +970,21 @@ def bulk_delete_posts(site_slug: str) -> ResponseReturnValue:
     Form-encoded POST with repeated `ids` fields. Returns the
     refreshed list partial on htmx; redirects to the list on cold
     POST. See _claude/specs/2026-06-08-bulk-delete-design.md.
+
+    The empty-ids guard sits INSIDE the session block so the auth
+    check always runs first. An author-role user posting an empty
+    form must get 403, not the warning flash, to keep the role
+    boundary consistent with every other write route in this file.
     """
     ids = request.form.getlist("ids", type=int)
-    if not ids:
-        flash("Select at least one post to delete.", "warning")
-        return _bulk_list_response(site_slug)
-
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
+
+        if not ids:
+            flash("Select at least one post to delete.", "warning")
+            return _bulk_list_response(site_slug)
+
         try:
             result = bulk_delete(
                 db=db,

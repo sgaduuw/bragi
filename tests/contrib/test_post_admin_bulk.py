@@ -18,6 +18,7 @@ from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from bragi.core.models.user_site_role import UserSiteRole
 from tests.conftest import csrf_token
 
 EMAIL = "ada@example.com"
@@ -194,3 +195,62 @@ def test_bulk_delete_over_cap_flashes_warning_and_no_writes(
     # Nothing was deleted.
     with db_session_factory() as db:
         assert len(db.execute(select(Post).where(Post.id.in_(ids))).scalars().all()) == 3
+
+
+AUTHOR_EMAIL = "author@example.com"
+
+
+@pytest.fixture
+def admin_app_with_author(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> Iterator[Flask]:
+    """Admin app seeded with one Site, a separate owner, and an
+    author-role user (not editor). Used to verify that auth-gated
+    routes reject sub-editor users before any data-path logic runs.
+    """
+    site_owner = User(email="owner@example.com", display_name="Owner", is_active=True)
+    author = User(email=AUTHOR_EMAIL, display_name="Author", is_active=True)
+    db_session.add_all([site_owner, author])
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=site_owner.id,
+    )
+    db_session.add(site)
+    db_session.flush()
+    db_session.add(LocalCredential(user_id=author.id, password_hash=hash_password(PASSWORD)))
+    db_session.add(UserSiteRole(user_id=author.id, site_id=site.id, role="author"))
+    db_session.commit()
+    yield create_admin_app()
+
+
+def test_bulk_delete_empty_form_requires_editor_role(
+    admin_app_with_author: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """The empty-ids early return must come AFTER the auth check.
+
+    An author-role user POSTing an empty form should be rejected by
+    require_role (403) rather than receiving the warning flash. This
+    pins the ordering fix: auth check before input validation.
+    """
+    client = admin_app_with_author.test_client()
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": AUTHOR_EMAIL, "password": PASSWORD, "_csrf_token": token},
+    )
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site_slug = site.slug
+
+    response = client.post(
+        f"/admin/sites/{site_slug}/posts/bulk-delete",
+        data={"_csrf_token": csrf_token(client, path=f"/admin/sites/{site_slug}/posts/")},
+    )
+    assert response.status_code == 403  # type: ignore[union-attr]
