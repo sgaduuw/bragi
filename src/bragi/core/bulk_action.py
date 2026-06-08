@@ -64,8 +64,18 @@ type BulkOutcome = Ok | Skipped
 
 @dataclass(frozen=True)
 class BulkResult:
+    """Accumulated outcome of a bulk_delete call.
+
+    Returned to the caller so it can flash appropriate messages and
+    queue any post-commit work (cache purge, audit row) without
+    re-querying the database.
+    """
+
+    # Snapshots of rows that were successfully deleted (per-row callable returned Ok).
     deleted_rows: list[_DeletedItem]
+    # (title, reason) pairs for rows the per-row callable refused (Skipped).
     skipped: list[tuple[str, str]]
+    # Count of ids the SELECT did not resolve: wrong site or already gone.
     missing_count: int
 
 
@@ -86,16 +96,20 @@ def bulk_delete(
     """Run `delete_one` over every row in `ids` scoped to `site`.
 
     Returns a BulkResult; caller is responsible for committing.
+
+    Rows are deleted in ascending id order. This is the only ordering guarantee.
     """
     if len(ids) > max_batch:
         raise BulkLimitExceeded(f"Bulk delete is limited to {max_batch} items per request.")
 
     rows = (
         db.execute(
-            select(model).where(
+            select(model)
+            .where(
                 model.id.in_(ids),  # type: ignore[attr-defined]
                 model.site_id == site.id,  # type: ignore[attr-defined]
             )
+            .order_by(model.id)  # type: ignore[attr-defined]
         )
         .scalars()
         .all()
