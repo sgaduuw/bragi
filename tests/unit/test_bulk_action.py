@@ -7,7 +7,8 @@ because it issues one SELECT; everything else is in-process.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from typing import Any
 
 import pytest
 from sqlalchemy import Column, ForeignKey, Integer, String, create_engine
@@ -20,6 +21,7 @@ from bragi.core.bulk_action import (
     Skipped,
     _DeletedItem,
     bulk_delete,
+    format_bulk_result,
 )
 
 
@@ -140,3 +142,79 @@ def test_cross_site_and_missing_ids_count_as_missing(db: Session) -> None:
     assert [item.id for item in result.deleted_rows] == [11]
     assert result.skipped == []
     assert result.missing_count == 2  # 99 (wrong site) + 999 (does not exist)
+
+
+# ---------------------------------------------------------------------------
+# format_bulk_result tests
+# ---------------------------------------------------------------------------
+
+
+def _result(
+    deleted: int = 0,
+    skipped: Sequence[tuple[str, str]] = (),
+) -> Any:
+    return type(
+        "R",
+        (),
+        {
+            "deleted_rows": [_DeletedItem(id=i, title=f"t{i}") for i in range(deleted)],
+            "skipped": list(skipped),
+            "missing_count": 0,
+        },
+    )()
+
+
+def test_format_all_deleted_no_skips() -> None:
+    result = _result(deleted=8)
+    assert format_bulk_result(result, singular="post", plural="posts") == ("Deleted 8 posts.")
+
+
+def test_format_one_deleted_singular_label() -> None:
+    result = _result(deleted=1)
+    assert format_bulk_result(result, singular="page", plural="pages") == ("Deleted 1 page.")
+
+
+def test_format_mixed_skip_under_truncation() -> None:
+    result = _result(deleted=2, skipped=[("About", "has 3 children")])
+    assert format_bulk_result(result, singular="page", plural="pages") == (
+        'Deleted 2 pages. Skipped 1: "About" (has 3 children).'
+    )
+
+
+def test_format_mixed_skip_at_truncation_boundary() -> None:
+    result = _result(
+        deleted=5,
+        skipped=[
+            ("About", "has 3 children"),
+            ("Docs", "has 5 children"),
+            ("Help", "has 1 child"),
+        ],
+    )
+    assert format_bulk_result(result, singular="page", plural="pages") == (
+        'Deleted 5 pages. Skipped 3: "About" (has 3 children), '
+        '"Docs" (has 5 children), "Help" (has 1 child).'
+    )
+
+
+def test_format_mixed_skip_over_truncation_boundary() -> None:
+    result = _result(
+        deleted=5,
+        skipped=[
+            ("About", "has 3 children"),
+            ("Docs", "has 5 children"),
+            ("Help", "has 1 child"),
+            ("Faq", "has 2 children"),
+            ("News", "has 4 children"),
+        ],
+    )
+    assert format_bulk_result(result, singular="page", plural="pages") == (
+        'Deleted 5 pages. Skipped 5: "About" (has 3 children), '
+        '"Docs" (has 5 children), "Help" (has 1 child), and 2 more.'
+    )
+
+
+def test_format_zero_deleted_with_skips_uses_distinct_phrasing() -> None:
+    result = _result(deleted=0, skipped=[("About", "has 3 children")])
+    assert format_bulk_result(result, singular="page", plural="pages") == (
+        '0 pages deleted. Skipped 1: "About" (has 3 children).'
+    )

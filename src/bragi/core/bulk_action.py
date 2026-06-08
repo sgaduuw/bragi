@@ -127,3 +127,30 @@ def bulk_delete(
             skipped.append((outcome.title, outcome.reason))
 
     return BulkResult(deleted_rows=deleted, skipped=skipped, missing_count=missing)
+
+
+_SKIP_TRUNCATE = 3
+
+
+def format_bulk_result(result: BulkResult, *, singular: str, plural: str) -> str:
+    """Produce the operator-facing flash string for a bulk-delete result.
+
+    Singular/plural labels are passed in so this is content-type
+    agnostic; the routes choose them. Skips beyond the first three are
+    summarised as "and N more". `missing_count` is intentionally
+    omitted: the operator already lost the race for those rows and a
+    flash about them is noise.
+    """
+    n = len(result.deleted_rows)
+    label = singular if n == 1 else plural
+    head = f"Deleted {n} {label}." if n > 0 else f"0 {plural} deleted."
+
+    if not result.skipped:
+        return head
+
+    visible = result.skipped[:_SKIP_TRUNCATE]
+    parts = [f'"{title}" ({reason})' for title, reason in visible]
+    if len(result.skipped) > _SKIP_TRUNCATE:
+        parts.append(f"and {len(result.skipped) - _SKIP_TRUNCATE} more")
+    tail = f" Skipped {len(result.skipped)}: " + ", ".join(parts) + "."
+    return head + tail
