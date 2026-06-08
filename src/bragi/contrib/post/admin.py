@@ -34,7 +34,14 @@ from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.audit import AuditAction, audit
-from bragi.core.bulk_action import BulkOutcome, DeletedItem, Ok
+from bragi.core.bulk_action import (
+    BulkLimitExceeded,
+    BulkOutcome,
+    DeletedItem,
+    Ok,
+    bulk_delete,
+    format_bulk_result,
+)
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
@@ -954,6 +961,62 @@ def delete_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         },
     )
     return redirect(url_for("post_admin.list_posts"))
+
+
+@bp.route("/bulk-delete", methods=["POST"])
+def bulk_delete_posts(site_slug: str) -> ResponseReturnValue:
+    """Delete a batch of posts. Best-effort partial-failure.
+
+    Form-encoded POST with repeated `ids` fields. Returns the
+    refreshed list partial on htmx; redirects to the list on cold
+    POST. See _claude/specs/2026-06-08-bulk-delete-design.md.
+    """
+    ids = request.form.getlist("ids", type=int)
+    if not ids:
+        flash("Select at least one post to delete.", "warning")
+        return _bulk_list_response(site_slug)
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        try:
+            result = bulk_delete(
+                db=db,
+                site=site,
+                model=Post,
+                ids=ids,
+                delete_one=_delete_one_post,
+            )
+        except BulkLimitExceeded as exc:
+            flash(str(exc), "warning")
+            return _bulk_list_response(site_slug)
+
+        db.commit()
+        pm = current_app.extensions["plugin_manager"]
+        for row in result.deleted_rows:
+            pm.hook.on_cache_purge(scope="post", key=str(row.id))
+
+    flash(format_bulk_result(result, singular="post", plural="posts"), "success")
+    for row in result.deleted_rows:
+        audit(
+            AuditAction.POST_DELETED,
+            target_type="post",
+            target_id=row.id,
+            site_id=site.id,
+            extra={
+                "slug": row.extras["slug"],
+                "title": row.title,
+                "via": "bulk",
+            },
+        )
+    return _bulk_list_response(site_slug)
+
+
+def _bulk_list_response(site_slug: str) -> ResponseReturnValue:
+    """Shared post-bulk dispatch: list partial on htmx, redirect on cold."""
+    if is_htmx():
+        return list_posts(site_slug)
+    return redirect(url_for("post_admin.list_posts", site_slug=site_slug))
 
 
 # ============================================================
