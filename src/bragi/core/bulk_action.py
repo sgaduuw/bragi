@@ -18,26 +18,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, TypeVar, runtime_checkable
+from typing import Any, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-
-@runtime_checkable
-class _HasIdAndSiteId(Protocol):
-    """Structural minimum required by bulk_delete on each row type.
-
-    Any SQLAlchemy model that carries `id` and `site_id` satisfies this
-    protocol. The Protocol bound lets mypy verify attribute access on `T`
-    without requiring a concrete base class.
-    """
-
-    id: int
-    site_id: int
-
-
-T = TypeVar("T", bound=_HasIdAndSiteId)
+# Unbound TypeVar: SQLAlchemy ORM models expose `id` and `site_id` as
+# InstrumentedAttribute descriptors at the class level, not plain `int`
+# values, so a structural Protocol bound would fail mypy's type-var check
+# on every call site. The attribute accesses below carry `type: ignore`
+# comments instead, which is the idiomatic SQLAlchemy pattern.
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -103,13 +94,13 @@ def bulk_delete(
         db.execute(
             select(model).where(
                 model.id.in_(ids),  # type: ignore[attr-defined]
-                model.site_id == site.id,
+                model.site_id == site.id,  # type: ignore[attr-defined]
             )
         )
         .scalars()
         .all()
     )
-    found_ids = {r.id for r in rows}
+    found_ids = {r.id for r in rows}  # type: ignore[attr-defined]
     missing = len(set(ids) - found_ids)
 
     deleted: list[_DeletedItem] = []
