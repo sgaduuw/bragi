@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.audit import AuditAction, audit
-from bragi.core.bulk_action import BulkOutcome, Ok, _DeletedItem
+from bragi.core.bulk_action import BulkOutcome, DeletedItem, Ok
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
@@ -917,7 +917,7 @@ def _delete_one_post(db: Session, site: Site, post: Post) -> BulkOutcome:
     """
     pm = current_app.extensions["plugin_manager"]
     pm.hook.on_post_deleted(item=post, session=db)
-    captured = _DeletedItem(id=post.id, title=post.title, extras={"slug": post.slug})
+    captured = DeletedItem(id=post.id, title=post.title, extras={"slug": post.slug})
     db.delete(post)
     return Ok(captured)
 

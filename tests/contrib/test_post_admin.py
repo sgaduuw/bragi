@@ -488,7 +488,7 @@ class _CachePurgeRecorder:
 @pytest.fixture
 def purge_recorder_factory(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
-) -> Iterator[_CachePurgeRecorder]:
+) -> Iterator[list[_CachePurgeRecorder]]:
     """Fixture that returns the recorder AFTER post_id is known.
 
     Yields the recorder object; callers must set it up via the

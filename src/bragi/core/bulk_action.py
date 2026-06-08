@@ -32,7 +32,7 @@ T = TypeVar("T")
 
 
 @dataclass(frozen=True)
-class _DeletedItem:
+class DeletedItem:
     """Snapshot of a row taken before delete, captured for post-commit
     use (audit row, cache purge key) when the live ORM object is
     detached/expired."""
@@ -46,7 +46,7 @@ class _DeletedItem:
 class Ok:
     """A row that was deleted successfully."""
 
-    item: _DeletedItem
+    item: DeletedItem
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,7 @@ class BulkResult:
     """
 
     # Snapshots of rows that were successfully deleted (per-row callable returned Ok).
-    deleted_rows: list[_DeletedItem]
+    deleted_rows: list[DeletedItem]
     # (title, reason) pairs for rows the per-row callable refused (Skipped).
     skipped: list[tuple[str, str]]
     # Count of ids the SELECT did not resolve: wrong site or already gone.
@@ -117,7 +117,7 @@ def bulk_delete(
     found_ids = {r.id for r in rows}  # type: ignore[attr-defined]
     missing = len(set(ids) - found_ids)
 
-    deleted: list[_DeletedItem] = []
+    deleted: list[DeletedItem] = []
     skipped: list[tuple[str, str]] = []
     for row in rows:
         outcome = delete_one(db, site, row)

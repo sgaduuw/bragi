@@ -17,9 +17,9 @@ from sqlalchemy.orm import DeclarativeBase, Session
 from bragi.core.bulk_action import (
     BulkLimitExceeded,
     BulkOutcome,
+    DeletedItem,
     Ok,
     Skipped,
-    _DeletedItem,
     bulk_delete,
     format_bulk_result,
 )
@@ -58,7 +58,7 @@ def _delete_ok(db: Session, site: _Site, row: _Thing) -> BulkOutcome:
     # row.id / row.title are InstrumentedAttribute at the class level but
     # resolve to plain values at the instance level; mypy sees Column types
     # on the test-local DeclarativeBase models.
-    return Ok(_DeletedItem(id=row.id, title=row.title))  # type: ignore[arg-type]
+    return Ok(DeletedItem(id=row.id, title=row.title))  # type: ignore[arg-type]
 
 
 def test_happy_path_deletes_all_rows(db: Session) -> None:
@@ -85,7 +85,7 @@ def _delete_skip_even(db: Session, site: _Site, row: _Thing) -> BulkOutcome:
     if row.id % 2 == 0:
         return Skipped(row.title, f"id {row.id} is even")  # type: ignore[arg-type]
     db.delete(row)
-    return Ok(_DeletedItem(id=row.id, title=row.title))  # type: ignore[arg-type]
+    return Ok(DeletedItem(id=row.id, title=row.title))  # type: ignore[arg-type]
 
 
 def test_skipped_outcomes_accumulate(db: Session) -> None:
@@ -157,7 +157,7 @@ def _result(
         "R",
         (),
         {
-            "deleted_rows": [_DeletedItem(id=i, title=f"t{i}") for i in range(deleted)],
+            "deleted_rows": [DeletedItem(id=i, title=f"t{i}") for i in range(deleted)],
             "skipped": list(skipped),
             "missing_count": 0,
         },
