@@ -3774,3 +3774,32 @@ def test_list_pagination_links_render_when_more_pages(
     body = resp.get_data(as_text=True)
     assert "Previous" in body
     assert "page=1" in body
+
+
+# --------------------------- htmx dispatch (T10) ---------------------------
+
+
+def test_list_attachments_htmx_returns_partial(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """Cold load returns the full admin page; HX-Request returns the
+    list partial only (wrapped in #attachments-list-table)."""
+    client = admin_app.test_client()
+    _login(client)
+
+    cold = client.get("/admin/sites/blog/attachments/")
+    assert cold.status_code == 200
+    assert b'id="attachments-list-table"' in cold.data
+    # Full page includes the admin chrome from base.html.
+    assert b"<html" in cold.data
+
+    hx = client.get(
+        "/admin/sites/blog/attachments/",
+        headers={"HX-Request": "true"},
+    )
+    assert hx.status_code == 200
+    assert b'id="attachments-list-table"' in hx.data
+    # Partial does not include the page chrome.
+    assert b"<html" not in hx.data

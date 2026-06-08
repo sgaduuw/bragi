@@ -209,8 +209,9 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         done_rendition_count = rendition_status_counts.get("done", 0)
         failed_rendition_count = rendition_status_counts.get("failed", 0)
 
-    return render_template(
-        "admin/attachments_list.html",
+    # htmx dispatch: return just the table partial for hx-get
+    # refreshes; full page for cold loads (and crawlers).
+    context = dict(
         rows=rows,
         page=page,
         has_more=has_more,
@@ -221,6 +222,9 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         failed_rendition_count=failed_rendition_count,
         thumb_storage_key_by_id=thumb_storage_key_by_id,
     )
+    if is_htmx():
+        return render_template("admin/_attachments_list_table.html", **context)
+    return render_template("admin/attachments_list.html", **context)
 
 
 @bp.route("/file/<path:storage_key>", methods=["GET"])
