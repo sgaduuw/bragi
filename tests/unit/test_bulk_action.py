@@ -14,8 +14,10 @@ from sqlalchemy import Column, ForeignKey, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session
 
 from bragi.core.bulk_action import (
+    BulkLimitExceeded,
     BulkOutcome,
     Ok,
+    Skipped,
     _DeletedItem,
     bulk_delete,
 )
@@ -75,3 +77,66 @@ def test_happy_path_deletes_all_rows(db: Session) -> None:
     assert [item.title for item in result.deleted_rows] == ["t10", "t20", "t30"]
     assert result.skipped == []
     assert result.missing_count == 0
+
+
+def _delete_skip_even(db: Session, site: _Site, row: _Thing) -> BulkOutcome:
+    if row.id % 2 == 0:
+        return Skipped(row.title, f"id {row.id} is even")  # type: ignore[arg-type]
+    db.delete(row)
+    return Ok(_DeletedItem(id=row.id, title=row.title))  # type: ignore[arg-type]
+
+
+def test_skipped_outcomes_accumulate(db: Session) -> None:
+    site = db.get(_Site, 1)
+    assert site is not None  # seeded in the db fixture
+    db.add_all([_Thing(id=i, title=f"t{i}", site_id=site.id) for i in (1, 2, 3, 4)])
+    db.flush()
+
+    result = bulk_delete(
+        db=db,
+        site=site,
+        model=_Thing,
+        ids=[1, 2, 3, 4],
+        delete_one=_delete_skip_even,
+    )
+
+    assert [item.id for item in result.deleted_rows] == [1, 3]
+    assert result.skipped == [("t2", "id 2 is even"), ("t4", "id 4 is even")]
+    assert result.missing_count == 0
+
+
+def test_over_max_batch_raises(db: Session) -> None:
+    site = db.get(_Site, 1)
+    assert site is not None  # seeded in the db fixture
+    with pytest.raises(BulkLimitExceeded) as exc:
+        bulk_delete(
+            db=db,
+            site=site,
+            model=_Thing,
+            ids=list(range(1, 11)),
+            delete_one=_delete_ok,
+            max_batch=5,
+        )
+    assert "5" in str(exc.value)
+
+
+def test_cross_site_and_missing_ids_count_as_missing(db: Session) -> None:
+    other_site = _Site(id=2, slug="b")
+    db.add(other_site)
+    db.add(_Thing(id=99, title="other-site", site_id=other_site.id))
+    db.add(_Thing(id=11, title="ours", site_id=1))
+    db.flush()
+    site = db.get(_Site, 1)
+    assert site is not None  # seeded in the db fixture
+
+    result = bulk_delete(
+        db=db,
+        site=site,
+        model=_Thing,
+        ids=[11, 99, 999],
+        delete_one=_delete_ok,
+    )
+
+    assert [item.id for item in result.deleted_rows] == [11]
+    assert result.skipped == []
+    assert result.missing_count == 2  # 99 (wrong site) + 999 (does not exist)
