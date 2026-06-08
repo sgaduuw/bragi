@@ -47,11 +47,15 @@ from bragi.contrib.attachments.delivery import build_attachment_response
 from bragi.contrib.attachments.service import create_attachment_from_bytes
 from bragi.core.audit import audit
 from bragi.core.bulk_action import (
+    BulkLimitExceeded,
     BulkOutcome,
     DeletedItem,
     Ok,
+    bulk_delete,
+    format_bulk_result,
 )
 from bragi.core.db import SessionLocal
+from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.site import Site
@@ -748,3 +752,87 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
     )
     flash(f"Deleted {deleted.title}.", "success")
     return redirect(url_for("attachment_admin.list_attachments"))
+
+
+@bp.route("/bulk-delete", methods=["POST"])
+def bulk_delete_attachments(site_slug: str) -> ResponseReturnValue:
+    """Delete a batch of attachments. Best-effort partial-failure.
+
+    The writer lock is held continuously from the first per-row
+    flush through the single batch commit; `_delete_one_attachment`
+    runs its refcount check and `backend.remove` BETWEEN its
+    `db.flush()` and the caller's `db.commit()`, so a concurrent
+    upload of the same content-addressed bytes cannot land an
+    INSERT against any storage_key between any per-row refcount
+    check and its `backend.remove` call. See
+    `_delete_one_attachment`'s docstring for the #171 rationale;
+    the "caller commits once" rule extends that lock-window-collapse
+    property across N rows automatically.
+
+    Each per-row callable queries the current `Attachment` /
+    `AttachmentRendition` state from `db`, which reflects all
+    earlier flushes in this batch AND any rows outside the batch.
+    A surviving (not-in-batch) Attachment row that references a
+    storage_key still in use is therefore visible to the refcount
+    check, so its bytes survive on disk; an unshared key in the
+    batch is unlinked.
+
+    Auth precedes the empty-ids early return (T5 review fix): an
+    author-role user POSTing an empty form must get 403, not the
+    warning flash.
+
+    No `on_cache_purge` fires: attachments don't fire a cache-purge
+    hook today (pre-existing pattern; spec says to leave that alone).
+    """
+    ids = request.form.getlist("ids", type=int)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+
+        if not ids:
+            flash("Select at least one attachment to delete.", "warning")
+            return _bulk_list_response(site_slug)
+
+        try:
+            result = bulk_delete(
+                db=db,
+                site=site,
+                model=Attachment,
+                ids=ids,
+                delete_one=_delete_one_attachment,
+            )
+        except BulkLimitExceeded as exc:
+            flash(str(exc), "warning")
+            return _bulk_list_response(site_slug)
+
+        db.commit()
+
+    flash(
+        format_bulk_result(result, singular="attachment", plural="attachments"),
+        "success",
+    )
+    for row in result.deleted_rows:
+        audit(
+            "attachment.deleted",
+            target_type="attachment",
+            target_id=row.id,
+            site_id=site.id,
+            extra={
+                "filename": row.title,
+                "storage_key": row.extras["storage_key"],
+                "renditions": row.extras["renditions"],
+                "via": "bulk",
+            },
+        )
+    return _bulk_list_response(site_slug)
+
+
+def _bulk_list_response(site_slug: str) -> ResponseReturnValue:
+    """Per-contrib bulk dispatch: list partial on htmx, redirect on cold.
+
+    Independent of the post / page versions; each contrib owns its
+    own list dispatch per the contrib-boundary rule.
+    """
+    if is_htmx():
+        return list_attachments(site_slug)
+    return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))
