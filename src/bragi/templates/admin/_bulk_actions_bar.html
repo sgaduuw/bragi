@@ -1,0 +1,48 @@
+{# Bulk actions bar.
+
+   Renders the Select button (default state) and the in-mode controls
+   (Cancel / Select-all / Delete-N) plus the confirmation <dialog>.
+   The JS module (admin/bulk_select.js) toggles the .select-mode
+   class on `wrapper_id` and drives the rest.
+
+   Parameters (passed via `with` on include):
+     bulk_action_url : POST endpoint
+     singular        : "post" / "page" / "attachment"
+     plural          : "posts" / "pages" / "attachments"
+     wrapper_id      : list-table wrapper id (e.g. "post-list-table")
+#}
+<div class="bulk-actions-bar" data-wrapper="#{{ wrapper_id }}">
+  <button type="button" class="btn secondary bulk-select-enter">Select</button>
+
+  <span class="bulk-select-controls" hidden>
+    <button type="button" class="btn secondary bulk-select-cancel">Cancel</button>
+    <button type="button" class="btn secondary bulk-select-all">
+      Select all on this page
+    </button>
+    <button type="button" class="btn danger bulk-select-delete" disabled>
+      Delete (<span class="bulk-count">0</span>)
+    </button>
+    <span class="bulk-mode-indicator"><span class="bulk-count">0</span> selected</span>
+  </span>
+
+  <dialog class="bulk-confirm-dialog">
+    <form method="dialog" class="bulk-confirm-form">
+      <h2>Delete <span class="bulk-count">0</span> {{ plural }}?</h2>
+      <ul class="bulk-confirm-titles"></ul>
+      <p class="bulk-confirm-more" hidden>…and <span class="bulk-more-count">0</span> more.</p>
+      <p><strong>This cannot be undone.</strong></p>
+      <menu>
+        <button type="button" class="btn secondary bulk-confirm-cancel">Cancel</button>
+        <button type="button" class="btn danger bulk-confirm-confirm">Delete</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <form method="post"
+        action="{{ bulk_action_url }}"
+        class="bulk-submit-form"
+        hidden>
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    {# JS populates one <input name="ids"> per selected row at confirm time #}
+  </form>
+</div>
