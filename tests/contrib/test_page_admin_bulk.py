@@ -30,16 +30,24 @@ def _make_pages(
     site_id: int,
     n: int,
     parent_id: int | None = None,
+    slug_prefix: str = "p",
 ) -> list[Page]:
-    """Create n pages on site_id. author_id is required (NOT NULL)."""
+    """Create n pages on site_id. author_id is required (NOT NULL).
+
+    Pass slug_prefix to namespace batches and avoid collisions when
+    multiple _make_pages calls share the same parent_id (e.g.
+    parent_id=None) in one test.
+    """
     owner_id = db.execute(select(Site.owner_user_id).where(Site.id == site_id)).scalar_one()
     out: list[Page] = []
     for i in range(n):
         page = Page(
             site_id=site_id,
             title=f"P{i}",
-            # Slug includes parent_id to avoid (site_id, parent_id, slug) collisions.
-            slug=f"p{i}-{parent_id or 'root'}",
+            # Slug combines prefix, index, and parent_id so that
+            # (site_id, parent_id, slug) stays unique even when multiple
+            # batches are created with the same parent_id in one test.
+            slug=f"{slug_prefix}{i}-{parent_id or 'root'}",
             status=PageStatus.PUBLISHED,
             parent_id=parent_id,
             author_id=owner_id,
@@ -153,10 +161,10 @@ def test_bulk_delete_mixed_with_children_guard(
     """
     with db_session_factory() as db:
         site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
-        parent = _make_pages(db, site_id, 1)[0]
+        parent = _make_pages(db, site_id, 1, slug_prefix="parent")[0]
         db.flush()
         children = _make_pages(db, site_id, 2, parent_id=parent.id)
-        deletable = _make_pages(db, site_id, 2)
+        deletable = _make_pages(db, site_id, 2, slug_prefix="deletable")
         db.commit()
         ids = [parent.id, deletable[0].id, deletable[1].id]  # type: ignore[attr-defined]
         parent_id: int = parent.id  # type: ignore[assignment]
