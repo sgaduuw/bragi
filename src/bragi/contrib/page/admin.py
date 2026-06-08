@@ -35,11 +35,13 @@ from sqlalchemy.orm import Session
 from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.audit import AuditAction, audit
 from bragi.core.bulk_action import (
+    BulkLimitExceeded,
     BulkOutcome,
     BulkResult,
     DeletedItem,
     Ok,
     Skipped,
+    bulk_delete,
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
@@ -968,6 +970,65 @@ def delete_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         },
     )
     return redirect(url_for("page_admin.list_pages"))
+
+
+@bp.route("/bulk-delete", methods=["POST"])
+def bulk_delete_pages(site_slug: str) -> ResponseReturnValue:
+    """Delete a batch of pages. Best-effort partial-failure.
+
+    Children-guarded pages are skipped with a per-row reason; the
+    helper handles the loop. The empty-ids early return is INSIDE the
+    `with SessionLocal()` block, after require_role, so the auth gate
+    runs before the no-op shortcut (same ordering fix applied in T5
+    post bulk-delete review).
+    """
+    ids = request.form.getlist("ids", type=int)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+
+        if not ids:
+            flash("Select at least one page to delete.", "warning")
+            return _bulk_list_response(site_slug)
+
+        try:
+            result = bulk_delete(
+                db=db,
+                site=site,
+                model=Page,
+                ids=ids,
+                delete_one=_delete_one_page,
+            )
+        except BulkLimitExceeded as exc:
+            flash(str(exc), "warning")
+            return _bulk_list_response(site_slug)
+
+        db.commit()
+        pm = current_app.extensions["plugin_manager"]
+        for row in result.deleted_rows:
+            pm.hook.on_cache_purge(scope="page", key=str(row.id))
+
+    flash(format_bulk_result(result, singular="page", plural="pages"), "success")
+    for row in result.deleted_rows:
+        audit(
+            AuditAction.POST_DELETED,
+            target_type="page",
+            target_id=row.id,
+            site_id=site.id,
+            extra={
+                "slug": row.extras["slug"],
+                "title": row.title,
+                "via": "bulk",
+            },
+        )
+    return _bulk_list_response(site_slug)
+
+
+def _bulk_list_response(site_slug: str) -> ResponseReturnValue:
+    """Shared page-bulk dispatch: list partial on htmx, redirect on cold."""
+    if is_htmx():
+        return list_pages(site_slug)
+    return redirect(url_for("page_admin.list_pages", site_slug=site_slug))
 
 
 # ============================================================
