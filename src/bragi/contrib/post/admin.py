@@ -34,11 +34,13 @@ from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.audit import AuditAction, audit
+from bragi.core.bulk_action import BulkOutcome, Ok, _DeletedItem
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
+from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.permissions import (
     has_role,
@@ -905,6 +907,21 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
     )
 
 
+def _delete_one_post(db: Session, site: Site, post: Post) -> BulkOutcome:
+    """Delete one post in the current transaction.
+
+    Fires on_post_deleted BEFORE db.delete so subscribers see the row
+    in-session (tombstone-redirect emitters, slug-to-410 mappers).
+    Returns Ok with the captured title/slug; never returns Skipped
+    today (posts have no per-row delete guard).
+    """
+    pm = current_app.extensions["plugin_manager"]
+    pm.hook.on_post_deleted(item=post, session=db)
+    captured = _DeletedItem(id=post.id, title=post.title, extras={"slug": post.slug})
+    db.delete(post)
+    return Ok(captured)
+
+
 @bp.route("/<int:post_id>/delete", methods=["POST"])
 def delete_post(site_slug: str, post_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
@@ -913,25 +930,28 @@ def delete_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         if post is None or post.site_id != site.id:
             abort(404)
         require_role("editor", post.site_id)
-        title = post.title
-        deleted_site_id = post.site_id
-        deleted_slug = post.slug
-        # Fire on_post_deleted BEFORE commit so subscribers see the
-        # row in-session (e.g. for emitting a tombstone redirect
-        # row, computing the slug to 410, etc).
-        pm = current_app.extensions["plugin_manager"]
-        pm.hook.on_post_deleted(item=post, session=db)
-        db.delete(post)
-        db.commit()
-        pm.hook.on_cache_purge(scope="post", key=str(post_id))
-        flash(f"Post '{title}' deleted.", "success")
 
+        outcome = _delete_one_post(db, site, post)
+        assert isinstance(outcome, Ok)  # posts have no skip path today
+        deleted = outcome.item
+        db.commit()
+
+        # Cache purge AFTER commit so the hook reads a settled DB.
+        # See spec section on cache-purge-after-commit alignment.
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_cache_purge(scope="post", key=str(deleted.id))
+
+    flash(f"Post '{deleted.title}' deleted.", "success")
     audit(
         AuditAction.POST_DELETED,
         target_type="post",
-        target_id=post_id,
-        site_id=deleted_site_id,
-        extra={"slug": deleted_slug, "title": title},
+        target_id=deleted.id,
+        site_id=site.id,
+        extra={
+            "slug": deleted.extras["slug"],
+            "title": deleted.title,
+            "via": "single",
+        },
     )
     return redirect(url_for("post_admin.list_posts"))
 
