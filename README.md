@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.29.0 (2026-06-07).
+**Latest release:** 1.30.0 (2026-06-09).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -341,7 +341,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.29.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.30.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -510,7 +510,7 @@ bragi/
 │       └── webmentions/        # indieweb send + receive + admin moderation
 ├── alembic/                    # alembic.ini + dev shim (script_location = bragi:alembic)
 ├── docker/                     # admin.Dockerfile, delivery.Dockerfile
-├── .github/workflows/          # ci.yml, docker.yml, release.yml
+├── .github/workflows/          # ci.yml, release.yml
 └── tests/
     ├── unit/                   # pure logic, no DB
     ├── contrib/                # one file per built-in plugin
@@ -678,14 +678,17 @@ runtime via `importlib.metadata` and exposed as `bragi.__version__`.
 
 Production images are tagged `bragi-admin:vX.Y.Z` and
 `bragi-delivery:vX.Y.Z` on the GitHub Container Registry, built by
-the `docker.yml` workflow on git tag push as multi-arch manifest
-lists covering `linux/amd64` and `linux/arm64`.
+the `publish-docker` job in `release.yml` on every GitHub Release
+as multi-arch manifest lists covering `linux/amd64` and
+`linux/arm64`. The job runs sequentially after `publish-pypi` and
+consumes the freshly-published wheel via `pip install
+bragi-cms==X.Y.Z`.
 
 From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.29.0
+pip install bragi-cms==1.30.0
 ```
 
 The import path stays `import bragi`. Container images remain the

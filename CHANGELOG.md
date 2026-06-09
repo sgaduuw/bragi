@@ -4,6 +4,28 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.30.0] - 2026-06-09
+
+### Added
+
+- Bulk delete on the Posts, Pages, and Attachments admin list
+  pages. Operator enters an explicit Select mode, picks rows,
+  confirms in a modal. Best-effort partial-failure: deletable
+  rows go, guarded rows (pages with children today) are reported
+  as skipped. Audit rows distinguish single vs bulk via
+  `extra.via`.
+
+### Changed
+
+- Post and Page single-delete cache-purge hook now fires after
+  commit instead of before, so subscribers observe a settled
+  database state. Behaviour change is invisible to operators.
+- Attachments admin list joins the htmx convention with an
+  `#attachments-list-table` partial; the single-delete route
+  continues to function unchanged.
+
 ## [1.29.0] - 2026-06-07
 
 ### Added

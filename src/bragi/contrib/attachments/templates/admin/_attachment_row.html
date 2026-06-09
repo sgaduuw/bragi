@@ -3,6 +3,9 @@
    (inline textarea + Save button). Wrapped in a stable id so the
    htmx response from /alt-text can swap it in place. #}
 <tr id="attachment-row-{{ r.id }}">
+  <td class="bulk-col">
+    <input type="checkbox" class="bulk-select" value="{{ r.id }}">
+  </td>
   <td style="width: 56px;">
     {% set thumb_key = thumb_storage_key_by_id.get(r.id) if thumb_storage_key_by_id is defined else none %}
     {% if thumb_key %}
@@ -19,7 +22,7 @@
     {% endif %}
   </td>
   <td>
-    <code>{{ r.filename }}</code>
+    <span class="bulk-row-title"><code>{{ r.filename }}</code></span>
     {% if r.width and r.height %}
       <br><small>{{ r.width }}&times;{{ r.height }}</small>
     {% endif %}

@@ -463,6 +463,129 @@ def test_on_post_deleted_fires_with_row_still_in_session(
     assert lifecycle_recorder.deleted[0]["slug"] == "hello"
 
 
+class _CachePurgeRecorder:
+    """Captures on_cache_purge calls, and whether the post row was
+    absent from the DB at the moment each purge fired.
+
+    Used to verify that on_cache_purge fires AFTER db.commit() so
+    the cache sees a settled DB (no lingering row for the deleted
+    post).
+    """
+
+    def __init__(self, post_id: int, factory: sessionmaker[Session]) -> None:
+        self._post_id = post_id
+        self._factory = factory
+        self.calls: list[tuple[str, str, bool]] = []
+        # Each entry is (scope, key, row_still_present_at_purge_time).
+
+    @hookimpl
+    def on_cache_purge(self, scope: str, key: str) -> None:
+        with self._factory() as db:
+            still_there = db.get(Post, self._post_id) is not None
+        self.calls.append((scope, key, still_there))
+
+
+@pytest.fixture
+def purge_recorder_factory(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> Iterator[list[_CachePurgeRecorder]]:
+    """Fixture that returns the recorder AFTER post_id is known.
+
+    Yields the recorder object; callers must set it up via the
+    inner fixture pattern. Because the post_id is needed at
+    construction time, this fixture creates the recorder lazily
+    via a list so the test can inject it after looking up post_id.
+    """
+    # We use a mutable container so the test can swap the real
+    # recorder into the registered plugin slot after knowing post_id.
+    holder: list[_CachePurgeRecorder] = []
+
+    class _Proxy:
+        """Pluggy hookimpl proxy that forwards to whichever recorder
+        the test has placed in `holder` after construction."""
+
+        @hookimpl
+        def on_cache_purge(self, scope: str, key: str) -> None:
+            if holder:
+                holder[0].on_cache_purge(scope=scope, key=key)
+
+    proxy = _Proxy()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(proxy)
+    try:
+        yield holder
+    finally:
+        pm.unregister(proxy)
+
+
+def test_delete_post_audit_carries_via_single(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Audit extras gain a 'via' field distinguishing single from
+    bulk; this test pins single.
+    """
+    from sqlalchemy import select as sa_select
+
+    from bragi.core.models.audit_log import AuditLog
+
+    with db_session_factory() as db:
+        post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/delete",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        row = db.execute(
+            sa_select(AuditLog)
+            .where(AuditLog.target_type == "post")
+            .where(AuditLog.target_id == post_id)
+        ).scalar_one()
+        assert row.extra.get("via") == "single"
+
+
+def test_delete_post_purges_cache_after_commit(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    purge_recorder_factory: list[_CachePurgeRecorder],
+) -> None:
+    """Cache-purge must fire on a settled DB so subscribers cannot
+    observe the row mid-delete.
+    """
+    with db_session_factory() as db:
+        post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
+
+    rec = _CachePurgeRecorder(post_id, db_session_factory)
+    purge_recorder_factory.append(rec)
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    resp = client.post(
+        f"/admin/sites/blog/posts/{post_id}/delete",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    # Exactly one purge for scope="post", and the row was gone by then.
+    post_purges = [(s, k, gone) for s, k, gone in rec.calls if s == "post"]
+    assert len(post_purges) == 1
+    scope, key, row_still_present = post_purges[0]
+    assert key == str(post_id)
+    assert not row_still_present, (
+        "on_cache_purge fired while the deleted post row was still visible: "
+        "purge must fire AFTER db.commit()"
+    )
+
+
 # ============================================================
 # Pinning fields round-trip (#125)
 # ============================================================
@@ -998,3 +1121,81 @@ def test_new_post_title_with_no_sluggable_chars_falls_through_to_required_error(
     )
     assert resp.status_code == 200
     assert b"required" in resp.data.lower()
+
+
+# ============================================================
+# Audit via distinguishability: single vs bulk (Task 17)
+# ============================================================
+
+
+def test_single_vs_bulk_audit_via_differs(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Audit rows from single-delete and bulk-delete differ in
+    extra.via. Distinguishability is load-bearing for post-mortem
+    grep."""
+    from werkzeug.datastructures import MultiDict
+
+    from bragi.core.models.audit_log import AuditLog
+
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        owner_id = db.execute(select(Site.owner_user_id).where(Site.id == site_id)).scalar_one()
+        for slug in ("s", "b"):
+            db.add(
+                Post(
+                    site_id=site_id,
+                    title=slug,
+                    slug=slug,
+                    status=PostStatus.PUBLISHED,
+                    body_markdown="",
+                    body_html="",
+                    body_excerpt="",
+                    author_id=owner_id,
+                )
+            )
+        db.commit()
+        single_id = db.execute(select(Post).where(Post.slug == "s")).scalar_one().id
+        bulk_id = db.execute(select(Post).where(Post.slug == "b")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+
+    # Single delete
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    client.post(
+        f"/admin/sites/blog/posts/{single_id}/delete",
+        data={"_csrf_token": token},
+    )
+
+    # Bulk delete
+    bulk_token = csrf_token(client, path="/admin/sites/blog/posts/")
+    client.post(
+        "/admin/sites/blog/posts/bulk-delete",
+        data=MultiDict([("_csrf_token", bulk_token), ("ids", str(bulk_id))]),
+    )
+
+    with db_session_factory() as db:
+        single_extra = (
+            db.execute(
+                select(AuditLog)
+                .where(AuditLog.target_type == "post")
+                .where(AuditLog.target_id == single_id)
+                .where(AuditLog.action == "post.deleted")
+            )
+            .scalar_one()
+            .extra
+        )
+        bulk_extra = (
+            db.execute(
+                select(AuditLog)
+                .where(AuditLog.target_type == "post")
+                .where(AuditLog.target_id == bulk_id)
+                .where(AuditLog.action == "post.deleted")
+            )
+            .scalar_one()
+            .extra
+        )
+        assert single_extra["via"] == "single"
+        assert bulk_extra["via"] == "bulk"

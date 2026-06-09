@@ -1,0 +1,64 @@
+/* Bulk-select admin behaviour.
+
+   Checkbox column is in the DOM unconditionally; CSS hides it until
+   the wrapper has .select-mode. Touch targets are sized to Apple's
+   44x44 minimum so the admin works comfortably on mobile.
+*/
+
+.bulk-col {
+  display: none;
+}
+
+.select-mode .bulk-col {
+  display: table-cell;
+}
+
+.select-mode .bulk-col input[type="checkbox"] {
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+}
+
+.bulk-actions-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bulk-select-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bulk-mode-indicator {
+  margin-left: auto;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.bulk-confirm-dialog {
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  padding: 1.5rem;
+  max-width: 32rem;
+}
+
+.bulk-confirm-titles {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.bulk-confirm-form menu {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+}
+
+@media (pointer: coarse) {
+  .select-mode .bulk-col input[type="checkbox"] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
