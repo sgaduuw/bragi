@@ -294,6 +294,52 @@ def test_delete_removes_row_and_file(
     assert not on_disk.exists()
 
 
+def test_delete_attachment_audit_carries_via_single(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """Audit extras gain a 'via' field distinguishing single from
+    bulk; this test pins single.
+    """
+    from sqlalchemy import select as sa_select
+
+    from bragi.core.models.audit_log import AuditLog
+
+    site_id = _blog_id(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/attachments/new")
+    client.post(
+        "/admin/sites/blog/attachments/new",
+        data={
+            "site_id": str(site_id),
+            "file": (io.BytesIO(b"via-single-bytes"), "via.txt"),
+            "_csrf_token": token,
+        },
+        content_type="multipart/form-data",
+    )
+    with db_session_factory() as db:
+        aid = db.execute(select(Attachment)).scalar_one().id
+
+    token = csrf_token(client, path="/admin/sites/blog/attachments/")
+    resp = client.post(
+        f"/admin/sites/blog/attachments/{aid}/delete",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        row = db.execute(
+            sa_select(AuditLog)
+            .where(AuditLog.action == "attachment.deleted")
+            .where(AuditLog.target_type == "attachment")
+            .where(AuditLog.target_id == aid)
+        ).scalar_one()
+        assert row.extra.get("via") == "single"
+
+
 def test_delete_preserves_file_when_other_rows_reference_it(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],
@@ -3728,3 +3774,32 @@ def test_list_pagination_links_render_when_more_pages(
     body = resp.get_data(as_text=True)
     assert "Previous" in body
     assert "page=1" in body
+
+
+# --------------------------- htmx dispatch (T10) ---------------------------
+
+
+def test_list_attachments_htmx_returns_partial(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    tmp_attachments_root: Path,
+) -> None:
+    """Cold load returns the full admin page; HX-Request returns the
+    list partial only (wrapped in #attachments-list-table)."""
+    client = admin_app.test_client()
+    _login(client)
+
+    cold = client.get("/admin/sites/blog/attachments/")
+    assert cold.status_code == 200
+    assert b'id="attachments-list-table"' in cold.data
+    # Full page includes the admin chrome from base.html.
+    assert b"<html" in cold.data
+
+    hx = client.get(
+        "/admin/sites/blog/attachments/",
+        headers={"HX-Request": "true"},
+    )
+    assert hx.status_code == 200
+    assert b'id="attachments-list-table"' in hx.data
+    # Partial does not include the page chrome.
+    assert b"<html" not in hx.data

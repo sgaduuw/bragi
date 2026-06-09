@@ -1,5 +1,8 @@
 {% extends "admin/base.html" %}
 {% block title %}Attachments &middot; bragi admin{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('admin_static.static', filename='admin/bulk_select.css') }}">
+{% endblock %}
 {% block content %}
 <section class="rendition-status-panel">
   <div class="rendition-counts">
@@ -53,6 +56,12 @@
       Images missing alt text ({{ missing_alt_count }})
     </a>
   {% endif %}
+  {% with bulk_action_url=url_for('attachment_admin.bulk_delete_attachments', site_slug=request.view_args['site_slug']),
+          singular="attachment",
+          plural="attachments",
+          wrapper_id="attachments-list-table" %}
+    {% include "admin/_bulk_actions_bar.html" %}
+  {% endwith %}
 </div>
 
 {% if missing_alt %}
@@ -66,45 +75,13 @@
   </p>
 {% endif %}
 
-{% if rows %}
-<table>
-  <thead>
-    <tr>
-      <th></th>{# thumbnail column #}
-      <th>Filename</th>
-      <th>Type</th>
-      {% if missing_alt %}
-        <th colspan="2">Alt text</th>
-      {% else %}
-        <th>Size</th>
-        <th>Uploaded</th>
-      {% endif %}
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for r in rows %}
-      {% include "admin/_attachment_row.html" %}
-    {% endfor %}
-  </tbody>
-</table>
+{% include "admin/_attachments_list_table.html" %}
 
-<nav style="margin-top: 1rem; display: flex; gap: 1rem; align-items: center;">
-  {% if page > 1 %}
-    <a href="{{ url_for('attachment_admin.list_attachments', site_slug=request.view_args['site_slug'], page=page - 1, missing_alt='1' if missing_alt else none) }}">← Previous</a>
-  {% else %}
-    <span style="opacity: 0.5;">← Previous</span>
-  {% endif %}
-  <span>Page {{ page }}</span>
-  {% if has_more %}
-    <a href="{{ url_for('attachment_admin.list_attachments', site_slug=request.view_args['site_slug'], page=page + 1, missing_alt='1' if missing_alt else none) }}">Next →</a>
-  {% else %}
-    <span style="opacity: 0.5;">Next →</span>
-  {% endif %}
-</nav>
-{% else %}
-  {% if not missing_alt %}
-    <p>No attachments yet. <a href="{{ url_for('attachment_admin.upload_attachment') }}">Upload one.</a></p>
-  {% endif %}
-{% endif %}
+<script src="{{ url_for('admin_static.static', filename='admin/bulk_select.js') }}"></script>
+<script>
+  window.bragiBulkSelect.init({
+    wrapperSelector: "#attachments-list-table",
+    barSelector: ".bulk-actions-bar[data-wrapper='#attachments-list-table']",
+  });
+</script>
 {% endblock %}

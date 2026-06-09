@@ -10,6 +10,7 @@ from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from bragi.api import hookimpl
 from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
@@ -257,6 +258,200 @@ def test_delete_blocked_when_children_exist(
     with db_session_factory() as db:
         # Both still on disk; the delete short-circuited with a flash.
         assert db.get(Page, about_id) is not None
+
+
+class _CachePurgeRecorder:
+    """Captures on_cache_purge calls and whether the page row was absent
+    from the DB at the moment each purge fired.
+
+    Used to verify that on_cache_purge fires AFTER db.commit() so the
+    cache sees a settled DB (no lingering row for the deleted page).
+    """
+
+    def __init__(self, page_id: int, factory: sessionmaker[Session]) -> None:
+        self._page_id = page_id
+        self._factory = factory
+        self.calls: list[tuple[str, str, bool]] = []
+        # Each entry is (scope, key, row_still_present_at_purge_time).
+
+    @hookimpl
+    def on_cache_purge(self, scope: str, key: str) -> None:
+        with self._factory() as db:
+            still_there = db.get(Page, self._page_id) is not None
+        self.calls.append((scope, key, still_there))
+
+
+@pytest.fixture
+def purge_recorder_factory(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> Iterator[list[_CachePurgeRecorder]]:
+    """Yields a mutable holder so the test can inject a recorder after
+    the page_id is known.
+    """
+    holder: list[_CachePurgeRecorder] = []
+
+    class _Proxy:
+        @hookimpl
+        def on_cache_purge(self, scope: str, key: str) -> None:
+            if holder:
+                holder[0].on_cache_purge(scope=scope, key=key)
+
+    proxy = _Proxy()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(proxy)
+    try:
+        yield holder
+    finally:
+        pm.unregister(proxy)
+
+
+def _make_pages(
+    db: Session,
+    site_id: int,
+    user_id: int,
+    count: int,
+    parent_id: int | None = None,
+    slug_prefix: str = "page",
+) -> list[Page]:
+    """Create `count` draft pages under `parent_id` and return them.
+
+    Mirrors the _make_posts helper pattern from test_post_admin_bulk.py.
+    """
+    pages = [
+        Page(
+            site_id=site_id,
+            parent_id=parent_id,
+            slug=f"{slug_prefix}-{i}",
+            title=f"Page {i}",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user_id,
+            status=PageStatus.DRAFT,
+        )
+        for i in range(count)
+    ]
+    for p in pages:
+        db.add(p)
+    db.flush()
+    return pages
+
+
+def test_delete_page_audit_carries_via_single(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Audit extras gain a 'via' field distinguishing single from bulk;
+    this test pins single.
+    """
+    from sqlalchemy import select as sa_select
+
+    from bragi.core.models.audit_log import AuditLog
+
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+        user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
+        pages = _make_pages(db, site_id, user_id, 1, slug_prefix="via-single")
+        db.commit()
+        page_id = pages[0].id
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/pages/")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{page_id}/delete",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        row = db.execute(
+            sa_select(AuditLog)
+            .where(AuditLog.target_type == "page")
+            .where(AuditLog.target_id == page_id)
+        ).scalar_one()
+        assert row.extra.get("via") == "single"
+
+
+def test_delete_page_purges_cache_after_commit(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    purge_recorder_factory: list[_CachePurgeRecorder],
+) -> None:
+    """Cache-purge must fire on a settled DB so subscribers cannot
+    observe the row mid-delete.
+    """
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+        user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
+        pages = _make_pages(db, site_id, user_id, 1, slug_prefix="purge-order")
+        db.commit()
+        page_id = pages[0].id
+
+    rec = _CachePurgeRecorder(page_id, db_session_factory)
+    purge_recorder_factory.append(rec)
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/pages/")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{page_id}/delete",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    # Exactly one purge for scope="page", and the row was gone by then.
+    page_purges = [(s, k, gone) for s, k, gone in rec.calls if s == "page"]
+    assert len(page_purges) == 1
+    scope, key, row_still_present = page_purges[0]
+    assert key == str(page_id)
+    assert not row_still_present, (
+        "on_cache_purge fired while the deleted page row was still visible: "
+        "purge must fire AFTER db.commit()"
+    )
+
+
+def test_delete_page_with_children_skips_with_format_bulk_result_copy(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Skip-flash uses format_bulk_result phrasing so single and bulk
+    say the same thing. Spec §Result feedback.
+    """
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site).where(Site.slug == "blog")).scalar_one().id
+        user_id = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
+        parent = Page(
+            site_id=site_id,
+            slug="parent-with-kids",
+            title="Parent",
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user_id,
+            status=PageStatus.PUBLISHED,
+        )
+        db.add(parent)
+        db.flush()
+        _make_pages(db, site_id, user_id, 2, parent_id=parent.id, slug_prefix="child")
+        db.commit()
+        parent_id = parent.id
+        parent_title = parent.title
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/pages/")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{parent_id}/delete",
+        data={"_csrf_token": token},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert b"0 pages deleted." in resp.data
+    assert parent_title.encode() in resp.data
+    assert b"has 2 child" in resp.data
 
 
 def test_pages_nav_entry_registered(admin_app: Flask) -> None:

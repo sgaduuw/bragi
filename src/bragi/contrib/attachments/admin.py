@@ -35,6 +35,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
+from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
 
 from bragi.api import Crumb, set_breadcrumbs
@@ -45,9 +46,19 @@ from bragi.contrib.attachments.cli import (
 from bragi.contrib.attachments.delivery import build_attachment_response
 from bragi.contrib.attachments.service import create_attachment_from_bytes
 from bragi.core.audit import audit
+from bragi.core.bulk_action import (
+    BulkLimitExceeded,
+    BulkOutcome,
+    DeletedItem,
+    Ok,
+    bulk_delete,
+    format_bulk_result,
+)
 from bragi.core.db import SessionLocal
+from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
+from bragi.core.models.site import Site
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
 from bragi.settings import settings
@@ -198,8 +209,9 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         done_rendition_count = rendition_status_counts.get("done", 0)
         failed_rendition_count = rendition_status_counts.get("failed", 0)
 
-    return render_template(
-        "admin/attachments_list.html",
+    # htmx dispatch: return just the table partial for hx-get
+    # refreshes; full page for cold loads (and crawlers).
+    context = dict(
         rows=rows,
         page=page,
         has_more=has_more,
@@ -210,6 +222,9 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         failed_rendition_count=failed_rendition_count,
         thumb_storage_key_by_id=thumb_storage_key_by_id,
     )
+    if is_htmx():
+        return render_template("admin/_attachments_list_table.html", **context)
+    return render_template("admin/attachments_list.html", **context)
 
 
 @bp.route("/file/<path:storage_key>", methods=["GET"])
@@ -639,6 +654,80 @@ def _parse_focal(raw: str | None) -> float | None:
     return max(0.0, min(1.0, value))
 
 
+def _delete_one_attachment(db: Session, site: Site, row: Attachment) -> BulkOutcome:
+    """Delete one attachment in the current transaction.
+
+    Collects rendition storage_keys before the cascade removes them, then
+    runs the refcount-aware on-disk cleanup BETWEEN `db.flush()` and the
+    caller's `db.commit()`. The caller commits once at the end of the
+    batch; the writer lock (SQLAlchemy's deferred BEGIN, upgraded to
+    RESERVED on the cascade DELETE, which queues other writers under
+    SQLite WAL) is held continuously from each per-row DELETE through
+    the final commit. A concurrent upload of the same content-addressed
+    bytes therefore cannot land an INSERT against any `storage_key`
+    between any per-row refcount check and its `backend.remove` call
+    (#171). Pre-v1.13.0 the commit fired first and the refcount loop
+    ran post-commit, leaving a narrow window during which a concurrent
+    upload could persist a row referencing a key we then unlinked.
+    The "caller commits once" rule extends that lock-window-collapse
+    to bulk batches automatically: a bulk delete of N rows is
+    semantically equivalent to N single deletes collapsed into one
+    transaction, with the writer lock held across the whole batch.
+    A residual race on the upload side (an in-flight `store_bytes`
+    that already ran before we acquired the lock) is acknowledged as
+    out-of-scope: closing it requires the upload path to re-store
+    inside its insert txn, tracked separately.
+
+    Pending renditions (status='pending'/'processing') have
+    storage_key=None and contribute no on-disk file to refcount.
+    """
+    # `site` is the resolved request-site, not derived from the row;
+    # capture its slug early because `backend.remove` needs it and we
+    # do not want to re-touch `site` after the cascade DELETE expires
+    # transient ORM state.
+    site_slug_for_storage = site.slug
+    storage_key = row.storage_key
+    filename = row.filename
+    rendition_keys = [
+        r.storage_key
+        for r in db.execute(
+            select(AttachmentRendition).where(AttachmentRendition.attachment_id == row.id)
+        ).scalars()
+        if r.storage_key is not None
+    ]
+    captured = DeletedItem(
+        id=row.id,
+        title=filename,
+        extras={
+            "storage_key": storage_key,
+            "renditions": len(rendition_keys),
+        },
+    )
+    db.delete(row)
+    db.flush()  # apply cascade so refcount sees post-delete state
+
+    # If no other row across attachments or renditions points at a
+    # key, free the on-disk file. Otherwise leave it; some surviving
+    # row still resolves through that key. This loop must stay
+    # INSIDE the per-row callable (between flush and the caller's
+    # commit) so the writer lock is held while refcount + unlink
+    # happen; see the function docstring for the #171 rationale.
+    backend = resolve_storage(current_app)
+    for key in {storage_key, *rendition_keys}:
+        still_used = (
+            db.execute(
+                select(Attachment).where(Attachment.storage_key == key).limit(1)
+            ).scalar_one_or_none()
+            or db.execute(
+                select(AttachmentRendition).where(AttachmentRendition.storage_key == key).limit(1)
+            ).scalar_one_or_none()
+        )
+        if still_used is None:
+            backend.remove(site_slug_for_storage, key)
+
+    return Ok(captured)
+
+
 @bp.route("/<int:attachment_id>/delete", methods=["POST"])
 def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
@@ -647,70 +736,107 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
         row = db.get(Attachment, attachment_id)
         if row is None or row.site_id != site.id:
             abort(404)
-        site_slug_for_storage = site.slug
-        storage_key = row.storage_key
-        filename = row.filename
-        site_id = row.site_id
-        # Collect rendition storage_keys before CASCADE removes the
-        # rows. Refcount + filesystem removal happen INSIDE this
-        # transaction (between `db.flush()` and `db.commit()`) so a
-        # concurrent upload of the same content-addressed bytes
-        # cannot land an INSERT against the same `storage_key`
-        # between our refcount check and our `backend.remove` call
-        # (#171). Pre-v1.13.0 the commit fired first and the
-        # refcount loop ran post-commit, leaving a narrow window
-        # during which a concurrent upload could persist a row
-        # referencing a key we then unlinked. Holding the writer
-        # lock (SQLAlchemy's deferred BEGIN is upgraded to
-        # RESERVED on the cascade DELETE, which queues other
-        # writers under SQLite WAL) until commit collapses that
-        # window to zero on the cleanup side. A residual race on
-        # the upload side (an in-flight `store_bytes` that
-        # already ran before we acquired the lock) is acknowledged
-        # as out-of-scope: closing it requires the upload path to
-        # re-store inside its insert txn, tracked separately.
-        # Pending renditions (status='pending'/'processing') have
-        # storage_key=None and contribute no on-disk file to refcount.
-        rendition_keys = [
-            r.storage_key
-            for r in db.execute(
-                select(AttachmentRendition).where(AttachmentRendition.attachment_id == row.id)
-            ).scalars()
-            if r.storage_key is not None
-        ]
-        db.delete(row)
-        db.flush()  # apply cascade so refcount sees post-delete state
 
-        # If no other row across attachments or renditions points
-        # at a key, free the on-disk file. Otherwise leave it; some
-        # surviving row still resolves through that key.
-        backend = resolve_storage(current_app)
-        for key in {storage_key, *rendition_keys}:
-            still_used = (
-                db.execute(
-                    select(Attachment).where(Attachment.storage_key == key).limit(1)
-                ).scalar_one_or_none()
-                or db.execute(
-                    select(AttachmentRendition)
-                    .where(AttachmentRendition.storage_key == key)
-                    .limit(1)
-                ).scalar_one_or_none()
-            )
-            if still_used is None:
-                backend.remove(site_slug_for_storage, key)
-
+        outcome = _delete_one_attachment(db, site, row)
+        assert isinstance(outcome, Ok)  # attachments have no skip path today
+        deleted = outcome.item
         db.commit()
 
     audit(
         "attachment.deleted",
         target_type="attachment",
-        target_id=attachment_id,
-        site_id=site_id,
+        target_id=deleted.id,
+        site_id=site.id,
         extra={
-            "filename": filename,
-            "storage_key": storage_key,
-            "renditions": len(rendition_keys),
+            "filename": deleted.title,
+            "storage_key": deleted.extras["storage_key"],
+            "renditions": deleted.extras["renditions"],
+            "via": "single",
         },
     )
-    flash(f"Deleted {filename}.", "success")
+    flash(f"Deleted {deleted.title}.", "success")
     return redirect(url_for("attachment_admin.list_attachments"))
+
+
+@bp.route("/bulk-delete", methods=["POST"])
+def bulk_delete_attachments(site_slug: str) -> ResponseReturnValue:
+    """Delete a batch of attachments. Best-effort partial-failure.
+
+    The writer lock is held continuously from the first per-row
+    flush through the single batch commit; `_delete_one_attachment`
+    runs its refcount check and `backend.remove` BETWEEN its
+    `db.flush()` and the caller's `db.commit()`, so a concurrent
+    upload of the same content-addressed bytes cannot land an
+    INSERT against any storage_key between any per-row refcount
+    check and its `backend.remove` call. See
+    `_delete_one_attachment`'s docstring for the #171 rationale;
+    the "caller commits once" rule extends that lock-window-collapse
+    property across N rows automatically.
+
+    Each per-row callable queries the current `Attachment` /
+    `AttachmentRendition` state from `db`, which reflects all
+    earlier flushes in this batch AND any rows outside the batch.
+    A surviving (not-in-batch) Attachment row that references a
+    storage_key still in use is therefore visible to the refcount
+    check, so its bytes survive on disk; an unshared key in the
+    batch is unlinked.
+
+    Auth precedes the empty-ids early return (T5 review fix): an
+    author-role user POSTing an empty form must get 403, not the
+    warning flash.
+
+    No `on_cache_purge` fires: attachments don't fire a cache-purge
+    hook today (pre-existing pattern; spec says to leave that alone).
+    """
+    ids = request.form.getlist("ids", type=int)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+
+        if not ids:
+            flash("Select at least one attachment to delete.", "warning")
+            return _bulk_list_response(site_slug)
+
+        try:
+            result = bulk_delete(
+                db=db,
+                site=site,
+                model=Attachment,
+                ids=ids,
+                delete_one=_delete_one_attachment,
+            )
+        except BulkLimitExceeded as exc:
+            flash(str(exc), "warning")
+            return _bulk_list_response(site_slug)
+
+        db.commit()
+
+    flash(
+        format_bulk_result(result, singular="attachment", plural="attachments"),
+        "success",
+    )
+    for row in result.deleted_rows:
+        audit(
+            "attachment.deleted",
+            target_type="attachment",
+            target_id=row.id,
+            site_id=site.id,
+            extra={
+                "filename": row.title,
+                "storage_key": row.extras["storage_key"],
+                "renditions": row.extras["renditions"],
+                "via": "bulk",
+            },
+        )
+    return _bulk_list_response(site_slug)
+
+
+def _bulk_list_response(site_slug: str) -> ResponseReturnValue:
+    """Per-contrib bulk dispatch: list partial on htmx, redirect on cold.
+
+    Independent of the post / page versions; each contrib owns its
+    own list dispatch per the contrib-boundary rule.
+    """
+    if is_htmx():
+        return list_attachments(site_slug)
+    return redirect(url_for("attachment_admin.list_attachments", site_slug=site_slug))

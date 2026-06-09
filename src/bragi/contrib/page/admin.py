@@ -34,12 +34,23 @@ from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.audit import AuditAction, audit
+from bragi.core.bulk_action import (
+    BulkLimitExceeded,
+    BulkOutcome,
+    BulkResult,
+    DeletedItem,
+    Ok,
+    Skipped,
+    bulk_delete,
+    format_bulk_result,
+)
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
 from bragi.core.models.post import Post, PostStatus
+from bragi.core.models.site import Site
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.render.markdown import make_excerpt, render_markdown
 from bragi.core.renditions import smallest_webp_storage_key
@@ -887,6 +898,32 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
     return redirect(url_for("page_admin.list_pages"))
 
 
+def _delete_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
+    """Delete one page in the current transaction.
+
+    Returns Skipped when the page has children; deleting it would
+    orphan them and there is no cascade rule on the FK by design.
+    Otherwise fires on_post_deleted, deletes, returns Ok.
+    """
+    child_count = db.execute(
+        select(func.count(Page.id)).where(Page.parent_id == page.id)
+    ).scalar_one()
+    if child_count > 0:
+        return Skipped(
+            page.title or "Untitled",
+            f"has {child_count} child page{'s' if child_count != 1 else ''}",
+        )
+    pm = current_app.extensions["plugin_manager"]
+    pm.hook.on_post_deleted(item=page, session=db)
+    captured = DeletedItem(
+        id=page.id,
+        title=page.title or "Untitled",
+        extras={"slug": page.slug},
+    )
+    db.delete(page)
+    return Ok(captured)
+
+
 @bp.route("/<int:page_id>/delete", methods=["POST"])
 def delete_page(site_slug: str, page_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
@@ -895,35 +932,103 @@ def delete_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
-        # A page with children blocks deletion; archive the children
-        # or re-parent them first. Keeps tree consistency without a
-        # cascade rule on the FK.
-        children = db.execute(select(Page).where(Page.parent_id == page.id)).scalars().all()
-        if children:
+
+        outcome = _delete_one_page(db, site, page)
+
+        if isinstance(outcome, Skipped):
+            # No commit needed: we did not write.
             flash(
-                f"Cannot delete page with {len(children)} child page(s). "
-                "Re-parent or delete the children first.",
+                format_bulk_result(
+                    BulkResult(
+                        deleted_rows=[],
+                        skipped=[(outcome.title, outcome.reason)],
+                        missing_count=0,
+                    ),
+                    singular="page",
+                    plural="pages",
+                ),
                 "error",
             )
             return redirect(url_for("page_admin.list_pages"))
-        title = page.title
-        deleted_site_id = page.site_id
-        deleted_slug = page.slug
-        pm = current_app.extensions["plugin_manager"]
-        pm.hook.on_post_deleted(item=page, session=db)
-        db.delete(page)
-        db.commit()
-        pm.hook.on_cache_purge(scope="page", key=str(page_id))
-        flash(f"Page '{title}' deleted.", "success")
 
+        deleted = outcome.item
+        db.commit()
+
+        pm = current_app.extensions["plugin_manager"]
+        pm.hook.on_cache_purge(scope="page", key=str(deleted.id))
+
+    flash(f"Page '{deleted.title}' deleted.", "success")
     audit(
         AuditAction.POST_DELETED,
         target_type="page",
-        target_id=page_id,
-        site_id=deleted_site_id,
-        extra={"slug": deleted_slug, "title": title},
+        target_id=deleted.id,
+        site_id=site.id,
+        extra={
+            "slug": deleted.extras["slug"],
+            "title": deleted.title,
+            "via": "single",
+        },
     )
     return redirect(url_for("page_admin.list_pages"))
+
+
+@bp.route("/bulk-delete", methods=["POST"])
+def bulk_delete_pages(site_slug: str) -> ResponseReturnValue:
+    """Delete a batch of pages. Best-effort partial-failure.
+
+    Children-guarded pages are skipped with a per-row reason; the
+    helper handles the loop. The empty-ids early return is INSIDE the
+    `with SessionLocal()` block, after require_role, so the auth gate
+    runs before the no-op shortcut (same ordering fix applied in T5
+    post bulk-delete review).
+    """
+    ids = request.form.getlist("ids", type=int)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+
+        if not ids:
+            flash("Select at least one page to delete.", "warning")
+            return _bulk_list_response(site_slug)
+
+        try:
+            result = bulk_delete(
+                db=db,
+                site=site,
+                model=Page,
+                ids=ids,
+                delete_one=_delete_one_page,
+            )
+        except BulkLimitExceeded as exc:
+            flash(str(exc), "warning")
+            return _bulk_list_response(site_slug)
+
+        db.commit()
+        pm = current_app.extensions["plugin_manager"]
+        for row in result.deleted_rows:
+            pm.hook.on_cache_purge(scope="page", key=str(row.id))
+
+    flash(format_bulk_result(result, singular="page", plural="pages"), "success")
+    for row in result.deleted_rows:
+        audit(
+            AuditAction.POST_DELETED,
+            target_type="page",
+            target_id=row.id,
+            site_id=site.id,
+            extra={
+                "slug": row.extras["slug"],
+                "title": row.title,
+                "via": "bulk",
+            },
+        )
+    return _bulk_list_response(site_slug)
+
+
+def _bulk_list_response(site_slug: str) -> ResponseReturnValue:
+    """Shared page-bulk dispatch: list partial on htmx, redirect on cold."""
+    if is_htmx():
+        return list_pages(site_slug)
+    return redirect(url_for("page_admin.list_pages", site_slug=site_slug))
 
 
 # ============================================================
