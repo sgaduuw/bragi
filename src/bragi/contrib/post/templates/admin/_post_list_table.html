@@ -10,6 +10,7 @@
 <table>
   <thead>
     <tr>
+      <th class="bulk-col"></th>
       <th>Title</th>
       <th>Slug</th>
       <th>Status</th>
@@ -22,6 +23,9 @@
   <tbody>
     {% for post in posts %}
     <tr>
+      <td class="bulk-col">
+        <input type="checkbox" class="bulk-select" value="{{ post.id }}">
+      </td>
       {% include "admin/_title_cell.html" %}
       {% include "admin/_slug_cell.html" %}
       {% include "admin/_status_cell.html" %}
