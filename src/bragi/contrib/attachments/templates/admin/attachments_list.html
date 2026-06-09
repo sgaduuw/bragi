@@ -1,5 +1,8 @@
 {% extends "admin/base.html" %}
 {% block title %}Attachments &middot; bragi admin{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('admin_static.static', filename='admin/bulk_select.css') }}">
+{% endblock %}
 {% block content %}
 <section class="rendition-status-panel">
   <div class="rendition-counts">
@@ -53,6 +56,12 @@
       Images missing alt text ({{ missing_alt_count }})
     </a>
   {% endif %}
+  {% with bulk_action_url=url_for('attachment_admin.bulk_delete_attachments', site_slug=request.view_args['site_slug']),
+          singular="attachment",
+          plural="attachments",
+          wrapper_id="attachments-list-table" %}
+    {% include "admin/_bulk_actions_bar.html" %}
+  {% endwith %}
 </div>
 
 {% if missing_alt %}
@@ -67,4 +76,12 @@
 {% endif %}
 
 {% include "admin/_attachments_list_table.html" %}
+
+<script src="{{ url_for('admin_static.static', filename='admin/bulk_select.js') }}"></script>
+<script>
+  window.bragiBulkSelect.init({
+    wrapperSelector: "#attachments-list-table",
+    barSelector: ".bulk-actions-bar[data-wrapper='#attachments-list-table']",
+  });
+</script>
 {% endblock %}
