@@ -1121,3 +1121,81 @@ def test_new_post_title_with_no_sluggable_chars_falls_through_to_required_error(
     )
     assert resp.status_code == 200
     assert b"required" in resp.data.lower()
+
+
+# ============================================================
+# Audit via distinguishability: single vs bulk (Task 17)
+# ============================================================
+
+
+def test_single_vs_bulk_audit_via_differs(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Audit rows from single-delete and bulk-delete differ in
+    extra.via. Distinguishability is load-bearing for post-mortem
+    grep."""
+    from werkzeug.datastructures import MultiDict
+
+    from bragi.core.models.audit_log import AuditLog
+
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        owner_id = db.execute(select(Site.owner_user_id).where(Site.id == site_id)).scalar_one()
+        for slug in ("s", "b"):
+            db.add(
+                Post(
+                    site_id=site_id,
+                    title=slug,
+                    slug=slug,
+                    status=PostStatus.PUBLISHED,
+                    body_markdown="",
+                    body_html="",
+                    body_excerpt="",
+                    author_id=owner_id,
+                )
+            )
+        db.commit()
+        single_id = db.execute(select(Post).where(Post.slug == "s")).scalar_one().id
+        bulk_id = db.execute(select(Post).where(Post.slug == "b")).scalar_one().id
+
+    client = admin_app.test_client()
+    _login(client)
+
+    # Single delete
+    token = csrf_token(client, path="/admin/sites/blog/posts/")
+    client.post(
+        f"/admin/sites/blog/posts/{single_id}/delete",
+        data={"_csrf_token": token},
+    )
+
+    # Bulk delete
+    bulk_token = csrf_token(client, path="/admin/sites/blog/posts/")
+    client.post(
+        "/admin/sites/blog/posts/bulk-delete",
+        data=MultiDict([("_csrf_token", bulk_token), ("ids", str(bulk_id))]),
+    )
+
+    with db_session_factory() as db:
+        single_extra = (
+            db.execute(
+                select(AuditLog)
+                .where(AuditLog.target_type == "post")
+                .where(AuditLog.target_id == single_id)
+                .where(AuditLog.action == "post.deleted")
+            )
+            .scalar_one()
+            .extra
+        )
+        bulk_extra = (
+            db.execute(
+                select(AuditLog)
+                .where(AuditLog.target_type == "post")
+                .where(AuditLog.target_id == bulk_id)
+                .where(AuditLog.action == "post.deleted")
+            )
+            .scalar_one()
+            .extra
+        )
+        assert single_extra["via"] == "single"
+        assert bulk_extra["via"] == "bulk"
