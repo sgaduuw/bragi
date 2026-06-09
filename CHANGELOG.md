@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-06-09
+
 ### Added
 
 - Bulk delete on the Posts, Pages, and Attachments admin list
