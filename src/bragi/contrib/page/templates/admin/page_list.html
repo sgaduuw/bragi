@@ -1,5 +1,8 @@
 {% extends "admin/base.html" %}
 {% block title %}Pages &middot; bragi admin{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('admin_static.static', filename='admin/bulk_select.css') }}">
+{% endblock %}
 {% block content %}
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
   <h1 style="margin: 0;">Pages</h1>
@@ -9,7 +12,21 @@
           hx-get="{{ url_for('page_admin.list_pages') }}"
           hx-target="#page-list-table"
           hx-swap="outerHTML">Refresh</button>
+  {% with bulk_action_url=url_for('page_admin.bulk_delete_pages', site_slug=request.view_args['site_slug']),
+          singular="page",
+          plural="pages",
+          wrapper_id="page-list-table" %}
+    {% include "admin/_bulk_actions_bar.html" %}
+  {% endwith %}
 </div>
 
 {% include "admin/_page_list_table.html" %}
+
+<script src="{{ url_for('admin_static.static', filename='admin/bulk_select.js') }}"></script>
+<script>
+  window.bragiBulkSelect.init({
+    wrapperSelector: "#page-list-table",
+    barSelector: ".bulk-actions-bar[data-wrapper='#page-list-table']",
+  });
+</script>
 {% endblock %}

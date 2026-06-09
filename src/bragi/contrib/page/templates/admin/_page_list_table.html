@@ -4,6 +4,7 @@
 <table>
   <thead>
     <tr>
+      <th class="bulk-col"></th>
       <th>Title</th>
       <th>Slug</th>
       <th>Parent</th>
@@ -17,6 +18,9 @@
   <tbody>
     {% for page in pages %}
     <tr>
+      <td class="bulk-col">
+        <input type="checkbox" class="bulk-select" value="{{ page.id }}">
+      </td>
       {% include "admin/_page_title_cell.html" %}
       {% include "admin/_page_slug_cell.html" %}
       <td>{{ page.parent_id or '(root)' }}</td>
