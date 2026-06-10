@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Runtime dependency bumps.** `gunicorn` 23 → 26, `argon2-cffi`
+  23 → 25, `markdown-it-py` 3 → 4, `mdit-py-plugins` 0.4 → 0.6,
+  `markdownify` 0.13 → 1.2. The full test suite (rendering
+  pipeline, importers, auth verification) passes against the new
+  versions without behaviour-change surface; argon2-cffi 25 still
+  verifies hashes produced by 23.x. Operators with deeply
+  customised gunicorn configs should skim the gunicorn 24/25/26
+  release notes; the in-tree compose defaults work unchanged.
 - **Python floor raised to 3.14.** `requires-python` is now
   `>=3.14,<4` (was `>=3.12,<4`). Installs against Python 3.12 and
   3.13 will fail at `pip install bragi-cms` resolution time. The
