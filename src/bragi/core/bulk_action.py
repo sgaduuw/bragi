@@ -18,17 +18,18 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-# Unbound TypeVar: SQLAlchemy ORM models expose `id` and `site_id` as
-# InstrumentedAttribute descriptors at the class level, not plain `int`
-# values, so a structural Protocol bound would fail mypy's type-var check
-# on every call site. The attribute accesses below carry `type: ignore`
-# comments instead, which is the idiomatic SQLAlchemy pattern.
-T = TypeVar("T")
+# `bulk_delete`'s `T` is declared inline via PEP 695 (`def bulk_delete[T]
+# (...)`). It is intentionally unbound: SQLAlchemy ORM models expose `id`
+# and `site_id` as InstrumentedAttribute descriptors at the class level,
+# not plain `int` values, so a structural Protocol bound would fail mypy's
+# type-var check on every call site. The attribute accesses below carry
+# `type: ignore` comments instead, which is the idiomatic SQLAlchemy
+# pattern.
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,7 @@ class BulkLimitExceeded(Exception):
     flashes the exception string and returns to the list view."""
 
 
-def bulk_delete(
+def bulk_delete[T](
     *,
     db: Session,
     site: Any,
