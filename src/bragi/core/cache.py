@@ -119,7 +119,7 @@ def maybe_304(
     if ims and last_modified is not None:
         try:
             since = parsedate_to_datetime(ims)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         # Both sides at second precision for a meaningful compare.
         lm = _as_utc(last_modified).replace(microsecond=0)

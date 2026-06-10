@@ -255,9 +255,9 @@ def test_patch_slug_rename_inserts_301(admin_app: Flask, db_session: Session) ->
         .scalars()
         .all()
     )
-    assert any(
-        "hello-world" in r.source_path for r in redirects
-    ), f"expected a 301 from /hello-world/, got: {[r.source_path for r in redirects]}"
+    assert any("hello-world" in r.source_path for r in redirects), (
+        f"expected a 301 from /hello-world/, got: {[r.source_path for r in redirects]}"
+    )
 
 
 def test_patch_slug_rejects_duplicate(admin_app: Flask, db_session: Session) -> None:

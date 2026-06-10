@@ -100,7 +100,7 @@ def _fetch_title(url: str, *, timeout: float, user_agent: str) -> str | None:
             return None
         title = resp.json().get("title")
         return title if isinstance(title, str) and title.strip() else None
-    except (SafeHTTPError, ValueError, Exception):  # noqa: BLE001 - best effort
+    except SafeHTTPError, ValueError, Exception:  # noqa: BLE001 - best effort
         return None
 
 

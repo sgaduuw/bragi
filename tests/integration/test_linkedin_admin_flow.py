@@ -126,9 +126,9 @@ def test_upload_review_apply_subset(
         assert "Imported from LinkedIn" in body
 
         # 2. Stash dir is removed after apply.
-        assert (
-            not stash_dir.exists()
-        ), f"stash should have been cleaned up: {stash_dir} still exists"
+        assert not stash_dir.exists(), (
+            f"stash should have been cleaned up: {stash_dir} still exists"
+        )
 
         # 3. The single selected proposal landed on the resume_data
         #    (or page metadata, depending on the proposal kind), and
@@ -160,9 +160,9 @@ def test_upload_review_apply_subset(
                 if section
             )
             non_empty_header = rd.header.tagline is not None or rd.header.location is not None
-            assert (
-                touched_sections >= 1 or non_empty_header or page.body_markdown
-            ), "apply with one selected proposal should have written at least one field"
+            assert touched_sections >= 1 or non_empty_header or page.body_markdown, (
+                "apply with one selected proposal should have written at least one field"
+            )
 
 
 def test_upload_widget_form_is_not_nested_in_page_edit_form(
@@ -210,7 +210,7 @@ def test_upload_widget_form_is_not_nested_in_page_edit_form(
     # AFTER the page-edit form's closing </form>.
     widget_form_open = body.find("import-linkedin/upload")
     assert widget_form_open != -1, (
-        "LinkedIn widget upload form not rendered " "(check resume_admin_extras() loop is firing)"
+        "LinkedIn widget upload form not rendered (check resume_admin_extras() loop is firing)"
     )
     assert widget_form_open > edit_form_close, (
         "LinkedIn widget <form> is nested INSIDE the page-edit form. "
@@ -262,8 +262,7 @@ def test_full_flow_preserves_page_kind_resume(
         assert (
             '<option value="resume" selected>Resume / CV (structured content)</option>' in body
         ) or ('value="resume" selected' in body and "Resume / CV" in body), (
-            "kind dropdown should pre-select resume after import; "
-            f"page kind in DB was: {page.kind}"
+            f"kind dropdown should pre-select resume after import; page kind in DB was: {page.kind}"
         )
 
 

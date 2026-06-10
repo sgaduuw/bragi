@@ -1195,7 +1195,7 @@ def test_apply_substitutes_inside_pre_code_documented_limitation(
                 "slug": "doc-ghost",
                 "title": "Documenting Ghost",
                 "html": (
-                    "<p>Ghost has a placeholder:</p>" "<pre><code>__GHOST_URL__/foo</code></pre>"
+                    "<p>Ghost has a placeholder:</p><pre><code>__GHOST_URL__/foo</code></pre>"
                 ),
                 "status": "published",
             }

@@ -287,8 +287,7 @@ def _certifications_proposals(
                         section="certifications",
                         kind="update",
                         summary=(
-                            f"Update Certification: {new.name}"
-                            f" ({new.issuer or 'unknown issuer'})"
+                            f"Update Certification: {new.name} ({new.issuer or 'unknown issuer'})"
                         ),
                         payload=payload,
                     )

@@ -189,7 +189,7 @@ def inbox() -> ResponseReturnValue:
     body = request.get_data() or b""
     try:
         activity = json.loads(body.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, RecursionError):
+    except ValueError, UnicodeDecodeError, RecursionError:
         # `RecursionError` covers deeply-nested attacker JSON
         # (e.g. `[[[ ... ]]]` or `{"a":{"a":...}}` past Python's
         # default 1000-level recursion limit). Without this, an

@@ -310,7 +310,7 @@ def test_filter_is_idempotent(
     site, _ = seeded
     with db_session_factory() as db:
         target_id = db.execute(select(Post.id).where(Post.slug == "how-i-write")).scalar_one()
-    body = '<p><a href="/posts/how-i-write/" ' f'data-bragi-link="post:{target_id}">x</a></p>'
+    body = f'<p><a href="/posts/how-i-write/" data-bragi-link="post:{target_id}">x</a></p>'
     with delivery_app.test_request_context("/", base_url="http://blog.example.com"):
         g.site = site
         once = str(internal_link_rewrite(body))
@@ -451,7 +451,7 @@ def test_end_to_end_target_deletion_marks_broken_without_500(
             title="Source",
             body_markdown="t",
             body_html=(
-                '<p><a href="/posts/will-die/" ' f'data-bragi-link="post:{target.id}">t</a></p>'
+                f'<p><a href="/posts/will-die/" data-bragi-link="post:{target.id}">t</a></p>'
             ),
             status=PostStatus.PUBLISHED,
             published_at=datetime.now(UTC).replace(tzinfo=None),
@@ -859,9 +859,9 @@ def test_drop_for_deleted_removes_both_source_and_target_rows(
     reindex_source(target_a, db_session)
     reindex_source(target_b, db_session)
     db_session.flush()
-    assert (
-        db_session.execute(select(InternalLink)).scalars().all()
-    ), "preconditions failed: no edges seeded"
+    assert db_session.execute(select(InternalLink)).scalars().all(), (
+        "preconditions failed: no edges seeded"
+    )
 
     drop_for_deleted(target_a, db_session)
     db_session.flush()

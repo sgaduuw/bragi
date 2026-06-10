@@ -149,7 +149,7 @@ def delivery_app_with_post(
     app = create_delivery_app()
     with app.app_context():
         body_html = render_markdown(
-            "Heading paragraph.\n\n" "```python\ndef hi():\n    return 1\n```\n"
+            "Heading paragraph.\n\n```python\ndef hi():\n    return 1\n```\n"
         )
     db_session.add(
         Post(

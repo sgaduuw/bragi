@@ -51,7 +51,7 @@ def _parsed_wp_date(value: Any) -> datetime | None:
     except ValueError:
         try:
             dt = parsedate_to_datetime(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
     if dt is None:
         return None

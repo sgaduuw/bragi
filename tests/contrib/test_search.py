@@ -654,7 +654,7 @@ def test_lifecycle_hookimpls_use_supplied_session_not_sessionlocal(
     db_session.commit()
 
     assert calls == 0, (
-        "hookimpl opened a fresh SessionLocal; " "FTS write would contend on the SQLite write lock"
+        "hookimpl opened a fresh SessionLocal; FTS write would contend on the SQLite write lock"
     )
 
 

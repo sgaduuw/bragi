@@ -352,9 +352,9 @@ def test_zip_extract_blocks_sibling_directory_bypass(
 
     # No sibling-prefix dir should have been created next to any stash.
     sibling_attempts = list(_isolated_stash_root.rglob("unpackedX"))
-    assert (
-        sibling_attempts == []
-    ), f"path-traversal: sibling-prefix dirs created: {sibling_attempts}"
+    assert sibling_attempts == [], (
+        f"path-traversal: sibling-prefix dirs created: {sibling_attempts}"
+    )
     # Nor any extracted file outside an actual 'unpacked' dir.
     owned = list(_isolated_stash_root.rglob("owned.txt"))
     assert owned == [], f"path-traversal: owned.txt extracted at {owned}"

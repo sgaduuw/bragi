@@ -1048,8 +1048,7 @@ def test_theme_switch_enqueues_missing_renditions(
     new_targets = {(f"{w}w", fmt) for w in (300, 600, 1200) for fmt in ("avif", "webp", "original")}
     have_pending = {(r.size_label, r.format) for r in rows if r.status == "pending"}
     assert new_targets == have_pending, (
-        f"missing pending rows: {new_targets - have_pending}; "
-        f"extra: {have_pending - new_targets}"
+        f"missing pending rows: {new_targets - have_pending}; extra: {have_pending - new_targets}"
     )
     old_labels = {"320w", "800w", "1600w"}
     leftover = {(r.size_label, r.format) for r in rows if r.size_label in old_labels}

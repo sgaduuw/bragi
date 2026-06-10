@@ -196,6 +196,6 @@ def test_edit_site_current_post_persists_changes(
 
     with db_session_factory() as db:
         after = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
-        assert (
-            after.title == "Renamed by test"
-        ), f"title was not persisted; before={before_title!r}, after={after.title!r}"
+        assert after.title == "Renamed by test", (
+            f"title was not persisted; before={before_title!r}, after={after.title!r}"
+        )
