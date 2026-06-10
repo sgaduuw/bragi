@@ -66,6 +66,40 @@ def test_admin_chrome_css_served(admin_app: Flask) -> None:
     assert "#1a1a1a" in body
 
 
+def test_bulk_select_assets_served(admin_app: Flask) -> None:
+    # admin_static.static_folder is already src/bragi/static/admin/,
+    # so the list templates must reference these as bare filenames.
+    # An accidental 'admin/' prefix double-resolves and 404s, which
+    # leaves checkboxes visible on cold load and breaks Select.
+    client = admin_app.test_client()
+    css = client.get("/admin/static/bulk_select.css")
+    assert css.status_code == 200
+    assert css.headers["Content-Type"].startswith("text/css")
+    js = client.get("/admin/static/bulk_select.js")
+    assert js.status_code == 200
+    assert js.headers["Content-Type"].startswith(("application/javascript", "text/javascript"))
+
+
+def test_bulk_select_list_templates_use_bare_filenames() -> None:
+    # Direct structural guard against the double-prefix bug. The
+    # asset-serving test above only catches blueprint/file regressions;
+    # this one catches the more common failure mode: a template author
+    # re-introducing `filename='admin/bulk_select.css'`.
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "src" / "bragi"
+    templates = [
+        src / "contrib" / "post" / "templates" / "admin" / "list.html",
+        src / "contrib" / "page" / "templates" / "admin" / "page_list.html",
+        src / "contrib" / "attachments" / "templates" / "admin" / "attachments_list.html",
+    ]
+    for tmpl in templates:
+        text = tmpl.read_text()
+        assert "filename='bulk_select.css'" in text, f"{tmpl}: missing CSS ref"
+        assert "filename='bulk_select.js'" in text, f"{tmpl}: missing JS ref"
+        assert "filename='admin/bulk_select" not in text, f"{tmpl}: double-prefix bug"
+
+
 def test_global_only_renders_one_row(admin_app: Flask) -> None:
     """Outside a site context, row 2 is suppressed entirely."""
     client = admin_app.test_client()

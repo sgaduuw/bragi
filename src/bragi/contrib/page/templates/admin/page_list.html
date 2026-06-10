@@ -1,7 +1,7 @@
 {% extends "admin/base.html" %}
 {% block title %}Pages &middot; bragi admin{% endblock %}
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('admin_static.static', filename='admin/bulk_select.css') }}">
+<link rel="stylesheet" href="{{ url_for('admin_static.static', filename='bulk_select.css') }}">
 {% endblock %}
 {% block content %}
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
@@ -22,7 +22,7 @@
 
 {% include "admin/_page_list_table.html" %}
 
-<script src="{{ url_for('admin_static.static', filename='admin/bulk_select.js') }}"></script>
+<script src="{{ url_for('admin_static.static', filename='bulk_select.js') }}"></script>
 <script>
   window.bragiBulkSelect.init({
     wrapperSelector: "#page-list-table",

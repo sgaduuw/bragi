@@ -1,7 +1,7 @@
 {% extends "admin/base.html" %}
 {% block title %}Attachments &middot; bragi admin{% endblock %}
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('admin_static.static', filename='admin/bulk_select.css') }}">
+<link rel="stylesheet" href="{{ url_for('admin_static.static', filename='bulk_select.css') }}">
 {% endblock %}
 {% block content %}
 <section class="rendition-status-panel">
@@ -77,7 +77,7 @@
 
 {% include "admin/_attachments_list_table.html" %}
 
-<script src="{{ url_for('admin_static.static', filename='admin/bulk_select.js') }}"></script>
+<script src="{{ url_for('admin_static.static', filename='bulk_select.js') }}"></script>
 <script>
   window.bragiBulkSelect.init({
     wrapperSelector: "#attachments-list-table",
