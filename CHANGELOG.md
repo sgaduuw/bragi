@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.30.1] - 2026-06-10
+
 ### Fixed
 
 - Bulk-select assets (`bulk_select.css`, `bulk_select.js`) on the
