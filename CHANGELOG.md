@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-06-10
+
 ### Changed
 
 - **Runtime dependency bumps.** `gunicorn` 23 → 26, `argon2-cffi`
