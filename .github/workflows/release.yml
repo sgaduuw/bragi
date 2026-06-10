@@ -3,6 +3,19 @@ name: Publish Release Artifacts
 on:
   release:
     types: [published]
+  # workflow_dispatch is the operator-recovery path for cases where
+  # publish-pypi succeeded but publish-docker exhausted its PyPI
+  # propagation budget (matrix runners can hit a CDN edge stuck
+  # behind pypi.org's primary node by tens of minutes; see v1.31.0
+  # for the incident that prompted this trigger). Dispatch with the
+  # already-published version to re-fire publish-docker alone;
+  # publish-pypi self-skips on this path so PyPI is not re-uploaded.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Already-published version to re-fire publish-docker for (no v prefix, e.g. 1.31.0).'
+        required: true
+        type: string
 
 # Trusted Publishers via OIDC for PyPI; GHCR via GITHUB_TOKEN.
 # PyPI side requires the pending publisher to be configured; see
@@ -10,6 +23,9 @@ on:
 
 jobs:
   publish-pypi:
+    # release-only: the dispatch path is for re-firing publish-docker
+    # against an already-published version; no need to re-upload.
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -45,6 +61,15 @@ jobs:
 
   publish-docker:
     needs: publish-pypi
+    # Runs on the release path when publish-pypi succeeds, and on the
+    # workflow_dispatch path when publish-pypi self-skipped. `always()`
+    # is required so the skipped publish-pypi doesn't propagate the
+    # skip into here.
+    if: |
+      always() && (
+        (github.event_name == 'release' && needs.publish-pypi.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && needs.publish-pypi.result == 'skipped')
+      )
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -56,11 +81,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Resolve version from release tag
+      - name: Resolve version
         id: version
+        # Sources the version from the release tag on the release-event
+        # path and from the dispatch input on the recovery path.
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -75,9 +107,18 @@ jobs:
       # download directory is discarded; this step does not pre-warm
       # any pip cache the docker build reads.
       - name: Wait for PyPI propagation
+        # Budget raised from 600s to 1800s (180 x 10s) after v1.31.0
+        # exhausted the prior 600s budget across three full re-runs
+        # while pypi.org's simple index already listed the wheel.
+        # GitHub Actions' egress hits PyPI CDN edges that can remain
+        # stuck behind the primary node by tens of minutes; the
+        # in-practice worst-case under v1.27.6 was ~11s, but
+        # outliers exist and the matrix-fail-then-rerun loop is
+        # expensive. 1800s leaves wide margin without making a
+        # genuinely-broken publish wait unreasonably long.
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          for i in $(seq 1 60); do
+          for i in $(seq 1 180); do
             rm -rf /tmp/pypi-check
             mkdir -p /tmp/pypi-check
             if python3 -m pip download \
@@ -92,7 +133,7 @@ jobs:
             echo "attempt ${i}: bragi-cms==${VERSION} not yet resolvable on PyPI"
             sleep 10
           done
-          echo "PyPI did not surface bragi-cms==${VERSION} after 600s; check publish-pypi step output and re-run this job"
+          echo "PyPI did not surface bragi-cms==${VERSION} after 1800s; check publish-pypi step output and re-run this job"
           exit 1
 
       # QEMU registers binfmt handlers for foreign architectures
@@ -166,11 +207,16 @@ jobs:
           owner: sgaduuw
           repositories: ${{ matrix.theme }}
 
-      - name: Resolve version from release tag
+      - name: Resolve version
         id: version
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch bragi-released
         env:
