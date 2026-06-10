@@ -10,7 +10,9 @@
  *   })
  *
  * The module is event-delegated on the wrapper so htmx swaps that
- * replace the table contents do not strip listeners.
+ * replace the table contents do not strip listeners. The header-row
+ * select-all checkbox lives inside the wrapper (so it gets re-rendered
+ * with each swap); the bar with Select/Cancel/Delete lives outside.
  */
 (function () {
   "use strict";
@@ -23,7 +25,6 @@
     const enterBtn = bar.querySelector(".bulk-select-enter");
     const controls = bar.querySelector(".bulk-select-controls");
     const cancelBtn = bar.querySelector(".bulk-select-cancel");
-    const selectAllBtn = bar.querySelector(".bulk-select-all");
     const deleteBtn = bar.querySelector(".bulk-select-delete");
     const dialog = bar.querySelector(".bulk-confirm-dialog");
     const dialogConfirm = dialog.querySelector(".bulk-confirm-confirm");
@@ -33,10 +34,29 @@
     const moreCount = dialog.querySelector(".bulk-more-count");
     const submitForm = bar.querySelector(".bulk-submit-form");
 
-    function selected() {
+    function rowBoxes() {
       return Array.from(
-        wrapper.querySelectorAll('input.bulk-select[type="checkbox"]:checked')
+        wrapper.querySelectorAll('input.bulk-select[type="checkbox"]')
       );
+    }
+
+    function headerBox() {
+      return wrapper.querySelector(
+        'input.bulk-select-all-header[type="checkbox"]'
+      );
+    }
+
+    function selected() {
+      return rowBoxes().filter((cb) => cb.checked);
+    }
+
+    function syncHeader() {
+      const header = headerBox();
+      if (!header) return;
+      const all = rowBoxes();
+      const n = all.filter((cb) => cb.checked).length;
+      header.checked = all.length > 0 && n === all.length;
+      header.indeterminate = n > 0 && n < all.length;
     }
 
     function updateCount() {
@@ -45,6 +65,7 @@
         el.textContent = String(n);
       });
       deleteBtn.disabled = n === 0;
+      syncHeader();
     }
 
     function enterMode() {
@@ -55,11 +76,9 @@
     }
 
     function exitMode() {
-      wrapper
-        .querySelectorAll('input.bulk-select[type="checkbox"]')
-        .forEach((cb) => {
-          cb.checked = false;
-        });
+      rowBoxes().forEach((cb) => {
+        cb.checked = false;
+      });
       wrapper.classList.remove("select-mode");
       controls.hidden = true;
       enterBtn.hidden = false;
@@ -69,20 +88,17 @@
     enterBtn.addEventListener("click", enterMode);
     cancelBtn.addEventListener("click", exitMode);
 
-    selectAllBtn.addEventListener("click", function () {
-      const boxes = wrapper.querySelectorAll(
-        'input.bulk-select[type="checkbox"]'
-      );
-      const anyUnchecked = Array.from(boxes).some((b) => !b.checked);
-      boxes.forEach((b) => {
-        b.checked = anyUnchecked;
-      });
-      updateCount();
-    });
-
-    // Event-delegated change tracking so htmx swaps survive.
+    // Event-delegated change tracking so htmx swaps survive. Header
+    // toggles all visible rows; rows feed back into the header's
+    // indeterminate / fully-checked state via updateCount().
     wrapper.addEventListener("change", function (evt) {
-      if (evt.target.matches('input.bulk-select[type="checkbox"]')) {
+      if (evt.target.matches('input.bulk-select-all-header[type="checkbox"]')) {
+        const checked = evt.target.checked;
+        rowBoxes().forEach((cb) => {
+          cb.checked = checked;
+        });
+        updateCount();
+      } else if (evt.target.matches('input.bulk-select[type="checkbox"]')) {
         updateCount();
       }
     });

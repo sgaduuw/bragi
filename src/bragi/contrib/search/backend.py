@@ -183,12 +183,34 @@ def _index(scope: str, entity_id: int, fields: dict[str, Any]) -> None:
         db.commit()
 
 
+def _remove_in_session(db: Any, scope: str, entity_id: int) -> None:
+    """Inner remove that takes an open session and does NOT commit.
+
+    Pulled out of `_remove` so lifecycle hook subscribers can do the FTS
+    DELETE on the same session/connection as the outer transaction.
+    Required because once any sibling hookimpl writes to the outer
+    session (e.g. internal_links.drop_for_deleted), SQLite promotes
+    that connection to a write transaction and holds the database
+    write lock; a fresh SessionLocal then waits busy_timeout and
+    errors with `database is locked`. Bulk-delete made this race
+    deterministic; single-delete masked it via the 5s timeout.
+    """
+    table = _FTS_TABLES.get(scope)
+    if table is None:
+        return
+    db.execute(text(f"DELETE FROM {table} WHERE rowid = :rid"), {"rid": entity_id})
+
+
 def _remove(scope: str, entity_id: int) -> None:
+    """Standalone remove that owns its own session. Used by the
+    `SearchBackendSpec.remove` callable (CLI, future backend swaps).
+    Lifecycle hookimpls should call `_remove_in_session` instead so
+    the FTS DELETE rides the outer transaction's connection."""
     table = _FTS_TABLES.get(scope)
     if table is None:
         return
     with SessionLocal() as db:
-        db.execute(text(f"DELETE FROM {table} WHERE rowid = :rid"), {"rid": entity_id})
+        _remove_in_session(db, scope, entity_id)
         db.commit()
 
 
@@ -407,3 +429,14 @@ def index_post(post: Post) -> None:
 def index_page(page: Page) -> None:
     """Index a Page via the default backend's `_index` callable."""
     _index("page", page.id, _page_fields(page))
+
+
+def index_post_in_session(db: Any, post: Post) -> None:
+    """In-session counterpart of `index_post` for lifecycle hookimpls.
+    See `_remove_in_session` for the contention rationale."""
+    _index_in_session(db, "post", post.id, _post_fields(post))
+
+
+def index_page_in_session(db: Any, page: Page) -> None:
+    """In-session counterpart of `index_page` for lifecycle hookimpls."""
+    _index_in_session(db, "page", page.id, _page_fields(page))

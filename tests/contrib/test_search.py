@@ -542,7 +542,8 @@ def test_on_post_published_indexes_post(
     post = _published_post(
         db_session, blog, user, slug="a", title="A", body="found-via-published-hook"
     )
-    on_post_published(post, None)
+    on_post_published(post, db_session)
+    db_session.commit()  # the hookimpl now writes through the supplied session; outer commits.
     assert SQLiteFTS5SearchBackend.search(blog.id, "found-via-published-hook", 1, 10).total == 1
 
 
@@ -561,7 +562,8 @@ def test_on_post_updated_removes_when_unpublished(
     # Flip to draft and fire the update hook.
     post.status = PostStatus.DRAFT
     db_session.commit()
-    on_post_updated(post, {}, {}, None)
+    on_post_updated(post, {}, {}, db_session)
+    db_session.commit()
     assert SQLiteFTS5SearchBackend.search(blog.id, "will-disappear", 1, 10).total == 0
 
 
@@ -577,7 +579,8 @@ def test_on_post_deleted_removes(
     blog, _, user = seeded_site
     post = _published_post(db_session, blog, user, slug="a", title="A", body="goes-away")
     index_post(post)
-    on_post_deleted(post, None)
+    on_post_deleted(post, db_session)
+    db_session.commit()
     assert SQLiteFTS5SearchBackend.search(blog.id, "goes-away", 1, 10).total == 0
 
 
@@ -604,9 +607,55 @@ def test_lifecycle_hookimpls_invalidate_total_cache(
     # Publish a second post via the lifecycle hook; the cache
     # MUST be flushed so the next search counts both rows.
     post_b = _published_post(db_session, blog, user, slug="b", title="B", body="cache-me")
-    on_post_published(post_b, None)
+    on_post_published(post_b, db_session)
+    db_session.commit()
     assert backend_mod._SEARCH_TOTAL_CACHE == {}
     assert SQLiteFTS5SearchBackend.search(blog.id, "cache-me", 1, 10).total == 2
+
+
+def test_lifecycle_hookimpls_use_supplied_session_not_sessionlocal(
+    fts_tables_present: None,
+    seeded_site: tuple[Site, Site, User],
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression for the bulk-delete `database is locked` race: the
+    # FTS write must ride the outer transaction's connection so it
+    # doesn't contend with the outer write lock that earlier hookimpls
+    # (e.g. internal_links.drop_for_deleted) acquire on the supplied
+    # session. Concretely: the SessionLocal proxy's `_factory` must
+    # NOT be invoked during any of the three on_post_* hookimpls
+    # (the proxy is the only path through which `SessionLocal()` ever
+    # produces a session, so spying there catches every cross-
+    # connection opening regardless of how it's written).
+    from bragi.contrib.search.plugin import (
+        on_post_deleted,
+        on_post_published,
+        on_post_updated,
+    )
+
+    blog, _, user = seeded_site
+    post = _published_post(db_session, blog, user, slug="x", title="X", body="locking")
+
+    calls = 0
+
+    def _spy(**kwargs: object) -> Session:
+        nonlocal calls
+        calls += 1
+        return db_session_factory(**kwargs)
+
+    monkeypatch.setattr("bragi.core.db.SessionLocal._factory", _spy)
+
+    on_post_published(post, db_session)
+    on_post_updated(post, {}, {}, db_session)
+    on_post_deleted(post, db_session)
+    db_session.commit()
+
+    assert calls == 0, (
+        "hookimpl opened a fresh SessionLocal; " "FTS write would contend on the SQLite write lock"
+    )
 
 
 def test_safe_query_normalizes_case_and_token_order() -> None:
