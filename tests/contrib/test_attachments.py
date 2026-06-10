@@ -2342,9 +2342,9 @@ def test_process_renditions_reclaims_stale_processing_rows(
     with db_session_factory() as db:
         row = db.get(AttachmentRendition, stale_row_id)
         assert row is not None
-        assert (
-            row.status != "processing"
-        ), f"reclaim never picked up the orphaned row; status still {row.status!r}"
+        assert row.status != "processing", (
+            f"reclaim never picked up the orphaned row; status still {row.status!r}"
+        )
         # Successful happy-path also clears claimed_at.
         if row.status == "done":
             assert row.claimed_at is None
@@ -3321,8 +3321,7 @@ def test_pictureify_emits_per_class_sizes_for_size_small(
         att_storage_key = att.storage_key
 
     html_in = (
-        f'<p><img src="/attachments/{att_storage_key}" '
-        f'alt="x" class="size-small align-left"></p>'
+        f'<p><img src="/attachments/{att_storage_key}" alt="x" class="size-small align-left"></p>'
     )
     with (
         delivery_app.test_request_context("/", headers={"Host": "blog.example.com"}),
@@ -3493,7 +3492,7 @@ def test_delivery_renders_image_with_size_class(
             "title": "Hero post",
             "slug": "hero-class",
             "body_markdown": (
-                f"![hero](/attachments/{att_storage_key})" "{.size-medium .align-center}"
+                f"![hero](/attachments/{att_storage_key}){{.size-medium .align-center}}"
             ),
             "status": "published",
             "tags": "",

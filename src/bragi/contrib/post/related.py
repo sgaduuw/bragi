@@ -37,7 +37,7 @@ def related_posts_count_for(site: Any) -> int:
     raw = getattr(site, "extra_settings", {}).get("related_posts_count", DEFAULT_RELATED_COUNT)
     try:
         n = int(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return DEFAULT_RELATED_COUNT
     return n if n > 0 else DEFAULT_RELATED_COUNT
 

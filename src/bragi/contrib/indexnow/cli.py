@@ -54,6 +54,6 @@ def setup(site_slug: str, key: str | None) -> None:
         click.echo(f"Verification URL: {canonical}/{fresh_key}.txt")
     else:
         click.echo(
-            "Site has no canonical_url set; configure one so the verification URL " "is reachable.",
+            "Site has no canonical_url set; configure one so the verification URL is reachable.",
             err=True,
         )

@@ -82,7 +82,7 @@ def _pinned_autoadvance_seconds(site: Site) -> int:
         return DEFAULT_PINNED_AUTOADVANCE_SECONDS
     try:
         value = int(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return DEFAULT_PINNED_AUTOADVANCE_SECONDS
     if value < 0:
         return DEFAULT_PINNED_AUTOADVANCE_SECONDS
@@ -147,7 +147,7 @@ def _posts_per_page(site: Site) -> int:
     raw = getattr(site, "extra_settings", {}).get("posts_per_page", DEFAULT_POSTS_PER_PAGE)
     try:
         n = int(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return DEFAULT_POSTS_PER_PAGE
     return n if n > 0 else DEFAULT_POSTS_PER_PAGE
 

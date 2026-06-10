@@ -133,9 +133,9 @@ def test_site_delete_cascades_through_per_site_tables(db_session: Session) -> No
     db_session.commit()
     db_session.expire_all()
     for model in (UserSiteRole, Tag, Redirect, SiteAlias, Attachment, AnalyticsEvent, Post, Page):
-        assert (
-            db_session.execute(select(model)).scalars().all() == []
-        ), f"{model.__name__} rows survived site delete"
+        assert db_session.execute(select(model)).scalars().all() == [], (
+            f"{model.__name__} rows survived site delete"
+        )
 
 
 def test_user_delete_cascades_to_user_owned_tables(db_session: Session) -> None:
@@ -164,9 +164,9 @@ def test_user_delete_cascades_to_user_owned_tables(db_session: Session) -> None:
     db_session.commit()
     db_session.expire_all()
     for model in (UserIdentity, UserSiteRole, SessionRow, LocalCredential):
-        assert (
-            db_session.execute(select(model)).scalars().all() == []
-        ), f"{model.__name__} rows survived user delete"
+        assert db_session.execute(select(model)).scalars().all() == [], (
+            f"{model.__name__} rows survived user delete"
+        )
 
 
 def test_user_delete_sets_history_columns_null(db_session: Session) -> None:

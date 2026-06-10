@@ -163,7 +163,7 @@ def _resume_data_for_form(page: Page | None, form: dict[str, str]) -> ResumeData
     if raw.strip():
         try:
             return ResumeData.model_validate(json.loads(raw))
-        except (json.JSONDecodeError, ValidationError):
+        except json.JSONDecodeError, ValidationError:
             pass
     if page is not None and page.resume_data:
         try:
@@ -243,7 +243,7 @@ def _normalized_parent_id(value: str) -> int | None:
         return None
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 

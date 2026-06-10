@@ -106,7 +106,7 @@ def test_in_tree_theme_ships_dark_mode_css(delivery_app: Flask, slug: str, _labe
         delivery_app.jinja_env, "delivery/base.html"
     )
     assert "prefers-color-scheme: dark" in source, (
-        f"theme {slug!r}'s delivery/base.html is missing a " f"`prefers-color-scheme: dark` block"
+        f"theme {slug!r}'s delivery/base.html is missing a `prefers-color-scheme: dark` block"
     )
     assert 'name="color-scheme"' in source, (
         f"theme {slug!r}'s delivery/base.html is missing the "

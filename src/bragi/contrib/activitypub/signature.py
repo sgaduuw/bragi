@@ -199,7 +199,7 @@ def verify_post(
     )
     try:
         signature_bytes = base64.b64decode(params.get("signature", ""))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return False
     if not _verify_rsa_sha256(public_key_pem, signing_string, signature_bytes):
         return False
@@ -248,7 +248,7 @@ def _verify_rsa_sha256(public_key_pem: str, signing_string: bytes, signature: by
     """Reverse of `_sign_rsa_sha256`. Returns False on any failure."""
     try:
         public_key = serialization.load_pem_public_key(public_key_pem.encode("ascii"))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return False
     if not isinstance(public_key, rsa.RSAPublicKey):
         return False
@@ -314,7 +314,7 @@ def _date_within_skew(date_header: str | None) -> bool:
         return False
     try:
         when = parsedate_to_datetime(date_header)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)

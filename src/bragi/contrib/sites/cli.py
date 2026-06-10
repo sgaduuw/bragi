@@ -108,7 +108,7 @@ def create_site(
         db.add(site)
         db.commit()
         click.echo(
-            f"Created site {site.slug} ({site.hostname}, id={site.id}, " f"owner={owner.email})."
+            f"Created site {site.slug} ({site.hostname}, id={site.id}, owner={owner.email})."
         )
 
 
@@ -149,8 +149,7 @@ def transfer_site(site_slug: str, to_email: str) -> None:
             extra={"from_user_id": old_owner_id, "to_user_id": new_owner.id},
         )
         click.echo(
-            f"Transferred ownership of {site_slug!r} to {to_email} "
-            f"(was user_id={old_owner_id})."
+            f"Transferred ownership of {site_slug!r} to {to_email} (was user_id={old_owner_id})."
         )
 
 

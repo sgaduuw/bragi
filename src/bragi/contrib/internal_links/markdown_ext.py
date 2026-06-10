@@ -72,7 +72,7 @@ def _emit_resolved_open(prefix: str, entity_id: int, href: str) -> str:
 
 
 def _emit_broken_open(prefix: str, key: str) -> str:
-    return '<a class="bragi-link--broken" ' f'data-bragi-link="{escape(f"{prefix}:{key}")}">'
+    return f'<a class="bragi-link--broken" data-bragi-link="{escape(f"{prefix}:{key}")}">'
 
 
 def _is_internal_prefix_href(href: str) -> tuple[str, str] | None:

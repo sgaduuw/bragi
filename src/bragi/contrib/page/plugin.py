@@ -350,7 +350,5 @@ def _register_posts_per_page() -> SiteSetting:
         type=Annotated[int, Field(gt=0)],
         default=10,
         label="Posts per page",
-        help_text=(
-            "Number of posts on a single listing page (index, tag, " "archive). Must be > 0."
-        ),
+        help_text=("Number of posts on a single listing page (index, tag, archive). Must be > 0."),
     )

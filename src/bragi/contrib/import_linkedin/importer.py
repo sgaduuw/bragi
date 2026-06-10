@@ -184,7 +184,7 @@ def apply(zip_path: Any, page: Any, options: dict[str, Any]) -> ImportResult:
         counts["skipped"] = len(dropped)
         for stale_id in sorted(dropped):
             warnings.append(
-                f"Skipped proposal {stale_id} (target row changed since " f"plan was generated)."
+                f"Skipped proposal {stale_id} (target row changed since plan was generated)."
             )
 
         # Build the new ResumeData by walking the proposals; sections

@@ -130,8 +130,7 @@ try:
     import pillow_avif  # type: ignore[import-untyped]  # noqa: F401  -- registers PIL.AvifImagePlugin
 except ImportError:
     LOG.warning(
-        "pillow_avif not installed; AVIF rendition encoding will fail. "
-        "Install pillow-avif-plugin."
+        "pillow_avif not installed; AVIF rendition encoding will fail. Install pillow-avif-plugin."
     )
 
 
