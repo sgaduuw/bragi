@@ -100,8 +100,7 @@ def test_source_links_to_target_matches_after_redirect() -> None:
 
 def test_extract_hcard_picks_name_url_photo() -> None:
     html = (
-        '<a class="h-card" href="https://author.example">Ada</a>'
-        '<img class="u-photo" src="/me.jpg">'
+        '<a class="h-card" href="https://author.example">Ada</a><img class="u-photo" src="/me.jpg">'
     )
     name, url, photo = extract_hcard(html, "https://author.example/")
     assert name == "Ada"

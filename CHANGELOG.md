@@ -6,6 +6,28 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-06-10
+
+### Changed
+
+- **Runtime dependency bumps.** `gunicorn` 23 → 26, `argon2-cffi`
+  23 → 25, `markdown-it-py` 3 → 4, `mdit-py-plugins` 0.4 → 0.6,
+  `markdownify` 0.13 → 1.2. The full test suite (rendering
+  pipeline, importers, auth verification) passes against the new
+  versions without behaviour-change surface; argon2-cffi 25 still
+  verifies hashes produced by 23.x. Operators with deeply
+  customised gunicorn configs should skim the gunicorn 24/25/26
+  release notes; the in-tree compose defaults work unchanged.
+- **Python floor raised to 3.14.** `requires-python` is now
+  `>=3.14,<4` (was `>=3.12,<4`). Installs against Python 3.12 and
+  3.13 will fail at `pip install bragi-cms` resolution time. The
+  `[tool.ruff] target-version` and `[tool.mypy] python_version` are
+  bumped in lockstep with the floor, and CI now exercises 3.14
+  instead of 3.12. Operators on the published Docker images
+  (`bragi-admin` / `bragi-delivery`) are unaffected; those have
+  always run `python:3.14-slim`. Direct PyPI installers on the
+  older interpreters need to upgrade.
+
 ## [1.30.1] - 2026-06-10
 
 ### Fixed

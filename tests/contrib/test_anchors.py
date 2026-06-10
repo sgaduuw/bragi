@@ -100,7 +100,7 @@ def test_transform_preserves_existing_attributes() -> None:
 
 def test_transform_unaffected_by_nested_html_in_long_doc() -> None:
     """Non-heading markup between headings is untouched."""
-    src = "<h1>Intro</h1>" "<p>Some paragraph.</p>" "<pre><code>x = 1</code></pre>" "<h2>Next</h2>"
+    src = "<h1>Intro</h1><p>Some paragraph.</p><pre><code>x = 1</code></pre><h2>Next</h2>"
     out = add_heading_anchors(src)
     assert "<p>Some paragraph.</p>" in out
     assert "<pre><code>x = 1</code></pre>" in out

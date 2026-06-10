@@ -111,7 +111,7 @@ def upload_and_plan(site_slug: str, page_id: int) -> ResponseReturnValue:
     if not detect(zip_path):
         shutil.rmtree(stash, ignore_errors=True)
         flash(
-            "Uploaded file does not look like a LinkedIn export " "(Profile.csv missing).",
+            "Uploaded file does not look like a LinkedIn export (Profile.csv missing).",
             "error",
         )
         return redirect(url_for("page_admin.edit_page", site_slug=site_slug, page_id=page_id))

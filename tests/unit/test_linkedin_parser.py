@@ -221,9 +221,7 @@ def test_parse_skills_empty_csv_returns_empty_list() -> None:
 def test_parse_languages_basic() -> None:
     zf = _zip_with(
         {
-            "Languages.csv": (
-                "Name,Proficiency\n" "Dutch,Native\n" "English,Professional working\n"
-            ),
+            "Languages.csv": ("Name,Proficiency\nDutch,Native\nEnglish,Professional working\n"),
         }
     )
     langs = parse_languages(zf)
@@ -255,9 +253,7 @@ def test_parse_certifications_extracts_year() -> None:
 def test_parse_certifications_unparseable_date_drops_year() -> None:
     zf = _zip_with(
         {
-            "Certifications.csv": (
-                "Name,Authority,Started On,Url\n" "Course,Provider,Spring 2022,\n"
-            ),
+            "Certifications.csv": ("Name,Authority,Started On,Url\nCourse,Provider,Spring 2022,\n"),
         }
     )
     [c] = parse_certifications(zf)
@@ -417,7 +413,7 @@ def test_parse_profile_cleans_summary() -> None:
     zf = _zip_with(
         {
             "Profile.csv": (
-                "First Name,Last Name,Summary\n" 'Eelco,W,"Engineer\n• Loves Python\n• Hates JS"\n'
+                'First Name,Last Name,Summary\nEelco,W,"Engineer\n• Loves Python\n• Hates JS"\n'
             ),
         }
     )
@@ -432,7 +428,7 @@ def test_parse_profile_cleans_summary() -> None:
 def test_clean_linkedin_description_inline_asterisks_with_intro() -> None:
     raw = "Built X.  * Designed it * Led the team * Shipped v1"
     result = clean_linkedin_description(raw)
-    assert result == ("Built X.\n" "\n" "- Designed it\n" "- Led the team\n" "- Shipped v1")
+    assert result == ("Built X.\n\n- Designed it\n- Led the team\n- Shipped v1")
 
 
 def test_clean_linkedin_description_inline_asterisks_no_intro() -> None:
@@ -485,4 +481,4 @@ def test_clean_linkedin_description_inline_asterisks_in_parse_positions() -> Non
         }
     )
     [p] = parse_positions(zf)
-    assert p.description_markdown == ("Built X.\n" "\n" "- Designed it\n" "- Led team")
+    assert p.description_markdown == ("Built X.\n\n- Designed it\n- Led team")

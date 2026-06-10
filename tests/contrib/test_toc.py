@@ -42,7 +42,7 @@ def test_toc_renders_for_two_or_more_headings() -> None:
 
 
 def test_toc_nests_h3_under_h2() -> None:
-    html = '<h2 id="a">A</h2><h3 id="a1">A1</h3>' '<h3 id="a2">A2</h3><h2 id="b">B</h2>'
+    html = '<h2 id="a">A</h2><h3 id="a1">A1</h3><h3 id="a2">A2</h3><h2 id="b">B</h2>'
     out = build_toc_html(html)
     assert out is not None
     # Nested <ol> appears between the h2 and the next h2.

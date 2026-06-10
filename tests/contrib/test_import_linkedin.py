@@ -106,7 +106,7 @@ def test_apply_does_not_change_page_kind(
                 "First Name,Last Name,Headline,Geo Location,Summary\n"
                 "Eelco,W,Engineer,Amsterdam,Bio\n"
             ),
-            "Positions.csv": ("Company Name,Title,Started On\n" "Acme,Engineer,Jan 2020\n"),
+            "Positions.csv": ("Company Name,Title,Started On\nAcme,Engineer,Jan 2020\n"),
             "Skills.csv": "Name\nPython\n",
         },
     )
@@ -152,7 +152,7 @@ def test_plan_then_apply_populates_resume_data(
             "Languages.csv": "Name,Proficiency\nDutch,Native\n",
             "Certifications.csv": "Name,Authority,Started On,Url\nCKA,LF,Mar 2022,\n",
             "Projects.csv": (
-                "Title,Url,Started On,Finished On,Description\n" "Mimir,,Jan 2024,,LKML.\n"
+                "Title,Url,Started On,Finished On,Description\nMimir,,Jan 2024,,LKML.\n"
             ),
         },
     )
@@ -195,7 +195,7 @@ def test_apply_with_subset_skips_unselected_changes(
         tmp_path,
         {
             "Profile.csv": "First Name,Last Name\nA,B\n",
-            "Positions.csv": ("Company Name,Title,Started On\n" "Acme,Engineer,Jan 2020\n"),
+            "Positions.csv": ("Company Name,Title,Started On\nAcme,Engineer,Jan 2020\n"),
             "Skills.csv": "Name\nPython\nGo\n",
         },
     )

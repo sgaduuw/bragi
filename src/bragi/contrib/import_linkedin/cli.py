@@ -76,7 +76,7 @@ def linkedin_command(
 def _run_plan(zip_path: Path, site_slug: str, page_slug: str, plan_out: Path) -> None:
     if not detect(zip_path):
         click.echo(
-            f"{zip_path} does not look like a LinkedIn export " f"(Profile.csv missing).", err=True
+            f"{zip_path} does not look like a LinkedIn export (Profile.csv missing).", err=True
         )
         sys.exit(1)
 
@@ -124,7 +124,7 @@ def _run_plan(zip_path: Path, site_slug: str, page_slug: str, plan_out: Path) ->
         click.echo("(no changes proposed)")
     for w in result.warnings:
         click.echo(f"warn: {w}", err=True)
-    click.echo(f"Review the plan, then run: " f"bragi import linkedin --apply {plan_out}")
+    click.echo(f"Review the plan, then run: bragi import linkedin --apply {plan_out}")
 
 
 def _run_apply(plan_path: Path) -> None:
@@ -134,7 +134,7 @@ def _run_apply(plan_path: Path) -> None:
         click.echo(f"Plan refers to ZIP at {zip_path}, which no longer exists.", err=True)
         sys.exit(1)
     if _sha256_file(zip_path) != raw["source_zip_sha256"]:
-        click.echo("Plan was generated from a different ZIP " "(sha256 mismatch).", err=True)
+        click.echo("Plan was generated from a different ZIP (sha256 mismatch).", err=True)
         sys.exit(1)
 
     site_slug = raw["target"]["site_slug"]

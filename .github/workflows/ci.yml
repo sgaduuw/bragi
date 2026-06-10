@@ -10,7 +10,7 @@ on:
       - "release/**"
       - "hotfix/**"
 
-# Minimum permissions. CI runs untrusted PR code (`poetry install`
+# Minimum permissions. CI runs untrusted PR code (`uv sync`
 # from a fork can execute arbitrary code in the build phase), so
 # the workflow token must not carry write permissions on repo
 # contents, packages, or anything else by default.
@@ -26,29 +26,32 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
-      - name: Install Poetry
-        run: pipx install poetry
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: uv sync --frozen
 
       - name: Lint (ruff check)
-        run: poetry run ruff check src/ tests/ alembic/
+        run: uv run ruff check src/ tests/ alembic/
 
       - name: Format check (ruff format)
-        run: poetry run ruff format --check src/ tests/ alembic/
+        run: uv run ruff format --check src/ tests/ alembic/
 
       - name: Type check (mypy)
-        run: poetry run mypy src/
+        run: uv run mypy src/
 
       - name: Test (pytest)
-        run: poetry run pytest
+        run: uv run pytest
 
       - name: Migration smoke (fresh DB)
         run: |
           rm -f bragi.db bragi.db-wal bragi.db-shm
-          poetry run alembic upgrade head
-          poetry run alembic downgrade base
-          poetry run alembic upgrade head
+          uv run alembic upgrade head
+          uv run alembic downgrade base
+          uv run alembic upgrade head

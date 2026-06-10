@@ -290,9 +290,9 @@ def test_position_heading_default_leads_with_company(
     company_pos = heading.find('itemprop="name"')
     role_pos = heading.find('class="role"')
     assert company_pos != -1 and role_pos != -1
-    assert (
-        company_pos < role_pos
-    ), f"expected company before role with lead_with_role=False; got {heading!r}"
+    assert company_pos < role_pos, (
+        f"expected company before role with lead_with_role=False; got {heading!r}"
+    )
 
 
 def test_position_heading_lead_with_role_swaps_order(
@@ -309,9 +309,9 @@ def test_position_heading_lead_with_role_swaps_order(
     company_pos = heading.find('itemprop="name"')
     role_pos = heading.find('class="role"')
     assert company_pos != -1 and role_pos != -1
-    assert (
-        role_pos < company_pos
-    ), f"expected role before company with lead_with_role=True; got {heading!r}"
+    assert role_pos < company_pos, (
+        f"expected role before company with lead_with_role=True; got {heading!r}"
+    )
 
 
 def _jsonld_block(html: str) -> str:

@@ -56,8 +56,7 @@ def register_importer_admin_tile() -> ImporterAdminTile:
         label="Ghost",
         slug="ghost",
         description=(
-            "Import posts, pages, redirects, and featured images "
-            "from a Ghost JSON or ZIP export."
+            "Import posts, pages, redirects, and featured images from a Ghost JSON or ZIP export."
         ),
         start_endpoint="ghost_admin.upload",
     )

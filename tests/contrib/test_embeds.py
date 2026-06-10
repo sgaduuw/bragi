@@ -323,7 +323,7 @@ def test_directive_renders_youtube_to_inline_html(
     admin_app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("bragi.settings.settings.embed_youtube_mode", "iframe")
-    src = "Hello\n\n" "::: embed https://www.youtube.com/watch?v=dQw4w9WgXcQ\n" ":::\n\n" "World\n"
+    src = "Hello\n\n::: embed https://www.youtube.com/watch?v=dQw4w9WgXcQ\n:::\n\nWorld\n"
     with admin_app.app_context():
         out = render_markdown(src)
     assert "<p>Hello</p>" in out

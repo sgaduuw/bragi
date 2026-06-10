@@ -240,7 +240,7 @@ def db_vacuum() -> None:
     "output_path",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
-    help="Tarball output path. Defaults to " "`bragi-backup-YYYYMMDD-HHMMSS.tar.gz` in the CWD.",
+    help="Tarball output path. Defaults to `bragi-backup-YYYYMMDD-HHMMSS.tar.gz` in the CWD.",
 )
 def backup(output_path: Path | None) -> None:
     """Produce a one-file backup of the DB + attachments.

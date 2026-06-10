@@ -19,7 +19,7 @@ log() {
 
 run_cmd() {
     log "running: $*"
-    if ! poetry run bragi "$@"; then
+    if ! uv run bragi "$@"; then
         log "command failed (rc=$?); continuing"
     fi
 }

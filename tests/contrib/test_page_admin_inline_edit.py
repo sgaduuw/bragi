@@ -216,9 +216,9 @@ def test_patch_slug_rename_inserts_301(admin_app: Flask, db_session: Session) ->
         .all()
     )
     # Page URL formatting differs from post; just check old slug appears somewhere.
-    assert any(
-        "about" in r.source_path for r in redirects
-    ), f"expected a 301 referencing /about/, got: {[r.source_path for r in redirects]}"
+    assert any("about" in r.source_path for r in redirects), (
+        f"expected a 301 referencing /about/, got: {[r.source_path for r in redirects]}"
+    )
 
 
 def test_patch_slug_rejects_duplicate(admin_app: Flask, db_session: Session) -> None:

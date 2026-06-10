@@ -39,7 +39,7 @@ def looks_like_ghost(path: Any) -> bool:
     """
     try:
         load_export(path)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         # `json.JSONDecodeError` subclasses ValueError, so this
         # one except line covers malformed JSON, missing
         # db[]/data envelope, and unreadable files.
