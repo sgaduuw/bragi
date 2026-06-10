@@ -81,9 +81,9 @@ unsplash = "bragi.contrib.unsplash.plugin"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0,<9",
-    "ruff>=0.5,<0.6",
-    "mypy>=1.10,<2",
+    "pytest>=9.0.3,<10",
+    "ruff>=0.15.14,<0.16",
+    "mypy>=1.18,<2",
 ]
 
 [build-system]
@@ -98,7 +98,7 @@ packages = ["src/bragi"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
