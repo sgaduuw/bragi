@@ -6,6 +6,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Python floor raised to 3.14.** `requires-python` is now
+  `>=3.14,<4` (was `>=3.12,<4`). Installs against Python 3.12 and
+  3.13 will fail at `pip install bragi-cms` resolution time. The
+  `[tool.ruff] target-version` and `[tool.mypy] python_version` are
+  bumped in lockstep with the floor, and CI now exercises 3.14
+  instead of 3.12. Operators on the published Docker images
+  (`bragi-admin` / `bragi-delivery`) are unaffected; those have
+  always run `python:3.14-slim`. Direct PyPI installers on the
+  older interpreters need to upgrade.
+
 ## [1.30.1] - 2026-06-10
 
 ### Fixed

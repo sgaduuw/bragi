@@ -8,7 +8,7 @@ description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.12,<4"
+requires-python = ">=3.14,<4"
 dependencies = [
     "flask (>=3.0,<4.0)",
     "sqlalchemy (>=2.0,<3.0)",
@@ -111,7 +111,7 @@ select = [
 ]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 strict = true
 warn_unused_configs = true
 warn_redundant_casts = true
