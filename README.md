@@ -314,8 +314,8 @@ wal_checkpoint(TRUNCATE)` is SQLite-only); on Postgres use
 ## Quick start (development)
 
 ```sh
-poetry install
-poetry run alembic upgrade head
+uv sync
+uv run alembic upgrade head
 make dev    # runs bragi-admin on :8001 and bragi-delivery on :8002 via the in-repo Procfile supervisor
 ```
 
@@ -654,7 +654,7 @@ palette that suits your theme.
 
 **Installing.** Install your package into the same Python
 environment as bragi (the `admin` and `delivery` containers, or
-`poetry add` in a dev tree):
+`uv add` in a dev tree):
 
 ```sh
 pip install bragi-theme-coral

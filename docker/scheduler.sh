@@ -5,7 +5,7 @@
 # Flask CLI commands at configured cadences.
 #
 # Each subcommand is invoked via the `bragi` console script installed
-# by Poetry, opens its own DB session, and exits cleanly so a crash
+# by pip (from the bragi-cms wheel), opens its own DB session, and exits cleanly so a crash
 # in one task doesn't take the loop down.
 #
 # Cadences (env-overridable, all in seconds):
