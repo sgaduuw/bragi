@@ -79,19 +79,22 @@ admin_imports = "bragi.contrib.admin_imports.plugin"
 admin_notices = "bragi.contrib.admin_notices.plugin"
 unsplash = "bragi.contrib.unsplash.plugin"
 
-# Poetry-specific build layout: src-layout package discovery. PEP
-# 621 has no portable equivalent for this; stays in `[tool.poetry]`.
-[tool.poetry]
-packages = [{include = "bragi", from = "src"}]
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0"
-ruff = "^0.5"
-mypy = "^1.10"
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<9",
+    "ruff>=0.5,<1",
+    "mypy>=1.10,<2",
+]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Explicit src-layout wheel target: tells hatchling where the
+# importable package lives so it does not fall back to project-root
+# discovery (which would miss the src/ prefix).
+[tool.hatch.build.targets.wheel]
+packages = ["src/bragi"]
 
 [tool.ruff]
 line-length = 100
