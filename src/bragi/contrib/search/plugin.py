@@ -24,9 +24,9 @@ from sqlalchemy.exc import OperationalError
 from bragi.api import SearchBackendSpec, hookimpl
 from bragi.contrib.search.backend import (
     SQLiteFTS5SearchBackend,
-    _remove,
-    index_page,
-    index_post,
+    _remove_in_session,
+    index_page_in_session,
+    index_post_in_session,
     invalidate_search_total_cache,
 )
 from bragi.contrib.search.cli import search_group
@@ -80,35 +80,41 @@ def _is_published(item: Any) -> bool:
     return getattr(item, "status", None) == PostStatus.PUBLISHED
 
 
-def _index_or_remove(item: Any) -> None:
-    """Dispatch by isinstance; remove unpublished from the index."""
+def _index_or_remove_in_session(db: Any, item: Any) -> None:
+    """Dispatch by isinstance; remove unpublished from the index.
+
+    Writes go through the supplied session so the FTS update rides the
+    outer transaction's connection (same write lock, no contention).
+    See backend `_remove_in_session` docstring for the underlying
+    SQLite-write-lock story.
+    """
     if isinstance(item, Post):
         if _is_published(item):
-            index_post(item)
+            index_post_in_session(db, item)
         else:
-            _remove("post", item.id)
+            _remove_in_session(db, "post", item.id)
     elif isinstance(item, Page):
         if _is_published(item):
-            index_page(item)
+            index_page_in_session(db, item)
         else:
-            _remove("page", item.id)
+            _remove_in_session(db, "page", item.id)
 
 
-def _remove_item(item: Any) -> None:
+def _remove_item_in_session(db: Any, item: Any) -> None:
     if isinstance(item, Post):
-        _remove("post", item.id)
+        _remove_in_session(db, "post", item.id)
     elif isinstance(item, Page):
-        _remove("page", item.id)
+        _remove_in_session(db, "page", item.id)
 
 
-def _safe(callable_: Any, item: Any) -> None:
-    """Run an index/remove call and swallow the "FTS tables absent"
-    error. The lifecycle hook must never raise; a missing FTS table
-    means the operator hasn't run the search migration yet, which is
-    a configuration issue, not a request-failure. Same shape as the
+def _safe_in_session(db: Any, callable_: Any, item: Any) -> None:
+    """Run an in-session index/remove call and swallow the "FTS tables
+    absent" error. The lifecycle hook must never raise; a missing FTS
+    table means the operator hasn't run the search migration yet, which
+    is a configuration issue, not a request-failure. Same shape as the
     indexnow plugin's quiet-on-misconfigured behaviour."""
     try:
-        callable_(item)
+        callable_(db, item)
     except OperationalError as exc:
         msg = str(exc)
         if "no such table: posts_fts" in msg or "no such table: pages_fts" in msg:
@@ -119,22 +125,20 @@ def _safe(callable_: Any, item: Any) -> None:
 
 @hookimpl
 def on_post_published(item: Any, session: Any) -> None:
-    del session
-    _safe(_index_or_remove, item)
+    _safe_in_session(session, _index_or_remove_in_session, item)
     invalidate_search_total_cache()
 
 
 @hookimpl
 def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], session: Any) -> None:
-    del before, after, session
-    _safe(_index_or_remove, item)
+    del before, after
+    _safe_in_session(session, _index_or_remove_in_session, item)
     invalidate_search_total_cache()
 
 
 @hookimpl
 def on_post_deleted(item: Any, session: Any) -> None:
-    del session
-    _safe(_remove_item, item)
+    _safe_in_session(session, _remove_item_in_session, item)
     invalidate_search_total_cache()
 
 

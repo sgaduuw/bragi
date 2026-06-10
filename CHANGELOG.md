@@ -17,6 +17,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   button non-functional. Templates now use bare filenames; a
   regression test scans the three list templates and the served
   asset URLs.
+- Bulk-delete on Posts and Pages raised `database is locked` once
+  a sibling `on_post_deleted` hookimpl (typically
+  `internal_links.drop_for_deleted`) had promoted the outer
+  session to a SQLite write transaction: the search plugin's
+  hookimpl ignored the supplied `session` and opened a fresh
+  `SessionLocal()`, whose write then contended with the outer
+  write lock and timed out on `busy_timeout`. The search plugin
+  now threads the supplied session through to
+  `_remove_in_session` / `index_*_in_session` so the FTS write
+  rides the outer transaction's connection (and rolls back with
+  it). The cross-connection regression is guarded by a new
+  `_factory` spy assertion. Single-delete masked the same race
+  via the 5s busy timeout; bulk-delete made it deterministic.
+
 ### Changed
 
 - Bulk-select "Select all" affordance moved from a toolbar button
