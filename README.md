@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.30.0 (2026-06-09).
+**Latest release:** 1.30.1 (2026-06-10).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -341,7 +341,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.30.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.30.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -451,8 +451,10 @@ bragi/
 │   │   ├── models/             # SQLAlchemy models (single source of truth)
 │   │   ├── middleware/         # site_resolver, csrf, sessions, redirects
 │   │   ├── render/             # markdown + transform registries
+│   │   ├── admin_notices.py    # cross-plugin admin notice writer
 │   │   ├── audit.py            # AuditLog writer
 │   │   ├── breadcrumbs.py      # Crumb dataclass + set_breadcrumbs helper (admin nav)
+│   │   ├── bulk_action.py      # bulk-action helpers (shared by post / page / attachments)
 │   │   ├── cache.py            # Cache-Control / ETag / 304 helpers
 │   │   ├── db.py               # SessionLocal
 │   │   ├── export.py           # corpus export writer (bragi export)
@@ -477,6 +479,7 @@ bragi/
 │   └── contrib/                # built-ins as plugins
 │       ├── activitypub/        # one fediverse actor per site (follow / undo / outbox fanout)
 │       ├── admin_imports/      # site-scoped admin importer index (tile aggregator)
+│       ├── admin_notices/      # cross-plugin admin notice surface (toast / banner)
 │       ├── analytics/          # per-site pageview sink + admin dashboard
 │       ├── anchors/            # heading id injection
 │       ├── api_tokens/         # personal access tokens + JSON REST surface
@@ -507,10 +510,11 @@ bragi/
 │       ├── theme_serif/        # long-form reading theme (slug "serif")
 │       ├── theme_terminal/     # monospace dev-focused theme (slug "terminal")
 │       ├── themes/             # file-based theme registry + admin picker
+│       ├── unsplash/           # Unsplash image picker + photographer-credit render
 │       └── webmentions/        # indieweb send + receive + admin moderation
 ├── alembic/                    # alembic.ini + dev shim (script_location = bragi:alembic)
 ├── docker/                     # admin.Dockerfile, delivery.Dockerfile
-├── .github/workflows/          # ci.yml, release.yml
+├── .github/workflows/          # ci.yml, release.yml, dispatch-theme-released.yml
 └── tests/
     ├── unit/                   # pure logic, no DB
     ├── contrib/                # one file per built-in plugin
@@ -688,7 +692,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.30.0
+pip install bragi-cms==1.30.1
 ```
 
 The import path stays `import bragi`. Container images remain the
