@@ -1,0 +1,102 @@
+name: Diagnose PyPI routing
+
+# Operator-dispatched diagnostic for the case where release.yml's
+# publish-docker `Wait for PyPI propagation` step exhausts its budget
+# while local pip download against the same version resolves in under
+# a second. The release.yml gate swallows pip's stderr with
+# `2>/dev/null`, so we cannot tell from that step whether the failure
+# is a 404 (stale CDN), 403 (rate limit), TCP error, or something
+# stranger. This workflow surfaces the actual response, then we can
+# decide whether to file with GitHub support, sidestep via Codespace,
+# or remove the propagation gate entirely.
+#
+# Dispatch with the version under investigation:
+#
+#   gh -R sgaduuw/bragi workflow run _diagnose-pypi.yml \
+#     --ref develop -f version=1.31.0
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'bragi-cms version to probe (no v prefix, e.g. 1.31.0).'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show runner identity + egress IP
+        run: |
+          echo "Runner: $RUNNER_OS $RUNNER_ARCH"
+          echo "Hostname: $(hostname)"
+          echo "Public egress IP (curl ifconfig.me):"
+          curl -sS https://ifconfig.me/ip || true
+          echo
+          echo "DNS resolver for pypi.org:"
+          getent hosts pypi.org || true
+          echo "DNS resolver for files.pythonhosted.org:"
+          getent hosts files.pythonhosted.org || true
+
+      - name: Probe simple index (HEAD + headers)
+        run: |
+          echo "--- HEAD https://pypi.org/simple/bragi-cms/ ---"
+          curl -sSI https://pypi.org/simple/bragi-cms/ || true
+          echo
+          echo "--- Does the simple index list version ${{ inputs.version }} ? ---"
+          curl -sS https://pypi.org/simple/bragi-cms/ | grep -oE 'bragi[_-]cms-${{ inputs.version }}[^"]*' | sort -u | head -10 || echo "(no match)"
+
+      - name: Probe JSON metadata
+        run: |
+          VERSION="${{ inputs.version }}"
+          echo "--- HEAD https://pypi.org/pypi/bragi-cms/${VERSION}/json ---"
+          curl -sSI "https://pypi.org/pypi/bragi-cms/${VERSION}/json" || true
+          echo
+          echo "--- urls[0] from the JSON metadata (the wheel pip would download) ---"
+          curl -sS "https://pypi.org/pypi/bragi-cms/${VERSION}/json" \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); [print(u['url']) for u in d.get('urls',[])]" \
+              || echo "(metadata fetch failed)"
+
+      - name: Probe the actual wheel URL (HEAD + range)
+        run: |
+          VERSION="${{ inputs.version }}"
+          WHEEL_URL=$(curl -sS "https://pypi.org/pypi/bragi-cms/${VERSION}/json" \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(u['url'] for u in d['urls'] if u['filename'].endswith('.whl')))" \
+              2>/dev/null || echo "")
+          if [ -z "$WHEEL_URL" ]; then
+            echo "Could not resolve wheel URL from JSON metadata; aborting wheel probe"
+            exit 0
+          fi
+          echo "Wheel URL: $WHEEL_URL"
+          echo
+          echo "--- HEAD on the wheel ---"
+          curl -sSI "$WHEEL_URL" || true
+          echo
+          echo "--- First 16 bytes via range request (also dumps headers) ---"
+          curl -sSv -H "Range: bytes=0-15" -o /tmp/whl-head.bin "$WHEEL_URL" 2>&1 | sed -n '/^[<>*]/p' | head -40 || true
+          echo
+          echo "--- /tmp/whl-head.bin first bytes ---"
+          xxd /tmp/whl-head.bin 2>/dev/null | head -2 || true
+
+      - name: Verbose pip download (with full stderr)
+        run: |
+          rm -rf /tmp/pip-diagnose && mkdir -p /tmp/pip-diagnose
+          set +e
+          python3 -m pip download \
+              --no-cache-dir \
+              --no-deps \
+              --verbose \
+              --dest /tmp/pip-diagnose \
+              "bragi-cms==${{ inputs.version }}"
+          rc=$?
+          set -e
+          echo
+          echo "pip download exit code: $rc"
+          echo
+          echo "--- files in /tmp/pip-diagnose ---"
+          ls -la /tmp/pip-diagnose/ || true
+          exit $rc
