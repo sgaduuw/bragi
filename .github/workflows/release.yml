@@ -81,6 +81,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # The propagation gate below uses `python3 -m pip download`
+      # against the pinned bragi-cms version. pip honours the
+      # `Requires-Python` constraint advertised on the simple index,
+      # so this Python MUST satisfy the bragi-cms floor: ubuntu-latest
+      # currently ships Python 3.12.3 by default, and v1.31.0 raised
+      # the floor to 3.14, which would make pip silently refuse to
+      # resolve the just-published wheel (the error reads
+      # `Could not find a version that satisfies` and looks identical
+      # to a propagation lag). Pin a Python that satisfies the floor.
+      # If the bragi-cms floor moves again, bump this too.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
       - name: Resolve version
         id: version
         # Sources the version from the release tag on the release-event
@@ -97,25 +111,22 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       # The publish-pypi job above succeeded, but the pip resolver
-      # behind `pip install` lags PyPI's JSON metadata at busy CDN
-      # nodes. v1.27.2, v1.27.4, and v1.27.5 all saw the docker job's
-      # `pip install` race the propagation while the old probe (curl
-      # against the JSON endpoint) already reported 200. Probe with
-      # pip itself so the gate exercises the same resolver path the
-      # docker build is about to take; only when pip can actually
+      # behind `pip install` can lag PyPI's JSON metadata at busy
+      # CDN nodes. v1.27.2, v1.27.4, and v1.27.5 all saw the docker
+      # job's `pip install` race the propagation while the old probe
+      # (curl against the JSON endpoint) already reported 200. Probe
+      # with pip itself so the gate exercises the same resolver path
+      # the docker build is about to take; only when pip can actually
       # resolve AND fetch the wheel do we proceed. The temporary
       # download directory is discarded; this step does not pre-warm
       # any pip cache the docker build reads.
       - name: Wait for PyPI propagation
-        # Budget raised from 600s to 1800s (180 x 10s) after v1.31.0
-        # exhausted the prior 600s budget across three full re-runs
-        # while pypi.org's simple index already listed the wheel.
-        # GitHub Actions' egress hits PyPI CDN edges that can remain
-        # stuck behind the primary node by tens of minutes; the
-        # in-practice worst-case under v1.27.6 was ~11s, but
-        # outliers exist and the matrix-fail-then-rerun loop is
-        # expensive. 1800s leaves wide margin without making a
-        # genuinely-broken publish wait unreasonably long.
+        # Budget is 1800s (180 x 10s). The 600s ceiling stood from
+        # v1.27.6 through v1.31.0; the v1.31.0 incident that
+        # raised it to 1800s turned out to be a Python-version skew
+        # in this very gate (the setup-python step above is the
+        # actual fix), not CDN-side lag. The wider budget is kept
+        # as belt-and-suspenders for genuine CDN outliers.
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           for i in $(seq 1 180); do
