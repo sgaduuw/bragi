@@ -178,11 +178,19 @@ jobs:
           # if needed.
           flavor: |
             latest=auto
+          # Pass an explicit `value=` to every semver pattern so the
+          # tags work on both the release-event path (github.ref is
+          # the v-tag) and the workflow_dispatch recovery path
+          # (github.ref is refs/heads/develop, so the patterns would
+          # otherwise resolve to nothing and buildx would refuse to
+          # push). The explicit value is a no-op on the release path
+          # because the resolved tag matches what the patterns would
+          # have inferred from github.ref.
           tags: |
             type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.tag }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
