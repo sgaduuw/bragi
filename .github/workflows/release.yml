@@ -186,8 +186,16 @@ jobs:
           # push). The explicit value is a no-op on the release path
           # because the resolved tag matches what the patterns would
           # have inferred from github.ref.
+          #
+          # `type=ref,event=tag` produces the v-prefixed tag on the
+          # release path (theme Dockerfiles pin via that form). On the
+          # dispatch path there is no tag ref, so the `type=raw` line
+          # below re-creates the v-prefixed tag from the resolved
+          # version, gated to fire only on the dispatch path so the
+          # release path does not produce a duplicate.
           tags: |
             type=ref,event=tag
+            type=raw,value=${{ steps.version.outputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
             type=semver,pattern={{version}},value=${{ steps.version.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.tag }}
             type=semver,pattern={{major}},value=${{ steps.version.outputs.tag }}
@@ -210,6 +218,11 @@ jobs:
 
   notify-themes:
     needs: publish-docker
+    # `success()` would walk the whole needs chain and skip because
+    # publish-pypi is `skipped` on the dispatch path; with always() +
+    # an explicit publish-docker.result check, this job fires whenever
+    # publish-docker succeeded, regardless of the publish-pypi state.
+    if: always() && needs.publish-docker.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false           # one theme failing must not block siblings
