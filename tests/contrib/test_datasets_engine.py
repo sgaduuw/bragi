@@ -16,10 +16,12 @@ import pytest
 from bragi.contrib.datasets.engine import (
     DatasetQueryError,
     DatasetQueryTimeout,
+    DatasetStorageError,
     execute,
     open_dataset,
     schema,
 )
+from bragi.settings import settings
 
 
 @pytest.fixture(scope="session")
@@ -133,6 +135,71 @@ def test_timeout_interrupts(fixture_files: Path) -> None:
             )
     finally:
         conn.close()
+
+
+def test_memory_limit_set_and_locked(fixture_files: Path) -> None:
+    conn = open_dataset(fixture_files / "cpi.duckdb", "duckdb")
+    try:
+        # duckdb normalises the configured "512MB" (512e6 bytes) to its
+        # MiB display form, 488.2 MiB. Assert the connection reflects the
+        # configured cap rather than duckdb's RAM-derived default.
+        assert settings.dataset_query_memory_limit == "512MB"
+        reported = execute(conn, "SELECT current_setting('memory_limit')").rows[0][0]
+        assert reported == "488.2 MiB"
+        # lock_configuration froze the cap; operator SQL can't raise it.
+        with pytest.raises(DatasetQueryError):
+            execute(conn, "SET memory_limit='8GB'")
+    finally:
+        conn.close()
+
+
+def test_multiple_statements_rejected(fixture_files: Path) -> None:
+    # A writable csv connection: the table `data` must survive the
+    # rejected multi-statement attempt intact (the DROP never runs).
+    conn = open_dataset(fixture_files / "cpi.csv", "csv")
+    try:
+        with pytest.raises(DatasetQueryError):
+            execute(conn, "SELECT 1; DROP TABLE data; SELECT 2")
+        # `data` is still present and queryable afterwards.
+        assert execute(conn, "SELECT count(*) FROM data").rows[0][0] >= 1
+    finally:
+        conn.close()
+
+
+def test_trailing_semicolon_still_works(fixture_files: Path) -> None:
+    conn = open_dataset(fixture_files / "cpi.duckdb", "duckdb")
+    try:
+        result = execute(conn, "SELECT count(*) FROM cpi;")
+        assert result.rows[0][0] == 3
+    finally:
+        conn.close()
+
+
+def test_attach_blocked(fixture_files: Path, tmp_path: Path) -> None:
+    # ATTACH is a more obvious exfiltration vector than read_csv_auto:
+    # a guarded connection must not be able to attach an arbitrary db.
+    conn = open_dataset(fixture_files / "cpi.duckdb", "duckdb")
+    try:
+        target = tmp_path / "exfil.db"
+        with pytest.raises(DatasetQueryError):
+            execute(conn, f"ATTACH '{target}'")
+    finally:
+        conn.close()
+
+
+def test_sqlite_numeric_affinity_text_raises_storage_error(tmp_path: Path) -> None:
+    # A NUMERIC column mapped to DuckDB DOUBLE: a row holding non-numeric
+    # text fails the INSERT during materialisation. The engine must
+    # surface that as DatasetStorageError (open-time failure), not leak a
+    # raw duckdb/sqlite exception.
+    src = tmp_path / "bad.sqlite"
+    s = sqlite3.connect(src)
+    s.execute("CREATE TABLE t (v NUMERIC)")
+    s.execute("INSERT INTO t VALUES ('not-a-number')")
+    s.commit()
+    s.close()
+    with pytest.raises(DatasetStorageError):
+        open_dataset(src, "sqlite")
 
 
 def test_schema_lists_tables_and_views(fixture_files: Path) -> None:

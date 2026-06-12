@@ -157,6 +157,11 @@ class Settings(BaseSettings):
     dataset_max_upload_bytes: int = 100 * 1024 * 1024  # 100 MiB
     dataset_query_timeout_seconds: float = 10.0
     dataset_query_max_rows: int = 1000
+    # duckdb-format size string bounding per-connection allocation: the
+    # row cap only bounds the returned result, but a CREATE TABLE AS over
+    # a huge cross join can spike memory toward duckdb's default
+    # (~80% of RAM) inside the shared Flask process before the timeout fires.
+    dataset_query_memory_limit: str = "512MB"
 
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake

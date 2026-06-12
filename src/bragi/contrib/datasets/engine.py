@@ -94,6 +94,8 @@ def local_path_for(site_slug: str, storage_key: str, app: Flask | None = None) -
             f"storage backend {backend.name!r} needs byte materialisation, "
             "which datasets v1 does not implement"
         )
+    # storage_path_for is the local backend's on-disk layout; the
+    # backend.name == "local" check above is what authorises calling it.
     path = storage_path_for(site_slug, storage_key)
     if not path.exists():
         raise DatasetStorageError(f"dataset bytes missing at {path}")
@@ -120,8 +122,12 @@ def open_dataset(path: Path, source_type: str) -> duckdb.DuckDBPyConnection:
             raise DatasetStorageError(f"unknown source_type {source_type!r}")
     except duckdb.Error as exc:
         raise DatasetStorageError(f"cannot open dataset: {exc}") from exc
-    # Order matters: lock_configuration last, so the access guard
-    # itself can't be flipped back on by operator SQL.
+    # Order matters: set memory_limit and disable external access
+    # first, then lock_configuration last. The lock freezes every
+    # setting, so the memory cap and the access guard must both be
+    # in place before it, and neither can be flipped back by operator
+    # SQL afterwards. Parameter binding for SET works on duckdb 1.5.3.
+    conn.execute("SET memory_limit = ?", [settings.dataset_query_memory_limit])
     conn.execute("SET enable_external_access = false")
     conn.execute("SET lock_configuration = true")
     return conn
@@ -182,6 +188,20 @@ def execute(
     """Run one statement with wall-clock and row-count guards."""
     timeout = settings.dataset_query_timeout_seconds if timeout is None else timeout
     max_rows = settings.dataset_query_max_rows if max_rows is None else max_rows
+    # Enforce one statement: duckdb's execute() runs every statement in
+    # a multi-statement string and returns only the last cursor, which
+    # would sidestep the row cap's mental model and let a writable
+    # in-memory branch run a hidden DROP/INSERT before the visible
+    # SELECT. extract_statements raises a duckdb.Error on invalid SQL;
+    # surface that as DatasetQueryError, the engine's normal bad-SQL path.
+    try:
+        statements = duckdb.extract_statements(sql)
+    except duckdb.Error as exc:
+        raise DatasetQueryError(str(exc)) from exc
+    if len(statements) > 1:
+        raise DatasetQueryError(
+            "multiple SQL statements are not allowed; run one statement at a time"
+        )
     timer = threading.Timer(timeout, conn.interrupt)
     timer.start()
     try:
