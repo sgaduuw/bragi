@@ -11,6 +11,7 @@ def test_dataset_settings_defaults() -> None:
     assert s.dataset_query_timeout_seconds == 10.0
     assert s.dataset_query_max_rows == 1000
     assert s.dataset_query_memory_limit == "512MB"
+    assert s.dataset_query_temp_limit == "1GB"
 
 
 def test_dataset_settings_env_override(monkeypatch) -> None:

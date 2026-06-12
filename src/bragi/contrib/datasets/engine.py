@@ -30,6 +30,7 @@ that is deliberately not built yet (no consumer, see spec).
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,10 +111,14 @@ def open_dataset(path: Path, source_type: str) -> duckdb.DuckDBPyConnection:
 
     Guard ordering (invariant across all branches):
       1. Connect.
-      2. SET memory_limit: cap allocation before any source bytes are
-         read into the in-memory connection. Applied before materialise
+      2. SET memory_limit + temp_directory + max_temp_directory_size:
+         cap allocation and bound on-disk spill before any source bytes
+         are read into the in-memory connection. Applied before materialise
          so a hostile / huge raw source file cannot spike memory past
-         the cap during the probe or ingest path.
+         the cap during the probe or ingest path. memory_limit is a soft
+         cap that spills to temp_directory once exceeded; without
+         max_temp_directory_size that spill is unbounded (a probe filled
+         183 GB), so both are set here before the lock.
       3. Materialise (raw sources only): read source bytes into DuckDB
          tables under the memory cap.
       4. SET enable_external_access = false: prevent operator SQL from
@@ -137,11 +142,23 @@ def open_dataset(path: Path, source_type: str) -> duckdb.DuckDBPyConnection:
     except duckdb.Error as exc:
         raise DatasetStorageError(f"cannot open dataset: {exc}") from exc
 
-    # Step 2: apply memory cap before any source bytes are read.
-    # Closing and re-raising keeps the exception type uniform
-    # whether the failure is a bad SET value or a later materialise error.
+    # Step 2: apply memory cap and bound on-disk spill before any source
+    # bytes are read. memory_limit is a soft cap: when exceeded duckdb
+    # spills intermediates to temp_directory, unbounded by default. We
+    # point temp_directory at one shared, bounded scratch dir under the
+    # system temp and cap its size, so a heavy query errors instead of
+    # filling the disk. The dir is shared across connections: duckdb
+    # uniquely names its own spill files (duckdb_temp_*), so concurrent
+    # guarded connections do not collide, and it removes those files on
+    # clean close, keeping the dir tiny between queries. Closing and
+    # re-raising keeps the exception type uniform whether the failure is
+    # a bad SET value or a later materialise error.
+    temp_dir = Path(tempfile.gettempdir()) / "bragi-datasets-tmp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
     try:
         conn.execute("SET memory_limit = ?", [settings.dataset_query_memory_limit])
+        conn.execute("SET temp_directory = ?", [str(temp_dir)])
+        conn.execute("SET max_temp_directory_size = ?", [settings.dataset_query_temp_limit])
     except duckdb.Error as exc:
         conn.close()
         raise DatasetStorageError(f"cannot apply query guards: {exc}") from exc

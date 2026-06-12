@@ -227,6 +227,11 @@ __marimo__/
 /CONTEXT.md
 /MEMORY.md
 
+# DuckDB default temp-spill directory (cwd-relative). Datasets v1 points
+# spill at the system temp dir, so nothing should land here; this is a
+# defensive guard so a future regression to the default can't be staged.
+/.tmp/
+
 # Local SQLite databases (WAL mode produces -wal and -shm siblings)
 /bragi.db
 /bragi.db-wal

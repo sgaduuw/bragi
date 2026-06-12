@@ -8,6 +8,7 @@ file-handling and locking behaviour (portfolio memory 2026-06-10).
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 from pathlib import Path
 
 import duckdb
@@ -151,6 +152,82 @@ def test_memory_limit_set_and_locked(fixture_files: Path) -> None:
             execute(conn, "SET memory_limit='8GB'")
     finally:
         conn.close()
+
+
+def test_temp_spill_settings_set_and_reflected(fixture_files: Path) -> None:
+    """temp_directory points at the scoped scratch dir and the spill cap is set.
+
+    memory_limit is a soft cap: duckdb spills to temp_directory when
+    exceeded, unbounded by default. open_dataset must point the spill at a
+    bounded scoped dir and cap its size so a heavy query errors rather than
+    filling the disk.
+    """
+    expected_dir = str(Path(tempfile.gettempdir()) / "bragi-datasets-tmp")
+    # Probe duckdb's normalised rendering of the configured cap so the
+    # assertion is stable across versions ("1GB" -> "953.6 MiB").
+    probe = duckdb.connect(":memory:")
+    probe.execute("SET max_temp_directory_size = ?", [settings.dataset_query_temp_limit])
+    expected_cap = probe.execute("SELECT current_setting('max_temp_directory_size')").fetchone()[0]
+    probe.close()
+
+    assert settings.dataset_query_temp_limit == "1GB"
+    conn = open_dataset(fixture_files / "cpi.duckdb", "duckdb")
+    try:
+        reported_dir = execute(conn, "SELECT current_setting('temp_directory')").rows[0][0]
+        assert reported_dir == expected_dir
+        reported_cap = execute(conn, "SELECT current_setting('max_temp_directory_size')").rows[0][0]
+        assert reported_cap == expected_cap
+    finally:
+        conn.close()
+
+
+def test_bounded_spill_errors_instead_of_filling_disk(
+    fixture_files: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A heavy spilling query raises DatasetQueryError rather than spilling unbounded.
+
+    With memory_limit tiny-but-valid (64MB, above duckdb 1.5.x's ~33MB
+    floor) and the temp spill cap tiny (1MB), a large ORDER BY that must
+    spill exhausts the bounded scratch dir. duckdb raises OutOfMemoryException
+    (a duckdb.Error subclass), which the engine maps to DatasetQueryError.
+    A generous statement timeout keeps the timeout from winning the race;
+    the query is cheap enough that total runtime stays a couple of seconds.
+    """
+    monkeypatch.setattr(settings, "dataset_query_memory_limit", "64MB")
+    monkeypatch.setattr(settings, "dataset_query_temp_limit", "1MB")
+    conn = open_dataset(fixture_files / "cpi.duckdb", "duckdb")
+    try:
+        with pytest.raises(DatasetQueryError):
+            execute(
+                conn,
+                # Wide rows ordered over a large range force a spill well past 1MB.
+                "SELECT count(*) FROM ("
+                "  SELECT a.range AS r, repeat('x', 200) AS pad "
+                "  FROM range(5000000) a ORDER BY a.range DESC, pad"
+                ")",
+                timeout=30.0,
+            )
+    finally:
+        conn.close()
+
+
+def test_temp_dir_clean_after_close(fixture_files: Path) -> None:
+    """After a clean conn.close(), the scoped scratch dir holds no duckdb temp files.
+
+    duckdb removes its own spill files (duckdb_temp_*) on clean close. This
+    pins that claim: a successfully-spilling query leaves nothing behind once
+    the connection closes, so the shared dir stays tiny across queries.
+    """
+    temp_dir = Path(tempfile.gettempdir()) / "bragi-datasets-tmp"
+    conn = open_dataset(fixture_files / "cpi.duckdb", "duckdb")
+    try:
+        # A modest spill: enough to write temp files, small enough to succeed
+        # under the production 1GB cap and a low memory_limit is not needed.
+        execute(conn, "SELECT count(*) FROM (SELECT range FROM range(2000000) ORDER BY range DESC)")
+    finally:
+        conn.close()
+    leftover = [p for p in temp_dir.iterdir() if p.name.startswith("duckdb_temp")]
+    assert leftover == [], f"duckdb temp files lingered after close: {leftover}"
 
 
 def test_multiple_statements_rejected(fixture_files: Path) -> None:

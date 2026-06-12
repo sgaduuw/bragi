@@ -162,6 +162,14 @@ class Settings(BaseSettings):
     # a huge cross join can spike memory toward duckdb's default
     # (~80% of RAM) inside the shared Flask process before the timeout fires.
     dataset_query_memory_limit: str = "512MB"
+    # duckdb-format size string bounding on-disk temp spill. memory_limit
+    # is a soft cap: once exceeded duckdb spills intermediate data to
+    # temp_directory without bound (a reviewer probe filled 183 GB before
+    # this guard existed). max_temp_directory_size bounds that spill so a
+    # heavy query errors (OutOfMemoryException -> DatasetQueryError) instead
+    # of filling the disk. Applied alongside memory_limit before the
+    # lock_configuration freeze in open_dataset.
+    dataset_query_temp_limit: str = "1GB"
 
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake

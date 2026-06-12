@@ -298,7 +298,7 @@ single DuckDB instance can open CSV or Parquet files transparently.
 
 **Admin explore console.** Site owners and site-level admins
 reach a DuckDB console at
-`/admin/sites/<slug>/datasets/<dataset-slug>/explore/` to run
+`/admin/sites/<slug>/datasets/<dataset-slug>/explore` to run
 ad-hoc SQL against the file, inspect column types, and save named
 queries. Access is author-only; the explore console is not exposed
 on the delivery app.
@@ -313,19 +313,23 @@ bakes the chart HTML at save time).
 post and page bodies at save time:
 
 ```
-# Inline SQL, table output (default):
-::: dataset slug=revenue q-sql="SELECT year, total FROM summary ORDER BY year" :::
+# Inline SQL, explicit table output:
+::: dataset slug=revenue sql="SELECT year, total FROM summary ORDER BY year" format=table
+:::
 
 # Saved query, Vega-Lite chart (requires the query to carry a spec):
-::: dataset slug=revenue q=annual_chart format=chart :::
+::: dataset slug=revenue q=annual_chart format=chart
+:::
 
 # Saved query, inline scalar:
-::: dataset slug=revenue q=latest_mrr format=scalar :::
+::: dataset slug=revenue q=latest_mrr format=scalar
+:::
 ```
 
-`format` is `table` (default), `chart`, or `scalar`. `q=<name>`
-references a saved query; `q-sql="..."` supplies inline SQL
-(inline SQL cannot use `format=chart`). Chart output renders
+The closing `:::` must sit on its own line. `format` is `table`,
+`chart`, or `scalar`. For a saved query (`q=<name>`) `format`
+defaults to `table`; inline SQL (`sql="..."`) must name an explicit
+`format=` and cannot use `format=chart`. Chart output renders
 client-side via CDN-loaded `vega-embed`; a `<noscript>` block
 with the same data as an HTML table is baked alongside so
 JS-disabled browsers and crawlers see the data.
