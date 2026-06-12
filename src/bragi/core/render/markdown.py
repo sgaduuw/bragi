@@ -24,7 +24,7 @@ is moderately heavy to construct.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import cast
+from typing import Any, cast
 
 from flask import Flask, current_app, has_app_context
 from markdown_it import MarkdownIt
@@ -94,18 +94,24 @@ def _transforms() -> tuple[TransformRegistry | None, TransformRegistry | None]:
     return md, html
 
 
-def render_markdown(text: str) -> str:
+def render_markdown(text: str, env: dict[str, Any] | None = None) -> str:
     """Render `text` (markdown source) to HTML.
 
     Pipeline: md_transforms.apply -> markdown-it-py -> html_transforms.apply.
     Outside a Flask app context, neither registry is consulted.
+
+    `env` is handed to markdown-it verbatim and shared by every
+    renderer rule in the pass. Callers that render outside a
+    request context (the datasets rerender path) use it to carry
+    site identity (`bragi_site_id`); plugins also use it for
+    per-pass state (the embeds timeout budget).
     """
     md_transforms, html_transforms = _transforms()
     if md_transforms is not None:
         text = md_transforms.apply(text)
     # markdown_it's `.render` is documented as returning str; the cast
     # papers over an Any leak through chained config in `_renderer`.
-    html = cast(str, _renderer().render(text))
+    html = cast(str, _renderer().render(text, env if env is not None else {}))
     if html_transforms is not None:
         html = html_transforms.apply(html)
     return html
