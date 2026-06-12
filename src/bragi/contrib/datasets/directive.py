@@ -119,6 +119,9 @@ def _site_id_from_context(env: dict[str, Any]) -> int | None:
         site = getattr(g, "current_site", None)
     except RuntimeError:
         return None
+    # g.current_site is set by resolve_site_or_abort from the URL slug, and
+    # the post/page being saved belongs to that same site by construction,
+    # so this fallback cannot cross site boundaries.
     return getattr(site, "id", None)
 
 

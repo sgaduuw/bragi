@@ -127,9 +127,13 @@ def open_dataset(path: Path, source_type: str) -> duckdb.DuckDBPyConnection:
     # setting, so the memory cap and the access guard must both be
     # in place before it, and neither can be flipped back by operator
     # SQL afterwards. Parameter binding for SET works on duckdb 1.5.3.
-    conn.execute("SET memory_limit = ?", [settings.dataset_query_memory_limit])
-    conn.execute("SET enable_external_access = false")
-    conn.execute("SET lock_configuration = true")
+    try:
+        conn.execute("SET memory_limit = ?", [settings.dataset_query_memory_limit])
+        conn.execute("SET enable_external_access = false")
+        conn.execute("SET lock_configuration = true")
+    except duckdb.Error as exc:
+        conn.close()
+        raise DatasetStorageError(f"cannot apply query guards: {exc}") from exc
     return conn
 
 

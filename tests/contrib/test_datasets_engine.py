@@ -211,3 +211,14 @@ def test_schema_lists_tables_and_views(fixture_files: Path) -> None:
     assert "cpi" in tables
     assert "cpi_latest" in tables
     assert tables["cpi"]["quarter"] == "VARCHAR"
+
+
+def test_bad_memory_limit_setting_raises_storage_error(
+    fixture_files: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A unit-less value like "512" is rejected by DuckDB's SET memory_limit.
+    # The guard-SET wrapper must close the connection and surface this as
+    # DatasetStorageError rather than leaking a raw duckdb.Error to the caller.
+    monkeypatch.setattr(settings, "dataset_query_memory_limit", "512")
+    with pytest.raises(DatasetStorageError, match="cannot apply query guards"):
+        open_dataset(fixture_files / "cpi.duckdb", "duckdb")

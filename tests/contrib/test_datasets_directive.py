@@ -174,3 +174,47 @@ def test_non_dataset_container_untouched(md, seeded_dataset) -> None:
     site, _ = seeded_dataset
     html = _render(md, "::: embed https://example.com\n:::\n", site.id)
     assert "bragi-dataset" not in html
+
+
+def test_bad_memory_limit_bakes_error_card(
+    md, seeded_dataset, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # When BRAGI_DATASET_QUERY_MEMORY_LIMIT is set to a unit-less value
+    # (e.g. "512"), DuckDB rejects the SET call with a duckdb.Error.
+    # The renderer must catch the resulting DatasetStorageError and bake
+    # an error card; it must not propagate the exception out of render(),
+    # which would abort the entire save.
+    site, _ = seeded_dataset
+    monkeypatch.setattr(settings, "dataset_query_memory_limit", "512")
+    html = _render(md, "::: dataset slug=cpi q=by-quarter\n:::\n", site.id)
+    assert "bragi-dataset--error" in html
+    assert "Traceback" not in html
+
+
+def test_two_directives_in_one_document(md, seeded_dataset) -> None:
+    site, _ = seeded_dataset
+    text = (
+        "::: dataset slug=cpi q=by-quarter\n:::\n\n"
+        '::: dataset slug=cpi sql="SELECT max(value) FROM cpi" format=scalar\n:::\n'
+    )
+    html = _render(md, text, site.id)
+    assert html.count('<table class="bragi-dataset-table">') == 1
+    assert html.count("bragi-dataset-scalar") == 1
+
+
+def test_directive_inside_blockquote_does_not_swallow(md, seeded_dataset) -> None:
+    site, _ = seeded_dataset
+    text = "> ::: dataset slug=cpi q=by-quarter\n\nafter paragraph\n\n:::\n"
+    html = _render(md, text, site.id)
+    assert "after paragraph" in html
+
+
+def test_inline_sql_with_embedded_equals(md, seeded_dataset) -> None:
+    site, _ = seeded_dataset
+    directive = (
+        "::: dataset slug=cpi"
+        " sql=\"SELECT value FROM cpi WHERE quarter='2025Q1'\""
+        " format=scalar\n:::\n"
+    )
+    html = _render(md, directive, site.id)
+    assert "102.5" in html
