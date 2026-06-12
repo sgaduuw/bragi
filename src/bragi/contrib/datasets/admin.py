@@ -359,6 +359,21 @@ def explore(site_slug: str, dataset_slug: str) -> ResponseReturnValue:
 
 @bp.route("/<dataset_slug>/explore/run", methods=["POST"])
 def explore_run(site_slug: str, dataset_slug: str) -> ResponseReturnValue:
+    # Non-htmx POSTs redirect back to the explore page with a flash.
+    # The partial template is an htmx-only surface; a cold or
+    # non-JS POST would receive a bare fragment without page chrome,
+    # which is worse than a redirect. Mirror the dispatch shape used
+    # by other contrib POST handlers (e.g. attachment bulk actions).
+    if not is_htmx():
+        flash("Query results are only available via the explore console.", "info")
+        return redirect(
+            url_for(
+                "dataset_admin.explore",
+                site_slug=site_slug,
+                dataset_slug=dataset_slug,
+            )
+        )
+
     sql = (request.form.get("sql") or "").strip()
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)

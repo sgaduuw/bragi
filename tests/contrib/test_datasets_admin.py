@@ -23,6 +23,7 @@ from bragi.core.models.dataset import Dataset, DatasetQuery
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from bragi.core.models.user_site_role import UserSiteRole
 from tests.conftest import csrf_token
 
 EMAIL = "ada@example.com"
@@ -513,3 +514,133 @@ def test_delete_query(
     with db_session_factory() as db:
         rows = db.execute(select(DatasetQuery)).scalars().all()
     assert len(rows) == 0
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: non-htmx POSTs to explore/run redirect instead of serving a bare
+# partial. Fix 3: delete requires editor role; author-role gets 403.
+# ---------------------------------------------------------------------------
+
+AUTHOR_EMAIL = "author-datasets@example.com"
+
+
+@pytest.fixture
+def admin_app_with_author(
+    patched_session_locals: sessionmaker[Session],
+    tmp_attachments_root: Path,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+) -> Iterator[Flask]:
+    """Admin app with a site owner and a separate author-role user.
+
+    The owner is NOT seeded with LocalCredential (not used in login);
+    only the author user is. This fixture mirrors the shape in
+    test_post_admin_bulk.py so the role-denial assertion pattern stays
+    consistent across contribs.
+    """
+    owner = User(email="owner-datasets@example.com", display_name="Owner", is_active=True)
+    author = User(email=AUTHOR_EMAIL, display_name="Author", is_active=True)
+    db_session.add_all([owner, author])
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=owner.id,
+    )
+    db_session.add(site)
+    db_session.flush()
+    db_session.add(LocalCredential(user_id=author.id, password_hash=hash_password(PASSWORD)))
+    db_session.add(UserSiteRole(user_id=author.id, site_id=site.id, role="author"))
+    db_session.commit()
+    yield create_admin_app()
+
+
+def _login_as_author(client: FlaskClient) -> None:
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": AUTHOR_EMAIL, "password": PASSWORD, "_csrf_token": token},
+    )
+
+
+def test_explore_run_non_htmx_redirects(
+    admin_app: Flask,
+    duckdb_bytes: bytes,
+) -> None:
+    """A non-htmx POST to explore/run redirects to the explore page (302).
+
+    The result partial is an htmx-only surface; a cold or non-JS POST
+    must get a redirect with a flash rather than a bare HTML fragment.
+    """
+    client = admin_app.test_client()
+    _login(client)
+    _upload(client, duckdb_bytes)
+
+    token = csrf_token(client, path="/admin/sites/blog/datasets/cpi/explore")
+    resp = client.post(
+        "/admin/sites/blog/datasets/cpi/explore/run",
+        data={"sql": "SELECT * FROM cpi", "_csrf_token": token},
+        # Deliberately no HX-Request header.
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert "explore" in resp.headers["Location"]
+
+
+def test_delete_dataset_author_role_denied(
+    admin_app_with_author: Flask,
+    db_session_factory: sessionmaker[Session],
+    duckdb_bytes: bytes,
+) -> None:
+    """An author-role user POSTing to the delete endpoint gets 403.
+
+    The delete route requires editor; this pins the role-check ordering
+    so the deny fires before any storage-path logic runs.
+    """
+    # Upload the dataset as owner first so the row exists.
+    # The admin_app_with_author fixture has no LocalCredential for the
+    # owner, so seed the dataset directly into the DB instead.
+    import hashlib
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site_id = site.id
+        site_slug = site.slug
+
+    app = admin_app_with_author
+    with app.app_context():
+        from bragi.core.storage import resolve as resolve_storage
+
+        backend = resolve_storage(app)
+        key, size = backend.store(site_slug, duckdb_bytes)
+
+    with db_session_factory() as db:
+        row = Dataset(
+            site_id=site_id,
+            slug="cpi",
+            name="CPI",
+            source_type="duckdb",
+            storage_key=key,
+            size_bytes=size,
+            content_sha=hashlib.sha256(duckdb_bytes).hexdigest(),
+        )
+        db.add(row)
+        db.commit()
+
+    client = app.test_client()
+    _login_as_author(client)
+
+    token = csrf_token(client, path="/admin/sites/blog/datasets/cpi/")
+    resp = client.post(
+        "/admin/sites/blog/datasets/cpi/delete",
+        data={"_csrf_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 403
+
+    # Dataset row must still exist (no deletion occurred).
+    with db_session_factory() as db:
+        rows = db.execute(select(Dataset)).scalars().all()
+    assert len(rows) == 1

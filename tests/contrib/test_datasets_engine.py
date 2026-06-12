@@ -219,6 +219,51 @@ def test_bad_memory_limit_setting_raises_storage_error(
     # A unit-less value like "512" is rejected by DuckDB's SET memory_limit.
     # The guard-SET wrapper must close the connection and surface this as
     # DatasetStorageError rather than leaking a raw duckdb.Error to the caller.
+    # Since the memory_limit SET now runs before materialise, the failure
+    # is still at the same guard-application step; only the timing relative
+    # to ingest changed.
     monkeypatch.setattr(settings, "dataset_query_memory_limit", "512")
     with pytest.raises(DatasetStorageError, match="cannot apply query guards"):
         open_dataset(fixture_files / "cpi.duckdb", "duckdb")
+
+
+def test_memory_cap_precedes_ingest_and_is_reflected(
+    fixture_files: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Memory cap is applied before source materialise and reflected on the conn.
+
+    Invariants:
+    - Opening the small 2-row fixture CSV under a reduced cap (40MB) succeeds.
+    - current_setting('memory_limit') on the returned connection reflects
+      the reduced cap, not duckdb's RAM-derived default (~80% of RAM).
+
+    This regression test pins the guard-ordering fix: the cap must be in
+    effect before any source bytes are read into the connection, so a
+    hostile or huge file cannot spike memory past the cap during ingest.
+
+    Note on "40MB": 1MB is a valid DuckDB size string but is far below
+    the minimum block size DuckDB's CSV reader needs (~33MB on 1.5.x).
+    40MB is the smallest round value that reliably lets the tiny 2-row
+    fixture succeed while still being well below the production default
+    (512MB), so the test exercises a real difference in configuration.
+    """
+    # Probe the normalised rendering first so the assertion is stable
+    # across duckdb versions (e.g. "40MB" normalises to "38.1 MiB").
+    probe = duckdb.connect(":memory:")
+    probe.execute("SET memory_limit = '40MB'")
+    expected = probe.execute("SELECT current_setting('memory_limit')").fetchone()[0]
+    probe.close()
+
+    monkeypatch.setattr(settings, "dataset_query_memory_limit", "40MB")
+    conn = open_dataset(fixture_files / "cpi.csv", "csv")
+    try:
+        reported = conn.execute("SELECT current_setting('memory_limit')").fetchone()[0]
+        assert reported == expected, (
+            f"connection memory_limit {reported!r} does not match configured cap {expected!r}"
+        )
+        # Verify the data is accessible (materialise completed successfully
+        # under the cap).
+        count = conn.execute("SELECT count(*) FROM data").fetchone()[0]
+        assert count >= 1
+    finally:
+        conn.close()

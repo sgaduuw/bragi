@@ -107,33 +107,67 @@ def open_dataset(path: Path, source_type: str) -> duckdb.DuckDBPyConnection:
 
     Raw sources land in a table named `data` (csv / parquet) or
     under their original table names (sqlite).
+
+    Guard ordering (invariant across all branches):
+      1. Connect.
+      2. SET memory_limit: cap allocation before any source bytes are
+         read into the in-memory connection. Applied before materialise
+         so a hostile / huge raw source file cannot spike memory past
+         the cap during the probe or ingest path.
+      3. Materialise (raw sources only): read source bytes into DuckDB
+         tables under the memory cap.
+      4. SET enable_external_access = false: prevent operator SQL from
+         reaching the filesystem or network.
+      5. SET lock_configuration = true: freeze all settings so operator
+         SQL cannot undo steps 2 or 4.
+
+    For the native duckdb read_only branch, step 3 is a no-op (the
+    file is opened directly, no trusted-code ingest), but the same
+    5-step ordering is maintained for uniformity.
+
+    Parameter binding for SET works on duckdb 1.5.3+.
     """
     try:
         if source_type == "duckdb":
             conn = duckdb.connect(str(path), read_only=True)
-        elif source_type in ("csv", "parquet"):
+        elif source_type in ("csv", "parquet", "sqlite"):
             conn = duckdb.connect(":memory:")
-            reader = "read_csv_auto" if source_type == "csv" else "read_parquet"
-            conn.execute(f"CREATE TABLE data AS SELECT * FROM {reader}(?)", [str(path)])
-        elif source_type == "sqlite":
-            conn = duckdb.connect(":memory:")
-            _materialise_sqlite(conn, path)
         else:
             raise DatasetStorageError(f"unknown source_type {source_type!r}")
     except duckdb.Error as exc:
         raise DatasetStorageError(f"cannot open dataset: {exc}") from exc
-    # Order matters: set memory_limit and disable external access
-    # first, then lock_configuration last. The lock freezes every
-    # setting, so the memory cap and the access guard must both be
-    # in place before it, and neither can be flipped back by operator
-    # SQL afterwards. Parameter binding for SET works on duckdb 1.5.3.
+
+    # Step 2: apply memory cap before any source bytes are read.
+    # Closing and re-raising keeps the exception type uniform
+    # whether the failure is a bad SET value or a later materialise error.
     try:
         conn.execute("SET memory_limit = ?", [settings.dataset_query_memory_limit])
+    except duckdb.Error as exc:
+        conn.close()
+        raise DatasetStorageError(f"cannot apply query guards: {exc}") from exc
+
+    # Step 3: materialise raw sources under the memory cap.
+    try:
+        if source_type in ("csv", "parquet"):
+            reader = "read_csv_auto" if source_type == "csv" else "read_parquet"
+            conn.execute(f"CREATE TABLE data AS SELECT * FROM {reader}(?)", [str(path)])
+        elif source_type == "sqlite":
+            _materialise_sqlite(conn, path)
+    except (duckdb.Error, DatasetStorageError) as exc:
+        conn.close()
+        if isinstance(exc, DatasetStorageError):
+            raise
+        raise DatasetStorageError(f"cannot open dataset: {exc}") from exc
+
+    # Steps 4-5: disable external access then lock all settings.
+    # lock_configuration must come last; it freezes everything above it.
+    try:
         conn.execute("SET enable_external_access = false")
         conn.execute("SET lock_configuration = true")
     except duckdb.Error as exc:
         conn.close()
         raise DatasetStorageError(f"cannot apply query guards: {exc}") from exc
+
     return conn
 
 
