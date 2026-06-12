@@ -1,0 +1,26 @@
+{% extends "admin/base.html" %}
+{% block title %}New dataset &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>New dataset</h1>
+<form method="post" enctype="multipart/form-data"
+      action="{{ url_for('dataset_admin.new_dataset') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <fieldset>
+    <label for="name">Name</label>
+    <input type="text" name="name" id="name" required>
+    <label for="slug">Slug</label>
+    <input type="text" name="slug" id="slug" required
+           pattern="[a-z0-9][a-z0-9-]*"
+           title="lowercase letters, digits, hyphens">
+    <label for="description">Description</label>
+    <textarea name="description" id="description" rows="2"></textarea>
+    <label for="source_type">Source type</label>
+    <select name="source_type" id="source_type">
+      {% for st in source_types %}<option value="{{ st }}">{{ st }}</option>{% endfor %}
+    </select>
+    <label for="file">File</label>
+    <input type="file" name="file" id="file" required>
+  </fieldset>
+  <div class="actions"><button type="submit">Upload</button></div>
+</form>
+{% endblock %}

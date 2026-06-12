@@ -3,13 +3,6 @@
 Occupies the datasets surface reserved in CONTEXT.md "Deferred
 surfaces" (#42). The `register_dataset_source` hookspec for
 plugin-supplied remote sources stays reserved; v1 is upload-only.
-
-`register_admin_nav` is intentionally absent here: the nav item
-references `dataset_admin.list_datasets`, which doesn't exist until
-the admin blueprint task lands. The nav template calls
-`url_for(item.endpoint)` at request time; a missing endpoint raises
-BuildError on every admin page render. The admin task adds the
-hookimpl alongside its blueprint.
 """
 
 from __future__ import annotations
@@ -20,7 +13,8 @@ import click
 from flask import Blueprint
 from markdown_it import MarkdownIt
 
-from bragi.api import hookimpl
+from bragi.api import NavItem, hookimpl
+from bragi.contrib.datasets.admin import bp as dataset_admin_bp
 from bragi.contrib.datasets.cli import datasets_group
 from bragi.contrib.datasets.delivery import bp as datasets_delivery_bp
 from bragi.contrib.datasets.directive import configure_datasets
@@ -52,12 +46,34 @@ def register_delivery_blueprint() -> Blueprint:
 
 
 @hookimpl
+def register_admin_blueprint() -> Blueprint:
+    """Mount the datasets admin Blueprint at /admin/sites/<slug>/datasets."""
+    return dataset_admin_bp
+
+
+@hookimpl
+def register_admin_nav() -> list[NavItem]:
+    """Add a Datasets entry to the admin nav (content section)."""
+    return [
+        NavItem(
+            label="Datasets",
+            endpoint="dataset_admin.list_datasets",
+            section="content",
+            weight=30,
+            scope="site",
+        ),
+    ]
+
+
+@hookimpl
 def register_cli_command(group: click.Group) -> None:
     """Add `bragi datasets rerender`."""
     group.add_command(datasets_group)
 
 
 __all__ = [
+    "register_admin_blueprint",
+    "register_admin_nav",
     "register_cli_command",
     "register_delivery_blueprint",
     "register_html_transform",

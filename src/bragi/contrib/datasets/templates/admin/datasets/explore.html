@@ -1,0 +1,62 @@
+{% extends "admin/base.html" %}
+{% block title %}Explore {{ row.name }} &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Explore: {{ row.name }}</h1>
+
+<div style="display: flex; gap: 2rem; align-items: flex-start;">
+  <aside style="min-width: 16rem;">
+    <h2>Schema</h2>
+    {% if schema_error %}
+      <p class="flash error">{{ schema_error }}</p>
+    {% elif tables %}
+      {% for t in tables %}
+      <details open>
+        <summary><code>{{ t.name }}</code></summary>
+        <ul>
+          {% for col, typ in t.columns %}
+          <li><code>{{ col }}</code> <small>{{ typ }}</small></li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endfor %}
+    {% else %}
+      <p>No tables found.</p>
+    {% endif %}
+    {% if row.source_type in ("csv", "parquet") %}
+      <p><small>Raw {{ row.source_type }} sources expose one table named <code>data</code>.</small></p>
+    {% endif %}
+  </aside>
+
+  <section style="flex: 1;">
+    <h2>Query</h2>
+    <form hx-post="{{ url_for('dataset_admin.explore_run', dataset_slug=row.slug) }}"
+          hx-target="#explore-result" hx-swap="outerHTML">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <textarea name="sql" rows="6" style="width: 100%; font-family: monospace;"
+                placeholder="SELECT ..."></textarea>
+      <div class="actions"><button type="submit">Run</button></div>
+    </form>
+
+    <div id="explore-result"></div>
+
+    <h2>Save as named query</h2>
+    <form method="post" action="{{ url_for('dataset_admin.save_query', dataset_slug=row.slug) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <label for="q-name">Name</label>
+      <input type="text" name="name" id="q-name" required
+             pattern="[a-z0-9][a-z0-9-]*" title="lowercase letters, digits, hyphens">
+      <label for="q-sql">SQL</label>
+      <textarea name="sql" id="q-sql" rows="4" required
+                style="width: 100%; font-family: monospace;"></textarea>
+      <label for="q-format">Default format</label>
+      <select name="default_format" id="q-format">
+        {% for f in formats %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
+      </select>
+      <label for="q-vega">Vega-Lite spec (chart format only, JSON)</label>
+      <textarea name="vega_spec_json" id="q-vega" rows="4"
+                style="width: 100%; font-family: monospace;"></textarea>
+      <div class="actions"><button type="submit">Save query</button></div>
+    </form>
+  </section>
+</div>
+{% endblock %}

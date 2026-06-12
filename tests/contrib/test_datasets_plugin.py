@@ -30,7 +30,6 @@ def test_directive_registered_on_app_renderer(admin_app: Flask) -> None:
     assert "bragi_dataset" in md.renderer.rules
 
 
-@pytest.mark.xfail(reason="dataset_admin blueprint lands in the admin task", strict=True)
 def test_admin_blueprint_mounted(admin_app: Flask) -> None:
     assert "dataset_admin" in admin_app.blueprints
 

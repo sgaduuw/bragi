@@ -1,0 +1,12 @@
+{% extends "admin/base.html" %}
+{% block title %}Datasets &middot; bragi admin{% endblock %}
+{% block content %}
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+  <h1 style="margin: 0;">Datasets</h1>
+  <a href="{{ url_for('dataset_admin.new_dataset') }}" class="btn">New dataset</a>
+  <button type="button" class="btn secondary"
+          hx-get="{{ url_for('dataset_admin.list_datasets') }}"
+          hx-target="#dataset-list-table" hx-swap="outerHTML">Refresh</button>
+</div>
+{% include "admin/datasets/_list_table.html" %}
+{% endblock %}
