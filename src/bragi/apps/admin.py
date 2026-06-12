@@ -100,10 +100,12 @@ def create_admin_app() -> Flask:
     # attachment cap (plus multipart overhead). Delivery sets a
     # smaller cap because it only receives federation-inbox JSON
     # bodies. The 64 KiB slack covers multipart boundaries / part
-    # headers for a single-file upload form.
+    # headers for a single-file upload form. Dataset uploads share
+    # the same single-file form shape, so the same slack applies.
     app.config["MAX_CONTENT_LENGTH"] = max(
         settings.max_request_bytes,
         settings.attachments_max_bytes + 64 * 1024,
+        settings.dataset_max_upload_bytes + 64 * 1024,
     )
 
     # Admin session cookie hardening. `bragi_sid` is the keychain

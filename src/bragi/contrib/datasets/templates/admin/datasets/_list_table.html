@@ -1,0 +1,23 @@
+{# Dataset list partial; #dataset-list-table is the hx-target. #}
+<div id="dataset-list-table">
+{% if rows %}
+<table>
+  <thead>
+    <tr><th>Name</th><th>Slug</th><th>Source</th><th>Size</th><th>Updated</th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><a href="{{ url_for('dataset_admin.detail', dataset_slug=row.slug) }}">{{ row.name }}</a></td>
+      <td><code>{{ row.slug }}</code></td>
+      <td>{{ row.source_type }}</td>
+      <td>{{ row.size_bytes }}</td>
+      <td>{{ row.updated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No datasets yet. Upload one to start embedding query results in posts.</p>
+{% endif %}
+</div>

@@ -6,6 +6,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Datasets (#42): per-site registry of uploaded data files
+  (DuckDB / CSV / Parquet / SQLite) queried via DuckDB. Admin
+  explore console with saved queries; `::: dataset :::` markdown
+  directive bakes tables, Vega-Lite charts (client-side hydration,
+  no-JS table fallback), and inline scalar values into post and
+  page bodies at save time; re-upload re-renders referencing
+  content. New settings: `BRAGI_DATASET_MAX_UPLOAD_BYTES`,
+  `BRAGI_DATASET_QUERY_TIMEOUT_SECONDS`,
+  `BRAGI_DATASET_QUERY_MAX_ROWS`,
+  `BRAGI_DATASET_QUERY_MEMORY_LIMIT`. New CLI: `bragi datasets
+  rerender`.
+
 ## [1.31.0] - 2026-06-10
 
 ### Changed

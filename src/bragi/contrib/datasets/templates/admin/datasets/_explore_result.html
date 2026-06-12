@@ -1,0 +1,9 @@
+{# Result partial; #explore-result is the hx-target. #}
+<div id="explore-result">
+  {% if error %}
+    <p class="flash error">{{ error }}</p>
+  {% elif table_html %}
+    {% if truncated %}<p><em>Result truncated to the configured row cap.</em></p>{% endif %}
+    {{ table_html | safe }}
+  {% endif %}
+</div>
