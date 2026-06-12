@@ -143,6 +143,34 @@ class Settings(BaseSettings):
     attachment_rendition_max_attempts: int = 3
     attachment_rendition_reclaim_after_seconds: int = 300
 
+    # Datasets (bragi.contrib.datasets). The upload cap is generous
+    # relative to attachments because a columnar file with a few
+    # million rows is a normal authoring artifact. Query guards cap
+    # wall-clock and result size for the admin explore console and
+    # the save-time directive render; only authenticated operators
+    # reach the query path in v1, these are defence in depth.
+    # Note: the admin request-body cap is max(max_request_bytes,
+    # attachments_max_bytes + slack, dataset_max_upload_bytes + slack),
+    # so setting this below the other caps does not shrink
+    # MAX_CONTENT_LENGTH; the dataset cap is still enforced in the
+    # upload handler.
+    dataset_max_upload_bytes: int = 100 * 1024 * 1024  # 100 MiB
+    dataset_query_timeout_seconds: float = 10.0
+    dataset_query_max_rows: int = 1000
+    # duckdb-format size string bounding per-connection allocation: the
+    # row cap only bounds the returned result, but a CREATE TABLE AS over
+    # a huge cross join can spike memory toward duckdb's default
+    # (~80% of RAM) inside the shared Flask process before the timeout fires.
+    dataset_query_memory_limit: str = "512MB"
+    # duckdb-format size string bounding on-disk temp spill. memory_limit
+    # is a soft cap: once exceeded duckdb spills intermediate data to
+    # temp_directory without bound (a reviewer probe filled 183 GB before
+    # this guard existed). max_temp_directory_size bounds that spill so a
+    # heavy query errors (OutOfMemoryException -> DatasetQueryError) instead
+    # of filling the disk. Applied alongside memory_limit before the
+    # lock_configuration freeze in open_dataset.
+    dataset_query_temp_limit: str = "1GB"
+
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake
     # contact. Format: `mailto:...` or `https://...` per RFC 9116.

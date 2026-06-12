@@ -3,6 +3,19 @@ name: Publish Release Artifacts
 on:
   release:
     types: [published]
+  # workflow_dispatch is the operator-recovery path for cases where
+  # publish-pypi succeeded but publish-docker exhausted its PyPI
+  # propagation budget (matrix runners can hit a CDN edge stuck
+  # behind pypi.org's primary node by tens of minutes; see v1.31.0
+  # for the incident that prompted this trigger). Dispatch with the
+  # already-published version to re-fire publish-docker alone;
+  # publish-pypi self-skips on this path so PyPI is not re-uploaded.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Already-published version to re-fire publish-docker for (no v prefix, e.g. 1.31.0).'
+        required: true
+        type: string
 
 # Trusted Publishers via OIDC for PyPI; GHCR via GITHUB_TOKEN.
 # PyPI side requires the pending publisher to be configured; see
@@ -10,6 +23,9 @@ on:
 
 jobs:
   publish-pypi:
+    # release-only: the dispatch path is for re-firing publish-docker
+    # against an already-published version; no need to re-upload.
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -45,6 +61,15 @@ jobs:
 
   publish-docker:
     needs: publish-pypi
+    # Runs on the release path when publish-pypi succeeds, and on the
+    # workflow_dispatch path when publish-pypi self-skipped. `always()`
+    # is required so the skipped publish-pypi doesn't propagate the
+    # skip into here.
+    if: |
+      always() && (
+        (github.event_name == 'release' && needs.publish-pypi.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && needs.publish-pypi.result == 'skipped')
+      )
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -56,28 +81,55 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Resolve version from release tag
+      # The propagation gate below uses `python3 -m pip download`
+      # against the pinned bragi-cms version. pip honours the
+      # `Requires-Python` constraint advertised on the simple index,
+      # so this Python MUST satisfy the bragi-cms floor: ubuntu-latest
+      # currently ships Python 3.12.3 by default, and v1.31.0 raised
+      # the floor to 3.14, which would make pip silently refuse to
+      # resolve the just-published wheel (the error reads
+      # `Could not find a version that satisfies` and looks identical
+      # to a propagation lag). Pin a Python that satisfies the floor.
+      # If the bragi-cms floor moves again, bump this too.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Resolve version
         id: version
+        # Sources the version from the release tag on the release-event
+        # path and from the dispatch input on the recovery path.
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="v${VERSION}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       # The publish-pypi job above succeeded, but the pip resolver
-      # behind `pip install` lags PyPI's JSON metadata at busy CDN
-      # nodes. v1.27.2, v1.27.4, and v1.27.5 all saw the docker job's
-      # `pip install` race the propagation while the old probe (curl
-      # against the JSON endpoint) already reported 200. Probe with
-      # pip itself so the gate exercises the same resolver path the
-      # docker build is about to take; only when pip can actually
+      # behind `pip install` can lag PyPI's JSON metadata at busy
+      # CDN nodes. v1.27.2, v1.27.4, and v1.27.5 all saw the docker
+      # job's `pip install` race the propagation while the old probe
+      # (curl against the JSON endpoint) already reported 200. Probe
+      # with pip itself so the gate exercises the same resolver path
+      # the docker build is about to take; only when pip can actually
       # resolve AND fetch the wheel do we proceed. The temporary
       # download directory is discarded; this step does not pre-warm
       # any pip cache the docker build reads.
       - name: Wait for PyPI propagation
+        # Budget is 1800s (180 x 10s). The 600s ceiling stood from
+        # v1.27.6 through v1.31.0; the v1.31.0 incident that
+        # raised it to 1800s turned out to be a Python-version skew
+        # in this very gate (the setup-python step above is the
+        # actual fix), not CDN-side lag. The wider budget is kept
+        # as belt-and-suspenders for genuine CDN outliers.
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          for i in $(seq 1 60); do
+          for i in $(seq 1 180); do
             rm -rf /tmp/pypi-check
             mkdir -p /tmp/pypi-check
             if python3 -m pip download \
@@ -92,7 +144,7 @@ jobs:
             echo "attempt ${i}: bragi-cms==${VERSION} not yet resolvable on PyPI"
             sleep 10
           done
-          echo "PyPI did not surface bragi-cms==${VERSION} after 600s; check publish-pypi step output and re-run this job"
+          echo "PyPI did not surface bragi-cms==${VERSION} after 1800s; check publish-pypi step output and re-run this job"
           exit 1
 
       # QEMU registers binfmt handlers for foreign architectures
@@ -126,11 +178,27 @@ jobs:
           # if needed.
           flavor: |
             latest=auto
+          # Pass an explicit `value=` to every semver pattern so the
+          # tags work on both the release-event path (github.ref is
+          # the v-tag) and the workflow_dispatch recovery path
+          # (github.ref is refs/heads/develop, so the patterns would
+          # otherwise resolve to nothing and buildx would refuse to
+          # push). The explicit value is a no-op on the release path
+          # because the resolved tag matches what the patterns would
+          # have inferred from github.ref.
+          #
+          # `type=ref,event=tag` produces the v-prefixed tag on the
+          # release path (theme Dockerfiles pin via that form). On the
+          # dispatch path there is no tag ref, so the `type=raw` line
+          # below re-creates the v-prefixed tag from the resolved
+          # version, gated to fire only on the dispatch path so the
+          # release path does not produce a duplicate.
           tags: |
             type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=raw,value=${{ steps.version.outputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.tag }}
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -150,6 +218,11 @@ jobs:
 
   notify-themes:
     needs: publish-docker
+    # `success()` would walk the whole needs chain and skip because
+    # publish-pypi is `skipped` on the dispatch path; with always() +
+    # an explicit publish-docker.result check, this job fires whenever
+    # publish-docker succeeded, regardless of the publish-pypi state.
+    if: always() && needs.publish-docker.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false           # one theme failing must not block siblings
@@ -166,11 +239,16 @@ jobs:
           owner: sgaduuw
           repositories: ${{ matrix.theme }}
 
-      - name: Resolve version from release tag
+      - name: Resolve version
         id: version
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch bragi-released
         env:
