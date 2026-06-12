@@ -22,8 +22,10 @@ AVIF / WebP / fallback tiers and per-class `sizes`), Unsplash
 plugin (search + insert from the admin image picker, photographer
 credit auto-renders beneath inline-body images; requires
 `BRAGI_UNSPLASH_ACCESS_KEY`), pinned posts on the landing page,
-ActivityPub + webmentions, four in-tree themes with auto
-light/dark, sitemap / feed / JSON-LD, audit-driven hardening
+ActivityPub + webmentions, datasets (per-site DuckDB-backed data
+file registry with an explore console, saved queries, and a
+`::: dataset :::` markdown directive), four in-tree themes with
+auto light/dark, sitemap / feed / JSON-LD, audit-driven hardening
 from v1.12 through v1.19.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
@@ -177,8 +179,7 @@ and ARM homelabs run natively rather than through QEMU emulation.
 - Authlib (GitHub OAuth + future OIDC providers)
 - markdown-it-py + Pygments
 - htmx (delivery side) + TipTap (admin editor)
-- SQLite (WAL) primary store; DuckDB reserved for later dataset
-  paths
+- SQLite (WAL) primary store; DuckDB for the datasets plugin
 - gunicorn (production WSGI server, sync worker class)
 
 ## Importers
@@ -287,6 +288,60 @@ as a diffable snapshot. Posts round-trip through `bragi import
 hugo`: importing the export and re-exporting changes nothing
 beyond timestamps, so the corpus is portable back into any Hugo
 build at any time.
+
+## Datasets
+
+Datasets is a per-site registry of uploaded data files. Supported
+formats: native DuckDB databases (`.duckdb`), CSV, Parquet, and
+SQLite. Every file is queried via DuckDB at render time, so a
+single DuckDB instance can open CSV or Parquet files transparently.
+
+**Admin explore console.** Site owners and site-level admins
+reach a DuckDB console at
+`/admin/sites/<slug>/datasets/<dataset-slug>/explore/` to run
+ad-hoc SQL against the file, inspect column types, and save named
+queries. Access is author-only; the explore console is not exposed
+on the delivery app.
+
+**Saved queries.** Named SQL strings stored alongside the dataset.
+A saved query is the required backing for a `format=chart`
+directive (the Vega-Lite spec lives on the saved query; the render
+pipeline executes the SQL, maps the result set onto the spec, and
+bakes the chart HTML at save time).
+
+**`::: dataset :::` directive.** Embeds dataset output into
+post and page bodies at save time:
+
+```
+# Inline SQL, table output (default):
+::: dataset slug=revenue q-sql="SELECT year, total FROM summary ORDER BY year" :::
+
+# Saved query, Vega-Lite chart (requires the query to carry a spec):
+::: dataset slug=revenue q=annual_chart format=chart :::
+
+# Saved query, inline scalar:
+::: dataset slug=revenue q=latest_mrr format=scalar :::
+```
+
+`format` is `table` (default), `chart`, or `scalar`. `q=<name>`
+references a saved query; `q-sql="..."` supplies inline SQL
+(inline SQL cannot use `format=chart`). Chart output renders
+client-side via CDN-loaded `vega-embed`; a `<noscript>` block
+with the same data as an HTML table is baked alongside so
+JS-disabled browsers and crawlers see the data.
+
+**Refresh model.** Dataset output is baked into `body_html` at
+post/page save time (same pipeline as embeds). Re-uploading a
+dataset file re-bakes every referencing post and page
+synchronously before the upload response returns.
+`bragi datasets rerender <site-id> [<dataset-slug>]` is the
+manual handle for out-of-band refreshes or recovery:
+
+```sh
+bragi datasets rerender 1              # re-bake all datasets for site 1
+bragi datasets rerender 1 revenue      # re-bake only the "revenue" dataset
+bragi datasets rerender 1 --dry-run    # report without writing
+```
 
 ## Backups
 
@@ -425,6 +480,16 @@ plugin (the Unsplash tab stays hidden). `BRAGI_UNSPLASH_APP_NAME`
 if you customise it, set it on both admin and delivery for
 consistency.
 
+`BRAGI_DATASET_MAX_UPLOAD_BYTES` (default 100 MiB),
+`BRAGI_DATASET_QUERY_TIMEOUT_SECONDS` (default 10.0),
+`BRAGI_DATASET_QUERY_MAX_ROWS` (default 1000), and
+`BRAGI_DATASET_QUERY_MEMORY_LIMIT` (default `512MB`) tune the
+datasets plugin. Upload size, DuckDB query timeout, per-query row
+cap, and DuckDB memory ceiling respectively. Set on the `admin`
+service; the delivery app inherits the row and memory caps for
+render-time queries. Leave at defaults unless a specific file size
+or query workload demands otherwise.
+
 Task-runner cadences (all in seconds, set on the `bragi-tasks`
 service) default to `SCHEDULED_PUBLISH_EVERY=60`,
 `EMBEDS_RERENDER_EVERY=600`, `WEBMENTIONS_SEND_EVERY=300`,
@@ -487,6 +552,7 @@ bragi/
 │       ├── audit/              # audit-log admin
 │       ├── auth_github/        # OAuth via Authlib
 │       ├── auth_local/         # email + password + must-change rotation
+│       ├── datasets/           # per-site data file registry + explore console + directive
 │       ├── embeds/             # external-content embeds (directive + providers + rerender)
 │       ├── highlight/          # Pygments html transform
 │       ├── import_ghost/       # Ghost JSON / ZIP importer (posts, pages, featured images)
