@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.31.0 (2026-06-10).
+**Latest release:** 1.32.0 (2026-06-12).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -400,7 +400,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.31.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.32.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -486,13 +486,18 @@ consistency.
 
 `BRAGI_DATASET_MAX_UPLOAD_BYTES` (default 100 MiB),
 `BRAGI_DATASET_QUERY_TIMEOUT_SECONDS` (default 10.0),
-`BRAGI_DATASET_QUERY_MAX_ROWS` (default 1000), and
-`BRAGI_DATASET_QUERY_MEMORY_LIMIT` (default `512MB`) tune the
+`BRAGI_DATASET_QUERY_MAX_ROWS` (default 1000),
+`BRAGI_DATASET_QUERY_MEMORY_LIMIT` (default `512MB`), and
+`BRAGI_DATASET_QUERY_TEMP_LIMIT` (default `1GB`) tune the
 datasets plugin. Upload size, DuckDB query timeout, per-query row
-cap, and DuckDB memory ceiling respectively. Set on the `admin`
-service; the delivery app inherits the row and memory caps for
-render-time queries. Leave at defaults unless a specific file size
-or query workload demands otherwise.
+cap, DuckDB memory ceiling, and the on-disk temp-spill bound
+respectively. The memory ceiling is a soft cap: once exceeded
+DuckDB spills intermediate data to a temp directory, and the
+temp-spill bound is what stops a heavy query from filling the disk
+(it errors instead). Set on the `admin` service; the delivery app
+inherits the row, memory, and temp caps for render-time queries.
+Leave at defaults unless a specific file size or query workload
+demands otherwise.
 
 Task-runner cadences (all in seconds, set on the `bragi-tasks`
 service) default to `SCHEDULED_PUBLISH_EVERY=60`,
@@ -584,7 +589,7 @@ bragi/
 │       └── webmentions/        # indieweb send + receive + admin moderation
 ├── alembic/                    # alembic.ini + dev shim (script_location = bragi:alembic)
 ├── docker/                     # admin.Dockerfile, delivery.Dockerfile
-├── .github/workflows/          # ci.yml, release.yml, dispatch-theme-released.yml
+├── .github/workflows/          # ci.yml, release.yml, dispatch-theme-released.yml, _diagnose-pypi.yml
 └── tests/
     ├── unit/                   # pure logic, no DB
     ├── contrib/                # one file per built-in plugin
@@ -762,7 +767,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.31.0
+pip install bragi-cms==1.32.0
 ```
 
 The import path stays `import bragi`. Container images remain the

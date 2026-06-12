@@ -6,6 +6,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-06-12
+
 ### Added
 
 - Datasets (#42): per-site registry of uploaded data files
@@ -17,8 +19,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   content. New settings: `BRAGI_DATASET_MAX_UPLOAD_BYTES`,
   `BRAGI_DATASET_QUERY_TIMEOUT_SECONDS`,
   `BRAGI_DATASET_QUERY_MAX_ROWS`,
-  `BRAGI_DATASET_QUERY_MEMORY_LIMIT`. New CLI: `bragi datasets
+  `BRAGI_DATASET_QUERY_MEMORY_LIMIT`,
+  `BRAGI_DATASET_QUERY_TEMP_LIMIT`. New CLI: `bragi datasets
   rerender`.
+
+### Changed
+
+- Release pipeline hardening (follow-up to the v1.31.0 PyPI
+  propagation incident, PRs #406-#410): `release.yml`'s
+  publish-docker propagation gate now pins Python 3.14 so the
+  `pip download` probe satisfies the package's requires-python,
+  extends the propagation budget, and carries a `workflow_dispatch`
+  recovery handle that produces a v-prefixed image tag and fires
+  the theme-notify step. Adds a standalone `_diagnose-pypi.yml`
+  workflow for diagnosing future routing incidents. No runtime or
+  deployment-behaviour change for operators.
 
 ## [1.31.0] - 2026-06-10
 
