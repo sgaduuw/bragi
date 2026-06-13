@@ -28,6 +28,10 @@
     </form>
   {% else %}
     <code>{{ page.slug }}</code>
-    {% if full_path %}<div class="slug-cell-path"><small>{{ full_path }}</small></div>{% endif %}
+    {# Only show the full path when it conveys more than the bare slug:
+       nested pages (/parent/child/) or the home page (shadowed to /).
+       For a plain root page the path is just /<slug>/, which stacked
+       under the slug reads as the page being nested under itself. #}
+    {% if full_path and full_path != '/' ~ page.slug ~ '/' %}<div class="slug-cell-path"><small>{{ full_path }}</small></div>{% endif %}
   {% endif %}
 </td>
