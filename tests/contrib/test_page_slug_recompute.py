@@ -352,3 +352,100 @@ def test_recompute_preview_requires_editor_role(
         data={"_csrf_token": csrf, "title": "X", "parent_id": ""},
     )
     assert resp.status_code == 403
+
+
+def test_bulk_recompute_persists_all(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    app, ids = admin_app
+    for name in ("about", "team", "contact"):
+        db_session.execute(
+            select(Page).where(Page.id == ids[name])
+        ).scalar_one().slug = f"messy-{name}"
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.post(
+        "/admin/sites/blog/pages/bulk-recompute-slugs",
+        data={"_csrf_token": csrf, "ids": [ids["about"], ids["team"], ids["contact"]]},
+    )
+    assert resp.status_code in (200, 302)
+    db_session.expire_all()
+    assert _slug_of(db_session, ids["about"]) == "about"
+    assert _slug_of(db_session, ids["team"]) == "team"
+    assert _slug_of(db_session, ids["contact"]) == "contact"
+
+
+def test_bulk_recompute_skips_301(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    app, ids = admin_app
+    db_session.execute(
+        select(Page).where(Page.id == ids["about"])
+    ).scalar_one().slug = "messy-about"
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    client.post(
+        "/admin/sites/blog/pages/bulk-recompute-slugs",
+        data={"_csrf_token": csrf, "ids": [ids["about"]]},
+    )
+    db_session.expire_all()
+    redirects = (
+        db_session.execute(select(Redirect).where(Redirect.site_id == ids["site"]))
+        .scalars()
+        .all()
+    )
+    assert redirects == []
+
+
+def test_bulk_recompute_skips_empty_title_row(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    app, ids = admin_app
+    db_session.execute(
+        select(Page).where(Page.id == ids["contact"])
+    ).scalar_one().title = "!!!"
+    db_session.execute(
+        select(Page).where(Page.id == ids["about"])
+    ).scalar_one().slug = "messy-about"
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.post(
+        "/admin/sites/blog/pages/bulk-recompute-slugs",
+        data={"_csrf_token": csrf, "ids": [ids["about"], ids["contact"]]},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    assert _slug_of(db_session, ids["about"]) == "about"  # recomputed
+    assert _slug_of(db_session, ids["contact"]) == "contact"  # skipped, unchanged
+
+
+def test_bulk_recompute_requires_editor_role(
+    admin_app: tuple[Flask, dict[str, int]],
+) -> None:
+    app, ids = admin_app
+    client = app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.post(
+        "/admin/sites/blog/pages/bulk-recompute-slugs",
+        data={"_csrf_token": csrf, "ids": [ids["about"]]},
+    )
+    assert resp.status_code == 403
+
+
+def test_bulk_actions_bar_renders_recompute_button(
+    admin_app: tuple[Flask, dict[str, int]],
+) -> None:
+    app, _ids = admin_app
+    client = app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/pages/").get_data(as_text=True)
+    assert "bulk-select-recompute" in body
+    assert "bulk-recompute-form" in body

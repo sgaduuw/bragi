@@ -6,10 +6,14 @@
    class on `wrapper_id` and drives the rest.
 
    Parameters (passed via `with` on include):
-     bulk_action_url : POST endpoint
+     bulk_action_url : POST endpoint for bulk delete
      singular        : "post" / "page" / "attachment"
      plural          : "posts" / "pages" / "attachments"
      wrapper_id      : list-table wrapper id (e.g. "post-list-table")
+     recompute_url   : (optional) POST endpoint for bulk slug recompute.
+                       When present, a "Recompute slugs" button and form
+                       are rendered. Posts and attachments do not pass
+                       this parameter, so they render exactly as before.
 #}
 <div class="bulk-actions-bar" data-wrapper="#{{ wrapper_id }}">
   <button type="button" class="btn secondary bulk-select-enter">Select</button>
@@ -19,6 +23,11 @@
     <button type="button" class="btn danger bulk-select-delete" disabled>
       Delete (<span class="bulk-count">0</span>)
     </button>
+    {% if recompute_url is defined and recompute_url %}
+    <button type="button" class="btn secondary bulk-select-recompute" disabled>
+      Recompute slugs (<span class="bulk-count">0</span>)
+    </button>
+    {% endif %}
     <span class="bulk-mode-indicator"><span class="bulk-count">0</span> selected</span>
   </span>
 
@@ -42,4 +51,9 @@
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     {# JS populates one <input name="ids"> per selected row at confirm time #}
   </form>
+  {% if recompute_url is defined and recompute_url %}
+  <form method="post" action="{{ recompute_url }}" class="bulk-recompute-form" hidden>
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  </form>
+  {% endif %}
 </div>

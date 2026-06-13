@@ -33,6 +33,8 @@
     const moreNote = dialog.querySelector(".bulk-confirm-more");
     const moreCount = dialog.querySelector(".bulk-more-count");
     const submitForm = bar.querySelector(".bulk-submit-form");
+    const recomputeBtn = bar.querySelector(".bulk-select-recompute");
+    const recomputeForm = bar.querySelector(".bulk-recompute-form");
 
     function rowBoxes() {
       return Array.from(
@@ -65,6 +67,7 @@
         el.textContent = String(n);
       });
       deleteBtn.disabled = n === 0;
+      if (recomputeBtn) recomputeBtn.disabled = n === 0;
       syncHeader();
     }
 
@@ -130,6 +133,25 @@
     dialogCancel.addEventListener("click", function () {
       dialog.close();
     });
+
+    // Recompute is undoable (snapshots PageRevision first), so submit
+    // directly without the confirm dialog.
+    if (recomputeBtn && recomputeForm) {
+      recomputeBtn.addEventListener("click", function () {
+        const sel = selected();
+        recomputeForm
+          .querySelectorAll('input[name="ids"]')
+          .forEach((el) => el.remove());
+        sel.forEach((cb) => {
+          const inp = document.createElement("input");
+          inp.type = "hidden";
+          inp.name = "ids";
+          inp.value = cb.value;
+          recomputeForm.appendChild(inp);
+        });
+        recomputeForm.submit();
+      });
+    }
 
     dialogConfirm.addEventListener("click", function () {
       const sel = selected();

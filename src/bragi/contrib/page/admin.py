@@ -943,6 +943,32 @@ def _delete_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
     return Ok(captured)
 
 
+def _recompute_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
+    """Recompute one page's slug from its title in the current transaction.
+
+    Skipped when the title slugifies to empty. Snapshots a PageRevision
+    before mutating (undoable), persists the new slug, and skips the
+    auto-301 (no on_post_updated). Caller commits.
+    """
+    from bragi.core.text import unique_slug_for_page
+
+    try:
+        new_slug = unique_slug_for_page(
+            db,
+            site_id=site.id,
+            parent_id=page.parent_id,
+            title=page.title,
+            exclude_page_id=page.id,
+        )
+    except ValueError:
+        return Skipped(page.title or "Untitled", "title has no sluggable characters")
+
+    if new_slug != page.slug:
+        _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+        page.slug = new_slug
+    return Ok(DeletedItem(id=page.id, title=page.title or "Untitled", extras={"slug": new_slug}))
+
+
 @bp.route("/<int:page_id>/delete", methods=["POST"])
 def delete_page(site_slug: str, page_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
@@ -1048,6 +1074,56 @@ def _bulk_list_response(site_slug: str) -> ResponseReturnValue:
     if is_htmx():
         return list_pages(site_slug)
     return redirect(url_for("page_admin.list_pages", site_slug=site_slug))
+
+
+@bp.route("/bulk-recompute-slugs", methods=["POST"])
+def bulk_recompute_slugs(site_slug: str) -> ResponseReturnValue:
+    """Recompute slugs from titles for a batch of pages.
+
+    Reuses the generic bulk loop (`bulk_delete`); the per-row callable
+    recomputes rather than deletes. Skip-301 + undoable per row (see
+    `_recompute_one_page`). Best-effort partial-failure: a page whose
+    title slugifies to empty is skipped with a reason.
+    """
+    ids = request.form.getlist("ids", type=int)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+
+        if not ids:
+            flash("Select at least one page to recompute.", "warning")
+            return _bulk_list_response(site_slug)
+
+        try:
+            result = bulk_delete(
+                db=db,
+                site=site,
+                model=Page,
+                ids=ids,
+                delete_one=_recompute_one_page,
+            )
+        except BulkLimitExceeded as exc:
+            flash(str(exc), "warning")
+            return _bulk_list_response(site_slug)
+
+        db.commit()
+        pm = current_app.extensions["plugin_manager"]
+        for row in result.deleted_rows:
+            pm.hook.on_cache_purge(scope="page", key=str(row.id))
+
+    flash(
+        format_bulk_result(result, singular="page", plural="pages", verb="Recomputed"),
+        "success",
+    )
+    for row in result.deleted_rows:
+        audit(
+            AuditAction.POST_UPDATED,
+            target_type="page",
+            target_id=row.id,
+            site_id=site.id,
+            extra={"field": "slug", "slug": row.extras["slug"], "via": "bulk-recompute"},
+        )
+    return _bulk_list_response(site_slug)
 
 
 # ============================================================

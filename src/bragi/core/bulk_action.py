@@ -133,8 +133,13 @@ def bulk_delete[T](
 _SKIP_TRUNCATE = 3
 
 
-def format_bulk_result(result: BulkResult, *, singular: str, plural: str) -> str:
-    """Produce the operator-facing flash string for a bulk-delete result.
+def format_bulk_result(
+    result: BulkResult, *, singular: str, plural: str, verb: str = "Deleted"
+) -> str:
+    """Produce the operator-facing flash string for a bulk-action result.
+
+    `verb` is the past-tense action word ("Deleted", "Recomputed"); the
+    default keeps existing delete callers unchanged.
 
     Singular/plural labels are passed in so this is content-type
     agnostic; the routes choose them. Skips beyond the first three are
@@ -144,7 +149,7 @@ def format_bulk_result(result: BulkResult, *, singular: str, plural: str) -> str
     """
     n = len(result.deleted_rows)
     label = singular if n == 1 else plural
-    head = f"Deleted {n} {label}." if n > 0 else f"0 {plural} deleted."
+    head = f"{verb} {n} {label}." if n > 0 else f"0 {plural} {verb.lower()}."
 
     if not result.skipped:
         return head
