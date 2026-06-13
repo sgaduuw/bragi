@@ -15,7 +15,8 @@ need an explicit query.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections import Counter
+from typing import TYPE_CHECKING, NamedTuple
 
 from flask import (
     Blueprint,
@@ -380,6 +381,35 @@ def _descendant_ids(pages: list[Page], page_id: int) -> set[int]:
     return descendants
 
 
+class _ParentChoice(NamedTuple):
+    id: int
+    label: str
+
+
+def _parent_choices(
+    db: Session, site: Site, pages: list[Page], exclude_ids: set[int]
+) -> list[_ParentChoice]:
+    """Build <select> options for the parent picker from an
+    already-loaded page list, dropping `exclude_ids` (the page itself
+    plus its descendants). Labels are the page title; when two
+    candidates share a title, the full path is appended to
+    disambiguate."""
+    from bragi.core.url import page_path_preview
+
+    candidates = [p for p in pages if p.id not in exclude_ids]
+    title_counts = Counter(p.title for p in candidates)
+    choices: list[_ParentChoice] = []
+    for p in candidates:
+        label = p.title
+        if title_counts[p.title] > 1:
+            path = page_path_preview(
+                db, site=site, parent_id=p.parent_id, slug=p.slug, page_id=p.id
+            )
+            label = f"{p.title} ({path})"
+        choices.append(_ParentChoice(p.id, label))
+    return choices
+
+
 @bp.route("/", methods=["GET"])
 def list_pages(site_slug: str) -> ResponseReturnValue:
     from bragi.core.url import page_path_preview, prewarm_page_url_cache
@@ -397,11 +427,25 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
             p.id: page_path_preview(db, site=site, parent_id=p.parent_id, slug=p.slug, page_id=p.id)
             for p in pages
         }
+        title_by_id = {p.id: p.title for p in pages}
+        page_parents = {
+            p.id: (title_by_id.get(p.parent_id) if p.parent_id else None) for p in pages
+        }
     if is_htmx():
         return render_template(
-            "admin/_page_list_table.html", pages=pages, site=site, page_paths=page_paths
+            "admin/_page_list_table.html",
+            pages=pages,
+            site=site,
+            page_paths=page_paths,
+            page_parents=page_parents,
         )
-    return render_template("admin/page_list.html", pages=pages, site=site, page_paths=page_paths)
+    return render_template(
+        "admin/page_list.html",
+        pages=pages,
+        site=site,
+        page_paths=page_paths,
+        page_parents=page_parents,
+    )
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -1919,3 +1963,133 @@ def patch_menu_order(site_slug: str, page_id: int) -> ResponseReturnValue:
         value=None,
         error=None,
     )
+
+
+@bp.route("/<int:page_id>/cell/parent", methods=["GET"])
+def parent_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the parent cell. ?mode=edit returns the <select> edit
+    partial; default returns the parent-title display. Editor role
+    required."""
+    mode = request.args.get("mode", "view")
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        parent_title = None
+        if page.parent_id is not None:
+            parent = db.get(Page, page.parent_id)
+            parent_title = parent.title if parent else None
+
+        candidates: list[_ParentChoice] = []
+        if mode == "edit":
+            pages = _all_pages_for_picker(db, site.id)
+            exclude = {page.id} | _descendant_ids(pages, page.id)
+            candidates = _parent_choices(db, site, pages, exclude)
+
+        return render_template(
+            "admin/_page_parent_cell.html",
+            site=site,
+            page=page,
+            mode=mode,
+            parent_title=parent_title,
+            candidates=candidates,
+            current=page.parent_id,
+            error=None,
+        )
+
+
+@bp.route("/<int:page_id>/patch/parent", methods=["PATCH"])
+def patch_parent(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """PATCH the page's parent. On success returns the view-mode cell
+    and fires on_post_updated (which inserts a subtree 301 when a
+    published page moves). On validation failure (cross-site parent,
+    cycle) returns the edit-mode cell with an inline error. Editor
+    role required."""
+    new_parent_id = _normalized_parent_id((request.form.get("parent_id") or "").strip())
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        def _render_view() -> str:
+            parent_title = None
+            if page.parent_id is not None:
+                parent = db.get(Page, page.parent_id)
+                parent_title = parent.title if parent else None
+            return render_template(
+                "admin/_page_parent_cell.html",
+                site=site,
+                page=page,
+                mode="view",
+                parent_title=parent_title,
+                candidates=[],
+                current=page.parent_id,
+                error=None,
+            )
+
+        def _render_edit_error(message: str) -> str:
+            pages = _all_pages_for_picker(db, site.id)
+            exclude = {page.id} | _descendant_ids(pages, page.id)
+            return render_template(
+                "admin/_page_parent_cell.html",
+                site=site,
+                page=page,
+                mode="edit",
+                parent_title=None,
+                candidates=_parent_choices(db, site, pages, exclude),
+                current=new_parent_id,
+                error=message,
+            )
+
+        validated, error = _validated_parent_id_or_error(
+            db, new_parent_id, site.id, exclude_page_id=page.id
+        )
+        if error is not None:
+            return _render_edit_error(error)
+
+        # No-op: choosing the current parent changes nothing.
+        if validated == page.parent_id:
+            return _render_view()
+
+        _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+        before = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "parent_id": page.parent_id,
+        }
+        page.parent_id = validated
+        db.commit()
+        db.refresh(page)
+        after = {
+            "slug": page.slug,
+            "title": page.title,
+            "status": page.status,
+            "parent_id": page.parent_id,
+        }
+
+        pm = current_app.extensions["plugin_manager"]
+        # on_post_updated inserts the subtree 301 for a published move
+        # (see bragi.contrib.redirects.plugin). Cache purge mirrors the
+        # slug-change path (purges the moved page; descendant render
+        # caches follow the same precedent as a slug change).
+        pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        cell_site_id = site.id
+        view_html = _render_view()
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=page_id,
+        site_id=cell_site_id,
+        extra={"field": "parent_id", "before": before, "after": after},
+    )
+    return view_html
