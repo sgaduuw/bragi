@@ -8,10 +8,14 @@
     class="is-editable{% if mode == 'edit' %} is-editing{% endif %}"
     tabindex="0"
     role="gridcell"
-    hx-get="{{ url_for('page_admin.parent_cell', site_slug=site.slug, page_id=page.id, mode='edit') }}"
+    {# Focused-Enter / double-click enters edit mode: a VIEW-mode
+       affordance only. In edit mode the form's Enter saves; keeping
+       this trigger here would double-fire an edit GET that races the
+       save and reverts the value (multi-worker prod). #}
+    {% if mode != 'edit' %}hx-get="{{ url_for('page_admin.parent_cell', site_slug=site.slug, page_id=page.id, mode='edit') }}"
     hx-target="this"
     hx-swap="outerHTML"
-    hx-trigger="dblclick, keyup[key=='Enter']">
+    hx-trigger="dblclick, keyup[key=='Enter']"{% endif %}>
   {% if mode == 'edit' %}
     <form hx-patch="{{ url_for('page_admin.patch_parent', site_slug=site.slug, page_id=page.id) }}"
           hx-target="#page-parent-cell-{{ page.id }}"
