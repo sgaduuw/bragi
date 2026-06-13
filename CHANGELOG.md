@@ -6,6 +6,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.33.1] - 2026-06-13
+
+### Fixed
+- Page list: the full-URL-path line is no longer shown for root
+  pages, where it merely repeated the slug as `/<slug>/` and, stacked
+  under the slug, read as the page being nested under itself. The
+  path now renders only where it adds information: nested pages
+  (the ancestor chain) and the home page. Cosmetic only, no data or
+  URL change.
+
 ## [1.33.0] - 2026-06-13
 
 ### Added
