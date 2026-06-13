@@ -25,7 +25,7 @@
       </td>
       {% include "admin/_page_title_cell.html" %}
       {% with full_path=page_paths.get(page.id) %}{% include "admin/_page_slug_cell.html" %}{% endwith %}
-      <td>{{ page.parent_id or '(root)' }}</td>
+      {% with parent_title=page_parents.get(page.id) %}{% include "admin/_page_parent_cell.html" %}{% endwith %}
       {% include "admin/_page_status_cell.html" %}
       {% include "admin/_page_show_in_nav_cell.html" %}
       {% include "admin/_page_menu_order_cell.html" %}

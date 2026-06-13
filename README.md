@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.33.1 (2026-06-13).
+**Latest release:** 1.34.0 (2026-06-14).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -26,7 +26,9 @@ ActivityPub + webmentions, datasets (per-site DuckDB-backed data
 file registry with an explore console, saved queries, and a
 `::: dataset :::` markdown directive), page-admin slug recompute
 from title (edit-form, page-list inline, and bulk) with a
-full-URL-path column in the page list, four in-tree themes with
+full-URL-path column in the page list, inline parent editing in the
+page list (double-click the Parent cell to reparent; published moves
+insert a subtree 301), four in-tree themes with
 auto light/dark, sitemap / feed / JSON-LD, audit-driven hardening
 from v1.12 through v1.19.
 
@@ -109,9 +111,10 @@ and ARM homelabs run natively rather than through QEMU emulation.
   (per tag). Server-side Pygments highlighting for code blocks
   (Ansible / Python / Terraform lexers in core).
 - **Redirects as a core subsystem.** Slug renames auto-301;
-  importers preserve source URLs as redirect rows; resolution
-  middleware runs on every public 404. `410 Gone` for tombstoned
-  content.
+  moving a published page to a new parent inserts a 301 covering
+  the page and its whole subtree; importers preserve source URLs
+  as redirect rows; resolution middleware runs on every public 404.
+  `410 Gone` for tombstoned content.
 - **Revision history.** Every post / page save captures a
   pre-edit snapshot in `post_revisions` / `page_revisions`.
   Admin views list revisions, show a side-by-side with the live
@@ -402,7 +405,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.33.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.34.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -769,7 +772,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.33.1
+pip install bragi-cms==1.34.0
 ```
 
 The import path stays `import bragi`. Container images remain the

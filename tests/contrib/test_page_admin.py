@@ -15,6 +15,7 @@ from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
+from bragi.core.models.redirect import Redirect
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from tests.conftest import csrf_token, make_test_site, make_test_user
@@ -1244,3 +1245,117 @@ def test_new_page_empty_title_and_slug_still_errors(
     )
     assert resp.status_code == 200
     assert b"required" in resp.data.lower()
+
+
+# ============================================================
+# Edit-form parity: parent_id in before/after dicts; picker
+# excludes descendants (Task 5)
+# ============================================================
+
+
+def _make_published_page(
+    db: Session,
+    *,
+    site_id: int,
+    author_id: int,
+    slug: str,
+    parent_id: int | None,
+) -> int:
+    """Create a published Page and return its id.
+
+    Page.kind / show_in_nav / menu_order use model defaults
+    (STATIC / True / 0), so no PageKind import is needed here.
+    """
+    page = Page(
+        site_id=site_id,
+        author_id=author_id,
+        title=slug,
+        slug=slug,
+        parent_id=parent_id,
+        body_markdown="",
+        body_html="",
+        body_excerpt="",
+        status=PageStatus.PUBLISHED,
+    )
+    db.add(page)
+    db.flush()
+    return page.id
+
+
+def test_edit_form_parent_move_inserts_301(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Moving a published page to a new parent via the edit form
+    inserts a subtree 301 from the old path to the new."""
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        author_id = db.execute(select(User.id).where(User.email == EMAIL)).scalar_one()
+
+        old_parent = _make_published_page(
+            db, site_id=site_id, author_id=author_id, slug="old", parent_id=None
+        )
+        new_parent = _make_published_page(
+            db, site_id=site_id, author_id=author_id, slug="new", parent_id=None
+        )
+        moved = _make_published_page(
+            db, site_id=site_id, author_id=author_id, slug="moved", parent_id=old_parent
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{moved}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{moved}/edit",
+        data={
+            "title": "moved",
+            "slug": "moved",
+            "parent_id": str(new_parent),
+            "body_markdown": "",
+            "status": "published",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        rows = db.execute(select(Redirect).where(Redirect.site_id == site_id)).scalars().all()
+    assert any(r.source_path == "/old/moved/" and r.target == "/new/moved/" for r in rows), (
+        f"expected /old/moved/ -> /new/moved/, got {[(r.source_path, r.target) for r in rows]}"
+    )
+
+
+def test_edit_form_rejects_descendant_cycle(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Setting a page's parent to its own child via the edit form is
+    rejected; the parent is unchanged."""
+    with db_session_factory() as db:
+        site_id = db.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+        author_id = db.execute(select(User.id).where(User.email == EMAIL)).scalar_one()
+
+        about = _make_published_page(
+            db, site_id=site_id, author_id=author_id, slug="about", parent_id=None
+        )
+        child = _make_published_page(
+            db, site_id=site_id, author_id=author_id, slug="child", parent_id=about
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{about}/edit")
+    client.post(
+        f"/admin/sites/blog/pages/{about}/edit",
+        data={
+            "title": "about",
+            "slug": "about",
+            "parent_id": str(child),
+            "body_markdown": "",
+            "status": "published",
+            "_csrf_token": token,
+        },
+    )
+    with db_session_factory() as db:
+        parent = db.execute(select(Page.parent_id).where(Page.id == about)).scalar_one()
+    assert parent is None  # unchanged; cycle rejected

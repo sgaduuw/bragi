@@ -4,7 +4,22 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.34.0] - 2026-06-14
+
+### Added
+- Pages admin: edit a page's parent inline from the list (double-click
+  the Parent cell, pick from the dropdown, Enter to save / Escape to
+  cancel), matching the existing inline title/slug/status editing.
+
+### Changed
+- Moving a published page to a new parent now inserts a 301 covering
+  the page and its whole subtree, so the old URLs keep resolving. This
+  applies to both the inline list edit and the full page edit form.
+
+### Fixed
+- The page parent picker (inline and edit form) no longer offers the
+  page itself or its descendants, and a descendant parent is rejected
+  server-side, preventing a cyclic page tree.
 
 ## [1.33.1] - 2026-06-13
 

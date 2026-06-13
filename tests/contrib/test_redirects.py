@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.api import RedirectTarget
+from bragi.core.models.page import PageStatus
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
 from bragi.plugins import create_plugin_manager
@@ -171,3 +173,173 @@ def test_redirect_source_path_must_be_nonempty(db_session: Session) -> None:
         db_session.rollback()
     else:  # pragma: no cover
         raise AssertionError("empty source_path was accepted")
+
+
+def _seed_move_pages(db, *, published: bool):
+    """Create site + OLD/NEW parents + a child P under OLD. Returns
+    (site_id, child, old_parent_id, new_parent_id) with the child
+    already moved under NEW in the session (parent_id reassigned)."""
+    from bragi.core.models.page import Page, PageStatus
+
+    user = make_test_user(db)
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
+    )
+    db.add(site)
+    db.flush()
+
+    def _page(slug, parent_id, status):
+        p = Page(
+            site_id=site.id,
+            parent_id=parent_id,
+            slug=slug,
+            title=slug,
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user.id,
+            status=status,
+        )
+        db.add(p)
+        db.flush()
+        return p
+
+    status = PageStatus.PUBLISHED if published else PageStatus.DRAFT
+    old = _page("old", None, PageStatus.PUBLISHED)
+    new = _page("new", None, PageStatus.PUBLISHED)
+    child = _page("child", old.id, status)
+    old_parent_id = child.parent_id
+    child.parent_id = new.id
+    db.commit()
+    return site.id, child, old_parent_id, new.id
+
+
+def test_parent_move_published_inserts_prefix_301(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    from bragi.contrib.redirects.plugin import on_post_updated
+
+    site_id, child, old_parent_id, new_parent_id = _seed_move_pages(db_session, published=True)
+    before = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": old_parent_id}
+    after = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": new_parent_id}
+
+    with patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory):
+        on_post_updated(item=child, before=before, after=after)
+
+    db_session.expire_all()
+    rows = db_session.execute(select(Redirect).where(Redirect.site_id == site_id)).scalars().all()
+    move_rows = [r for r in rows if r.source == RedirectSource.PARENT_MOVE]
+    assert len(move_rows) == 1
+    row = move_rows[0]
+    assert row.source_path == "/old/child/"
+    assert row.target == "/new/child/"
+    assert row.match_type == MatchType.PREFIX
+
+
+def test_parent_move_draft_inserts_no_redirect(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    from bragi.contrib.redirects.plugin import on_post_updated
+
+    site_id, child, old_parent_id, new_parent_id = _seed_move_pages(db_session, published=False)
+    before = {"slug": "child", "status": PageStatus.DRAFT, "parent_id": old_parent_id}
+    after = {"slug": "child", "status": PageStatus.DRAFT, "parent_id": new_parent_id}
+
+    with patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory):
+        on_post_updated(item=child, before=before, after=after)
+
+    db_session.expire_all()
+    rows = db_session.execute(select(Redirect).where(Redirect.site_id == site_id)).scalars().all()
+    assert rows == []
+
+
+def test_parent_move_multilevel_reconstructs_old_path(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """The old path is rebuilt by walking the full pre-move parent
+    chain, not just the immediate parent."""
+    from bragi.contrib.redirects.plugin import on_post_updated
+    from bragi.core.models.page import Page, PageStatus
+
+    user = make_test_user(db_session)
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
+    )
+    db_session.add(site)
+    db_session.flush()
+
+    def _page(slug, parent_id):
+        p = Page(
+            site_id=site.id,
+            parent_id=parent_id,
+            slug=slug,
+            title=slug,
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=user.id,
+            status=PageStatus.PUBLISHED,
+        )
+        db_session.add(p)
+        db_session.flush()
+        return p
+
+    a = _page("a", None)
+    b = _page("b", a.id)
+    child = _page("child", b.id)
+    new = _page("new", None)
+    old_parent_id = child.parent_id  # b.id, which is nested under a
+    child.parent_id = new.id
+    db_session.commit()
+
+    before = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": old_parent_id}
+    after = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": new.id}
+    with patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory):
+        on_post_updated(item=child, before=before, after=after)
+
+    db_session.expire_all()
+    rows = db_session.execute(select(Redirect).where(Redirect.site_id == site.id)).scalars().all()
+    move_rows = [r for r in rows if r.source == RedirectSource.PARENT_MOVE]
+    assert len(move_rows) == 1
+    assert move_rows[0].source_path == "/a/b/child/"
+    assert move_rows[0].target == "/new/child/"
+    assert move_rows[0].match_type == MatchType.PREFIX
+
+
+def test_parent_move_with_slug_change_emits_only_parent_move(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """A simultaneous slug+parent change emits exactly one parent-move
+    PREFIX rule (from the true old path to the fully-new path) and does
+    NOT also emit a slug-change rule."""
+    from bragi.contrib.redirects.plugin import on_post_updated
+    from bragi.core.models.page import PageStatus
+
+    site_id, child, old_parent_id, new_parent_id = _seed_move_pages(db_session, published=True)
+    # Change the slug in the same edit as the move.
+    child.slug = "kid"
+    db_session.commit()
+
+    before = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": old_parent_id}
+    after = {"slug": "kid", "status": PageStatus.PUBLISHED, "parent_id": new_parent_id}
+    with patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory):
+        on_post_updated(item=child, before=before, after=after)
+
+    db_session.expire_all()
+    rows = db_session.execute(select(Redirect).where(Redirect.site_id == site_id)).scalars().all()
+    assert [r.source for r in rows] == [RedirectSource.PARENT_MOVE]
+    assert rows[0].source_path == "/old/child/"
+    assert rows[0].target == "/new/kid/"
+    assert rows[0].match_type == MatchType.PREFIX

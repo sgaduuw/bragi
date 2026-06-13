@@ -97,6 +97,28 @@ def test_draft_page_returns_404(delivery_app: Flask) -> None:
     assert resp.status_code == 404
 
 
+def test_descendant_ids_returns_subtree() -> None:
+    """_descendant_ids returns every id strictly below a page."""
+    from types import SimpleNamespace
+
+    from bragi.contrib.page.admin import _descendant_ids
+
+    # SimpleNamespace stands in for Page rows: only .id and .parent_id
+    # are read by the helper.
+    pages = [
+        SimpleNamespace(id=1, parent_id=None),
+        SimpleNamespace(id=2, parent_id=1),
+        SimpleNamespace(id=3, parent_id=2),
+        SimpleNamespace(id=4, parent_id=1),
+        SimpleNamespace(id=5, parent_id=None),
+    ]
+    assert _descendant_ids(pages, 1) == {2, 3, 4}
+    assert _descendant_ids(pages, 2) == {3}
+    assert _descendant_ids(pages, 5) == set()
+    # A page_id with no row in the list has no descendants.
+    assert _descendant_ids(pages, 99) == set()
+
+
 def test_nested_path_without_parent_returns_404(delivery_app: Flask) -> None:
     """Child slug under wrong parent: no such page."""
     resp = delivery_app.test_client().get("/secret/team/", headers={"Host": "blog.example.com"})
@@ -345,3 +367,55 @@ def test_validate_resume_data_rejects_null_description_markdown() -> None:
     assert err is not None
     assert "experience.0.description_markdown" in err
     assert "valid string" in err
+
+
+def test_validated_parent_rejects_descendant_cycle(
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    """Setting a page's parent to one of its own descendants is a cycle."""
+    from bragi.contrib.page.admin import _validated_parent_id_or_error
+
+    with db_session_factory() as db:
+        user = User(email="ada@example.com", display_name="Ada", is_active=True)
+        db.add(user)
+        db.flush()
+        site = Site(
+            slug="blog",
+            hostname="blog.example.com",
+            title="Blog",
+            canonical_url="https://blog.example.com",
+            owner_user_id=user.id,
+        )
+        db.add(site)
+        db.flush()
+
+        def _page(slug: str, parent_id: int | None) -> Page:
+            p = Page(
+                site_id=site.id,
+                parent_id=parent_id,
+                slug=slug,
+                title=slug,
+                body_markdown="",
+                body_html="",
+                body_excerpt="",
+                author_id=user.id,
+                status=PageStatus.PUBLISHED,
+            )
+            db.add(p)
+            db.flush()
+            return p
+
+        a = _page("a", None)
+        b = _page("b", a.id)
+        c = _page("c", b.id)
+
+        # Trying to set A's parent to its grandchild C must be rejected.
+        result, error = _validated_parent_id_or_error(db, c.id, site.id, exclude_page_id=a.id)
+        assert result is None
+        assert error is not None
+        assert "below" in error.lower()
+
+        # A non-descendant parent is still accepted.
+        ok_result, ok_error = _validated_parent_id_or_error(db, b.id, site.id, exclude_page_id=c.id)
+        assert ok_error is None
+        assert ok_result == b.id
