@@ -359,6 +359,27 @@ def _all_pages_for_picker(db: object, site_id: int) -> list[Page]:
     )
 
 
+def _descendant_ids(pages: list[Page], page_id: int) -> set[int]:
+    """Ids strictly below `page_id`, computed from an already-loaded
+    page list (no DB round-trip).
+
+    Used to exclude a page's own subtree from its parent picker so a
+    move can never select a descendant and create a cycle.
+    """
+    children: dict[int | None, list[int]] = {}
+    for p in pages:
+        children.setdefault(p.parent_id, []).append(p.id)
+    descendants: set[int] = set()
+    queue: list[int] = list(children.get(page_id, []))
+    while queue:
+        current = queue.pop()
+        if current in descendants:
+            continue
+        descendants.add(current)
+        queue.extend(children.get(current, []))
+    return descendants
+
+
 @bp.route("/", methods=["GET"])
 def list_pages(site_slug: str) -> ResponseReturnValue:
     from bragi.core.url import page_path_preview, prewarm_page_url_cache

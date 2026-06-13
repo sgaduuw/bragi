@@ -97,6 +97,28 @@ def test_draft_page_returns_404(delivery_app: Flask) -> None:
     assert resp.status_code == 404
 
 
+def test_descendant_ids_returns_subtree() -> None:
+    """_descendant_ids returns every id strictly below a page."""
+    from types import SimpleNamespace
+
+    from bragi.contrib.page.admin import _descendant_ids
+
+    # SimpleNamespace stands in for Page rows: only .id and .parent_id
+    # are read by the helper.
+    pages = [
+        SimpleNamespace(id=1, parent_id=None),
+        SimpleNamespace(id=2, parent_id=1),
+        SimpleNamespace(id=3, parent_id=2),
+        SimpleNamespace(id=4, parent_id=1),
+        SimpleNamespace(id=5, parent_id=None),
+    ]
+    assert _descendant_ids(pages, 1) == {2, 3, 4}
+    assert _descendant_ids(pages, 2) == {3}
+    assert _descendant_ids(pages, 5) == set()
+    # A page_id with no row in the list has no descendants.
+    assert _descendant_ids(pages, 99) == set()
+
+
 def test_nested_path_without_parent_returns_404(delivery_app: Flask) -> None:
     """Child slug under wrong parent: no such page."""
     resp = delivery_app.test_client().get("/secret/team/", headers={"Host": "blog.example.com"})
