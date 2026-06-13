@@ -1,0 +1,37 @@
+{# Inline-edit parent cell for pages. View mode shows the parent
+   page's title (or "(root)"); double-click / focused-Enter swaps to
+   a <select> of candidate parents. Enter saves, Escape cancels.
+   Mirrors the title/slug cells (admin/_page_title_cell.html). The
+   candidate list excludes the page itself and its descendants so a
+   move can never create a cycle. #}
+<td id="page-parent-cell-{{ page.id }}"
+    class="is-editable{% if mode == 'edit' %} is-editing{% endif %}"
+    tabindex="0"
+    role="gridcell"
+    hx-get="{{ url_for('page_admin.parent_cell', site_slug=site.slug, page_id=page.id, mode='edit') }}"
+    hx-target="this"
+    hx-swap="outerHTML"
+    hx-trigger="dblclick, keyup[key=='Enter']">
+  {% if mode == 'edit' %}
+    <form hx-patch="{{ url_for('page_admin.patch_parent', site_slug=site.slug, page_id=page.id) }}"
+          hx-target="#page-parent-cell-{{ page.id }}"
+          hx-swap="outerHTML"
+          style="margin: 0;">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <select name="parent_id" autofocus
+              hx-get="{{ url_for('page_admin.parent_cell', site_slug=site.slug, page_id=page.id, mode='view') }}"
+              hx-target="closest td"
+              hx-swap="outerHTML"
+              hx-trigger="keyup[key=='Escape']">
+        <option value=""{% if current is none %} selected{% endif %}>(root)</option>
+        {% for cand in candidates %}
+          <option value="{{ cand.id }}"{% if cand.id == current %} selected{% endif %}>{{ cand.label }}</option>
+        {% endfor %}
+      </select>
+      {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
+      <div class="inline-edit-hint">&#9166; save &middot; esc cancel</div>
+    </form>
+  {% else %}
+    {{ parent_title or '(root)' }}
+  {% endif %}
+</td>

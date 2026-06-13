@@ -30,7 +30,7 @@ from sqlalchemy import func, select
 from bragi.api import NavItem, RedirectTarget, hookimpl
 from bragi.contrib.redirects.admin import bp as redirect_admin_bp
 from bragi.core.db import SessionLocal
-from bragi.core.models.page import Page, PageKind
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.post import Post
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.site import Site
@@ -284,6 +284,30 @@ def _page_url_with_substituted_slug(session: Any, page: Page, leaf_slug: str) ->
     return "/" + "/".join(chain) + "/"
 
 
+def _page_url_with_substituted_parent(session: Any, parent_id: int | None, leaf_slug: str) -> str:
+    """Path a page would live at under `parent_id` with `leaf_slug`
+    as its final segment.
+
+    Walks the chain upward from `parent_id` (so passing the page's
+    PRE-move parent id reconstructs its old URL even though the live
+    row already points at the new parent), then appends `leaf_slug`.
+    """
+    parent_segments: list[str] = []
+    cursor_id = parent_id
+    seen: set[int] = set()
+    while cursor_id is not None:
+        if cursor_id in seen:
+            break
+        seen.add(cursor_id)
+        parent = session.get(Page, cursor_id)
+        if parent is None:
+            break
+        parent_segments.append(parent.slug)
+        cursor_id = parent.parent_id
+    parent_segments.reverse()
+    return "/" + "/".join(parent_segments + [leaf_slug]) + "/"
+
+
 @hookimpl
 def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) -> None:
     """Insert 301s when content slugs or page kinds change.
@@ -321,9 +345,16 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) ->
     new_slug = (after or {}).get("slug")
     old_kind = (before or {}).get("kind")
     new_kind = (after or {}).get("kind")
+    old_parent_id = (before or {}).get("parent_id")
+    new_parent_id = (after or {}).get("parent_id")
     slug_changed = bool(old_slug and new_slug and old_slug != new_slug)
     kind_changed = bool(old_kind and new_kind and old_kind != new_kind)
-    if not slug_changed and not kind_changed:
+    parent_changed = bool(
+        "parent_id" in (before or {})
+        and "parent_id" in (after or {})
+        and old_parent_id != new_parent_id
+    )
+    if not slug_changed and not kind_changed and not parent_changed:
         return
 
     site_id = int(item.site_id)
@@ -357,6 +388,36 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) ->
             return
 
         if isinstance(item, Page):
+            if parent_changed:
+                # A move changes the page's URL and every descendant's
+                # URL. One PREFIX rule from the old subtree path to the
+                # new one carries them all (same shape as the
+                # POST_INDEX demotion case below). Only published pages
+                # had a live URL worth preserving; drafts get nothing.
+                # The move is the authoritative redirect for this edit,
+                # so we never also run the slug-only branch (its
+                # old-path math walks the CURRENT, already-moved parent
+                # chain and would be wrong). The early return also skips
+                # the kind-demotion branch below: if a POST_INDEX page
+                # is moved AND self-demoted to STATIC in one save, the
+                # subtree-to-new-post-index redirect is not emitted. The
+                # move PREFIX already carries this page's own subtree to
+                # its new location, and that double-action in one save is
+                # rare; the move redirect takes precedence here.
+                if (before or {}).get("status") == PageStatus.PUBLISHED:
+                    old_leaf = str((before or {}).get("slug") or item.slug)
+                    old_path = _page_url_with_substituted_parent(session, old_parent_id, old_leaf)
+                    new_path = page_url_for(item, db=session)
+                    if old_path != new_path:
+                        _upsert_redirect(
+                            session,
+                            site_id=site_id,
+                            source_path=old_path,
+                            target=new_path,
+                            match_type=MatchType.PREFIX,
+                            source=RedirectSource.PARENT_MOVE,
+                        )
+                return
             if slug_changed:
                 old_path = _page_url_with_substituted_slug(session, item, str(old_slug))
                 new_path = page_url_for(item, db=session)

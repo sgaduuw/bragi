@@ -419,3 +419,168 @@ def test_patch_menu_order_requires_editor_role(admin_app: Flask, db_session: Ses
         data={"_csrf_token": csrf, "menu_order": "5"},
     )
     assert resp.status_code == 403
+
+
+def _make_page(
+    db_session: Session,
+    *,
+    slug: str,
+    title: str,
+    parent_id: int | None = None,
+    status: str = PageStatus.PUBLISHED,
+) -> int:
+    site_id = db_session.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+    author_id = db_session.execute(select(User.id).where(User.email == EDITOR_EMAIL)).scalar_one()
+    page = Page(
+        site_id=site_id,
+        author_id=author_id,
+        title=title,
+        slug=slug,
+        parent_id=parent_id,
+        body_markdown="",
+        body_html="",
+        body_excerpt="",
+        kind=PageKind.STATIC,
+        status=status,
+        show_in_nav=True,
+        menu_order=0,
+    )
+    db_session.add(page)
+    db_session.commit()
+    return page.id
+
+
+# ============================================================
+# GET /cell/parent and PATCH /patch/parent
+# ============================================================
+
+
+def test_parent_cell_view_shows_parent_title(admin_app: Flask, db_session: Session) -> None:
+    about_id = _page_id(db_session)
+    child_id = _make_page(db_session, slug="team", title="Team", parent_id=about_id)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/pages/{child_id}/cell/parent")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "About" in body
+    assert "is-editable" in body
+    assert "dblclick" in body
+
+
+def test_parent_cell_root_shows_root_label(admin_app: Flask, db_session: Session) -> None:
+    about_id = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/pages/{about_id}/cell/parent")
+    assert resp.status_code == 200
+    assert "(root)" in resp.get_data(as_text=True)
+
+
+def test_parent_cell_edit_excludes_self_and_descendants(
+    admin_app: Flask, db_session: Session
+) -> None:
+    about_id = _page_id(db_session)
+    child_id = _make_page(db_session, slug="team", title="Team", parent_id=about_id)
+    grand_id = _make_page(db_session, slug="leads", title="Leads", parent_id=child_id)
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/pages/{about_id}/cell/parent?mode=edit")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'name="parent_id"' in body
+    assert "(root)" in body
+    assert f'value="{about_id}"' not in body
+    assert f'value="{child_id}"' not in body
+    assert f'value="{grand_id}"' not in body
+
+
+def test_patch_parent_happy_path(admin_app: Flask, db_session: Session) -> None:
+    about_id = _page_id(db_session)
+    target_id = _make_page(db_session, slug="docs", title="Docs")
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{about_id}/patch/parent",
+        data={"_csrf_token": csrf, "parent_id": str(target_id)},
+    )
+    assert resp.status_code == 200
+    assert "Docs" in resp.get_data(as_text=True)
+    db_session.expire_all()
+    parent = db_session.execute(select(Page.parent_id).where(Page.id == about_id)).scalar_one()
+    assert parent == target_id
+
+
+def test_patch_parent_to_root(admin_app: Flask, db_session: Session) -> None:
+    about_id = _page_id(db_session)
+    child_id = _make_page(db_session, slug="team", title="Team", parent_id=about_id)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{child_id}/patch/parent",
+        data={"_csrf_token": csrf, "parent_id": ""},
+    )
+    assert resp.status_code == 200
+    assert "(root)" in resp.get_data(as_text=True)
+    db_session.expire_all()
+    parent = db_session.execute(select(Page.parent_id).where(Page.id == child_id)).scalar_one()
+    assert parent is None
+
+
+def test_patch_parent_rejects_descendant_cycle(admin_app: Flask, db_session: Session) -> None:
+    about_id = _page_id(db_session)
+    child_id = _make_page(db_session, slug="team", title="Team", parent_id=about_id)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{about_id}/patch/parent",
+        data={"_csrf_token": csrf, "parent_id": str(child_id)},
+    )
+    assert resp.status_code == 200
+    assert "inline-edit-error" in resp.get_data(as_text=True)
+    db_session.expire_all()
+    parent = db_session.execute(select(Page.parent_id).where(Page.id == about_id)).scalar_one()
+    assert parent is None
+
+
+def test_patch_parent_requires_editor_role(admin_app: Flask, db_session: Session) -> None:
+    about_id = _page_id(db_session)
+    target_id = _make_page(db_session, slug="docs", title="Docs")
+    client = admin_app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{about_id}/patch/parent",
+        data={"_csrf_token": csrf, "parent_id": str(target_id)},
+    )
+    assert resp.status_code == 403
+
+
+def test_patch_parent_published_move_inserts_301(admin_app: Flask, db_session: Session) -> None:
+    site_id = db_session.execute(select(Site.id).where(Site.slug == "blog")).scalar_one()
+    old_parent = _make_page(db_session, slug="old", title="Old")
+    new_parent = _make_page(db_session, slug="new", title="New")
+    moved = _make_page(db_session, slug="moved", title="Moved", parent_id=old_parent)
+    _make_page(db_session, slug="leaf", title="Leaf", parent_id=moved)
+    client = admin_app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.patch(
+        f"/admin/sites/blog/pages/{moved}/patch/parent",
+        data={"_csrf_token": csrf, "parent_id": str(new_parent)},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    rows = (
+        db_session.execute(
+            select(Redirect).where(Redirect.site_id == site_id, Redirect.status_code == 301)
+        )
+        .scalars()
+        .all()
+    )
+    assert any(r.source_path == "/old/moved/" and r.target == "/new/moved/" for r in rows), (
+        f"expected /old/moved/ -> /new/moved/, got {[(r.source_path, r.target) for r in rows]}"
+    )
