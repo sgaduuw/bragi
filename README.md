@@ -26,7 +26,9 @@ ActivityPub + webmentions, datasets (per-site DuckDB-backed data
 file registry with an explore console, saved queries, and a
 `::: dataset :::` markdown directive), page-admin slug recompute
 from title (edit-form, page-list inline, and bulk) with a
-full-URL-path column in the page list, four in-tree themes with
+full-URL-path column in the page list, inline parent editing in the
+page list (double-click the Parent cell to reparent; published moves
+insert a subtree 301), four in-tree themes with
 auto light/dark, sitemap / feed / JSON-LD, audit-driven hardening
 from v1.12 through v1.19.
 
@@ -109,9 +111,10 @@ and ARM homelabs run natively rather than through QEMU emulation.
   (per tag). Server-side Pygments highlighting for code blocks
   (Ansible / Python / Terraform lexers in core).
 - **Redirects as a core subsystem.** Slug renames auto-301;
-  importers preserve source URLs as redirect rows; resolution
-  middleware runs on every public 404. `410 Gone` for tombstoned
-  content.
+  moving a published page to a new parent inserts a 301 covering
+  the page and its whole subtree; importers preserve source URLs
+  as redirect rows; resolution middleware runs on every public 404.
+  `410 Gone` for tombstoned content.
 - **Revision history.** Every post / page save captures a
   pre-edit snapshot in `post_revisions` / `page_revisions`.
   Admin views list revisions, show a side-by-side with the live
