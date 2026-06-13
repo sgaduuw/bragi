@@ -697,9 +697,13 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             Crumb(page.title or "Untitled", None),
         )
 
-        # Exclude self from the parent picker to avoid loops.
+        # Exclude self AND descendants from the parent picker; a move
+        # to a descendant would create a cycle (rejected server-side
+        # by _validated_parent_id_or_error, but the picker should not
+        # offer it either).
         all_parents = _all_pages_for_picker(db, page.site_id)
-        parents = [p for p in all_parents if p.id != page.id]
+        descendants = _descendant_ids(all_parents, page.id)
+        parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
 
         if request.method == "GET":
             form = {
@@ -920,14 +924,15 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         # the page to its prior shape (including parent).
         _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
 
-        # `before` snapshot for the on_post_updated hook (slug
-        # changes drive auto-301 redirects via the redirects
+        # `before` snapshot for the on_post_updated hook (slug and
+        # parent changes drive auto-301 redirects via the redirects
         # plugin's subscriber). Capture BEFORE mutating.
         before = {
             "slug": page.slug,
             "title": page.title,
             "status": page.status,
             "kind": page.kind,
+            "parent_id": page.parent_id,
         }
         was_published = page.status == PageStatus.PUBLISHED
 
@@ -955,6 +960,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             "title": page.title,
             "status": page.status,
             "kind": page.kind,
+            "parent_id": page.parent_id,
         }
         skip_redirect = request.form.get("skip_redirect") == "1"
 
