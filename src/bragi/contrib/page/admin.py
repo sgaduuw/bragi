@@ -1287,6 +1287,8 @@ def slug_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
     partial (input + hx-patch form); default returns the display
     partial (code element). Editor role required.
     """
+    from bragi.core.url import page_path_preview
+
     mode = request.args.get("mode", "view")
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
@@ -1294,6 +1296,10 @@ def slug_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
+
+        full_path = page_path_preview(
+            db, site=site, parent_id=page.parent_id, slug=page.slug, page_id=page.id
+        )
         return render_template(
             "admin/_page_slug_cell.html",
             site=site,
@@ -1301,6 +1307,7 @@ def slug_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
             mode=mode,
             value=None,
             error=None,
+            full_path=full_path,
         )
 
 
@@ -1402,6 +1409,82 @@ def patch_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
         mode="view",
         value=None,
         error=None,
+        full_path=None,
+    )
+
+
+@bp.route("/<int:page_id>/recompute-slug", methods=["POST"])
+def recompute_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Recompute the page's slug from its stored title and persist it.
+
+    Skips the auto-301 (does NOT fire on_post_updated) because this is
+    import/cleanup work; undoable via a PageRevision snapshot. Returns
+    the slug cell in view mode. Editor role required.
+    """
+    from bragi.core.text import unique_slug_for_page
+    from bragi.core.url import page_path_preview
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        try:
+            new_slug = unique_slug_for_page(
+                db,
+                site_id=site.id,
+                parent_id=page.parent_id,
+                title=page.title,
+                exclude_page_id=page.id,
+            )
+        except ValueError:
+            return render_template(
+                "admin/_page_slug_cell.html",
+                site=site,
+                page=page,
+                mode="edit",
+                value=page.slug,
+                error="Cannot derive a slug from the title.",
+                full_path=None,
+            )
+
+        before_slug = page.slug
+        changed = new_slug != page.slug
+        if changed:
+            _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+            page.slug = new_slug
+            db.commit()
+            db.refresh(page)
+            pm = current_app.extensions["plugin_manager"]
+            # Deliberately NO on_post_updated -> no 301. Purge so the new
+            # URL renders.
+            pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        full_path = page_path_preview(
+            db, site=site, parent_id=page.parent_id, slug=page.slug, page_id=page.id
+        )
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    if changed:
+        audit(
+            AuditAction.POST_UPDATED,
+            target_type="page",
+            target_id=page_id,
+            site_id=cell_site_id,
+            extra={"field": "slug", "before": before_slug, "after": new_slug, "via": "recompute"},
+        )
+    return render_template(
+        "admin/_page_slug_cell.html",
+        site=cell_site,
+        page=cell_page,
+        mode="view",
+        value=None,
+        error=None,
+        full_path=full_path,
     )
 
 

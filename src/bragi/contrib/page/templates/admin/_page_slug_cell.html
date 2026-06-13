@@ -21,6 +21,10 @@
              hx-trigger="keyup[key=='Escape']">
       {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
       <div class="inline-edit-hint">&#9166; save &middot; esc cancel</div>
+      <button type="button" class="btn secondary"
+              hx-post="{{ url_for('page_admin.recompute_slug', site_slug=site.slug, page_id=page.id) }}"
+              hx-target="#page-slug-cell-{{ page.id }}"
+              hx-swap="outerHTML">Recompute from title</button>
     </form>
   {% else %}
     <code>{{ page.slug }}</code>

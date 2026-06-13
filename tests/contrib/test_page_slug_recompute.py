@@ -7,12 +7,14 @@ from collections.abc import Iterator
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageKind, PageStatus
+from bragi.core.models.redirect import Redirect
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 from bragi.core.models.user_site_role import UserSiteRole
@@ -174,3 +176,133 @@ def test_list_shows_full_path_for_nested_page(
     body = resp.get_data(as_text=True)
     # The nested 'team' page lives at /about/team/.
     assert "/about/team/" in body
+
+
+def _slug_of(db: Session, page_id: int) -> str:
+    return db.execute(select(Page.slug).where(Page.id == page_id)).scalar_one()
+
+
+def test_recompute_slug_persists_from_title(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    app, ids = admin_app
+    # Make 'team' have a messy slug so recompute changes it.
+    db_session.execute(
+        select(Page).where(Page.id == ids["team"])
+    ).scalar_one().slug = "old-team-slug"
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.post(
+        f"/admin/sites/blog/pages/{ids['team']}/recompute-slug",
+        data={"_csrf_token": csrf},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    assert _slug_of(db_session, ids["team"]) == "team"
+
+
+def test_recompute_slug_skips_301(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    app, ids = admin_app
+    db_session.execute(
+        select(Page).where(Page.id == ids["team"])
+    ).scalar_one().slug = "old-team-slug"
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    client.post(
+        f"/admin/sites/blog/pages/{ids['team']}/recompute-slug",
+        data={"_csrf_token": csrf},
+    )
+    db_session.expire_all()
+    redirects = (
+        db_session.execute(select(Redirect).where(Redirect.site_id == ids["site"]))
+        .scalars()
+        .all()
+    )
+    assert redirects == [], f"expected no redirect rows, got {[r.source_path for r in redirects]}"
+
+
+def test_recompute_slug_snapshots_revision(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    from bragi.core.models.page_revision import PageRevision
+
+    app, ids = admin_app
+    db_session.execute(
+        select(Page).where(Page.id == ids["team"])
+    ).scalar_one().slug = "old-team-slug"
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    client.post(
+        f"/admin/sites/blog/pages/{ids['team']}/recompute-slug",
+        data={"_csrf_token": csrf},
+    )
+    db_session.expire_all()
+    revs = (
+        db_session.execute(
+            select(PageRevision).where(PageRevision.page_id == ids["team"])
+        )
+        .scalars()
+        .all()
+    )
+    # A snapshot of the pre-recompute state ('old-team-slug') exists.
+    assert any(r.slug == "old-team-slug" for r in revs)
+
+
+def test_recompute_slug_idempotent(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    app, ids = admin_app
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    # 'team' already equals slugify('Team'); recompute must not bump to team-2.
+    client.post(
+        f"/admin/sites/blog/pages/{ids['team']}/recompute-slug",
+        data={"_csrf_token": csrf},
+    )
+    db_session.expire_all()
+    assert _slug_of(db_session, ids["team"]) == "team"
+
+
+def test_recompute_slug_empty_title_errors(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    app, ids = admin_app
+    # A title that slugifies to empty (only punctuation).
+    db_session.execute(
+        select(Page).where(Page.id == ids["contact"])
+    ).scalar_one().title = "!!!"
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.post(
+        f"/admin/sites/blog/pages/{ids['contact']}/recompute-slug",
+        data={"_csrf_token": csrf},
+    )
+    assert resp.status_code == 200
+    assert "inline-edit-error" in resp.get_data(as_text=True)
+    db_session.expire_all()
+    assert _slug_of(db_session, ids["contact"]) == "contact"  # unchanged
+
+
+def test_recompute_slug_requires_editor_role(
+    admin_app: tuple[Flask, dict[str, int]],
+) -> None:
+    app, ids = admin_app
+    client = app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.post(
+        f"/admin/sites/blog/pages/{ids['team']}/recompute-slug",
+        data={"_csrf_token": csrf},
+    )
+    assert resp.status_code == 403
