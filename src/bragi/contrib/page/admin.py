@@ -264,6 +264,11 @@ def _validated_parent_id_or_error(
     real content, but the corrupted row leaks the cross-site
     parent's slug into the sitemap and into any slug-change
     auto-redirect derived from its URL chain (#M3 / audit pass 4).
+
+    When `exclude_page_id` is given (an edit, not a create), the
+    proposed parent must not be the page itself nor any of its
+    descendants: accepting a descendant would make the tree cyclic
+    and corrupt every path derived from the chain.
     """
     if parent_id is None:
         return None, None
@@ -274,6 +279,25 @@ def _validated_parent_id_or_error(
         return None, "Parent page must belong to this site."
     if exclude_page_id is not None and parent.id == exclude_page_id:
         return None, "A page cannot be its own parent."
+    if exclude_page_id is not None:
+        # Walk up from the proposed parent. If the page being edited
+        # is one of its ancestors, the parent is at or below that
+        # page in the tree and accepting it would create a cycle.
+        cursor_id: int | None = parent.parent_id
+        seen: set[int] = {parent.id}
+        while cursor_id is not None:
+            if cursor_id == exclude_page_id:
+                return None, "That page is below this one in the tree."
+            if cursor_id in seen:
+                # Defensive: a pre-existing corrupt cycle in the stored
+                # tree would otherwise loop forever. The tree is meant
+                # to be acyclic, so this only fires on already-bad data.
+                break
+            seen.add(cursor_id)
+            ancestor = db.get(Page, cursor_id)
+            if ancestor is None:
+                break
+            cursor_id = ancestor.parent_id
     return parent_id, None
 
 
