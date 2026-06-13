@@ -85,11 +85,14 @@ def unique_slug_for_page(
     site_id: int,
     parent_id: int | None,
     title: str,
+    exclude_page_id: int | None = None,
 ) -> str:
     """Same shape as `unique_slug_for_post`, scoped to (site_id, parent_id).
     Page uniqueness is per parent (uq_pages_site_parent_slug), so the
     collision check must include the parent. `parent_id=None` matches
-    root-level pages."""
+    root-level pages. `exclude_page_id` drops that page's own row from the
+    collision set so recomputing a page that already owns its base slug is
+    idempotent (does not bump itself to `-2`)."""
     from sqlalchemy import select
 
     from bragi.core.models.page import Page
@@ -106,5 +109,7 @@ def unique_slug_for_page(
         stmt = stmt.where(Page.parent_id.is_(None))
     else:
         stmt = stmt.where(Page.parent_id == parent_id)
+    if exclude_page_id is not None:
+        stmt = stmt.where(Page.id != exclude_page_id)
     taken = set(db.execute(stmt).scalars())
     return _disambiguate_slug(base, taken)

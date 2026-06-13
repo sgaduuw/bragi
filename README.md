@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.32.0 (2026-06-12).
+**Latest release:** 1.33.0 (2026-06-13).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -24,7 +24,9 @@ credit auto-renders beneath inline-body images; requires
 `BRAGI_UNSPLASH_ACCESS_KEY`), pinned posts on the landing page,
 ActivityPub + webmentions, datasets (per-site DuckDB-backed data
 file registry with an explore console, saved queries, and a
-`::: dataset :::` markdown directive), four in-tree themes with
+`::: dataset :::` markdown directive), page-admin slug recompute
+from title (edit-form, page-list inline, and bulk) with a
+full-URL-path column in the page list, four in-tree themes with
 auto light/dark, sitemap / feed / JSON-LD, audit-driven hardening
 from v1.12 through v1.19.
 
@@ -400,7 +402,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.32.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.33.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -767,7 +769,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.32.0
+pip install bragi-cms==1.33.0
 ```
 
 The import path stays `import bragi`. Container images remain the

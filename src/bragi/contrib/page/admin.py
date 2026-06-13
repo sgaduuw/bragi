@@ -337,6 +337,8 @@ def _all_pages_for_picker(db: object, site_id: int) -> list[Page]:
 
 @bp.route("/", methods=["GET"])
 def list_pages(site_slug: str) -> ResponseReturnValue:
+    from bragi.core.url import page_path_preview, prewarm_page_url_cache
+
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         pages = (
@@ -344,9 +346,17 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
             .scalars()
             .all()
         )
+        # One batch query for the whole tree, then O(1) per page.
+        prewarm_page_url_cache(db, site.id)
+        page_paths = {
+            p.id: page_path_preview(db, site=site, parent_id=p.parent_id, slug=p.slug, page_id=p.id)
+            for p in pages
+        }
     if is_htmx():
-        return render_template("admin/_page_list_table.html", pages=pages, site=site)
-    return render_template("admin/page_list.html", pages=pages, site=site)
+        return render_template(
+            "admin/_page_list_table.html", pages=pages, site=site, page_paths=page_paths
+        )
+    return render_template("admin/page_list.html", pages=pages, site=site, page_paths=page_paths)
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -619,12 +629,17 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "show_in_nav": "1" if page.show_in_nav else "",
                 "menu_order": str(page.menu_order),
             }
+            from bragi.core.url import page_path_preview
+
             return render_template(
                 "admin/page_edit.html",
                 page=page,
                 form=form,
                 parents=parents,
                 site=site,
+                slug_full_path=page_path_preview(
+                    db, site=site, parent_id=page.parent_id, slug=page.slug, page_id=page.id
+                ),
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -924,6 +939,41 @@ def _delete_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
     return Ok(captured)
 
 
+def _recompute_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
+    """Recompute one page's slug from its title in the current transaction.
+
+    Skipped when the title slugifies to empty, or when the slug is already
+    correct (no change). Otherwise snapshots a PageRevision before mutating
+    (undoable), persists the new slug, and skips the auto-301 (no
+    on_post_updated). Caller commits.
+
+    Flushes after a changed assignment so a later row in the same batch sees
+    this slug when it runs its own collision check (the session has
+    autoflush disabled, so without this two same-base siblings in one batch
+    would collide).
+    """
+    from bragi.core.text import unique_slug_for_page
+
+    try:
+        new_slug = unique_slug_for_page(
+            db,
+            site_id=site.id,
+            parent_id=page.parent_id,
+            title=page.title,
+            exclude_page_id=page.id,
+        )
+    except ValueError:
+        return Skipped(page.title or "Untitled", "title has no sluggable characters")
+
+    if new_slug == page.slug:
+        return Skipped(page.title or "Untitled", "already correct")
+
+    _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+    page.slug = new_slug
+    db.flush()
+    return Ok(DeletedItem(id=page.id, title=page.title or "Untitled", extras={"slug": new_slug}))
+
+
 @bp.route("/<int:page_id>/delete", methods=["POST"])
 def delete_page(site_slug: str, page_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
@@ -1029,6 +1079,56 @@ def _bulk_list_response(site_slug: str) -> ResponseReturnValue:
     if is_htmx():
         return list_pages(site_slug)
     return redirect(url_for("page_admin.list_pages", site_slug=site_slug))
+
+
+@bp.route("/bulk-recompute-slugs", methods=["POST"])
+def bulk_recompute_slugs(site_slug: str) -> ResponseReturnValue:
+    """Recompute slugs from titles for a batch of pages.
+
+    Reuses the generic bulk loop (`bulk_delete`); the per-row callable
+    recomputes rather than deletes. Skip-301 + undoable per row (see
+    `_recompute_one_page`). Best-effort partial-failure: a page whose
+    title slugifies to empty is skipped with a reason.
+    """
+    ids = request.form.getlist("ids", type=int)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+
+        if not ids:
+            flash("Select at least one page to recompute.", "warning")
+            return _bulk_list_response(site_slug)
+
+        try:
+            result = bulk_delete(
+                db=db,
+                site=site,
+                model=Page,
+                ids=ids,
+                delete_one=_recompute_one_page,
+            )
+        except BulkLimitExceeded as exc:
+            flash(str(exc), "warning")
+            return _bulk_list_response(site_slug)
+
+        db.commit()
+        pm = current_app.extensions["plugin_manager"]
+        for row in result.deleted_rows:
+            pm.hook.on_cache_purge(scope="page", key=str(row.id))
+
+    flash(
+        format_bulk_result(result, singular="page", plural="pages", verb="Recomputed"),
+        "success",
+    )
+    for row in result.deleted_rows:
+        audit(
+            AuditAction.POST_UPDATED,
+            target_type="page",
+            target_id=row.id,
+            site_id=site.id,
+            extra={"field": "slug", "slug": row.extras["slug"], "via": "bulk-recompute"},
+        )
+    return _bulk_list_response(site_slug)
 
 
 # ============================================================
@@ -1273,6 +1373,8 @@ def slug_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
     partial (input + hx-patch form); default returns the display
     partial (code element). Editor role required.
     """
+    from bragi.core.url import page_path_preview
+
     mode = request.args.get("mode", "view")
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
@@ -1280,6 +1382,10 @@ def slug_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
+
+        full_path = page_path_preview(
+            db, site=site, parent_id=page.parent_id, slug=page.slug, page_id=page.id
+        )
         return render_template(
             "admin/_page_slug_cell.html",
             site=site,
@@ -1287,6 +1393,7 @@ def slug_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
             mode=mode,
             value=None,
             error=None,
+            full_path=full_path,
         )
 
 
@@ -1388,7 +1495,136 @@ def patch_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
         mode="view",
         value=None,
         error=None,
+        full_path=None,
     )
+
+
+@bp.route("/<int:page_id>/recompute-slug", methods=["POST"])
+def recompute_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Recompute the page's slug from its stored title and persist it.
+
+    Skips the auto-301 (does NOT fire on_post_updated) because this is
+    import/cleanup work; undoable via a PageRevision snapshot. Returns
+    the slug cell in view mode. Editor role required.
+    """
+    from bragi.core.text import unique_slug_for_page
+    from bragi.core.url import page_path_preview
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        try:
+            new_slug = unique_slug_for_page(
+                db,
+                site_id=site.id,
+                parent_id=page.parent_id,
+                title=page.title,
+                exclude_page_id=page.id,
+            )
+        except ValueError:
+            return render_template(
+                "admin/_page_slug_cell.html",
+                site=site,
+                page=page,
+                mode="edit",
+                value=page.slug,
+                error="Cannot derive a slug from the title.",
+                full_path=None,
+            )
+
+        before_slug = page.slug
+        changed = new_slug != page.slug
+        if changed:
+            _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+            page.slug = new_slug
+            db.commit()
+            db.refresh(page)
+            pm = current_app.extensions["plugin_manager"]
+            # Deliberately NO on_post_updated -> no 301. Purge so the new
+            # URL renders.
+            pm.hook.on_cache_purge(scope="page", key=str(page.id))
+
+        full_path = page_path_preview(
+            db, site=site, parent_id=page.parent_id, slug=page.slug, page_id=page.id
+        )
+        cell_site = site
+        cell_page = page
+        cell_site_id = site.id
+
+    if changed:
+        audit(
+            AuditAction.POST_UPDATED,
+            target_type="page",
+            target_id=page_id,
+            site_id=cell_site_id,
+            extra={"field": "slug", "before": before_slug, "after": new_slug, "via": "recompute"},
+        )
+    return render_template(
+        "admin/_page_slug_cell.html",
+        site=cell_site,
+        page=cell_page,
+        mode="view",
+        value=None,
+        error=None,
+        full_path=full_path,
+    )
+
+
+@bp.route("/<int:page_id>/recompute-slug-preview", methods=["POST"])
+def recompute_slug_preview(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Compute a slug from the posted (possibly unsaved) title + parent and
+    return the slug-field partial repopulated, with a full-path preview.
+    Persists nothing; the normal Save writes the row. Editor role required.
+
+    The posted parent_id is validated against this site (same as the save
+    path) so a crafted cross-site parent can't leak another tenant's slug
+    chain into the preview.
+    """
+    from bragi.core.text import unique_slug_for_page
+    from bragi.core.url import page_path_preview
+
+    title = (request.form.get("title") or "").strip()
+    parent_id = _normalized_parent_id((request.form.get("parent_id") or "").strip())
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        parent_id, error = _validated_parent_id_or_error(
+            db, parent_id, site.id, exclude_page_id=page.id
+        )
+        slug = page.slug
+        if error is None:
+            try:
+                slug = unique_slug_for_page(
+                    db,
+                    site_id=site.id,
+                    parent_id=parent_id,
+                    title=title,
+                    exclude_page_id=page.id,
+                )
+            except ValueError:
+                error = "Cannot derive a slug from the title."
+        # On a parent error, parent_id is None (root) so the preview path
+        # never walks the rejected parent.
+        full_path = page_path_preview(
+            db, site=site, parent_id=parent_id, slug=slug, page_id=page.id
+        )
+        return render_template(
+            "admin/_page_slug_field.html",
+            slug=slug,
+            full_path=full_path,
+            error=error,
+            is_edit=True,
+            page_id=page.id,
+            site_slug=site_slug,
+        )
 
 
 # Pages support only three statuses: draft, published, archived.

@@ -13,6 +13,7 @@
           hx-target="#page-list-table"
           hx-swap="outerHTML">Refresh</button>
   {% with bulk_action_url=url_for('page_admin.bulk_delete_pages', site_slug=request.view_args['site_slug']),
+          recompute_url=url_for('page_admin.bulk_recompute_slugs', site_slug=request.view_args['site_slug']),
           singular="page",
           plural="pages",
           wrapper_id="page-list-table" %}
