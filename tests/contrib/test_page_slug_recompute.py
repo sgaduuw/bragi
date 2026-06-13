@@ -597,3 +597,18 @@ def test_bulk_recompute_unchanged_rows_not_audited(
         db_session.execute(select(AuditLog).where(AuditLog.site_id == site_id)).scalars().all()
     )
     assert after_count == before_count, "unchanged recompute should write no audit rows"
+
+
+def test_list_suppresses_redundant_path_for_root_page(
+    admin_app: tuple[Flask, dict[str, int]],
+) -> None:
+    # A root page's full path is just /<slug>/, redundant with the slug
+    # shown above it; the list must NOT render that line (stacked under
+    # the slug it read as the page being nested under itself, #hotfix
+    # 1.33.1). Nested pages still show their informative path.
+    app, _ids = admin_app
+    client = app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/pages/").get_data(as_text=True)
+    assert "/about/team/" in body  # nested page still shows its path
+    assert "/contact/" not in body  # root page 'contact' path line suppressed
