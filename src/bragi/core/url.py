@@ -114,13 +114,21 @@ def page_path_preview(
 
     A page mapped to the site's home is served at "/" regardless of its
     slug chain, so the preview returns "/" in that case.
+
+    A parent that belongs to a different site is silently ignored so the
+    path preview never walks a cross-tenant slug chain. Callers should
+    validate the parent before calling; this check is defence-in-depth so
+    the helper is safe even from an unvalidated caller.
     """
     if page_id is not None and site.home_page_id == page_id:
         return "/"
     segments: list[str] = []
     if parent_id is not None:
         parent = db.get(Page, parent_id)
-        if parent is not None:
+        # Ignore a parent on another site: the path preview must never walk
+        # a cross-tenant slug chain (defence-in-depth; callers should also
+        # validate, but this keeps the helper safe on its own).
+        if parent is not None and parent.site_id == site.id:
             segments = _resolve_segments(db, parent)
     segments.append(slug)
     return "/" + "/".join(segments) + "/"

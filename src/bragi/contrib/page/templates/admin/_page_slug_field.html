@@ -17,7 +17,7 @@
   {% if is_edit %}
   <button type="button" class="btn secondary"
           hx-post="{{ url_for('page_admin.recompute_slug_preview', site_slug=site_slug, page_id=page_id) }}"
-          hx-include="#title, #parent_id"
+          hx-include="closest form"
           hx-target="#page-slug-field"
           hx-swap="outerHTML"
           hx-on:htmx:after-request="if(event.detail.successful){document.getElementById('skip_redirect').checked = true}">

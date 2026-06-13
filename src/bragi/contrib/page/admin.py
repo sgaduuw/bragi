@@ -1579,6 +1579,10 @@ def recompute_slug_preview(site_slug: str, page_id: int) -> ResponseReturnValue:
     """Compute a slug from the posted (possibly unsaved) title + parent and
     return the slug-field partial repopulated, with a full-path preview.
     Persists nothing; the normal Save writes the row. Editor role required.
+
+    The posted parent_id is validated against this site (same as the save
+    path) so a crafted cross-site parent can't leak another tenant's slug
+    chain into the preview.
     """
     from bragi.core.text import unique_slug_for_page
     from bragi.core.url import page_path_preview
@@ -1592,18 +1596,23 @@ def recompute_slug_preview(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
-        error: str | None = None
+        parent_id, error = _validated_parent_id_or_error(
+            db, parent_id, site.id, exclude_page_id=page.id
+        )
         slug = page.slug
-        try:
-            slug = unique_slug_for_page(
-                db,
-                site_id=site.id,
-                parent_id=parent_id,
-                title=title,
-                exclude_page_id=page.id,
-            )
-        except ValueError:
-            error = "Cannot derive a slug from the title."
+        if error is None:
+            try:
+                slug = unique_slug_for_page(
+                    db,
+                    site_id=site.id,
+                    parent_id=parent_id,
+                    title=title,
+                    exclude_page_id=page.id,
+                )
+            except ValueError:
+                error = "Cannot derive a slug from the title."
+        # On a parent error, parent_id is None (root) so the preview path
+        # never walks the rejected parent.
         full_path = page_path_preview(
             db, site=site, parent_id=parent_id, slug=slug, page_id=page.id
         )

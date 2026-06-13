@@ -517,6 +517,61 @@ def test_bulk_recompute_disambiguates_same_base_child_siblings(
     assert got == ["crew", "crew-2"], got
 
 
+def test_recompute_preview_rejects_cross_site_parent(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    # An editor on 'blog' must not be able to use a page on another site as
+    # the parent and leak that site's slug into the preview.
+    app, ids = admin_app
+    other_owner = db_session.execute(
+        select(User).where(User.email == "owner@example.com")
+    ).scalar_one()
+    other = Site(
+        slug="other",
+        hostname="other.example.com",
+        title="Other",
+        canonical_url="https://other.example.com",
+        owner_user_id=other_owner.id,
+    )
+    db_session.add(other)
+    db_session.flush()
+    secret = Page(
+        site_id=other.id,
+        author_id=ids["ada"],
+        title="Secret",
+        slug="secret-other-site-page",
+        parent_id=None,
+        body_markdown="x",
+        body_html="<p>x</p>",
+        kind=PageKind.STATIC,
+        status=PageStatus.PUBLISHED,
+        show_in_nav=True,
+        menu_order=0,
+    )
+    db_session.add(secret)
+    db_session.flush()
+    secret_id = secret.id
+    db_session.commit()
+
+    client = app.test_client()
+    _login(client)  # logs in as the 'blog' editor (ada)
+    csrf = csrf_token(client)
+    resp = client.post(
+        f"/admin/sites/blog/pages/{ids['about']}/recompute-slug-preview",
+        data={
+            "_csrf_token": csrf,
+            "title": "About Us",
+            "parent_id": str(secret_id),
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    # The other site's slug must NOT appear in the preview.
+    assert "secret-other-site-page" not in body
+    # And an error about the parent should be surfaced.
+    assert "inline-edit-error" in body
+
+
 def test_bulk_recompute_unchanged_rows_not_audited(
     admin_app: tuple[Flask, dict[str, int]], db_session: Session
 ) -> None:
