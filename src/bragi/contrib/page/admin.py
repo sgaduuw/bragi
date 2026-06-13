@@ -633,12 +633,17 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "show_in_nav": "1" if page.show_in_nav else "",
                 "menu_order": str(page.menu_order),
             }
+            from bragi.core.url import page_path_preview
+
             return render_template(
                 "admin/page_edit.html",
                 page=page,
                 form=form,
                 parents=parents,
                 site=site,
+                slug_full_path=page_path_preview(
+                    db, site=site, parent_id=page.parent_id, slug=page.slug, page_id=page.id
+                ),
                 featured_image=_load_featured_image(
                     db, form.get("featured_image_id"), page.site_id
                 ),
@@ -1486,6 +1491,50 @@ def recompute_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
         error=None,
         full_path=full_path,
     )
+
+
+@bp.route("/<int:page_id>/recompute-slug-preview", methods=["POST"])
+def recompute_slug_preview(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Compute a slug from the posted (possibly unsaved) title + parent and
+    return the slug-field partial repopulated, with a full-path preview.
+    Persists nothing; the normal Save writes the row. Editor role required.
+    """
+    from bragi.core.text import unique_slug_for_page
+    from bragi.core.url import page_path_preview
+
+    title = (request.form.get("title") or "").strip()
+    parent_id = _normalized_parent_id((request.form.get("parent_id") or "").strip())
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        error: str | None = None
+        slug = page.slug
+        try:
+            slug = unique_slug_for_page(
+                db,
+                site_id=site.id,
+                parent_id=parent_id,
+                title=title,
+                exclude_page_id=page.id,
+            )
+        except ValueError:
+            error = "Cannot derive a slug from the title."
+        full_path = page_path_preview(
+            db, site=site, parent_id=parent_id, slug=slug, page_id=page.id
+        )
+        return render_template(
+            "admin/_page_slug_field.html",
+            slug=slug,
+            full_path=full_path,
+            error=error,
+            is_edit=True,
+            page_id=page.id,
+            site_slug=site_slug,
+        )
 
 
 # Pages support only three statuses: draft, published, archived.

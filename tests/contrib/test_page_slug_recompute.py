@@ -306,3 +306,49 @@ def test_recompute_slug_requires_editor_role(
         data={"_csrf_token": csrf},
     )
     assert resp.status_code == 403
+
+
+def test_recompute_preview_computes_from_posted_title(
+    admin_app: tuple[Flask, dict[str, int]],
+) -> None:
+    app, ids = admin_app
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.post(
+        f"/admin/sites/blog/pages/{ids['about']}/recompute-slug-preview",
+        data={"_csrf_token": csrf, "title": "About Our Company", "parent_id": ""},
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'value="about-our-company"' in body
+    assert "/about-our-company/" in body  # full-path preview line
+
+
+def test_recompute_preview_persists_nothing(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    app, ids = admin_app
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    client.post(
+        f"/admin/sites/blog/pages/{ids['about']}/recompute-slug-preview",
+        data={"_csrf_token": csrf, "title": "Totally Different", "parent_id": ""},
+    )
+    db_session.expire_all()
+    assert _slug_of(db_session, ids["about"]) == "about"  # unchanged on disk
+
+
+def test_recompute_preview_requires_editor_role(
+    admin_app: tuple[Flask, dict[str, int]],
+) -> None:
+    app, ids = admin_app
+    client = app.test_client()
+    _login(client, email=AUTHOR_EMAIL)
+    csrf = csrf_token(client)
+    resp = client.post(
+        f"/admin/sites/blog/pages/{ids['about']}/recompute-slug-preview",
+        data={"_csrf_token": csrf, "title": "X", "parent_id": ""},
+    )
+    assert resp.status_code == 403

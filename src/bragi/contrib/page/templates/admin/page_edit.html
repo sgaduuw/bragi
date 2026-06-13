@@ -63,9 +63,14 @@
   </fieldset>
 
   <fieldset>
-    <label for="slug">Slug</label>
-    <input type="text" name="slug" id="slug" required pattern="[a-z0-9-]+"
-           value="{{ form.get('slug', '') }}">
+    {% with slug=form.get('slug', ''),
+            full_path=slug_full_path,
+            error=none,
+            is_edit=is_edit,
+            page_id=(page.id if page else none),
+            site_slug=request.view_args['site_slug'] %}
+      {% include "admin/_page_slug_field.html" %}
+    {% endwith %}
   </fieldset>
 
   <fieldset>
