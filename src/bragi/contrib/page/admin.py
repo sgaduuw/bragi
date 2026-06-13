@@ -337,6 +337,8 @@ def _all_pages_for_picker(db: object, site_id: int) -> list[Page]:
 
 @bp.route("/", methods=["GET"])
 def list_pages(site_slug: str) -> ResponseReturnValue:
+    from bragi.core.url import page_path_preview, prewarm_page_url_cache
+
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         pages = (
@@ -344,9 +346,21 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
             .scalars()
             .all()
         )
+        # One batch query for the whole tree, then O(1) per page.
+        prewarm_page_url_cache(db, site.id)
+        page_paths = {
+            p.id: page_path_preview(
+                db, site=site, parent_id=p.parent_id, slug=p.slug, page_id=p.id
+            )
+            for p in pages
+        }
     if is_htmx():
-        return render_template("admin/_page_list_table.html", pages=pages, site=site)
-    return render_template("admin/page_list.html", pages=pages, site=site)
+        return render_template(
+            "admin/_page_list_table.html", pages=pages, site=site, page_paths=page_paths
+        )
+    return render_template(
+        "admin/page_list.html", pages=pages, site=site, page_paths=page_paths
+    )
 
 
 @bp.route("/new", methods=["GET", "POST"])

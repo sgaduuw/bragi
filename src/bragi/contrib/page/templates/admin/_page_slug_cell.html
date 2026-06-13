@@ -24,5 +24,6 @@
     </form>
   {% else %}
     <code>{{ page.slug }}</code>
+    {% if full_path %}<div class="slug-cell-path"><small>{{ full_path }}</small></div>{% endif %}
   {% endif %}
 </td>

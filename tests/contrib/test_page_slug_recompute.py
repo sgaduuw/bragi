@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from collections.abc import Iterator
 
+import pytest
+from flask import Flask
+from flask.testing import FlaskClient
+from sqlalchemy.orm import Session, sessionmaker
+
+from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageKind, PageStatus
@@ -12,6 +18,7 @@ from bragi.core.models.user import User
 from bragi.core.models.user_site_role import UserSiteRole
 from bragi.core.text import unique_slug_for_page
 from bragi.core.url import page_path_preview
+from tests.conftest import csrf_token
 
 EDITOR_EMAIL = "ada@example.com"
 AUTHOR_EMAIL = "bob@example.com"
@@ -136,3 +143,34 @@ def test_page_path_preview_home_shadows_to_root(db_session: Session) -> None:
         )
         == "/"
     )
+
+
+@pytest.fixture
+def admin_app(
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    patched_session_locals: sessionmaker[Session],
+) -> Iterator[tuple[Flask, dict[str, int]]]:
+    ids = _seed(db_session)
+    yield create_admin_app(), ids
+
+
+def _login(client: FlaskClient, email: str = EDITOR_EMAIL) -> None:
+    token = csrf_token(client)
+    client.post(
+        "/auth/login",
+        data={"email": email, "password": PASSWORD, "_csrf_token": token},
+    )
+
+
+def test_list_shows_full_path_for_nested_page(
+    admin_app: tuple[Flask, dict[str, int]],
+) -> None:
+    app, _ids = admin_app
+    client = app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/pages/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    # The nested 'team' page lives at /about/team/.
+    assert "/about/team/" in body
