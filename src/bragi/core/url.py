@@ -96,6 +96,44 @@ def page_url_for(page: Page, *, db: Session | None = None) -> str:
     return "/" + "/".join(_resolve_segments(db, page)) + "/"
 
 
+def page_path_preview(
+    db: Session,
+    *,
+    site: Site,
+    parent_id: int | None,
+    slug: str,
+    page_id: int | None = None,
+) -> str:
+    """Full public path a page with `slug` under `parent_id` would live at.
+
+    Used by the recompute-slug UI to show "Will live at: /about/team/"
+    for a candidate slug before (or just after) it is saved. Mirrors
+    `page_url_for`'s slash-joined chain, but takes a candidate
+    (parent_id, slug) pair rather than a persisted Page, so it works for
+    an unsaved edit.
+
+    A page mapped to the site's home is served at "/" regardless of its
+    slug chain, so the preview returns "/" in that case.
+
+    A parent that belongs to a different site is silently ignored so the
+    path preview never walks a cross-tenant slug chain. Callers should
+    validate the parent before calling; this check is defence-in-depth so
+    the helper is safe even from an unvalidated caller.
+    """
+    if page_id is not None and site.home_page_id == page_id:
+        return "/"
+    segments: list[str] = []
+    if parent_id is not None:
+        parent = db.get(Page, parent_id)
+        # Ignore a parent on another site: the path preview must never walk
+        # a cross-tenant slug chain (defence-in-depth; callers should also
+        # validate, but this keeps the helper safe on its own).
+        if parent is not None and parent.site_id == site.id:
+            segments = _resolve_segments(db, parent)
+    segments.append(slug)
+    return "/" + "/".join(segments) + "/"
+
+
 def post_index_page_for(site: Site, *, db: Session | None = None) -> Page | None:
     """Return the site's POST_INDEX page, or None when none exists.
 

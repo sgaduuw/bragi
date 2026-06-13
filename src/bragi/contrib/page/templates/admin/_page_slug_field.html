@@ -1,0 +1,29 @@
+{# Slug field for the page edit/new form. Wrapped in a stable id so the
+   recompute-preview endpoint can swap the whole field + preview.
+
+   Variables (passed via `with` from page_edit.html, or directly by the
+   recompute_slug_preview endpoint):
+     slug       : current slug string
+     full_path  : full path the slug resolves to (optional)
+     error      : recompute error message (optional)
+     is_edit    : whether this is an existing page (button only then)
+     page_id    : the page id (for the button's hx-post URL; edit only)
+     site_slug  : the site slug (for the button's hx-post URL)
+#}
+<div id="page-slug-field">
+  <label for="slug">Slug</label>
+  <input type="text" name="slug" id="slug" required pattern="[a-z0-9-]+"
+         value="{{ slug }}">
+  {% if is_edit %}
+  <button type="button" class="btn secondary"
+          hx-post="{{ url_for('page_admin.recompute_slug_preview', site_slug=site_slug, page_id=page_id) }}"
+          hx-include="closest form"
+          hx-target="#page-slug-field"
+          hx-swap="outerHTML"
+          hx-on:htmx:after-request="if(event.detail.successful){document.getElementById('skip_redirect').checked = true}">
+    Recompute from title
+  </button>
+  {% endif %}
+  {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
+  {% if full_path %}<p class="slug-cell-path"><small>Will live at: <code>{{ full_path }}</code></small></p>{% endif %}
+</div>
