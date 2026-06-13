@@ -4,7 +4,7 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.34.0] - 2026-06-14
 
 ### Added
 - Pages admin: edit a page's parent inline from the list (double-click
