@@ -397,7 +397,13 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) ->
                 # The move is the authoritative redirect for this edit,
                 # so we never also run the slug-only branch (its
                 # old-path math walks the CURRENT, already-moved parent
-                # chain and would be wrong).
+                # chain and would be wrong). The early return also skips
+                # the kind-demotion branch below: if a POST_INDEX page
+                # is moved AND self-demoted to STATIC in one save, the
+                # subtree-to-new-post-index redirect is not emitted. The
+                # move PREFIX already carries this page's own subtree to
+                # its new location, and that double-action in one save is
+                # rare; the move redirect takes precedence here.
                 if (before or {}).get("status") == PageStatus.PUBLISHED:
                     old_leaf = str((before or {}).get("slug") or item.slug)
                     old_path = _page_url_with_substituted_parent(session, old_parent_id, old_leaf)
