@@ -349,18 +349,14 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
         # One batch query for the whole tree, then O(1) per page.
         prewarm_page_url_cache(db, site.id)
         page_paths = {
-            p.id: page_path_preview(
-                db, site=site, parent_id=p.parent_id, slug=p.slug, page_id=p.id
-            )
+            p.id: page_path_preview(db, site=site, parent_id=p.parent_id, slug=p.slug, page_id=p.id)
             for p in pages
         }
     if is_htmx():
         return render_template(
             "admin/_page_list_table.html", pages=pages, site=site, page_paths=page_paths
         )
-    return render_template(
-        "admin/page_list.html", pages=pages, site=site, page_paths=page_paths
-    )
+    return render_template("admin/page_list.html", pages=pages, site=site, page_paths=page_paths)
 
 
 @bp.route("/new", methods=["GET", "POST"])
@@ -946,9 +942,15 @@ def _delete_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
 def _recompute_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
     """Recompute one page's slug from its title in the current transaction.
 
-    Skipped when the title slugifies to empty. Snapshots a PageRevision
-    before mutating (undoable), persists the new slug, and skips the
-    auto-301 (no on_post_updated). Caller commits.
+    Skipped when the title slugifies to empty, or when the slug is already
+    correct (no change). Otherwise snapshots a PageRevision before mutating
+    (undoable), persists the new slug, and skips the auto-301 (no
+    on_post_updated). Caller commits.
+
+    Flushes after a changed assignment so a later row in the same batch sees
+    this slug when it runs its own collision check (the session has
+    autoflush disabled, so without this two same-base siblings in one batch
+    would collide).
     """
     from bragi.core.text import unique_slug_for_page
 
@@ -963,9 +965,12 @@ def _recompute_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
     except ValueError:
         return Skipped(page.title or "Untitled", "title has no sluggable characters")
 
-    if new_slug != page.slug:
-        _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
-        page.slug = new_slug
+    if new_slug == page.slug:
+        return Skipped(page.title or "Untitled", "already correct")
+
+    _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+    page.slug = new_slug
+    db.flush()
     return Ok(DeletedItem(id=page.id, title=page.title or "Untitled", extras={"slug": new_slug}))
 
 

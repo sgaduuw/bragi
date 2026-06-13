@@ -111,10 +111,7 @@ def test_unique_slug_without_exclude_bumps_to_2(db_session: Session) -> None:
 def test_page_path_preview_root(db_session: Session) -> None:
     ids = _seed(db_session)
     site = db_session.get(Site, ids["site"])
-    assert (
-        page_path_preview(db_session, site=site, parent_id=None, slug="about-us")
-        == "/about-us/"
-    )
+    assert page_path_preview(db_session, site=site, parent_id=None, slug="about-us") == "/about-us/"
 
 
 def test_page_path_preview_nested(db_session: Session) -> None:
@@ -122,9 +119,7 @@ def test_page_path_preview_nested(db_session: Session) -> None:
     site = db_session.get(Site, ids["site"])
     # Candidate 'crew' under 'about' -> /about/crew/
     assert (
-        page_path_preview(
-            db_session, site=site, parent_id=ids["about"], slug="crew"
-        )
+        page_path_preview(db_session, site=site, parent_id=ids["about"], slug="crew")
         == "/about/crew/"
     )
 
@@ -220,9 +215,7 @@ def test_recompute_slug_skips_301(
     )
     db_session.expire_all()
     redirects = (
-        db_session.execute(select(Redirect).where(Redirect.site_id == ids["site"]))
-        .scalars()
-        .all()
+        db_session.execute(select(Redirect).where(Redirect.site_id == ids["site"])).scalars().all()
     )
     assert redirects == [], f"expected no redirect rows, got {[r.source_path for r in redirects]}"
 
@@ -246,9 +239,7 @@ def test_recompute_slug_snapshots_revision(
     )
     db_session.expire_all()
     revs = (
-        db_session.execute(
-            select(PageRevision).where(PageRevision.page_id == ids["team"])
-        )
+        db_session.execute(select(PageRevision).where(PageRevision.page_id == ids["team"]))
         .scalars()
         .all()
     )
@@ -277,9 +268,7 @@ def test_recompute_slug_empty_title_errors(
 ) -> None:
     app, ids = admin_app
     # A title that slugifies to empty (only punctuation).
-    db_session.execute(
-        select(Page).where(Page.id == ids["contact"])
-    ).scalar_one().title = "!!!"
+    db_session.execute(select(Page).where(Page.id == ids["contact"])).scalar_one().title = "!!!"
     db_session.commit()
     client = app.test_client()
     _login(client)
@@ -394,9 +383,7 @@ def test_bulk_recompute_skips_301(
     )
     db_session.expire_all()
     redirects = (
-        db_session.execute(select(Redirect).where(Redirect.site_id == ids["site"]))
-        .scalars()
-        .all()
+        db_session.execute(select(Redirect).where(Redirect.site_id == ids["site"])).scalars().all()
     )
     assert redirects == []
 
@@ -405,9 +392,7 @@ def test_bulk_recompute_skips_empty_title_row(
     admin_app: tuple[Flask, dict[str, int]], db_session: Session
 ) -> None:
     app, ids = admin_app
-    db_session.execute(
-        select(Page).where(Page.id == ids["contact"])
-    ).scalar_one().title = "!!!"
+    db_session.execute(select(Page).where(Page.id == ids["contact"])).scalar_one().title = "!!!"
     db_session.execute(
         select(Page).where(Page.id == ids["about"])
     ).scalar_one().slug = "messy-about"
@@ -449,3 +434,111 @@ def test_bulk_actions_bar_renders_recompute_button(
     body = client.get("/admin/sites/blog/pages/").get_data(as_text=True)
     assert "bulk-select-recompute" in body
     assert "bulk-recompute-form" in body
+
+
+def test_bulk_recompute_disambiguates_same_base_root_siblings(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    # Two root pages whose titles both slugify to 'team'. Bulk recompute must
+    # give them distinct slugs (team / team-2), not a silent duplicate.
+    app, ids = admin_app
+    ada = ids["ada"]
+    site_id = ids["site"]
+    rows = []
+    for messy in ("messy-1", "messy-2"):
+        p = Page(
+            site_id=site_id,
+            author_id=ada,
+            title="Team",
+            slug=messy,
+            parent_id=None,
+            body_markdown="x",
+            body_html="<p>x</p>",
+            kind=PageKind.STATIC,
+            status=PageStatus.PUBLISHED,
+            show_in_nav=True,
+            menu_order=0,
+        )
+        db_session.add(p)
+        db_session.flush()
+        rows.append(p.id)
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.post(
+        "/admin/sites/blog/pages/bulk-recompute-slugs",
+        data={"_csrf_token": csrf, "ids": rows},
+    )
+    assert resp.status_code in (200, 302)
+    db_session.expire_all()
+    got = sorted(_slug_of(db_session, pid) for pid in rows)
+    assert got == ["team", "team-2"], got
+
+
+def test_bulk_recompute_disambiguates_same_base_child_siblings(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    # Two children of 'about' both titled 'Crew'. Must not 500 on the
+    # uq_pages_site_parent_slug constraint; must disambiguate.
+    app, ids = admin_app
+    ada = ids["ada"]
+    site_id = ids["site"]
+    parent = ids["about"]
+    rows = []
+    for messy in ("c1", "c2"):
+        p = Page(
+            site_id=site_id,
+            author_id=ada,
+            title="Crew",
+            slug=messy,
+            parent_id=parent,
+            body_markdown="x",
+            body_html="<p>x</p>",
+            kind=PageKind.STATIC,
+            status=PageStatus.PUBLISHED,
+            show_in_nav=True,
+            menu_order=0,
+        )
+        db_session.add(p)
+        db_session.flush()
+        rows.append(p.id)
+    db_session.commit()
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    resp = client.post(
+        "/admin/sites/blog/pages/bulk-recompute-slugs",
+        data={"_csrf_token": csrf, "ids": rows},
+    )
+    assert resp.status_code in (200, 302)
+    db_session.expire_all()
+    got = sorted(_slug_of(db_session, pid) for pid in rows)
+    assert got == ["crew", "crew-2"], got
+
+
+def test_bulk_recompute_unchanged_rows_not_audited(
+    admin_app: tuple[Flask, dict[str, int]], db_session: Session
+) -> None:
+    # Selecting pages whose slugs are already correct must NOT write audit
+    # rows for them (matches the single-page route's changed-only semantics).
+    from bragi.core.models.audit_log import AuditLog
+
+    app, ids = admin_app
+    site_id = ids["site"]
+    before_count = len(
+        db_session.execute(select(AuditLog).where(AuditLog.site_id == site_id)).scalars().all()
+    )
+    client = app.test_client()
+    _login(client)
+    csrf = csrf_token(client)
+    # 'about', 'team', 'contact' all already own correct slugs.
+    client.post(
+        "/admin/sites/blog/pages/bulk-recompute-slugs",
+        data={"_csrf_token": csrf, "ids": [ids["about"], ids["team"], ids["contact"]]},
+    )
+    db_session.expire_all()
+    after_count = len(
+        db_session.execute(select(AuditLog).where(AuditLog.site_id == site_id)).scalars().all()
+    )
+    assert after_count == before_count, "unchanged recompute should write no audit rows"
