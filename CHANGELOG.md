@@ -6,6 +6,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Recompute a page's slug from its title across the page admin: a
+  "Recompute from title" button on the edit form (previews the
+  resulting URL, ticks "skip redirect"), an inline recompute in the
+  page-list slug cell, and a bulk "Recompute slugs" action over
+  selected pages. Recompute skips the auto-301 by default and is
+  undoable via page revision history. The page list now shows each
+  page's full URL path.
+
 ## [1.32.0] - 2026-06-12
 
 ### Added
