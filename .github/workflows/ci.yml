@@ -1,14 +1,17 @@
 name: CI
 
 on:
+  # CI is the pull-request gate: the full test job (ruff check +
+  # format check + mypy + pytest + migration smoke) on every PR to
+  # develop or main. It runs on NO branch push. release/** and
+  # hotfix/** code is gated by its PR to main; the release publish
+  # (PyPI + docker + notify-themes) lives in release.yml on the
+  # GitHub Release, which trusts this gate. (develop is a loose
+  # integration branch; main is the PR-gated release branch.)
   pull_request:
     branches:
       - develop
       - main
-  push:
-    branches:
-      - "release/**"
-      - "hotfix/**"
 
 # Minimum permissions. CI runs untrusted PR code (`uv sync`
 # from a fork can execute arbitrary code in the build phase), so
