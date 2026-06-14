@@ -584,3 +584,42 @@ def test_patch_parent_published_move_inserts_301(admin_app: Flask, db_session: S
     assert any(r.source_path == "/old/moved/" and r.target == "/new/moved/" for r in rows), (
         f"expected /old/moved/ -> /new/moved/, got {[(r.source_path, r.target) for r in rows]}"
     )
+
+
+# ============================================================
+# Inline-edit Enter-to-save must not double-fire a re-edit GET
+# ============================================================
+
+
+@pytest.mark.parametrize("field", ["title", "slug", "parent"])
+def test_inline_cell_edit_mode_drops_enter_reedit_trigger(
+    field: str, admin_app: Flask, db_session: Session
+) -> None:
+    """The cell <td>'s focused-Enter "enter edit mode" affordance must
+    exist in VIEW mode but NOT survive into EDIT mode.
+
+    If the td keeps `hx-trigger="...keyup[key=='Enter']"` (hx-get
+    mode=edit) while editing, pressing Enter to save fires TWO requests:
+    the form's hx-patch (save) AND the td's hx-get (re-render edit,
+    reading the value from the DB). They race on the same target; the
+    lighter read-only GET lands last and, under multi-worker prod, reads
+    the pre-commit value, so the cell re-renders edit mode with the OLD
+    value and the save appears to revert. Gating the edit-entry trigger
+    to view mode removes the double-fire. Regression guard.
+    """
+    pid = _page_id(db_session)
+    client = admin_app.test_client()
+    _login(client)
+
+    view = client.get(f"/admin/sites/blog/pages/{pid}/cell/{field}")
+    assert view.status_code == 200
+    assert "keyup[key=='Enter']" in view.get_data(as_text=True), (
+        f"{field} view-mode cell should keep the focused-Enter edit affordance"
+    )
+
+    edit = client.get(f"/admin/sites/blog/pages/{pid}/cell/{field}?mode=edit")
+    assert edit.status_code == 200
+    assert "keyup[key=='Enter']" not in edit.get_data(as_text=True), (
+        f"{field} edit-mode cell must not re-fire an edit GET on Enter "
+        "(double-fire races the save and reverts the value)"
+    )
