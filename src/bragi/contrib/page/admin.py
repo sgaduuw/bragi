@@ -427,9 +427,16 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
             p.id: page_path_preview(db, site=site, parent_id=p.parent_id, slug=p.slug, page_id=p.id)
             for p in pages
         }
-        title_by_id = {p.id: p.title for p in pages}
-        page_parents = {
-            p.id: (title_by_id.get(p.parent_id) if p.parent_id else None) for p in pages
+        # The parent column is an always-live <select> per row; build
+        # each page's candidate list (excluding itself and its
+        # descendants so a move can't create a cycle) from the shared
+        # non-archived picker list.
+        picker_pages = _all_pages_for_picker(db, site.id)
+        page_parent_choices = {
+            p.id: _parent_choices(
+                db, site, picker_pages, {p.id} | _descendant_ids(picker_pages, p.id)
+            )
+            for p in pages
         }
     if is_htmx():
         return render_template(
@@ -437,14 +444,14 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
             pages=pages,
             site=site,
             page_paths=page_paths,
-            page_parents=page_parents,
+            page_parent_choices=page_parent_choices,
         )
     return render_template(
         "admin/page_list.html",
         pages=pages,
         site=site,
         page_paths=page_paths,
-        page_parents=page_parents,
+        page_parent_choices=page_parent_choices,
     )
 
 
@@ -1973,10 +1980,8 @@ def patch_menu_order(site_slug: str, page_id: int) -> ResponseReturnValue:
 
 @bp.route("/<int:page_id>/cell/parent", methods=["GET"])
 def parent_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
-    """Render the parent cell. ?mode=edit returns the <select> edit
-    partial; default returns the parent-title display. Editor role
-    required."""
-    mode = request.args.get("mode", "view")
+    """Render the always-live parent cell: a <select> of candidate
+    parents that saves on change. Editor role required."""
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
@@ -1984,36 +1989,25 @@ def parent_cell(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
-        parent_title = None
-        if page.parent_id is not None:
-            parent = db.get(Page, page.parent_id)
-            parent_title = parent.title if parent else None
-
-        candidates: list[_ParentChoice] = []
-        if mode == "edit":
-            pages = _all_pages_for_picker(db, site.id)
-            exclude = {page.id} | _descendant_ids(pages, page.id)
-            candidates = _parent_choices(db, site, pages, exclude)
-
+        picker = _all_pages_for_picker(db, site.id)
+        exclude = {page.id} | _descendant_ids(picker, page.id)
         return render_template(
             "admin/_page_parent_cell.html",
             site=site,
             page=page,
-            mode=mode,
-            parent_title=parent_title,
-            candidates=candidates,
-            current=page.parent_id,
+            candidates=_parent_choices(db, site, picker, exclude),
             error=None,
         )
 
 
 @bp.route("/<int:page_id>/patch/parent", methods=["PATCH"])
 def patch_parent(site_slug: str, page_id: int) -> ResponseReturnValue:
-    """PATCH the page's parent. On success returns the view-mode cell
-    and fires on_post_updated (which inserts a subtree 301 when a
-    published page moves). On validation failure (cross-site parent,
-    cycle) returns the edit-mode cell with an inline error. Editor
-    role required."""
+    """PATCH the page's parent (save-on-select from the always-live
+    cell). On success fires on_post_updated (which inserts a subtree
+    301 when a published page moves) and returns the re-rendered cell
+    with the new parent selected. On validation failure (cross-site
+    parent, cycle) returns the cell with an inline error and no
+    mutation. Editor role required."""
     new_parent_id = _normalized_parent_id((request.form.get("parent_id") or "").strip())
 
     with SessionLocal() as db:
@@ -2023,45 +2017,26 @@ def patch_parent(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
-        def _render_view() -> str:
-            parent_title = None
-            if page.parent_id is not None:
-                parent = db.get(Page, page.parent_id)
-                parent_title = parent.title if parent else None
+        def _render(error: str | None = None) -> str:
+            picker = _all_pages_for_picker(db, site.id)
+            exclude = {page.id} | _descendant_ids(picker, page.id)
             return render_template(
                 "admin/_page_parent_cell.html",
                 site=site,
                 page=page,
-                mode="view",
-                parent_title=parent_title,
-                candidates=[],
-                current=page.parent_id,
-                error=None,
-            )
-
-        def _render_edit_error(message: str) -> str:
-            pages = _all_pages_for_picker(db, site.id)
-            exclude = {page.id} | _descendant_ids(pages, page.id)
-            return render_template(
-                "admin/_page_parent_cell.html",
-                site=site,
-                page=page,
-                mode="edit",
-                parent_title=None,
-                candidates=_parent_choices(db, site, pages, exclude),
-                current=new_parent_id,
-                error=message,
+                candidates=_parent_choices(db, site, picker, exclude),
+                error=error,
             )
 
         validated, error = _validated_parent_id_or_error(
             db, new_parent_id, site.id, exclude_page_id=page.id
         )
         if error is not None:
-            return _render_edit_error(error)
+            return _render(error=error)
 
-        # No-op: choosing the current parent changes nothing.
+        # No-op: selecting the current parent changes nothing.
         if validated == page.parent_id:
-            return _render_view()
+            return _render()
 
         _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
         before = {
@@ -2089,7 +2064,7 @@ def patch_parent(site_slug: str, page_id: int) -> ResponseReturnValue:
         pm.hook.on_cache_purge(scope="page", key=str(page.id))
 
         cell_site_id = site.id
-        view_html = _render_view()
+        html = _render()
 
     audit(
         AuditAction.POST_UPDATED,
@@ -2098,4 +2073,4 @@ def patch_parent(site_slug: str, page_id: int) -> ResponseReturnValue:
         site_id=cell_site_id,
         extra={"field": "parent_id", "before": before, "after": after},
     )
-    return view_html
+    return html
