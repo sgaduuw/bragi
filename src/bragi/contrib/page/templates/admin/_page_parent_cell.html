@@ -1,41 +1,22 @@
-{# Inline-edit parent cell for pages. View mode shows the parent
-   page's title (or "(root)"); double-click / focused-Enter swaps to
-   a <select> of candidate parents. Enter saves, Escape cancels.
-   Mirrors the title/slug cells (admin/_page_title_cell.html). The
-   candidate list excludes the page itself and its descendants so a
-   move can never create a cycle. #}
-<td id="page-parent-cell-{{ page.id }}"
-    class="is-editable{% if mode == 'edit' %} is-editing{% endif %}"
-    tabindex="0"
-    role="gridcell"
-    {# Focused-Enter / double-click enters edit mode: a VIEW-mode
-       affordance only. In edit mode the form's Enter saves; keeping
-       this trigger here would double-fire an edit GET that races the
-       save and reverts the value (multi-worker prod). #}
-    {% if mode != 'edit' %}hx-get="{{ url_for('page_admin.parent_cell', site_slug=site.slug, page_id=page.id, mode='edit') }}"
-    hx-target="this"
-    hx-swap="outerHTML"
-    hx-trigger="dblclick, keyup[key=='Enter']"{% endif %}>
-  {% if mode == 'edit' %}
-    <form hx-patch="{{ url_for('page_admin.patch_parent', site_slug=site.slug, page_id=page.id) }}"
-          hx-target="#page-parent-cell-{{ page.id }}"
-          hx-swap="outerHTML"
-          style="margin: 0;">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <select name="parent_id" autofocus
-              hx-get="{{ url_for('page_admin.parent_cell', site_slug=site.slug, page_id=page.id, mode='view') }}"
-              hx-target="closest td"
-              hx-swap="outerHTML"
-              hx-trigger="keyup[key=='Escape']">
-        <option value=""{% if current is none %} selected{% endif %}>(root)</option>
-        {% for cand in candidates %}
-          <option value="{{ cand.id }}"{% if cand.id == current %} selected{% endif %}>{{ cand.label }}</option>
-        {% endfor %}
-      </select>
-      {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
-      <div class="inline-edit-hint">&#9166; save &middot; esc cancel</div>
-    </form>
-  {% else %}
-    {{ parent_title or '(root)' }}
-  {% endif %}
+{# Always-live parent cell: a <select> of candidate parents. Changing
+   the value fires PATCH via hx-trigger="change" (save on select), the
+   same pattern as the status cell. A <select> does not submit a form
+   on Enter, so the earlier Enter-to-save / Escape-to-cancel model never
+   worked here; change-to-save is the reliable one. The candidate list
+   excludes the page itself and its descendants so a move can never
+   create a cycle. #}
+<td id="page-parent-cell-{{ page.id }}" role="gridcell">
+  <form hx-patch="{{ url_for('page_admin.patch_parent', site_slug=site.slug, page_id=page.id) }}"
+        hx-target="#page-parent-cell-{{ page.id }}"
+        hx-swap="outerHTML"
+        style="margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <select name="parent_id" hx-trigger="change" hx-include="closest form">
+      <option value=""{% if page.parent_id is none %} selected{% endif %}>(root)</option>
+      {% for cand in candidates %}
+        <option value="{{ cand.id }}"{% if cand.id == page.parent_id %} selected{% endif %}>{{ cand.label }}</option>
+      {% endfor %}
+    </select>
+    {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
+  </form>
 </td>

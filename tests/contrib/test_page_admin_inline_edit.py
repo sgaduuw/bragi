@@ -455,7 +455,9 @@ def _make_page(
 # ============================================================
 
 
-def test_parent_cell_view_shows_parent_title(admin_app: Flask, db_session: Session) -> None:
+def test_parent_cell_renders_live_select_with_current_parent(
+    admin_app: Flask, db_session: Session
+) -> None:
     about_id = _page_id(db_session)
     child_id = _make_page(db_session, slug="team", title="Team", parent_id=about_id)
     client = admin_app.test_client()
@@ -463,29 +465,31 @@ def test_parent_cell_view_shows_parent_title(admin_app: Flask, db_session: Sessi
     resp = client.get(f"/admin/sites/blog/pages/{child_id}/cell/parent")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "About" in body
-    assert "is-editable" in body
-    assert "dblclick" in body
+    # Always-live select that saves on change (no Enter / Escape).
+    assert 'name="parent_id"' in body
+    assert 'hx-trigger="change"' in body
+    # The current parent (About) is the selected option.
+    assert f'value="{about_id}" selected' in body
 
 
-def test_parent_cell_root_shows_root_label(admin_app: Flask, db_session: Session) -> None:
-    about_id = _page_id(db_session)
+def test_parent_cell_root_selected_for_root_page(admin_app: Flask, db_session: Session) -> None:
+    about_id = _page_id(db_session)  # About is a root page
     client = admin_app.test_client()
     _login(client)
     resp = client.get(f"/admin/sites/blog/pages/{about_id}/cell/parent")
     assert resp.status_code == 200
-    assert "(root)" in resp.get_data(as_text=True)
+    body = resp.get_data(as_text=True)
+    assert "(root)" in body
+    assert 'value="" selected' in body
 
 
-def test_parent_cell_edit_excludes_self_and_descendants(
-    admin_app: Flask, db_session: Session
-) -> None:
+def test_parent_cell_excludes_self_and_descendants(admin_app: Flask, db_session: Session) -> None:
     about_id = _page_id(db_session)
     child_id = _make_page(db_session, slug="team", title="Team", parent_id=about_id)
     grand_id = _make_page(db_session, slug="leads", title="Leads", parent_id=child_id)
     client = admin_app.test_client()
     _login(client)
-    resp = client.get(f"/admin/sites/blog/pages/{about_id}/cell/parent?mode=edit")
+    resp = client.get(f"/admin/sites/blog/pages/{about_id}/cell/parent")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert 'name="parent_id"' in body
@@ -591,7 +595,10 @@ def test_patch_parent_published_move_inserts_301(admin_app: Flask, db_session: S
 # ============================================================
 
 
-@pytest.mark.parametrize("field", ["title", "slug", "parent"])
+# Title and slug are text-input cells using the double-click / Enter
+# model. The parent cell is an always-live <select> (save on change),
+# so it has no edit mode and is intentionally excluded here.
+@pytest.mark.parametrize("field", ["title", "slug"])
 def test_inline_cell_edit_mode_drops_enter_reedit_trigger(
     field: str, admin_app: Flask, db_session: Session
 ) -> None:
