@@ -4,6 +4,15 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.2] - 2026-06-14
+
+### Fixed
+- Pages admin: the Parent column is now an always-live dropdown that
+  saves as soon as you pick a value, matching the Status column.
+  Previously it tried to save on Enter and cancel on Escape, but a
+  dropdown does not submit on Enter and swallows Escape, so after
+  picking a parent neither key did anything.
+
 ## [1.34.1] - 2026-06-14
 
 ### Fixed
