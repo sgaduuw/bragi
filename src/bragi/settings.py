@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     # Storage
     database_url: str = "sqlite:///bragi.db"
 
+    # SQLite write-contention tuning (cheap hardening, see
+    # _claude/specs/2026-06-14-write-broker-design.md "tier 1").
+    # busy_timeout: how long a contended writer waits for the write
+    # lock before raising `database is locked`. slow_write_warn_ms: a
+    # write transaction holding the lock longer than this logs a
+    # `held=Nms` WARNING on the bragi.db.slow_write logger.
+    sqlite_busy_timeout_ms: int = 10000
+    slow_write_warn_ms: int = 2000
+
     # Deployment mode. `development` is the laptop / `make dev`
     # default; `production` is what the container image / compose
     # file passes. The two differ in safety checks at app init:

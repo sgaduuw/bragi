@@ -4,6 +4,17 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- SQLite write-contention hardening: `PRAGMA synchronous=NORMAL` (shorter
+  write-lock hold), a tunable busy_timeout (`BRAGI_SQLITE_BUSY_TIMEOUT_MS`,
+  default raised to 10s), a `held=Nms` slow-write WARNING on the
+  `bragi.db.slow_write` logger (threshold `BRAGI_SLOW_WRITE_WARN_MS`,
+  default 2000) so write contention is visible in logs, and a
+  retry-on-`database is locked` helper applied to the redirect hit-count
+  bump.
+
 ## [1.34.3] - 2026-06-14
 
 ### Fixed
