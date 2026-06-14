@@ -18,13 +18,40 @@ future deploy, see this handler as a no-op):
 
 from __future__ import annotations
 
+import functools
+import logging
+import time
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.settings import settings
+
+logger = logging.getLogger(__name__)
+
+# Dedicated, fully-configured logger for the held= slow-write line. A
+# plain module logger's WARNING can be silently dropped under the
+# gunicorn tier (mimir shipped held= logging that never surfaced,
+# twice; see bragi MEMORY 2026-06-14). Own StreamHandler +
+# propagate=False guarantees the line reaches stdout regardless of the
+# app's root logging config.
+slow_write_logger = logging.getLogger("bragi.db.slow_write")
+if not slow_write_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    slow_write_logger.addHandler(_handler)
+    slow_write_logger.setLevel(logging.WARNING)
+    slow_write_logger.propagate = False
+
+# Leading keywords that mark a transaction as a write, so held= logging
+# scopes to writes and skips read transactions. Write-CTEs (WITH ...
+# DELETE) are not caught; rare in bragi and not worth the false-positive
+# risk of flagging read CTEs.
+_WRITE_KEYWORDS = ("INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP")
 
 
 @event.listens_for(Engine, "connect")
@@ -34,8 +61,97 @@ def _sqlite_pragmas(dbapi_connection: Any, _connection_record: Any) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys = ON")
         cursor.execute("PRAGMA journal_mode = WAL")
-        cursor.execute("PRAGMA busy_timeout = 5000")
+        # synchronous=NORMAL: fewer fsyncs per commit under WAL, so the
+        # write lock is held for less time. Durable across a process
+        # crash; only a power loss can lose the last committed txn,
+        # acceptable for this workload.
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.execute(f"PRAGMA busy_timeout = {settings.sqlite_busy_timeout_ms}")
         cursor.close()
+
+
+@event.listens_for(Engine, "begin")
+def _txn_begin(conn: Any) -> None:
+    """Mark the start of a transaction for held= timing."""
+    conn.info["_bragi_txn_start"] = time.perf_counter()
+    conn.info["_bragi_txn_wrote"] = False
+
+
+@event.listens_for(Engine, "before_cursor_execute")
+def _txn_mark_write(
+    conn: Any,
+    cursor: Any,
+    statement: str,
+    parameters: Any,
+    context: Any,
+    executemany: bool,
+) -> None:
+    """Flag the transaction as a write when it emits a mutating statement."""
+    if statement.lstrip()[:10].upper().startswith(_WRITE_KEYWORDS):
+        conn.info["_bragi_txn_wrote"] = True
+
+
+@event.listens_for(Engine, "commit")
+def _txn_commit(conn: Any) -> None:
+    """On a write transaction's commit, log held=Nms when over threshold."""
+    start = conn.info.pop("_bragi_txn_start", None)
+    wrote = conn.info.pop("_bragi_txn_wrote", False)
+    if start is None or not wrote:
+        return
+    held_ms = int((time.perf_counter() - start) * 1000)
+    if held_ms >= settings.slow_write_warn_ms:
+        slow_write_logger.warning("slow write transaction held=%dms", held_ms)
+
+
+def _is_locked_error(exc: BaseException) -> bool:
+    return isinstance(exc, OperationalError) and "database is locked" in str(exc).lower()
+
+
+def run_with_write_retry[T](
+    label: str,
+    fn: Callable[[], T],
+    *,
+    session: Session | None = None,
+    attempts: int = 3,
+    base_delay: float = 0.05,
+) -> T:
+    """Run a write `fn`, retrying on `database is locked` with backoff.
+
+    `busy_timeout` already waits for the write lock; this is the belt-
+    and-suspenders for the rare case it still raises under cross-process
+    contention. `session` (if given) is rolled back between attempts so
+    the retry replays from a clean transaction state. Re-raises the lock
+    error after the final attempt; non-lock errors propagate at once.
+    """
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except OperationalError as exc:
+            if not _is_locked_error(exc) or attempt == attempts - 1:
+                raise
+            if session is not None:
+                session.rollback()
+            slow_write_logger.warning("write retry [%s] attempt=%d after lock", label, attempt + 1)
+            time.sleep(base_delay * (2**attempt))
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def write_retry[T](
+    label: str, *, attempts: int = 3, base_delay: float = 0.05
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Decorator form of `run_with_write_retry` for self-contained write
+    functions (those that open and commit their own session)."""
+
+    def _decorator(fn: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(fn)
+        def _wrapped(*args: Any, **kwargs: Any) -> T:
+            return run_with_write_retry(
+                label, lambda: fn(*args, **kwargs), attempts=attempts, base_delay=base_delay
+            )
+
+        return _wrapped
+
+    return _decorator
 
 
 class _SessionFactoryProxy:
