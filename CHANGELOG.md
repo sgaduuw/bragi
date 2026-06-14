@@ -4,6 +4,16 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.1] - 2026-06-14
+
+### Fixed
+- Inline editing in the Pages list: pressing Enter to save a title,
+  slug, or parent no longer reverts the value. The cell's
+  focused-Enter "enter edit mode" trigger was also firing while
+  editing, racing the save request and re-rendering the old value
+  under multi-worker deployments. The trigger now applies in view
+  mode only.
+
 ## [1.34.0] - 2026-06-14
 
 ### Added

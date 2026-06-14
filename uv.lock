@@ -149,7 +149,7 @@ wheels = [
 
 [[package]]
 name = "bragi-cms"
-version = "1.34.0"
+version = "1.34.1"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
