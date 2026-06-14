@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.34.3 (2026-06-14).
+**Latest release:** 1.35.0 (2026-06-15).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes and
@@ -405,7 +405,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.34.3 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.35.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -503,6 +503,15 @@ temp-spill bound is what stops a heavy query from filling the disk
 inherits the row, memory, and temp caps for render-time queries.
 Leave at defaults unless a specific file size or query workload
 demands otherwise.
+
+SQLite write-contention knobs (set on every app process; read once
+at connect time) default to `BRAGI_SQLITE_BUSY_TIMEOUT_MS=10000`, how
+long a write waits for the single write lock before raising `database
+is locked`, and `BRAGI_SLOW_WRITE_WARN_MS=2000`, the threshold above
+which a write transaction holding the lock emits a `held=Nms` WARNING
+on the `bragi.db.slow_write` logger. Raise the busy-timeout on deploys
+with sustained concurrent-write pressure; watch the `held=` lines to
+see whether contention is actually occurring.
 
 Task-runner cadences (all in seconds, set on the `bragi-tasks`
 service) default to `SCHEDULED_PUBLISH_EVERY=60`,
@@ -772,7 +781,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.34.3
+pip install bragi-cms==1.35.0
 ```
 
 The import path stays `import bragi`. Container images remain the
