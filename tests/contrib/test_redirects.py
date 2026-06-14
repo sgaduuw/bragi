@@ -228,8 +228,7 @@ def test_parent_move_published_inserts_prefix_301(
     before = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": old_parent_id}
     after = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": new_parent_id}
 
-    with patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory):
-        on_post_updated(item=child, before=before, after=after)
+    on_post_updated(item=child, before=before, after=after, session=db_session)
 
     db_session.expire_all()
     rows = db_session.execute(select(Redirect).where(Redirect.site_id == site_id)).scalars().all()
@@ -251,8 +250,7 @@ def test_parent_move_draft_inserts_no_redirect(
     before = {"slug": "child", "status": PageStatus.DRAFT, "parent_id": old_parent_id}
     after = {"slug": "child", "status": PageStatus.DRAFT, "parent_id": new_parent_id}
 
-    with patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory):
-        on_post_updated(item=child, before=before, after=after)
+    on_post_updated(item=child, before=before, after=after, session=db_session)
 
     db_session.expire_all()
     rows = db_session.execute(select(Redirect).where(Redirect.site_id == site_id)).scalars().all()
@@ -305,8 +303,7 @@ def test_parent_move_multilevel_reconstructs_old_path(
 
     before = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": old_parent_id}
     after = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": new.id}
-    with patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory):
-        on_post_updated(item=child, before=before, after=after)
+    on_post_updated(item=child, before=before, after=after, session=db_session)
 
     db_session.expire_all()
     rows = db_session.execute(select(Redirect).where(Redirect.site_id == site.id)).scalars().all()
@@ -334,8 +331,7 @@ def test_parent_move_with_slug_change_emits_only_parent_move(
 
     before = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": old_parent_id}
     after = {"slug": "kid", "status": PageStatus.PUBLISHED, "parent_id": new_parent_id}
-    with patch("bragi.contrib.redirects.plugin.SessionLocal", db_session_factory):
-        on_post_updated(item=child, before=before, after=after)
+    on_post_updated(item=child, before=before, after=after, session=db_session)
 
     db_session.expire_all()
     rows = db_session.execute(select(Redirect).where(Redirect.site_id == site_id)).scalars().all()
@@ -343,3 +339,33 @@ def test_parent_move_with_slug_change_emits_only_parent_move(
     assert rows[0].source_path == "/old/child/"
     assert rows[0].target == "/new/kid/"
     assert rows[0].match_type == MatchType.PREFIX
+
+
+def test_on_post_updated_writes_on_supplied_session_not_sessionlocal(
+    db_session: Session,
+) -> None:
+    """Regression guard: the redirects on_post_updated MUST write the
+    redirect on the SUPPLIED session, never a fresh SessionLocal. A
+    sibling in-session hookimpl (search FTS, internal_links) holds the
+    SQLite write lock on the request connection, so a second
+    connection's redirect INSERT deadlocks ("database is locked",
+    surfaced as a 500 on parent moves in prod). See MEMORY 2026-06-14.
+    """
+    from unittest.mock import MagicMock
+
+    from bragi.contrib.redirects.plugin import on_post_updated
+
+    site_id, child, old_parent_id, new_parent_id = _seed_move_pages(db_session, published=True)
+    before = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": old_parent_id}
+    after = {"slug": "child", "status": PageStatus.PUBLISHED, "parent_id": new_parent_id}
+
+    # If on_post_updated opens its own SessionLocal, calling the sentinel
+    # raises and the test fails loudly.
+    sentinel = MagicMock(side_effect=AssertionError("on_post_updated opened its own SessionLocal"))
+    with patch("bragi.contrib.redirects.plugin.SessionLocal", sentinel):
+        on_post_updated(item=child, before=before, after=after, session=db_session)
+
+    sentinel.assert_not_called()
+    db_session.expire_all()
+    rows = db_session.execute(select(Redirect).where(Redirect.site_id == site_id)).scalars().all()
+    assert any(r.source == RedirectSource.PARENT_MOVE for r in rows)

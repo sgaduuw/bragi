@@ -4,6 +4,15 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.3] - 2026-06-14
+
+### Fixed
+- Changing a page's parent (in the list or the edit form) failed with a
+  "database is locked" error on multi-worker deployments and the change
+  did not persist. The redirect that records the moved URL was being
+  written on a second database connection that deadlocked against the
+  page save; it now shares the request's connection.
+
 ## [1.34.2] - 2026-06-14
 
 ### Fixed

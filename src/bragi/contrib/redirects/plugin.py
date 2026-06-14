@@ -309,7 +309,7 @@ def _page_url_with_substituted_parent(session: Any, parent_id: int | None, leaf_
 
 
 @hookimpl
-def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) -> None:
+def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], session: Any) -> None:
     """Insert 301s when content slugs or page kinds change.
 
     Handles both Post and Page rows (the hookspec fires for either).
@@ -330,8 +330,14 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) ->
       at its own URL (the resolve order is content-first, so the
       page response wins over the empty-tail prefix hop).
 
-    The hookimpl opens its own SessionLocal so the caller's
-    transaction shape is decoupled from ours.
+    Writes the redirect on the SUPPLIED `session`, never a fresh
+    `SessionLocal()`: a sibling in-session hookimpl (search FTS,
+    internal_links) writes on this connection and holds SQLite's
+    single write lock, so a second connection's INSERT deadlocks on
+    it ("database is locked", surfaced v1.34.x on parent moves). This
+    is the CLAUDE.md "lifecycle hookimpls MUST use the supplied
+    session" rule; the redirects hook was the last violator (search
+    was fixed in 2026-06-10). See MEMORY 2026-06-14.
 
     Out of scope (per #130): demotion with no replacement
     POST_INDEX page leaves posts orphaned; a 410 Gone per orphan
@@ -364,94 +370,93 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any]) ->
     # downstream computations.
     invalidate_post_index_cache()
 
-    with SessionLocal() as session:
-        site = session.get(Site, site_id)
-        if site is None:
-            return
+    site = session.get(Site, site_id)
+    if site is None:
+        return
 
-        if isinstance(item, Post):
-            if not slug_changed:
-                return
-            old_path = post_url_for(site, str(old_slug))
-            new_path = post_url_for(site, str(new_slug))
-            if old_path is None or new_path is None or old_path == new_path:
-                # No post_index page on this site (no public URL
-                # exists), or the URL didn't actually change.
-                return
-            _upsert_redirect(
-                session,
-                site_id=site_id,
-                source_path=old_path,
-                target=new_path,
-                match_type=MatchType.EXACT,
-            )
+    if isinstance(item, Post):
+        if not slug_changed:
             return
+        old_path = post_url_for(site, str(old_slug))
+        new_path = post_url_for(site, str(new_slug))
+        if old_path is None or new_path is None or old_path == new_path:
+            # No post_index page on this site (no public URL
+            # exists), or the URL didn't actually change.
+            return
+        _upsert_redirect(
+            session,
+            site_id=site_id,
+            source_path=old_path,
+            target=new_path,
+            match_type=MatchType.EXACT,
+        )
+        return
 
-        if isinstance(item, Page):
-            if parent_changed:
-                # A move changes the page's URL and every descendant's
-                # URL. One PREFIX rule from the old subtree path to the
-                # new one carries them all (same shape as the
-                # POST_INDEX demotion case below). Only published pages
-                # had a live URL worth preserving; drafts get nothing.
-                # The move is the authoritative redirect for this edit,
-                # so we never also run the slug-only branch (its
-                # old-path math walks the CURRENT, already-moved parent
-                # chain and would be wrong). The early return also skips
-                # the kind-demotion branch below: if a POST_INDEX page
-                # is moved AND self-demoted to STATIC in one save, the
-                # subtree-to-new-post-index redirect is not emitted. The
-                # move PREFIX already carries this page's own subtree to
-                # its new location, and that double-action in one save is
-                # rare; the move redirect takes precedence here.
-                if (before or {}).get("status") == PageStatus.PUBLISHED:
-                    old_leaf = str((before or {}).get("slug") or item.slug)
-                    old_path = _page_url_with_substituted_parent(session, old_parent_id, old_leaf)
-                    new_path = page_url_for(item, db=session)
-                    if old_path != new_path:
-                        _upsert_redirect(
-                            session,
-                            site_id=site_id,
-                            source_path=old_path,
-                            target=new_path,
-                            match_type=MatchType.PREFIX,
-                            source=RedirectSource.PARENT_MOVE,
-                        )
-                return
-            if slug_changed:
-                old_path = _page_url_with_substituted_slug(session, item, str(old_slug))
+    if isinstance(item, Page):
+        if parent_changed:
+            # A move changes the page's URL and every descendant's
+            # URL. One PREFIX rule from the old subtree path to the
+            # new one carries them all (same shape as the
+            # POST_INDEX demotion case below). Only published pages
+            # had a live URL worth preserving; drafts get nothing.
+            # The move is the authoritative redirect for this edit,
+            # so we never also run the slug-only branch (its
+            # old-path math walks the CURRENT, already-moved parent
+            # chain and would be wrong). The early return also skips
+            # the kind-demotion branch below: if a POST_INDEX page
+            # is moved AND self-demoted to STATIC in one save, the
+            # subtree-to-new-post-index redirect is not emitted. The
+            # move PREFIX already carries this page's own subtree to
+            # its new location, and that double-action in one save is
+            # rare; the move redirect takes precedence here.
+            if (before or {}).get("status") == PageStatus.PUBLISHED:
+                old_leaf = str((before or {}).get("slug") or item.slug)
+                old_path = _page_url_with_substituted_parent(session, old_parent_id, old_leaf)
                 new_path = page_url_for(item, db=session)
                 if old_path != new_path:
-                    # POST_INDEX pages move a subtree (the page
-                    # itself, all posts under it, and tag listings).
-                    # One PREFIX rule covers them all.
-                    match_type = (
-                        MatchType.PREFIX if item.kind == PageKind.POST_INDEX else MatchType.EXACT
-                    )
                     _upsert_redirect(
                         session,
                         site_id=site_id,
                         source_path=old_path,
                         target=new_path,
-                        match_type=match_type,
+                        match_type=MatchType.PREFIX,
+                        source=RedirectSource.PARENT_MOVE,
                     )
-            if kind_changed and old_kind == PageKind.POST_INDEX and new_kind != PageKind.POST_INDEX:
-                # Demotion: the page's subtree no longer hosts
-                # posts/tags. Insert a PREFIX redirect to the
-                # current POST_INDEX URL so old links resolve to
-                # the new blog home. When no POST_INDEX exists
-                # (the swap-with-nothing case), skip; the orphan-
-                # post 410 path is deferred per issue.
-                new_post_index = post_index_page_for(site)
-                if new_post_index is not None and new_post_index.id != item.id:
-                    old_prefix_path = page_url_for(item, db=session)
-                    new_index_path = page_url_for(new_post_index, db=session)
-                    if old_prefix_path != new_index_path:
-                        _upsert_redirect(
-                            session,
-                            site_id=site_id,
-                            source_path=old_prefix_path,
-                            target=new_index_path,
-                            match_type=MatchType.PREFIX,
-                            source=RedirectSource.KIND_CHANGE,
-                        )
+            return
+        if slug_changed:
+            old_path = _page_url_with_substituted_slug(session, item, str(old_slug))
+            new_path = page_url_for(item, db=session)
+            if old_path != new_path:
+                # POST_INDEX pages move a subtree (the page
+                # itself, all posts under it, and tag listings).
+                # One PREFIX rule covers them all.
+                match_type = (
+                    MatchType.PREFIX if item.kind == PageKind.POST_INDEX else MatchType.EXACT
+                )
+                _upsert_redirect(
+                    session,
+                    site_id=site_id,
+                    source_path=old_path,
+                    target=new_path,
+                    match_type=match_type,
+                )
+        if kind_changed and old_kind == PageKind.POST_INDEX and new_kind != PageKind.POST_INDEX:
+            # Demotion: the page's subtree no longer hosts
+            # posts/tags. Insert a PREFIX redirect to the
+            # current POST_INDEX URL so old links resolve to
+            # the new blog home. When no POST_INDEX exists
+            # (the swap-with-nothing case), skip; the orphan-
+            # post 410 path is deferred per issue.
+            new_post_index = post_index_page_for(site)
+            if new_post_index is not None and new_post_index.id != item.id:
+                old_prefix_path = page_url_for(item, db=session)
+                new_index_path = page_url_for(new_post_index, db=session)
+                if old_prefix_path != new_index_path:
+                    _upsert_redirect(
+                        session,
+                        site_id=site_id,
+                        source_path=old_prefix_path,
+                        target=new_index_path,
+                        match_type=MatchType.PREFIX,
+                        source=RedirectSource.KIND_CHANGE,
+                    )
