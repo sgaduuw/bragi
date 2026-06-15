@@ -32,9 +32,7 @@ def test_pipe_table_renders_to_html_table() -> None:
 
 
 def test_inline_marks_inside_a_table_cell_render() -> None:
-    html = render_markdown(
-        "| H |\n| --- |\n| **bold** and `code` |\n"
-    )
+    html = render_markdown("| H |\n| --- |\n| **bold** and `code` |\n")
     assert "<table>" in html
     assert "<strong>bold</strong>" in html
     assert "<code>code</code>" in html

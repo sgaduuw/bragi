@@ -186,7 +186,7 @@ def test_toolbar_includes_table_actions(admin_app: Flask) -> None:
     _login(client)
     body = client.get("/admin/sites/blog/posts/new").data.decode()
     for action in (
-        "table",            # insert table
+        "table",  # insert table
         "table-row-before",
         "table-row-after",
         "table-col-before",

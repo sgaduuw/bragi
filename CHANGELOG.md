@@ -4,6 +4,13 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Table authoring in the admin editor: insert and edit GFM pipe tables
+  with full structural editing (add/remove rows and columns, toggle
+  header row), persisted as pipe-table markdown.
+
 ## [1.35.0] - 2026-06-15
 
 ### Added
