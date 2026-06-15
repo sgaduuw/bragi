@@ -529,7 +529,11 @@
         StarterKit,
         Link.configure({ openOnClick: false, autolink: false }),
         ClassedImage,
-        TableWithMarkdown,
+        // resizable: false set explicitly (not relying on the extension
+        // default) so a future CDN bump that flips the default cannot
+        // silently introduce colwidth cell attrs, which have no GFM
+        // representation and would vanish on save (round-trip hazard).
+        TableWithMarkdown.configure({ resizable: false }),
         TableRow,
         InlineTableHeader,
         InlineTableCell,
