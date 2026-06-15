@@ -27,6 +27,21 @@
   <button type="button" data-action="unlink" title="Remove link">Unlink</button>
   <span class="sep">|</span>
   <button type="button" data-action="image" title="Insert image">&#128247; Image</button>
+  <span class="sep">|</span>
+  <details class="toolbar-menu">
+    <summary title="Table">Table &#9662;</summary>
+    <div class="toolbar-menu__panel">
+      <button type="button" data-action="table" title="Insert table">Insert table</button>
+      <button type="button" data-action="table-row-before" title="Add row above">Row above</button>
+      <button type="button" data-action="table-row-after" title="Add row below">Row below</button>
+      <button type="button" data-action="table-col-before" title="Add column left">Column left</button>
+      <button type="button" data-action="table-col-after" title="Add column right">Column right</button>
+      <button type="button" data-action="table-row-delete" title="Delete row">Delete row</button>
+      <button type="button" data-action="table-col-delete" title="Delete column">Delete column</button>
+      <button type="button" data-action="table-header-toggle" title="Toggle header row">Toggle header</button>
+      <button type="button" data-action="table-delete" title="Delete table">Delete table</button>
+    </div>
+  </details>
 </div>
 
 <dialog id="image-picker-dialog"
@@ -556,6 +571,7 @@
         'code-block': () => editor.isActive('codeBlock'),
         link: () => editor.isActive('link') && !currentInternalLinkMarker(editor),
         'internal-link': () => !!currentInternalLinkMarker(editor),
+        table: () => editor.isActive('table'),
       };
       toolbar.querySelectorAll('button[data-action]').forEach((btn) => {
         const fn = map[btn.dataset.action];
@@ -567,6 +583,10 @@
       const btn = e.target.closest('button[data-action]');
       if (!btn) return;
       e.preventDefault();
+      // Collapse the Table dropdown after any toolbar action so it does
+      // not stay open over the editor.
+      const openMenu = btn.closest('details.toolbar-menu');
+      if (openMenu) openMenu.open = false;
       const chain = editor.chain().focus();
       switch (btn.dataset.action) {
         case 'bold': chain.toggleBold().run(); break;
@@ -590,6 +610,17 @@
         case 'unlink': chain.unsetLink().run(); break;
         case 'image': openImagePicker(); break;
         case 'internal-link': openInternalLinkPicker(currentInternalLinkMarker(editor)); break;
+        case 'table':
+          chain.insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run();
+          break;
+        case 'table-row-before': chain.addRowBefore().run(); break;
+        case 'table-row-after': chain.addRowAfter().run(); break;
+        case 'table-col-before': chain.addColumnBefore().run(); break;
+        case 'table-col-after': chain.addColumnAfter().run(); break;
+        case 'table-row-delete': chain.deleteRow().run(); break;
+        case 'table-col-delete': chain.deleteColumn().run(); break;
+        case 'table-header-toggle': chain.toggleHeaderRow().run(); break;
+        case 'table-delete': chain.deleteTable().run(); break;
       }
     });
 

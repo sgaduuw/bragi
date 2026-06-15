@@ -180,6 +180,25 @@ def test_existing_post_pre_populates_textarea(
     assert '<textarea name="body_markdown" id="body_markdown">**hi**</textarea>' in body
 
 
+def test_toolbar_includes_table_actions(admin_app: Flask) -> None:
+    """The table dropdown exposes insert plus the structural ops."""
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/posts/new").data.decode()
+    for action in (
+        "table",            # insert table
+        "table-row-before",
+        "table-row-after",
+        "table-col-before",
+        "table-col-after",
+        "table-row-delete",
+        "table-col-delete",
+        "table-header-toggle",
+        "table-delete",
+    ):
+        assert f'data-action="{action}"' in body, f"missing table action: {action}"
+
+
 def test_post_create_still_works_via_textarea_submission(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
