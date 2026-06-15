@@ -133,6 +133,24 @@
     background: #222; color: #fff; border-color: #222;
   }
   .editor-toolbar .sep { color: #aaa; align-self: center; padding: 0 0.25rem; }
+  .toolbar-menu { position: relative; display: inline-block; }
+  .toolbar-menu > summary {
+    list-style: none; cursor: pointer;
+    background: white; color: #222; border: 1px solid #ccc;
+    border-radius: 3px; padding: 0.2rem 0.5rem; font-size: 0.9em;
+    line-height: 1.2;
+  }
+  .toolbar-menu > summary::-webkit-details-marker { display: none; }
+  .toolbar-menu > summary:hover { background: #eee; }
+  .toolbar-menu[open] > summary { background: #222; color: #fff; border-color: #222; }
+  .toolbar-menu__panel {
+    position: absolute; top: 100%; left: 0; z-index: 10;
+    display: flex; flex-direction: column; gap: 0.15rem;
+    margin-top: 0.2rem; padding: 0.3rem;
+    background: white; border: 1px solid #bbb; border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1); min-width: 9rem;
+  }
+  .toolbar-menu__panel button { text-align: left; white-space: nowrap; }
   .editor-mount { border: 1px solid #bbb; border-radius: 0 0 4px 4px;
     min-height: 14rem; padding: 0.75rem; background: white; }
   .editor-mount .ProseMirror { outline: none; min-height: 12rem;
@@ -145,6 +163,25 @@
     border-radius: 3px; font-family: ui-monospace, Menlo, Consolas, monospace; }
   .editor-mount .ProseMirror blockquote { border-left: 3px solid #ccc;
     margin: 0.5rem 0; padding: 0 0.75rem; color: #555; }
+  .editor-mount .ProseMirror table {
+    border-collapse: collapse; width: 100%; margin: 0.75rem 0;
+    table-layout: fixed; overflow: hidden;
+  }
+  .editor-mount .ProseMirror th,
+  .editor-mount .ProseMirror td {
+    border: 1px solid #ccc; padding: 0.3rem 0.5rem;
+    vertical-align: top; text-align: left;
+  }
+  .editor-mount .ProseMirror th {
+    background: #f0f0f0; font-weight: 600;
+  }
+  /* ProseMirror's cell-selection overlay so dragging across cells is
+     visible. */
+  .editor-mount .ProseMirror .selectedCell::after {
+    content: ""; position: absolute; inset: 0;
+    background: rgba(34, 34, 34, 0.08); pointer-events: none;
+  }
+  .editor-mount .ProseMirror td, .editor-mount .ProseMirror th { position: relative; }
   /* Hide the textarea once JS has wired the editor; the body
      attribute is set by the module script. */
   body.has-tiptap-editor textarea#body_markdown { display: none; }

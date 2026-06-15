@@ -199,6 +199,15 @@ def test_toolbar_includes_table_actions(admin_app: Flask) -> None:
         assert f'data-action="{action}"' in body, f"missing table action: {action}"
 
 
+def test_editor_includes_table_styles(admin_app: Flask) -> None:
+    """Editor mount has table CSS and the dropdown panel is styled."""
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/posts/new").data.decode()
+    assert ".editor-mount .ProseMirror table" in body
+    assert ".toolbar-menu" in body
+
+
 def test_post_create_still_works_via_textarea_submission(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
