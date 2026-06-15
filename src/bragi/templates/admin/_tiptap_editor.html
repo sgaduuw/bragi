@@ -27,6 +27,21 @@
   <button type="button" data-action="unlink" title="Remove link">Unlink</button>
   <span class="sep">|</span>
   <button type="button" data-action="image" title="Insert image">&#128247; Image</button>
+  <span class="sep">|</span>
+  <details class="toolbar-menu">
+    <summary title="Table">Table &#9662;</summary>
+    <div class="toolbar-menu__panel">
+      <button type="button" data-action="table" title="Insert table">Insert table</button>
+      <button type="button" data-action="table-row-before" title="Add row above">Row above</button>
+      <button type="button" data-action="table-row-after" title="Add row below">Row below</button>
+      <button type="button" data-action="table-col-before" title="Add column left">Column left</button>
+      <button type="button" data-action="table-col-after" title="Add column right">Column right</button>
+      <button type="button" data-action="table-row-delete" title="Delete row">Delete row</button>
+      <button type="button" data-action="table-col-delete" title="Delete column">Delete column</button>
+      <button type="button" data-action="table-header-toggle" title="Toggle header row">Toggle header</button>
+      <button type="button" data-action="table-delete" title="Delete table">Delete table</button>
+    </div>
+  </details>
 </div>
 
 <dialog id="image-picker-dialog"
@@ -118,6 +133,24 @@
     background: #222; color: #fff; border-color: #222;
   }
   .editor-toolbar .sep { color: #aaa; align-self: center; padding: 0 0.25rem; }
+  .toolbar-menu { position: relative; display: inline-block; }
+  .toolbar-menu > summary {
+    list-style: none; cursor: pointer;
+    background: white; color: #222; border: 1px solid #ccc;
+    border-radius: 3px; padding: 0.2rem 0.5rem; font-size: 0.9em;
+    line-height: 1.2;
+  }
+  .toolbar-menu > summary::-webkit-details-marker { display: none; }
+  .toolbar-menu > summary:hover { background: #eee; }
+  .toolbar-menu[open] > summary { background: #222; color: #fff; border-color: #222; }
+  .toolbar-menu__panel {
+    position: absolute; top: 100%; left: 0; z-index: 10;
+    display: flex; flex-direction: column; gap: 0.15rem;
+    margin-top: 0.2rem; padding: 0.3rem;
+    background: white; border: 1px solid #bbb; border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1); min-width: 9rem;
+  }
+  .toolbar-menu__panel button { text-align: left; white-space: nowrap; }
   .editor-mount { border: 1px solid #bbb; border-radius: 0 0 4px 4px;
     min-height: 14rem; padding: 0.75rem; background: white; }
   .editor-mount .ProseMirror { outline: none; min-height: 12rem;
@@ -130,6 +163,25 @@
     border-radius: 3px; font-family: ui-monospace, Menlo, Consolas, monospace; }
   .editor-mount .ProseMirror blockquote { border-left: 3px solid #ccc;
     margin: 0.5rem 0; padding: 0 0.75rem; color: #555; }
+  .editor-mount .ProseMirror table {
+    border-collapse: collapse; width: 100%; margin: 0.75rem 0;
+    table-layout: fixed; overflow: hidden;
+  }
+  .editor-mount .ProseMirror th,
+  .editor-mount .ProseMirror td {
+    border: 1px solid #ccc; padding: 0.3rem 0.5rem;
+    vertical-align: top; text-align: left;
+  }
+  .editor-mount .ProseMirror th {
+    background: #f0f0f0; font-weight: 600;
+  }
+  /* ProseMirror's cell-selection overlay so dragging across cells is
+     visible. */
+  .editor-mount .ProseMirror .selectedCell::after {
+    content: ""; position: absolute; inset: 0;
+    background: rgba(34, 34, 34, 0.08); pointer-events: none;
+  }
+  .editor-mount .ProseMirror td, .editor-mount .ProseMirror th { position: relative; }
   /* Hide the textarea once JS has wired the editor; the body
      attribute is set by the module script. */
   body.has-tiptap-editor textarea#body_markdown { display: none; }
@@ -187,6 +239,19 @@
   // back into the Image node's `class` attribute. Without this,
   // class survives save but is dropped on reload.
   import markdownItAttrs from 'https://esm.sh/markdown-it-attrs@4';
+  // Pipe-table support. StarterKit ships no table node, so these four
+  // add the schema (table > tableRow > tableHeader|tableCell). Parse
+  // (markdown -> editor) is free: tiptap-markdown renders markdown to
+  // HTML and these nodes' parseHTML handles <table>/<tr>/<th>/<td>,
+  // once markdown-it's table rule is enabled (see TableWithMarkdown
+  // below). Only serialize (editor -> markdown) needs custom code.
+  // resizable is left off: column widths are cell attrs with no GFM
+  // representation, so they would silently vanish on save (deferred,
+  // see _claude/specs/2026-06-15-tiptap-table-support-design.md).
+  import Table from 'https://esm.sh/@tiptap/extension-table@2.6';
+  import TableRow from 'https://esm.sh/@tiptap/extension-table-row@2.6';
+  import TableHeader from 'https://esm.sh/@tiptap/extension-table-header@2.6';
+  import TableCell from 'https://esm.sh/@tiptap/extension-table-cell@2.6';
   // BubbleMenu floats a small toolbar above the focused Image node
   // so the operator can change size + alignment without leaving the
   // editor. Admin-only; delivery ships none of this.
@@ -339,6 +404,95 @@
     },
   });
 
+  // GFM table cells are single-line inline text. @tiptap/extension-table
+  // cells default to `content: 'block+'` (paragraphs, lists), which a
+  // pipe table cannot represent. Constraining to inline makes the editor
+  // unable to author what the markdown round-trip would lose. The
+  // serializer below also flattens any in-cell hard break to a space.
+  const InlineTableCell = TableCell.extend({ content: 'inline*' });
+  const InlineTableHeader = TableHeader.extend({ content: 'inline*' });
+
+  // Render a single cell's inline content to a markdown string by
+  // letting tiptap-markdown render it into `state.out`, then slicing
+  // off and rolling back what it appended (we assemble the table layout
+  // ourselves). Marks inside the cell (bold, italic, code, links)
+  // survive because renderInline emits their markdown delimiters.
+  function serializeTableCell(state, cellNode) {
+    const beforeLen = state.out.length;
+    const beforeClosed = state.closed;
+    const beforeAtBlockStart = state.atBlockStart;
+    state.renderInline(cellNode);
+    let text = state.out.slice(beforeLen);
+    state.out = state.out.slice(0, beforeLen);
+    state.closed = beforeClosed;
+    state.atBlockStart = beforeAtBlockStart;
+    // Flatten hard breaks / newlines (and any escaping backslash a
+    // hardBreak emits before its newline) to a single space; collapse
+    // runs of whitespace; trim; escape pipes so they do not split the
+    // row. Empty cell becomes a single space to keep the row parseable.
+    text = text.replace(/\\?\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    text = text.replace(/\|/g, '\\|');
+    return text === '' ? ' ' : text;
+  }
+
+  const TableWithMarkdown = Table.extend({
+    addStorage() {
+      return {
+        markdown: {
+          // Editor -> markdown. Row 0 is always emitted as the GFM
+          // header row followed by the `| --- |` delimiter, so every
+          // saved table is valid GFM even if the operator toggled the
+          // header off. Column count comes from row 0.
+          serialize(state, node) {
+            // Close any preceding block (e.g. a paragraph) with its
+            // blank-line separation BEFORE the cell loop below runs any
+            // renderInline. renderInline internally flushes the pending
+            // close; if that happens during the rolled-back cell capture
+            // the separation is discarded and the table glues onto the
+            // previous block (invalid GFM that will not parse back as a
+            // table). Flushing here, against committed output, keeps the
+            // blank line.
+            state.flushClose();
+            const rows = [];
+            node.forEach((rowNode) => {
+              const cells = [];
+              rowNode.forEach((cellNode) => {
+                cells.push(serializeTableCell(state, cellNode));
+              });
+              rows.push(cells);
+            });
+            if (rows.length === 0) return;
+            const colCount = rows[0].length;
+            const line = (cells) => {
+              const c = cells.slice(0, colCount);
+              while (c.length < colCount) c.push(' ');
+              return '| ' + c.join(' | ') + ' |';
+            };
+            state.write(line(rows[0]));
+            state.ensureNewLine();
+            state.write('| ' + Array(colCount).fill('---').join(' | ') + ' |');
+            state.ensureNewLine();
+            for (let i = 1; i < rows.length; i++) {
+              state.write(line(rows[i]));
+              state.ensureNewLine();
+            }
+            state.closeBlock(node);
+          },
+          // markdown -> editor. Enable markdown-it's table rule on
+          // tiptap-markdown's internal parser so a loaded body's pipe
+          // table becomes <table> HTML, which the table extensions'
+          // parseHTML then turns into editor nodes. Mirrors how
+          // ClassedImage registers markdown-it-attrs via this hook.
+          parse: {
+            setup(md) {
+              md.enable('table');
+            },
+          },
+        },
+      };
+    },
+  });
+
   // Site-scoped admin URL for attachment bytes. The stored
   // markdown uses public `/attachments/<key>` URLs so it round-
   // trips cleanly to delivery; in the editor we rewrite to the
@@ -375,6 +529,14 @@
         StarterKit,
         Link.configure({ openOnClick: false, autolink: false }),
         ClassedImage,
+        // resizable: false set explicitly (not relying on the extension
+        // default) so a future CDN bump that flips the default cannot
+        // silently introduce colwidth cell attrs, which have no GFM
+        // representation and would vanish on save (round-trip hazard).
+        TableWithMarkdown.configure({ resizable: false }),
+        TableRow,
+        InlineTableHeader,
+        InlineTableCell,
         Markdown.configure({
           html: false,
           linkify: true,
@@ -450,6 +612,7 @@
         'code-block': () => editor.isActive('codeBlock'),
         link: () => editor.isActive('link') && !currentInternalLinkMarker(editor),
         'internal-link': () => !!currentInternalLinkMarker(editor),
+        table: () => editor.isActive('table'),
       };
       toolbar.querySelectorAll('button[data-action]').forEach((btn) => {
         const fn = map[btn.dataset.action];
@@ -461,6 +624,10 @@
       const btn = e.target.closest('button[data-action]');
       if (!btn) return;
       e.preventDefault();
+      // Collapse the Table dropdown after any toolbar action so it does
+      // not stay open over the editor.
+      const openMenu = btn.closest('details.toolbar-menu');
+      if (openMenu) openMenu.open = false;
       const chain = editor.chain().focus();
       switch (btn.dataset.action) {
         case 'bold': chain.toggleBold().run(); break;
@@ -484,6 +651,17 @@
         case 'unlink': chain.unsetLink().run(); break;
         case 'image': openImagePicker(); break;
         case 'internal-link': openInternalLinkPicker(currentInternalLinkMarker(editor)); break;
+        case 'table':
+          chain.insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run();
+          break;
+        case 'table-row-before': chain.addRowBefore().run(); break;
+        case 'table-row-after': chain.addRowAfter().run(); break;
+        case 'table-col-before': chain.addColumnBefore().run(); break;
+        case 'table-col-after': chain.addColumnAfter().run(); break;
+        case 'table-row-delete': chain.deleteRow().run(); break;
+        case 'table-col-delete': chain.deleteColumn().run(); break;
+        case 'table-header-toggle': chain.toggleHeaderRow().run(); break;
+        case 'table-delete': chain.deleteTable().run(); break;
       }
     });
 
