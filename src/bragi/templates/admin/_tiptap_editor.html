@@ -366,10 +366,14 @@
   // ourselves). Marks inside the cell (bold, italic, code, links)
   // survive because renderInline emits their markdown delimiters.
   function serializeTableCell(state, cellNode) {
-    const before = state.out.length;
+    const beforeLen = state.out.length;
+    const beforeClosed = state.closed;
+    const beforeAtBlockStart = state.atBlockStart;
     state.renderInline(cellNode);
-    let text = state.out.slice(before);
-    state.out = state.out.slice(0, before);
+    let text = state.out.slice(beforeLen);
+    state.out = state.out.slice(0, beforeLen);
+    state.closed = beforeClosed;
+    state.atBlockStart = beforeAtBlockStart;
     // Flatten hard breaks / newlines (and any escaping backslash a
     // hardBreak emits before its newline) to a single space; collapse
     // runs of whitespace; trim; escape pipes so they do not split the
@@ -388,6 +392,15 @@
           // saved table is valid GFM even if the operator toggled the
           // header off. Column count comes from row 0.
           serialize(state, node) {
+            // Close any preceding block (e.g. a paragraph) with its
+            // blank-line separation BEFORE the cell loop below runs any
+            // renderInline. renderInline internally flushes the pending
+            // close; if that happens during the rolled-back cell capture
+            // the separation is discarded and the table glues onto the
+            // previous block (invalid GFM that will not parse back as a
+            // table). Flushing here, against committed output, keeps the
+            // blank line.
+            state.flushClose();
             const rows = [];
             node.forEach((rowNode) => {
               const cells = [];
