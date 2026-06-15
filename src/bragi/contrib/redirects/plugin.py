@@ -56,10 +56,18 @@ def _bump_hit(session: Any, row: Redirect) -> None:
     session, this becomes a footgun; switch to flush + caller-side
     commit at that point.
     """
-    try:
+    from bragi.core.db import run_with_write_retry
+
+    def _do() -> None:
         row.hit_count = (row.hit_count or 0) + 1
         row.last_hit_at = naive_utcnow()
         session.commit()
+
+    try:
+        # Retry the bump on `database is locked` (frequent public-path
+        # write that contends with admin/tasks writers) before the
+        # best-effort swallow below.
+        run_with_write_retry("redirect.hit_bump", _do, session=session)
     except Exception:
         LOG.exception("Failed to bump hit_count for redirect id=%s", row.id)
         session.rollback()
