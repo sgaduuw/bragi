@@ -187,6 +187,19 @@
   // back into the Image node's `class` attribute. Without this,
   // class survives save but is dropped on reload.
   import markdownItAttrs from 'https://esm.sh/markdown-it-attrs@4';
+  // Pipe-table support. StarterKit ships no table node, so these four
+  // add the schema (table > tableRow > tableHeader|tableCell). Parse
+  // (markdown -> editor) is free: tiptap-markdown renders markdown to
+  // HTML and these nodes' parseHTML handles <table>/<tr>/<th>/<td>,
+  // once markdown-it's table rule is enabled (see TableWithMarkdown
+  // below). Only serialize (editor -> markdown) needs custom code.
+  // resizable is left off: column widths are cell attrs with no GFM
+  // representation, so they would silently vanish on save (deferred,
+  // see _claude/specs/2026-06-15-tiptap-table-support-design.md).
+  import Table from 'https://esm.sh/@tiptap/extension-table@2.6';
+  import TableRow from 'https://esm.sh/@tiptap/extension-table-row@2.6';
+  import TableHeader from 'https://esm.sh/@tiptap/extension-table-header@2.6';
+  import TableCell from 'https://esm.sh/@tiptap/extension-table-cell@2.6';
   // BubbleMenu floats a small toolbar above the focused Image node
   // so the operator can change size + alignment without leaving the
   // editor. Admin-only; delivery ships none of this.
@@ -339,6 +352,82 @@
     },
   });
 
+  // GFM table cells are single-line inline text. @tiptap/extension-table
+  // cells default to `content: 'block+'` (paragraphs, lists), which a
+  // pipe table cannot represent. Constraining to inline makes the editor
+  // unable to author what the markdown round-trip would lose. The
+  // serializer below also flattens any in-cell hard break to a space.
+  const InlineTableCell = TableCell.extend({ content: 'inline*' });
+  const InlineTableHeader = TableHeader.extend({ content: 'inline*' });
+
+  // Render a single cell's inline content to a markdown string by
+  // letting tiptap-markdown render it into `state.out`, then slicing
+  // off and rolling back what it appended (we assemble the table layout
+  // ourselves). Marks inside the cell (bold, italic, code, links)
+  // survive because renderInline emits their markdown delimiters.
+  function serializeTableCell(state, cellNode) {
+    const before = state.out.length;
+    state.renderInline(cellNode);
+    let text = state.out.slice(before);
+    state.out = state.out.slice(0, before);
+    // Flatten hard breaks / newlines (and any escaping backslash a
+    // hardBreak emits before its newline) to a single space; collapse
+    // runs of whitespace; trim; escape pipes so they do not split the
+    // row. Empty cell becomes a single space to keep the row parseable.
+    text = text.replace(/\\?\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    text = text.replace(/\|/g, '\\|');
+    return text === '' ? ' ' : text;
+  }
+
+  const TableWithMarkdown = Table.extend({
+    addStorage() {
+      return {
+        markdown: {
+          // Editor -> markdown. Row 0 is always emitted as the GFM
+          // header row followed by the `| --- |` delimiter, so every
+          // saved table is valid GFM even if the operator toggled the
+          // header off. Column count comes from row 0.
+          serialize(state, node) {
+            const rows = [];
+            node.forEach((rowNode) => {
+              const cells = [];
+              rowNode.forEach((cellNode) => {
+                cells.push(serializeTableCell(state, cellNode));
+              });
+              rows.push(cells);
+            });
+            if (rows.length === 0) return;
+            const colCount = rows[0].length;
+            const line = (cells) => {
+              const c = cells.slice(0, colCount);
+              while (c.length < colCount) c.push(' ');
+              return '| ' + c.join(' | ') + ' |';
+            };
+            state.write(line(rows[0]));
+            state.ensureNewLine();
+            state.write('| ' + Array(colCount).fill('---').join(' | ') + ' |');
+            state.ensureNewLine();
+            for (let i = 1; i < rows.length; i++) {
+              state.write(line(rows[i]));
+              state.ensureNewLine();
+            }
+            state.closeBlock(node);
+          },
+          // markdown -> editor. Enable markdown-it's table rule on
+          // tiptap-markdown's internal parser so a loaded body's pipe
+          // table becomes <table> HTML, which the table extensions'
+          // parseHTML then turns into editor nodes. Mirrors how
+          // ClassedImage registers markdown-it-attrs via this hook.
+          parse: {
+            setup(md) {
+              md.enable('table');
+            },
+          },
+        },
+      };
+    },
+  });
+
   // Site-scoped admin URL for attachment bytes. The stored
   // markdown uses public `/attachments/<key>` URLs so it round-
   // trips cleanly to delivery; in the editor we rewrite to the
@@ -375,6 +464,10 @@
         StarterKit,
         Link.configure({ openOnClick: false, autolink: false }),
         ClassedImage,
+        TableWithMarkdown,
+        TableRow,
+        InlineTableHeader,
+        InlineTableCell,
         Markdown.configure({
           html: false,
           linkify: true,

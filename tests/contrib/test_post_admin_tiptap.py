@@ -135,6 +135,25 @@ def test_toolbar_includes_required_actions(admin_app: Flask) -> None:
         assert f'data-action="{action}"' in body, f"missing toolbar action: {action}"
 
 
+def test_edit_page_loads_table_extensions(admin_app: Flask) -> None:
+    """Pipe-table support: the four @tiptap/extension-table modules,
+    the table node in the schema, and markdown-it's table rule enabled
+    for the parse path."""
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/posts/new").data.decode()
+    assert "esm.sh/@tiptap/extension-table@2.6" in body
+    assert "esm.sh/@tiptap/extension-table-row@2.6" in body
+    assert "esm.sh/@tiptap/extension-table-header@2.6" in body
+    assert "esm.sh/@tiptap/extension-table-cell@2.6" in body
+    # Parse path: markdown-it's table rule enabled inside the editor's
+    # own parser so a loaded body's pipe table becomes editor nodes.
+    assert "md.enable('table')" in body
+    # Cells constrained to inline so the editor cannot author block
+    # content GFM cannot represent.
+    assert "content: 'inline*'" in body
+
+
 def test_new_post_page_has_empty_editor_content(admin_app: Flask) -> None:
     """New-post form has an empty body so the editor mounts empty."""
     client = admin_app.test_client()
