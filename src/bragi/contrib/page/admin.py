@@ -47,14 +47,21 @@ from bragi.core.bulk_action import (
 )
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
-from bragi.core.models.attachment import Attachment
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.render.markdown import make_excerpt, render_markdown
-from bragi.core.renditions import smallest_webp_storage_key
+from bragi.core.renditions import (
+    featured_image_thumb_key as _featured_image_thumb_key,
+)
+from bragi.core.renditions import (
+    load_featured_image as _load_featured_image,
+)
+from bragi.core.renditions import (
+    resolve_featured_image_id as _resolve_featured_image_id,
+)
 
 if TYPE_CHECKING:
     from bragi.contrib.page.resume import ResumeData
@@ -172,56 +179,6 @@ def _resume_data_for_form(page: Page | None, form: dict[str, str]) -> ResumeData
         except ValidationError:
             pass
     return ResumeData()
-
-
-def _resolve_featured_image_id(
-    db: Session, raw: str, site_id: int
-) -> tuple[int | None, str | None]:
-    """Validate a form-supplied attachment id; same shape as the
-    post admin's helper. The same-site check prevents a crafted
-    POST from surfacing another tenant's attachment."""
-    if not raw:
-        return None, None
-    try:
-        candidate_id = int(raw)
-    except ValueError:
-        return None, "Featured image id must be an integer."
-    attachment = db.get(Attachment, candidate_id)
-    if attachment is None:
-        return None, "Featured image attachment not found."
-    if attachment.site_id != site_id:
-        return None, "Featured image must belong to this site."
-    return candidate_id, None
-
-
-def _load_featured_image(db: Session, raw: str | None, site_id: int) -> Attachment | None:
-    """Load the Attachment for the form's inline thumbnail preview.
-
-    Returns None for any invalid input. Same shape as the post
-    admin's helper; cross-checks site_id so a stale form-state
-    can't leak a different tenant's attachment.
-    """
-    if not raw:
-        return None
-    try:
-        att_id = int(raw)
-    except ValueError:
-        return None
-    attachment = db.get(Attachment, att_id)
-    if attachment is None or attachment.site_id != site_id:
-        return None
-    return attachment
-
-
-def _featured_image_thumb_key(db: Session, raw: str | None, site_id: int) -> str | None:
-    """Compute the macro's `thumb_storage_key` for the form's preview.
-
-    Mirrors the post-admin helper of the same name: the macro falls
-    back to the original storage_key when this returns None, so the
-    preview still works for a brand-new attachment whose renditions
-    haven't processed yet.
-    """
-    return smallest_webp_storage_key(db, _load_featured_image(db, raw, site_id))
 
 
 def _existing_post_index(
