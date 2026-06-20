@@ -18,7 +18,6 @@ future deploy, see this handler as a no-op):
 
 from __future__ import annotations
 
-import functools
 import logging
 import time
 from collections.abc import Callable
@@ -134,24 +133,6 @@ def run_with_write_retry[T](
             slow_write_logger.warning("write retry [%s] attempt=%d after lock", label, attempt + 1)
             time.sleep(base_delay * (2**attempt))
     raise AssertionError("unreachable")  # pragma: no cover
-
-
-def write_retry[T](
-    label: str, *, attempts: int = 3, base_delay: float = 0.05
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
-    """Decorator form of `run_with_write_retry` for self-contained write
-    functions (those that open and commit their own session)."""
-
-    def _decorator(fn: Callable[..., T]) -> Callable[..., T]:
-        @functools.wraps(fn)
-        def _wrapped(*args: Any, **kwargs: Any) -> T:
-            return run_with_write_retry(
-                label, lambda: fn(*args, **kwargs), attempts=attempts, base_delay=base_delay
-            )
-
-        return _wrapped
-
-    return _decorator
 
 
 class _SessionFactoryProxy:

@@ -53,6 +53,3 @@ class TransformRegistry:
     def names(self) -> list[str]:
         """Names of registered transforms in priority order."""
         return [e.name for e in self._entries]
-
-    def __len__(self) -> int:
-        return len(self._entries)
