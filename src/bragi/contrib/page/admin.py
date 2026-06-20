@@ -367,6 +367,65 @@ def _parent_choices(
     return choices
 
 
+def _render_page_form(
+    db: Session,
+    site: Site,
+    page: Page | None,
+    form: dict[str, str],
+    parents: list[Page],
+    *,
+    slug_full_path: str | None = None,
+    swap_pending: bool = False,
+    swap_target: Page | None = None,
+    demotion_pending: bool = False,
+    demotion_post_count: int | None = None,
+) -> str:
+    """Render the page create/edit form (`admin/page_edit.html`).
+
+    Every GET and re-render-on-error path in `new_page` and
+    `edit_page` funnels through here so the long, identical
+    render_template kwarg list lives in one place. The featured-image
+    preview is derived from `form['featured_image_id']` (empty/absent
+    -> no thumbnail, no DB hit); `resume_data_for_form` from
+    `(page, form)`. The keyword flags drive the optional surfaces:
+    `slug_full_path` the edit form's full-path preview, the
+    swap/demotion pairs the POST_INDEX confirmation banners. All are
+    falsy-guarded in the template, so a default (`None`/`False`) is
+    equivalent to the kwarg being absent (the pre-dedup shape).
+    """
+    fid = form.get("featured_image_id")
+    return render_template(
+        "admin/page_edit.html",
+        page=page,
+        form=form,
+        parents=parents,
+        site=site,
+        slug_full_path=slug_full_path,
+        featured_image=_load_featured_image(db, fid, site.id),
+        featured_image_thumb_key=_featured_image_thumb_key(db, fid, site.id),
+        resume_data_for_form=_resume_data_for_form(page, form),
+        swap_pending=swap_pending,
+        swap_target=swap_target,
+        demotion_pending=demotion_pending,
+        demotion_post_count=demotion_post_count,
+    )
+
+
+def _page_nav_snapshot(page: Page) -> dict[str, object]:
+    """The before/after field set the inline `patch_*` handlers hand to
+    `on_post_updated` (slug/title/status changes drive auto-301s; the
+    nav fields drive menu recompute). Read into a plain dict so the
+    snapshot survives the session close.
+    """
+    return {
+        "slug": page.slug,
+        "title": page.title,
+        "status": page.status,
+        "show_in_nav": page.show_in_nav,
+        "menu_order": page.menu_order,
+    }
+
+
 @bp.route("/", methods=["GET"])
 def list_pages(site_slug: str) -> ResponseReturnValue:
     from bragi.core.url import page_path_preview, prewarm_page_url_cache
@@ -426,16 +485,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
 
         if request.method == "GET":
             parents = _all_pages_for_picker(db, site_id)
-            return render_template(
-                "admin/page_edit.html",
-                page=None,
-                form={},
-                parents=parents,
-                featured_image=None,
-                featured_image_thumb_key=None,
-                resume_data_for_form=_resume_data_for_form(None, {}),
-                site=site,
-            )
+            return _render_page_form(db, site, None, {}, parents)
 
         form = _form_from_request()
         parents = _all_pages_for_picker(db, site_id)
@@ -456,104 +506,38 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 pass
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=None,
-                form=form,
-                parents=parents,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(None, form),
-                site=site,
-            )
+            return _render_page_form(db, site, None, form, parents)
 
         new_kind = str(form["kind"])
         if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
             flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=None,
-                form=form,
-                parents=parents,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(None, form),
-                site=site,
-            )
+            return _render_page_form(db, site, None, form, parents)
 
         parent_id = _normalized_parent_id(form["parent_id"])
         parent_id, parent_err = _validated_parent_id_or_error(db, parent_id, site_id)
         if parent_err is not None:
             flash(parent_err, "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=None,
-                form=form,
-                parents=parents,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(None, form),
-                site=site,
-            )
+            return _render_page_form(db, site, None, form, parents)
         slug = str(form["slug"])
         if _slug_in_use(db, site_id, parent_id, slug):
             flash(
                 f"A page with slug {slug!r} already exists under that parent.",
                 "error",
             )
-            return render_template(
-                "admin/page_edit.html",
-                page=None,
-                form=form,
-                parents=parents,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(None, form),
-                site=site,
-            )
+            return _render_page_form(db, site, None, form, parents)
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], site_id
         )
         if featured_image_err is not None:
             flash(featured_image_err, "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=None,
-                form=form,
-                parents=parents,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(None, form),
-                site=site,
-            )
+            return _render_page_form(db, site, None, form, parents)
 
         # Validate resume_data when kind is resume. This runs after all
         # the structural validations so the form error message has context.
         resume_data_dict, resume_err = _validate_resume_data(form["resume_data"])
         if resume_err is not None:
             flash(resume_err, "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=None,
-                form=form,
-                parents=parents,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(None, form),
-                site=site,
-            )
+            return _render_page_form(db, site, None, form, parents)
 
         # Promotion to POST_INDEX swaps any existing POST_INDEX page
         # back to STATIC. Require explicit confirmation so the
@@ -563,19 +547,8 @@ def new_page(site_slug: str) -> ResponseReturnValue:
         )
         acknowledge_swap = request.form.get("acknowledge_swap") == "1"
         if existing_index is not None and not acknowledge_swap:
-            return render_template(
-                "admin/page_edit.html",
-                page=None,
-                form=form,
-                parents=parents,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(None, form),
-                swap_pending=True,
-                swap_target=existing_index,
-                site=site,
+            return _render_page_form(
+                db, site, None, form, parents, swap_pending=True, swap_target=existing_index
             )
 
         body_markdown = str(form["body_markdown"])
@@ -688,137 +661,52 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             }
             from bragi.core.url import page_path_preview
 
-            return render_template(
-                "admin/page_edit.html",
-                page=page,
-                form=form,
-                parents=parents,
-                site=site,
+            return _render_page_form(
+                db,
+                site,
+                page,
+                form,
+                parents,
                 slug_full_path=page_path_preview(
                     db, site=site, parent_id=page.parent_id, slug=page.slug, page_id=page.id
                 ),
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(page, form),
             )
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=page,
-                form=form,
-                parents=parents,
-                site=site,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(page, form),
-            )
+            return _render_page_form(db, site, page, form, parents)
         new_kind = str(form["kind"])
         if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
             flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=page,
-                form=form,
-                parents=parents,
-                site=site,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(page, form),
-            )
+            return _render_page_form(db, site, page, form, parents)
         parent_id = _normalized_parent_id(form["parent_id"])
         parent_id, parent_err = _validated_parent_id_or_error(
             db, parent_id, page.site_id, exclude_page_id=page.id
         )
         if parent_err is not None:
             flash(parent_err, "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=page,
-                form=form,
-                parents=parents,
-                site=site,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(page, form),
-            )
+            return _render_page_form(db, site, page, form, parents)
         slug = str(form["slug"])
         if _slug_in_use(db, page.site_id, parent_id, slug, exclude_page_id=page.id):
             flash(
                 f"A page with slug {slug!r} already exists under that parent.",
                 "error",
             )
-            return render_template(
-                "admin/page_edit.html",
-                page=page,
-                form=form,
-                parents=parents,
-                site=site,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(page, form),
-            )
+            return _render_page_form(db, site, page, form, parents)
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], page.site_id
         )
         if featured_image_err is not None:
             flash(featured_image_err, "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=page,
-                form=form,
-                parents=parents,
-                site=site,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(page, form),
-            )
+            return _render_page_form(db, site, page, form, parents)
 
         # Validate resume_data when kind is resume. This runs after all
         # the structural validations so the form error message has context.
         resume_data_dict, resume_err = _validate_resume_data(form["resume_data"])
         if resume_err is not None:
             flash(resume_err, "error")
-            return render_template(
-                "admin/page_edit.html",
-                page=page,
-                form=form,
-                parents=parents,
-                site=site,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(page, form),
-            )
+            return _render_page_form(db, site, page, form, parents)
 
         # Promotion-to-POST_INDEX swap requires explicit confirmation.
         # Excludes self so editing an already-POST_INDEX page doesn't
@@ -830,21 +718,8 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         )
         acknowledge_swap = request.form.get("acknowledge_swap") == "1"
         if existing_index is not None and not acknowledge_swap:
-            return render_template(
-                "admin/page_edit.html",
-                page=page,
-                form=form,
-                parents=parents,
-                site=site,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), page.site_id
-                ),
-                resume_data_for_form=_resume_data_for_form(page, form),
-                swap_pending=True,
-                swap_target=existing_index,
+            return _render_page_form(
+                db, site, page, form, parents, swap_pending=True, swap_target=existing_index
             )
 
         # Demoting the only POST_INDEX on a site strips the public
@@ -866,19 +741,12 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                         Post.status == PostStatus.PUBLISHED,
                     )
                 ).scalar_one()
-                return render_template(
-                    "admin/page_edit.html",
-                    page=page,
-                    form=form,
-                    parents=parents,
-                    site=site,
-                    featured_image=_load_featured_image(
-                        db, form.get("featured_image_id"), page.site_id
-                    ),
-                    featured_image_thumb_key=_featured_image_thumb_key(
-                        db, form.get("featured_image_id"), page.site_id
-                    ),
-                    resume_data_for_form=_resume_data_for_form(page, form),
+                return _render_page_form(
+                    db,
+                    site,
+                    page,
+                    form,
+                    parents,
                     demotion_pending=True,
                     demotion_post_count=published_count,
                 )
@@ -1383,23 +1251,11 @@ def patch_title(site_slug: str, page_id: int) -> ResponseReturnValue:
                 error=error,
             )
 
-        before = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        before = _page_nav_snapshot(page)
         page.title = raw
         db.commit()
         db.refresh(page)
-        after = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
@@ -1510,23 +1366,11 @@ def patch_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
                 error=error,
             )
 
-        before = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        before = _page_nav_snapshot(page)
         page.slug = raw
         db.commit()
         db.refresh(page)
-        after = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         # on_post_updated handles both Post and Page items; the
@@ -1735,23 +1579,11 @@ def patch_status(site_slug: str, page_id: int) -> ResponseReturnValue:
                 error=error,
             )
 
-        before = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        before = _page_nav_snapshot(page)
         page.status = raw
         db.commit()
         db.refresh(page)
-        after = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
@@ -1802,23 +1634,11 @@ def patch_show_in_nav(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
-        before = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        before = _page_nav_snapshot(page)
         page.show_in_nav = not page.show_in_nav
         db.commit()
         db.refresh(page)
-        after = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
@@ -1892,24 +1712,12 @@ def patch_menu_order(site_slug: str, page_id: int) -> ResponseReturnValue:
                 error=error,
             )
 
-        before = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        before = _page_nav_snapshot(page)
         assert value is not None  # narrowed by the try/except above
         page.menu_order = value
         db.commit()
         db.refresh(page)
-        after = {
-            "slug": page.slug,
-            "title": page.title,
-            "status": page.status,
-            "show_in_nav": page.show_in_nav,
-            "menu_order": page.menu_order,
-        }
+        after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)

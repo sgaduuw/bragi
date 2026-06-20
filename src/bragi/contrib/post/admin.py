@@ -182,6 +182,40 @@ def _sync_post_tags(
     post.tags = tags
 
 
+def _render_post_form(db: Session, site_id: int, post: Post | None, form: dict[str, str]) -> str:
+    """Render the post create/edit form (`admin/edit.html`).
+
+    Every GET and re-render-on-error path in `new_post` and
+    `edit_post` funnels through here so the identical render_template
+    kwarg list lives in one place. The featured-image preview is
+    derived from `form['featured_image_id']` (empty/absent -> no
+    thumbnail, no DB hit).
+    """
+    fid = form.get("featured_image_id")
+    return render_template(
+        "admin/edit.html",
+        post=post,
+        form=form,
+        featured_image=_load_featured_image(db, fid, site_id),
+        featured_image_thumb_key=_featured_image_thumb_key(db, fid, site_id),
+    )
+
+
+def _post_snapshot(post: Post) -> dict[str, object]:
+    """The before/after field set every post mutation hands to
+    `on_post_updated` (slug/title/status changes drive auto-301s and
+    the publish lifecycle). Read into a plain dict so the snapshot
+    survives the session close.
+    """
+    return {
+        "slug": post.slug,
+        "title": post.title,
+        "status": post.status,
+        "is_pinned": post.is_pinned,
+        "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+    }
+
+
 @bp.route("/", methods=["GET"])
 def list_posts(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
@@ -226,13 +260,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         )
 
         if request.method == "GET":
-            return render_template(
-                "admin/edit.html",
-                post=None,
-                form={},
-                featured_image=None,
-                featured_image_thumb_key=None,
-            )
+            return _render_post_form(db, site_id, None, {})
 
         form = _form_from_request()
         if not form["slug"] and form["title"]:
@@ -246,42 +274,18 @@ def new_post(site_slug: str) -> ResponseReturnValue:
                 pass
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template(
-                "admin/edit.html",
-                post=None,
-                form=form,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-            )
+            return _render_post_form(db, site_id, None, form)
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], site_id
         )
         if featured_image_err is not None:
             flash(featured_image_err, "error")
-            return render_template(
-                "admin/edit.html",
-                post=None,
-                form=form,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-            )
+            return _render_post_form(db, site_id, None, form)
 
         pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
         if pin_err is not None:
             flash(pin_err, "error")
-            return render_template(
-                "admin/edit.html",
-                post=None,
-                form=form,
-                featured_image=_load_featured_image(db, form.get("featured_image_id"), site_id),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), site_id
-                ),
-            )
+            return _render_post_form(db, site_id, None, form)
 
         body_markdown = form["body_markdown"]
         new_status = form["status"]
@@ -365,56 +369,20 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
                     post.pinned_until.strftime("%Y-%m-%dT%H:%M") if post.pinned_until else ""
                 ),
             }
-            return render_template(
-                "admin/edit.html",
-                post=post,
-                form=form,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), post.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), post.site_id
-                ),
-            )
+            return _render_post_form(db, post.site_id, post, form)
 
         form = _form_from_request()
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
-            return render_template(
-                "admin/edit.html",
-                post=post,
-                form=form,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), post.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), post.site_id
-                ),
-            )
+            return _render_post_form(db, post.site_id, post, form)
         featured_image_id, featured_image_err = _resolve_featured_image_id(
             db, form["featured_image_id"], post.site_id
         )
         if featured_image_err is not None:
             flash(featured_image_err, "error")
-            return render_template(
-                "admin/edit.html",
-                post=post,
-                form=form,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), post.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), post.site_id
-                ),
-            )
+            return _render_post_form(db, post.site_id, post, form)
 
-        before = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        before = _post_snapshot(post)
         # Snapshot the pre-edit state so the editor can roll back
         # later. Captured BEFORE the mutation: the live row stays
         # "current" and the most recent revision is "what it was
@@ -433,17 +401,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
         if pin_err is not None:
             flash(pin_err, "error")
-            return render_template(
-                "admin/edit.html",
-                post=post,
-                form=form,
-                featured_image=_load_featured_image(
-                    db, form.get("featured_image_id"), post.site_id
-                ),
-                featured_image_thumb_key=_featured_image_thumb_key(
-                    db, form.get("featured_image_id"), post.site_id
-                ),
-            )
+            return _render_post_form(db, post.site_id, post, form)
         post.is_pinned = form["is_pinned"] == "1"
         post.pinned_until = pinned_until
 
@@ -467,13 +425,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         db.commit()
         updated_id = post.id
         updated_site_id = post.site_id
-        after = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        after = _post_snapshot(post)
         skip_redirect = request.form.get("skip_redirect") == "1"
 
         pm = current_app.extensions["plugin_manager"]
@@ -599,23 +551,11 @@ def patch_title(site_slug: str, post_id: int) -> ResponseReturnValue:
                 error=error,
             )
 
-        before = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        before = _post_snapshot(post)
         post.title = raw
         db.commit()
         db.refresh(post)
-        after = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        after = _post_snapshot(post)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
@@ -718,23 +658,11 @@ def patch_slug(site_slug: str, post_id: int) -> ResponseReturnValue:
                 error=error,
             )
 
-        before = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        before = _post_snapshot(post)
         post.slug = raw
         db.commit()
         db.refresh(post)
-        after = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        after = _post_snapshot(post)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
@@ -818,25 +746,13 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         becoming_published = raw == PostStatus.PUBLISHED
         is_first_publish = was_unpublished and becoming_published
 
-        before = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        before = _post_snapshot(post)
         if is_first_publish and post.published_at is None:
             post.published_at = naive_utcnow()
         post.status = raw
         db.commit()
         db.refresh(post)
-        after = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        after = _post_snapshot(post)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
@@ -1064,13 +980,7 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         # redirects auto-301, AP outbox fanout on a
         # status->published transition) should see the same
         # `on_post_updated` they'd see for a hand edit.
-        before = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        before = _post_snapshot(post)
         was_unpublished = post.status != PostStatus.PUBLISHED
         post.title = revision.title
         post.slug = revision.slug
@@ -1094,13 +1004,7 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         db.commit()
         restored_id = post.id
         site_id_for_audit = post.site_id
-        after = {
-            "slug": post.slug,
-            "title": post.title,
-            "status": post.status,
-            "is_pinned": post.is_pinned,
-            "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
-        }
+        after = _post_snapshot(post)
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
         if is_first_publish:
