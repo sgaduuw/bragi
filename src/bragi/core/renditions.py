@@ -91,6 +91,61 @@ def smallest_webp_storage_key(db: Session, attachment: Attachment | None) -> str
     ).scalar_one_or_none()
 
 
+def resolve_featured_image_id(db: Session, raw: str, site_id: int) -> tuple[int | None, str | None]:
+    """Validate a form-supplied featured-image attachment id.
+
+    Returns `(value, error)`: empty string clears (None, None); a
+    valid same-site attachment id resolves to (int, None); anything
+    that doesn't exist or belongs to another site returns
+    (None, message). The same-site check is the load-bearing one:
+    without it a crafted POST could surface a different tenant's
+    attachment in this site's social preview.
+    """
+    if not raw:
+        return None, None
+    try:
+        candidate_id = int(raw)
+    except ValueError:
+        return None, "Featured image id must be an integer."
+    attachment = db.get(Attachment, candidate_id)
+    if attachment is None:
+        return None, "Featured image attachment not found."
+    if attachment.site_id != site_id:
+        return None, "Featured image must belong to this site."
+    return candidate_id, None
+
+
+def load_featured_image(db: Session, raw: str | None, site_id: int) -> Attachment | None:
+    """Load the Attachment for a form's inline thumbnail preview.
+
+    Returns None for any invalid input. Cross-checks site_id so a
+    stale form-state can't leak a different tenant's attachment into
+    the rendered form.
+    """
+    if not raw:
+        return None
+    try:
+        att_id = int(raw)
+    except ValueError:
+        return None
+    attachment = db.get(Attachment, att_id)
+    if attachment is None or attachment.site_id != site_id:
+        return None
+    return attachment
+
+
+def featured_image_thumb_key(db: Session, raw: str | None, site_id: int) -> str | None:
+    """Compute the picker macro's `thumb_storage_key` for a form's preview.
+
+    The macro falls back to the original's storage_key when this
+    returns None, so a brand-new attachment without processed
+    renditions still shows the preview (just heavier than necessary).
+    Once the worker emits the smallest WebP rendition the form picks
+    it up on the next render.
+    """
+    return smallest_webp_storage_key(db, load_featured_image(db, raw, site_id))
+
+
 # Image refs in body_markdown look like `(/attachments/<sha>)`. The
 # stored body uses the public delivery path; the editor rewrites to
 # the admin path on load and back on save.

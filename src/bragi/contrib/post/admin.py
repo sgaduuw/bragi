@@ -44,7 +44,6 @@ from bragi.core.bulk_action import (
 )
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
-from bragi.core.models.attachment import Attachment
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
 from bragi.core.models.site import Site
@@ -55,7 +54,15 @@ from bragi.core.permissions import (
     resolve_site_or_abort,
 )
 from bragi.core.render.markdown import make_excerpt, render_markdown
-from bragi.core.renditions import smallest_webp_storage_key
+from bragi.core.renditions import (
+    featured_image_thumb_key as _featured_image_thumb_key,
+)
+from bragi.core.renditions import (
+    load_featured_image as _load_featured_image,
+)
+from bragi.core.renditions import (
+    resolve_featured_image_id as _resolve_featured_image_id,
+)
 from bragi.core.security import current_user
 from bragi.core.text import slugify
 from bragi.core.time import naive_utcnow
@@ -83,64 +90,6 @@ def _form_from_request() -> dict[str, str]:
         "is_pinned": "1" if request.form.get("is_pinned") else "",
         "pinned_until": (request.form.get("pinned_until") or "").strip(),
     }
-
-
-def _resolve_featured_image_id(
-    db: Session, raw: str, site_id: int
-) -> tuple[int | None, str | None]:
-    """Validate a form-supplied attachment id.
-
-    Returns `(value, error)`: empty string clears (None, None); a
-    valid same-site attachment id resolves to (int, None); anything
-    that doesn't exist or belongs to another site returns
-    (None, message). The same-site check is the load-bearing one:
-    without it a crafted POST could surface a different tenant's
-    attachment in this site's social preview.
-    """
-    if not raw:
-        return None, None
-    try:
-        candidate_id = int(raw)
-    except ValueError:
-        return None, "Featured image id must be an integer."
-    attachment = db.get(Attachment, candidate_id)
-    if attachment is None:
-        return None, "Featured image attachment not found."
-    if attachment.site_id != site_id:
-        return None, "Featured image must belong to this site."
-    return candidate_id, None
-
-
-def _load_featured_image(db: Session, raw: str | None, site_id: int) -> Attachment | None:
-    """Load the Attachment for the form's inline thumbnail preview.
-
-    Returns None for any invalid input — the picker just shows the
-    \"Pick image\" button rather than a thumbnail. Always cross-checks
-    the site_id so a stale form-state can't leak a different tenant's
-    attachment into the rendered form.
-    """
-    if not raw:
-        return None
-    try:
-        att_id = int(raw)
-    except ValueError:
-        return None
-    attachment = db.get(Attachment, att_id)
-    if attachment is None or attachment.site_id != site_id:
-        return None
-    return attachment
-
-
-def _featured_image_thumb_key(db: Session, raw: str | None, site_id: int) -> str | None:
-    """Compute the macro's `thumb_storage_key` for the form's preview.
-
-    The macro falls back to the original's storage_key when this
-    returns None, so a brand-new attachment without processed
-    renditions still shows the preview (just slightly heavier than
-    necessary). Once the worker emits the smallest WebP rendition
-    the form picks it up on the next render.
-    """
-    return smallest_webp_storage_key(db, _load_featured_image(db, raw, site_id))
 
 
 def _parse_pinned_until(raw: str) -> tuple[datetime | None, str | None]:
