@@ -22,9 +22,7 @@ Token shape: `brg_<public_id>_<secret>`.
 
 from __future__ import annotations
 
-import base64
 import secrets
-import uuid
 from datetime import datetime
 from typing import NamedTuple
 
@@ -61,14 +59,13 @@ class MintedToken(NamedTuple):
 
 
 def _random_public_id() -> str:
-    """22-char url-safe base64 of 16 random bytes."""
-    raw = uuid.uuid4().bytes
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+    """22-char url-safe string from 16 random bytes."""
+    return secrets.token_urlsafe(16)
 
 
 def _random_secret() -> str:
     """32 url-safe chars; ~192 bits of entropy."""
-    return secrets.token_urlsafe(24)[:SECRET_LEN]
+    return secrets.token_urlsafe(24)
 
 
 def mint_token(

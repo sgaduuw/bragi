@@ -31,18 +31,10 @@ bp = Blueprint(
 )
 
 
-def _safe_next(candidate: str | None) -> str:
-    """Restrict `next` to same-host relative paths to prevent open redirects.
-
-    See `bragi.core.safe_urls.safe_relative_path` for the rejected
-    shapes (incl. backslash-normalisation by the browser URL parser).
-    """
-    return safe_relative_path(candidate) or "/"
-
-
 @bp.route("/login", methods=["GET", "POST"])
 def login() -> ResponseReturnValue:
-    next_url = _safe_next(request.args.get("next") or request.form.get("next"))
+    # Restrict `next` to same-host relative paths to prevent open redirects.
+    next_url = safe_relative_path(request.args.get("next") or request.form.get("next")) or "/"
 
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
@@ -180,7 +172,7 @@ def change_password() -> ResponseReturnValue:
         # Clear the gate flag and follow the original post-login
         # destination if one was stashed; otherwise land at "/".
         session.pop("must_change_password", None)
-        next_url = _safe_next(session.pop("post_change_next", None))
+        next_url = safe_relative_path(session.pop("post_change_next", None)) or "/"
         audit(
             AuditAction.AUTH_LOGIN_SUCCESS,
             target_type="user",

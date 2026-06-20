@@ -4,6 +4,21 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.1] - 2026-06-21
+
+Internal maintenance release. No user-facing, schema, or configuration
+changes; behaviour is identical to 1.36.0.
+
+### Changed
+- Removed roughly 390 lines of duplicated and dead code across the admin
+  and importer surfaces: the featured-image form helpers were
+  consolidated into `bragi.core.renditions`; the repeated edit-form
+  renders and `on_post_updated` snapshots in the post and page admin were
+  funnelled through helpers; the Ghost importer's permalink-redirect
+  upsert was deduplicated; and dead constants, an unused decorator, and a
+  hand-rolled token-id generator (now `secrets.token_urlsafe`) were
+  removed.
+
 ## [1.36.0] - 2026-06-15
 
 ### Added
