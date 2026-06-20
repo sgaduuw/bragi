@@ -34,7 +34,6 @@ from bragi.core.time import aware_utcnow
 # requires `digest` so receivers can confirm the body hasn't been
 # tampered with after signing.
 _SIGNED_HEADERS_POST = ("(request-target)", "host", "date", "digest")
-_SIGNED_HEADERS_GET = ("(request-target)", "host", "date")
 
 # How much clock skew we tolerate on inbound Date headers, in
 # seconds. Five minutes is the de-facto standard; tighter trips

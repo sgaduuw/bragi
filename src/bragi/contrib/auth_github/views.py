@@ -40,16 +40,12 @@ from bragi.settings import settings
 bp = Blueprint("auth_github", __name__, url_prefix="/auth/github")
 
 
-def _safe_next(candidate: str | None) -> str:
-    """See `bragi.core.safe_urls.safe_relative_path` for the rejection rules."""
-    return safe_relative_path(candidate) or "/"
-
-
 @bp.route("/login", methods=["GET"])
 def login() -> ResponseReturnValue:
     if not settings.github_client_id or not settings.github_client_secret:
         abort(503)
-    session["oauth_post_login_next"] = _safe_next(request.args.get("next"))
+    # Restrict `next` to same-host relative paths to prevent open redirects.
+    session["oauth_post_login_next"] = safe_relative_path(request.args.get("next")) or "/"
     client = build_github_client()
     redirect_uri = url_for("auth_github.callback", _external=True)
     # Authlib's authorize_redirect returns a Flask Response; cast
@@ -187,6 +183,6 @@ def callback() -> ResponseReturnValue:
     pm = current_app.extensions["plugin_manager"]
     pm.hook.on_user_login(user=user, method="github", request=request)
 
-    next_url = _safe_next(session.pop("oauth_post_login_next", None))
+    next_url = safe_relative_path(session.pop("oauth_post_login_next", None)) or "/"
     flash(f"Welcome, {display_name}.", "success")
     return redirect(next_url)
