@@ -168,6 +168,39 @@ def _basename_from_url(url: str) -> str | None:
     return last or None
 
 
+def _upsert_ghost_redirect(db: Any, site_id: int, source_path: str, target: str) -> bool:
+    """Insert a 301 from `source_path` to `target` for this Ghost import,
+    or refresh an existing row's target/status. Returns True when a new
+    row was inserted (for the caller's `redirects_inserted` counter).
+
+    Both the post and page permalink loops emit redirects with this
+    exact upsert shape; keeping it in one place stops the two copies
+    drifting. A `source_path` equal to the `target` is a no-op.
+    """
+    if source_path == target:
+        return False
+    clash = db.execute(
+        select(Redirect).where(
+            Redirect.site_id == site_id,
+            Redirect.source_path == source_path,
+        )
+    ).scalar_one_or_none()
+    if clash is None:
+        db.add(
+            Redirect(
+                site_id=site_id,
+                source_path=source_path,
+                target=target,
+                status_code=301,
+                source=RedirectSource.IMPORT_GHOST,
+            )
+        )
+        return True
+    clash.target = target
+    clash.status_code = 301
+    return False
+
+
 def _resolve_feature_image(
     db: Session,
     *,
@@ -442,27 +475,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             target = post_url_for(site, slug, db=db)
             if status == PostStatus.PUBLISHED and target is not None:
                 source_path = f"/{slug}/"
-                if source_path != target:
-                    clash = db.execute(
-                        select(Redirect).where(
-                            Redirect.site_id == site_id,
-                            Redirect.source_path == source_path,
-                        )
-                    ).scalar_one_or_none()
-                    if clash is None:
-                        db.add(
-                            Redirect(
-                                site_id=site_id,
-                                source_path=source_path,
-                                target=target,
-                                status_code=301,
-                                source=RedirectSource.IMPORT_GHOST,
-                            )
-                        )
-                        redirects_inserted += 1
-                    else:
-                        clash.target = target
-                        clash.status_code = 301
+                redirects_inserted += _upsert_ghost_redirect(db, site_id, source_path, target)
 
         # ----------------------------------------------------------
         # Pages loop. Ghost ships pages in the same `posts` array as
@@ -569,27 +582,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             if status == PageStatus.PUBLISHED:
                 target = page_url_for(page, db=db)
                 source_path = f"/{slug}/"
-                if source_path != target:
-                    clash = db.execute(
-                        select(Redirect).where(
-                            Redirect.site_id == site_id,
-                            Redirect.source_path == source_path,
-                        )
-                    ).scalar_one_or_none()
-                    if clash is None:
-                        db.add(
-                            Redirect(
-                                site_id=site_id,
-                                source_path=source_path,
-                                target=target,
-                                status_code=301,
-                                source=RedirectSource.IMPORT_GHOST,
-                            )
-                        )
-                        redirects_inserted += 1
-                    else:
-                        clash.target = target
-                        clash.status_code = 301
+                redirects_inserted += _upsert_ghost_redirect(db, site_id, source_path, target)
 
         if unresolved_url_fields:
             warnings.append(
