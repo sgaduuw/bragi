@@ -1,7 +1,11 @@
-"""Regression test for issue #430: lifecycle-hook writes are dropped.
+"""Regression tests for issue #430: lifecycle-hook writes are dropped.
 
-**This test is expected to FAIL on the `fix/430-lifecycle-commit`
-branch before the bug is fixed. Its redness IS the deliverable.**
+These guard the fix (now committed): handlers flush, fire the lifecycle
+hook chain, then commit ONCE after it, so content + index + redirect +
+edges land atomically. `test_internal_link_edge_survives_update` is the
+primary regression (it was RED before the fix); the two best-effort
+guards below pin that a failing index / notifier hook never aborts the
+content save under the new commit-after-hooks shape.
 
 The bug (#430)
 ==============
@@ -33,11 +37,10 @@ test closes both gaps: it uses the file-backed, alembic-applied
 fixture from `tests/integration/conftest.py` and drives a REAL admin
 update through `edit_page`.
 
-The fix (Task 1, not done here)
-===============================
-Have the handler flush the hooks and commit ONCE after the chain, so
-content + index + redirect + edges land as one atomic transaction.
-When that ships, this test goes GREEN.
+The fix
+=======
+The handler flushes, fires the hooks, and commits ONCE after the chain,
+so content + index + redirect + edges land as one atomic transaction.
 """
 
 from __future__ import annotations
@@ -47,7 +50,7 @@ from collections.abc import Iterator
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.contrib.auth_local.passwords import hash_password
@@ -235,3 +238,117 @@ def test_internal_link_edge_survives_update(
         "hook chain, so the edge write was rolled back on `with SessionLocal()` "
         f"exit. Expected edge ('page', {page_b_id}) in {targets or 'no edges'}."
     )
+
+
+def test_missing_fts_tables_do_not_drop_content_or_edges(
+    site_with_two_pages: tuple[Flask, sessionmaker[Session], int, int],
+) -> None:
+    """A missing-FTS-tables misconfig must not lose the edit or the edge.
+
+    The search index is best-effort: `_safe_in_session` swallows the
+    "no such table" OperationalError when an operator hasn't run the
+    search migration. Under #430's commit-after-hooks, that swallowed
+    error must NOT poison the request transaction and roll back the
+    content save plus the sibling internal_links edge. We drop the FTS5
+    tables to force the swallow, then drive a real edit and assert both
+    the content change and the A->B edge persist. (Confirmed: on the
+    file-backed/WAL engine, matching prod, the swallow leaves the
+    transaction committable; the "doom" only ever appeared on the
+    `:memory:` fixture, which is why `tests/conftest.py` now creates the
+    FTS tables for parity.)
+    """
+    admin_app, session_factory, page_a_id, page_b_id = site_with_two_pages
+    with session_factory() as db:
+        db.execute(text("DROP TABLE IF EXISTS pages_fts"))
+        db.execute(text("DROP TABLE IF EXISTS posts_fts"))
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    token = _csrf_token(client, path=f"/admin/sites/blog/pages/{page_a_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{page_a_id}/edit",
+        data={
+            "title": "A-EDITED",
+            "slug": "a",
+            "body_markdown": f"See [B](page:{page_b_id}) here.",
+            "status": "published",
+            "kind": "static",
+            "parent_id": "",
+            "menu_order": "0",
+            "_csrf_token": token,
+        },
+        headers={"Host": HOST},
+    )
+    assert resp.status_code == 302, f"edit did not succeed: {resp.status_code}"
+
+    with session_factory() as db:
+        page_a = db.get(Page, page_a_id)
+        assert page_a is not None and page_a.title == "A-EDITED", (
+            "content edit was rolled back by the swallowed FTS error (#430 best-effort guard)"
+        )
+        edges = (
+            db.execute(
+                select(InternalLink).where(
+                    InternalLink.source_type == "page",
+                    InternalLink.source_id == page_a_id,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert ("page", page_b_id) in {(e.target_type, e.target_id) for e in edges}, (
+            "internal_links edge was rolled back by the swallowed FTS error"
+        )
+
+
+def test_indexnow_http_failure_does_not_abort_save(
+    site_with_two_pages: tuple[Flask, sessionmaker[Session], int, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A best-effort notifier (indexnow HTTP) failing must not roll back
+    the content save.
+
+    With an `indexnow_key` configured the publish/edit fires a live
+    `submit()`; we force its `safe_post` to raise and confirm the edit
+    still commits. `submit()` swallows all HTTP errors ("best-effort,
+    never break publish"), so the hook never propagates out of the chain
+    and #430's single post-chain commit persists the content.
+    """
+    admin_app, session_factory, page_a_id, page_b_id = site_with_two_pages
+    with session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.extra_settings = {**(site.extra_settings or {}), "indexnow_key": "testkey"}
+        db.commit()
+
+    import bragi.contrib.indexnow.client as indexnow_client
+
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("indexnow endpoint unreachable")
+
+    monkeypatch.setattr(indexnow_client, "safe_post", _boom)
+
+    client = admin_app.test_client()
+    _login(client)
+    token = _csrf_token(client, path=f"/admin/sites/blog/pages/{page_a_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{page_a_id}/edit",
+        data={
+            "title": "A-INDEXNOW",
+            "slug": "a",
+            "body_markdown": "alpha edited",
+            "status": "published",
+            "kind": "static",
+            "parent_id": "",
+            "menu_order": "0",
+            "_csrf_token": token,
+        },
+        headers={"Host": HOST},
+    )
+    assert resp.status_code == 302, f"edit did not succeed: {resp.status_code}"
+
+    with session_factory() as db:
+        page_a = db.get(Page, page_a_id)
+        assert page_a is not None and page_a.title == "A-INDEXNOW", (
+            "content edit was rolled back by the indexnow HTTP failure (#430 best-effort guard)"
+        )
