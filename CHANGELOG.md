@@ -11,6 +11,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   post or page body. It was already sticky but pinned behind the sticky
   admin nav, so it disappeared under the nav bar a screen deep; it now
   offsets by the nav's live height and parks just below it.
+- Editing a post or page no longer silently drops lifecycle side effects.
+  Handlers committed the content change *before* running the lifecycle
+  hook chain, so writes from late-firing hooks (notably the
+  internal-links edge re-index, and a slug-change 301 in some orderings)
+  were rolled back and lost. Handlers now commit once *after* the chain,
+  so the content, search index, redirect, and internal-links edges are
+  saved atomically (#430).
 
 ## [1.36.1] - 2026-06-21
 
