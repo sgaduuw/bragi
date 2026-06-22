@@ -60,7 +60,13 @@ def on_post_published(item: Any, session: Any) -> None:
         site = session.get(Site, item.site_id)
         if site is None:
             return
-        path = post_url_for(site, item.slug)
+        # Pass `db=session`: since issue #430 the handler commits ONCE
+        # after the hook chain, so the post is still pending in this
+        # session. `post_url_for` without `db=` opens a fresh
+        # SessionLocal that (a) can't see the uncommitted post and
+        # (b) under SQLite's SingletonThreadPool shares the connection
+        # and rolls back the caller's pending writes on exit.
+        path = post_url_for(site, item.slug, db=session)
         if path is None:
             return
         fanout_for_post(session, item, post_path=path)
