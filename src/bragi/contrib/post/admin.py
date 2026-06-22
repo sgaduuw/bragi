@@ -312,13 +312,14 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         # A brand-new post that starts published triggers
         # on_post_published just like an edit-time transition does.
         pm = current_app.extensions["plugin_manager"]
-        if new_status == PostStatus.PUBLISHED:
+        published = new_status == PostStatus.PUBLISHED
+        if published:
             pm.hook.on_post_published(item=new_post_row, session=db)
         # ONE commit AFTER the hook chain so the new row, its tags,
         # and any publish-time index/edge writes land atomically
         # (issue #430). Unconditional: a draft create must persist too.
         db.commit()
-        if new_status == PostStatus.PUBLISHED:
+        if published:
             pm.hook.on_cache_purge(scope="post", key=str(new_id))
 
         flash(f"Post '{form['title']}' created.", "success")

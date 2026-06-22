@@ -576,7 +576,11 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             menu_order=_safe_int(form.get("menu_order")),
         )
         db.add(page_row)
-        db.commit()
+        # Flush (not commit) so page_row gets its id and the pending
+        # writes (incl. the existing_index demotion above) are visible
+        # to the hooks' in-session reads before the single post-chain
+        # commit (issue #430).
+        db.flush()
         new_id = page_row.id
         new_slug = page_row.slug
         pm = current_app.extensions["plugin_manager"]
@@ -602,11 +606,18 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 },
                 session=db,
             )
-        if new_status == PageStatus.PUBLISHED:
+        published = new_status == PageStatus.PUBLISHED
+        if published:
             # Mirror the post admin's first-publish path: subscribers
             # (search index, sitemap rebuild, indexnow ping, webhook
             # fans) get the same hook surface for pages as for posts.
             pm.hook.on_post_published(item=page_row, session=db)
+        # ONE commit AFTER the hook chain so the new page, the
+        # swap-demotion 301, and any publish-time index/edge writes
+        # land atomically (issue #430). Unconditional: a draft create
+        # must persist too.
+        db.commit()
+        if published:
             pm.hook.on_cache_purge(scope="page", key=str(new_id))
         flash(f"Page '{form['title']}' created.", "success")
 

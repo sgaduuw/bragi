@@ -352,3 +352,55 @@ def test_indexnow_http_failure_does_not_abort_save(
         assert page_a is not None and page_a.title == "A-INDEXNOW", (
             "content edit was rolled back by the indexnow HTTP failure (#430 best-effort guard)"
         )
+
+
+def test_internal_link_edge_persists_on_published_create(
+    site_with_two_pages: tuple[Flask, sessionmaker[Session], int, int],
+) -> None:
+    """A published page CREATE linking to an existing page persists the edge.
+
+    `new_page` had the same #430 shape as the update handlers: it
+    committed the new row BEFORE firing on_post_published, so the
+    create's internal_links reindex (and FTS / swap-301) was rolled back
+    on `with SessionLocal()` exit. This guards the create path (caught by
+    the whole-diff review, which spotted new_page omitted from the
+    update-handler sweep).
+    """
+    admin_app, session_factory, _page_a_id, page_b_id = site_with_two_pages
+    client = admin_app.test_client()
+    _login(client)
+
+    token = _csrf_token(client, path="/admin/sites/blog/pages/new")
+    resp = client.post(
+        "/admin/sites/blog/pages/new",
+        data={
+            "title": "C",
+            "slug": "c",
+            "parent_id": "",
+            "body_markdown": f"Link to [B](page:{page_b_id}).",
+            "status": "published",
+            "_csrf_token": token,
+        },
+        headers={"Host": HOST},
+    )
+    assert resp.status_code == 302, f"create failed: {resp.status_code}"
+
+    with session_factory() as db:
+        page_c = db.execute(select(Page).where(Page.slug == "c")).scalar_one()
+        assert f'data-bragi-link="page:{page_b_id}"' in (page_c.body_html or ""), (
+            "precondition: C's body_html should carry the resolved marker"
+        )
+        edges = (
+            db.execute(
+                select(InternalLink).where(
+                    InternalLink.source_type == "page",
+                    InternalLink.source_id == page_c.id,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert ("page", page_b_id) in {(e.target_type, e.target_id) for e in edges}, (
+            "issue #430 (create path): the published-create internal_links edge was "
+            "rolled back because new_page committed before its hook chain"
+        )
