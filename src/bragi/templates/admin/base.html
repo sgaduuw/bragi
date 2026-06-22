@@ -38,5 +38,23 @@
      browser, not the public. #}
   <script src="https://unpkg.com/htmx.org@1.9.10" crossorigin="anonymous"></script>
   <script src="{{ url_for('admin_static.static', filename='inline-edit.js') }}"></script>
+  <script>
+    // The admin nav is sticky at top:0 (z-index 100). Any sticky page
+    // content (e.g. the editor toolbar) must pin BELOW it, not behind
+    // it, so expose the nav's live height as --admin-nav-height for
+    // `top: var(--admin-nav-height)`. The height varies (the site row
+    // is conditional; mobile collapses to one row), so track it rather
+    // than hardcode. ResizeObserver covers breakpoint and row changes
+    // without a separate resize listener.
+    (function () {
+      const nav = document.querySelector('.admin-nav-sticky');
+      if (!nav) return;
+      const sync = () => document.documentElement.style.setProperty(
+        '--admin-nav-height', nav.offsetHeight + 'px');
+      sync();
+      if (window.ResizeObserver) new ResizeObserver(sync).observe(nav);
+      else window.addEventListener('resize', sync);
+    })();
+  </script>
 </body>
 </html>

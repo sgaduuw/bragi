@@ -4,6 +4,14 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- The TipTap editor toolbar now stays in reach while scrolling a long
+  post or page body. It was already sticky but pinned behind the sticky
+  admin nav, so it disappeared under the nav bar a screen deep; it now
+  offsets by the nav's live height and parks just below it.
+
 ## [1.36.1] - 2026-06-21
 
 Internal maintenance release. No user-facing, schema, or configuration
