@@ -82,8 +82,13 @@ def scheduled_publish(dry_run: bool) -> None:
                 post.status = PostStatus.PUBLISHED
                 if post.published_at is None:
                     post.published_at = now
-                db.commit()
+                # Fire the publish hook BEFORE committing so any
+                # writes it makes on `db` (search FTS, internal-links
+                # edges, AP outbox fanout) land in the same transaction
+                # as the status flip (issue #430). The try/except still
+                # rolls the whole row back if the hook raises.
                 pm.hook.on_post_published(item=post, session=db)
+                db.commit()
                 pm.hook.on_cache_purge(scope="post", key=str(post.id))
                 published.append(post.id)
                 click.echo(f"scheduled-publish: published id={post.id} slug={post.slug!r}")

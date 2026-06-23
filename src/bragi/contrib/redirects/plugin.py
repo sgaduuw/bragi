@@ -235,6 +235,14 @@ def _upsert_redirect(
     crashing the UNIQUE constraint or stacking dead rules. The
     `source` label distinguishes slug-change, kind-change, and
     home-page-change rows in the redirects admin.
+
+    Flushes but does NOT commit: the caller (the content request
+    handler) owns the single commit after the full hook chain, so
+    the content row, FTS index, redirect, and internal-links edges
+    land in one transaction (issue #430). The flush makes this row
+    visible to a later `_upsert_redirect` call's collision SELECT
+    within the same hook invocation (the session has autoflush off),
+    so two overlapping upserts can't stack a duplicate.
     """
     existing = session.execute(
         select(Redirect).where(
@@ -250,7 +258,7 @@ def _upsert_redirect(
             existing.status_code = 301
             existing.active = True
             existing.source = source
-            session.commit()
+            session.flush()
         return
     session.add(
         Redirect(
@@ -263,7 +271,7 @@ def _upsert_redirect(
             active=True,
         )
     )
-    session.commit()
+    session.flush()
 
 
 def _page_url_with_substituted_slug(session: Any, page: Page, leaf_slug: str) -> str:
@@ -455,7 +463,13 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], se
             # the new blog home. When no POST_INDEX exists
             # (the swap-with-nothing case), skip; the orphan-
             # post 410 path is deferred per issue.
-            new_post_index = post_index_page_for(site)
+            # Read the post_index on the SUPPLIED session, not a fresh
+            # SessionLocal: since issue #430 the handler commits ONCE
+            # after the hook chain, so the just-promoted POST_INDEX page
+            # is only pending in this session (uncommitted). A separate
+            # connection (the no-`db` path) wouldn't see it and the
+            # demotion 301 would silently not insert.
+            new_post_index = post_index_page_for(site, db=session)
             if new_post_index is not None and new_post_index.id != item.id:
                 old_prefix_path = page_url_for(item, db=session)
                 new_index_path = page_url_for(new_post_index, db=session)

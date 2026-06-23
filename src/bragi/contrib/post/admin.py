@@ -306,15 +306,20 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         db.add(new_post_row)
         db.flush()
         _sync_post_tags(db, new_post_row, form["tags"], site_id)
-        db.commit()
         new_id = new_post_row.id
         new_slug = new_post_row.slug
 
         # A brand-new post that starts published triggers
         # on_post_published just like an edit-time transition does.
-        if new_status == PostStatus.PUBLISHED:
-            pm = current_app.extensions["plugin_manager"]
+        pm = current_app.extensions["plugin_manager"]
+        published = new_status == PostStatus.PUBLISHED
+        if published:
             pm.hook.on_post_published(item=new_post_row, session=db)
+        # ONE commit AFTER the hook chain so the new row, its tags,
+        # and any publish-time index/edge writes land atomically
+        # (issue #430). Unconditional: a draft create must persist too.
+        db.commit()
+        if published:
             pm.hook.on_cache_purge(scope="post", key=str(new_id))
 
         flash(f"Post '{form['title']}' created.", "success")
@@ -422,7 +427,6 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post.status = form["status"]
 
         _sync_post_tags(db, post, form["tags"], post.site_id)
-        db.commit()
         updated_id = post.id
         updated_site_id = post.site_id
         after = _post_snapshot(post)
@@ -440,6 +444,11 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         # webhook fans, ...).
         if is_first_publish:
             pm.hook.on_post_published(item=post, session=db)
+        # ONE commit AFTER the whole hook chain so the content row,
+        # tags, FTS index, redirect, and internal-links edges land in
+        # one atomic transaction (issue #430). Unconditional: the save
+        # must persist even when skip_redirect fired no on_post_updated.
+        db.commit()
         # Any save invalidates the post's cached page. A slug
         # change also invalidates the old slug, but that one's
         # routed via the slug-change Redirect row and the redirect
@@ -553,12 +562,12 @@ def patch_title(site_slug: str, post_id: int) -> ResponseReturnValue:
 
         before = _post_snapshot(post)
         post.title = raw
-        db.commit()
-        db.refresh(post)
         after = _post_snapshot(post)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        # ONE commit AFTER the hook chain (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="post", key=str(post.id))
 
         cell_site = site
@@ -660,12 +669,13 @@ def patch_slug(site_slug: str, post_id: int) -> ResponseReturnValue:
 
         before = _post_snapshot(post)
         post.slug = raw
-        db.commit()
-        db.refresh(post)
         after = _post_snapshot(post)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        # ONE commit AFTER the hook chain so the slug change and its
+        # auto-301 redirect land atomically (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="post", key=str(post.id))
 
         cell_site = site
@@ -750,14 +760,14 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         if is_first_publish and post.published_at is None:
             post.published_at = naive_utcnow()
         post.status = raw
-        db.commit()
-        db.refresh(post)
         after = _post_snapshot(post)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
         if is_first_publish:
             pm.hook.on_post_published(item=post, session=db)
+        # ONE commit AFTER the hook chain (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="post", key=str(post.id))
 
         cell_site = site
@@ -1001,7 +1011,6 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         is_first_publish = was_unpublished and post.status == PostStatus.PUBLISHED
         if is_first_publish and post.published_at is None:
             post.published_at = naive_utcnow()
-        db.commit()
         restored_id = post.id
         site_id_for_audit = post.site_id
         after = _post_snapshot(post)
@@ -1009,6 +1018,8 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
         if is_first_publish:
             pm.hook.on_post_published(item=post, session=db)
+        # ONE commit AFTER the hook chain (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="post", key=str(restored_id))
 
     audit(

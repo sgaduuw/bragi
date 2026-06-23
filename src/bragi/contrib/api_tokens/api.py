@@ -223,8 +223,7 @@ def create_post(site_slug: str) -> ResponseReturnValue:
             meta_description=payload.get("meta_description"),
         )
         db.add(post)
-        db.commit()
-        out = _post_to_json(post)
+        db.flush()
         new_post_id = post.id
         is_published_now = status == PostStatus.PUBLISHED
 
@@ -237,6 +236,11 @@ def create_post(site_slug: str) -> ResponseReturnValue:
         pm = current_app.extensions["plugin_manager"]
         if is_published_now:
             pm.hook.on_post_published(item=post, session=db)
+        # ONE commit AFTER the hook chain so the new row and any
+        # publish-time index/edge writes land atomically (issue #430).
+        # Unconditional: a draft create must persist too.
+        db.commit()
+        out = _post_to_json(post)
         pm.hook.on_cache_purge(scope="post", key=str(new_post_id))
     return jsonify({"post": out}), 201
 
@@ -294,8 +298,6 @@ def update_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             post.published_at = _parse_dt(payload["published_at"])
         if "meta_description" in payload:
             post.meta_description = payload["meta_description"]
-        db.commit()
-        out = _post_to_json(post)
         after = {"slug": post.slug, "title": post.title, "status": post.status}
         updated_id = post.id
         is_first_publish = not was_published and post.status == PostStatus.PUBLISHED
@@ -308,6 +310,10 @@ def update_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
         if is_first_publish:
             pm.hook.on_post_published(item=post, session=db)
+        # ONE commit AFTER the whole hook chain so the content row,
+        # FTS index, redirect, and edges land atomically (issue #430).
+        db.commit()
+        out = _post_to_json(post)
         pm.hook.on_cache_purge(scope="post", key=str(updated_id))
     return jsonify({"post": out})
 
@@ -326,8 +332,6 @@ def publish_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         post.status = PostStatus.PUBLISHED
         if post.published_at is None:
             post.published_at = naive_utcnow()
-        db.commit()
-        out = _post_to_json(post)
         published_id = post.id
         is_first_publish = not was_published
 
@@ -340,6 +344,10 @@ def publish_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         pm = current_app.extensions["plugin_manager"]
         if is_first_publish:
             pm.hook.on_post_published(item=post, session=db)
+        # ONE commit AFTER the hook chain so the status flip and any
+        # publish-time index/edge writes land atomically (issue #430).
+        db.commit()
+        out = _post_to_json(post)
         pm.hook.on_cache_purge(scope="post", key=str(published_id))
     return jsonify({"post": out})
 

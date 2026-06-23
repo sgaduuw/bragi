@@ -576,7 +576,11 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             menu_order=_safe_int(form.get("menu_order")),
         )
         db.add(page_row)
-        db.commit()
+        # Flush (not commit) so page_row gets its id and the pending
+        # writes (incl. the existing_index demotion above) are visible
+        # to the hooks' in-session reads before the single post-chain
+        # commit (issue #430).
+        db.flush()
         new_id = page_row.id
         new_slug = page_row.slug
         pm = current_app.extensions["plugin_manager"]
@@ -602,11 +606,18 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 },
                 session=db,
             )
-        if new_status == PageStatus.PUBLISHED:
+        published = new_status == PageStatus.PUBLISHED
+        if published:
             # Mirror the post admin's first-publish path: subscribers
             # (search index, sitemap rebuild, indexnow ping, webhook
             # fans) get the same hook surface for pages as for posts.
             pm.hook.on_post_published(item=page_row, session=db)
+        # ONE commit AFTER the hook chain so the new page, the
+        # swap-demotion 301, and any publish-time index/edge writes
+        # land atomically (issue #430). Unconditional: a draft create
+        # must persist too.
+        db.commit()
+        if published:
             pm.hook.on_cache_purge(scope="page", key=str(new_id))
         flash(f"Page '{form['title']}' created.", "success")
 
@@ -784,7 +795,8 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         page.show_in_nav = form.get("show_in_nav") == "1"
         page.menu_order = _safe_int(form.get("menu_order"))
 
-        db.commit()
+        # `after` reads the just-mutated in-session attributes (no
+        # commit needed for plain ORM reads).
         updated_id = page.id
         updated_site_id = page.site_id
         after = {
@@ -795,6 +807,13 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             "parent_id": page.parent_id,
         }
         skip_redirect = request.form.get("skip_redirect") == "1"
+
+        # Flush the content mutation so the lifecycle hooks' in-session
+        # reads (e.g. redirects' `post_index_page_for(..., db=session)`
+        # on a POST_INDEX swap) see the new kind/slug/parent before the
+        # single post-chain commit (issue #430). The session has
+        # autoflush off, so this is explicit.
+        db.flush()
 
         pm = current_app.extensions["plugin_manager"]
         # Fire on_post_updated unless the editor opted out (typo-
@@ -827,6 +846,11 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         # subscribers see the same lifecycle as posts.
         if page.status == PageStatus.PUBLISHED and not was_published:
             pm.hook.on_post_published(item=page, session=db)
+        # ONE commit AFTER the whole hook chain so the content row,
+        # FTS index, redirect, and internal-links edges land in one
+        # atomic transaction (issue #430). Unconditional: the content
+        # save must persist even when skip_redirect fired no hook.
+        db.commit()
         pm.hook.on_cache_purge(scope="page", key=str(updated_id))
         flash(f"Page '{form['title']}' updated.", "success")
 
@@ -1166,7 +1190,6 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
         page.meta_description = revision.meta_description
         page.featured_image_id = revision.featured_image_id
         page.resume_data = revision.resume_data
-        db.commit()
         restored_id = page.id
         site_id_for_audit = page.site_id
         after = {
@@ -1185,6 +1208,8 @@ def restore_page_revision(site_slug: str, page_id: int, rev_id: int) -> Response
             # observable like a hand edit. (Page has no
             # `published_at` field, so no timestamp to stamp.)
             pm.hook.on_post_published(item=page, session=db)
+        # ONE commit AFTER the hook chain (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="page", key=str(restored_id))
 
     audit(
@@ -1253,12 +1278,12 @@ def patch_title(site_slug: str, page_id: int) -> ResponseReturnValue:
 
         before = _page_nav_snapshot(page)
         page.title = raw
-        db.commit()
-        db.refresh(page)
         after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # ONE commit AFTER the hook chain (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="page", key=str(page.id))
 
         cell_site = site
@@ -1368,8 +1393,6 @@ def patch_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
 
         before = _page_nav_snapshot(page)
         page.slug = raw
-        db.commit()
-        db.refresh(page)
         after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
@@ -1378,6 +1401,9 @@ def patch_slug(site_slug: str, page_id: int) -> ResponseReturnValue:
         # page URL when the slug changes (EXACT for STATIC pages,
         # PREFIX for POST_INDEX pages).
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # ONE commit AFTER the hook chain so the slug change and its
+        # auto-301 redirect land atomically (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="page", key=str(page.id))
 
         cell_site = site
@@ -1581,12 +1607,12 @@ def patch_status(site_slug: str, page_id: int) -> ResponseReturnValue:
 
         before = _page_nav_snapshot(page)
         page.status = raw
-        db.commit()
-        db.refresh(page)
         after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # ONE commit AFTER the hook chain (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="page", key=str(page.id))
 
         cell_site = site
@@ -1636,12 +1662,12 @@ def patch_show_in_nav(site_slug: str, page_id: int) -> ResponseReturnValue:
 
         before = _page_nav_snapshot(page)
         page.show_in_nav = not page.show_in_nav
-        db.commit()
-        db.refresh(page)
         after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # ONE commit AFTER the hook chain (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="page", key=str(page.id))
 
         cell_site = site
@@ -1715,12 +1741,12 @@ def patch_menu_order(site_slug: str, page_id: int) -> ResponseReturnValue:
         before = _page_nav_snapshot(page)
         assert value is not None  # narrowed by the try/except above
         page.menu_order = value
-        db.commit()
-        db.refresh(page)
         after = _page_nav_snapshot(page)
 
         pm = current_app.extensions["plugin_manager"]
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # ONE commit AFTER the hook chain (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="page", key=str(page.id))
 
         cell_site = site
@@ -1811,8 +1837,6 @@ def patch_parent(site_slug: str, page_id: int) -> ResponseReturnValue:
             "parent_id": page.parent_id,
         }
         page.parent_id = validated
-        db.commit()
-        db.refresh(page)
         after = {
             "slug": page.slug,
             "title": page.title,
@@ -1826,6 +1850,9 @@ def patch_parent(site_slug: str, page_id: int) -> ResponseReturnValue:
         # slug-change path (purges the moved page; descendant render
         # caches follow the same precedent as a slug change).
         pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # ONE commit AFTER the hook chain so the parent move and its
+        # subtree-301 redirect land atomically (issue #430).
+        db.commit()
         pm.hook.on_cache_purge(scope="page", key=str(page.id))
 
         cell_site_id = site.id
