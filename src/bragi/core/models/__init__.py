@@ -28,9 +28,11 @@ from bragi.core.models.internal_link import InternalLink
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.page_revision import PageRevision
+from bragi.core.models.page_working_copy import PageWorkingCopy
 from bragi.core.models.personal_access_token import PersonalAccessToken, TokenScope
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
+from bragi.core.models.post_working_copy import PostWorkingCopy
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.models.session import Session
 from bragi.core.models.site import Site
@@ -65,10 +67,12 @@ __all__ = [
     "Page",
     "PageRevision",
     "PageStatus",
+    "PageWorkingCopy",
     "PersonalAccessToken",
     "Post",
     "PostRevision",
     "PostStatus",
+    "PostWorkingCopy",
     "Redirect",
     "RedirectSource",
     "Role",
