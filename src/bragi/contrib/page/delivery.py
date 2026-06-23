@@ -30,7 +30,7 @@ similarly invisible to the dispatcher.
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from flask import (
     Blueprint,
@@ -399,36 +399,76 @@ def render_tag_feed(site: Site, tag_slug: str) -> Response | None:
 
 @bp.route("/_preview/<token>", methods=["GET"])
 def preview_working_copy(token: str) -> ResponseReturnValue:
-    """Render a page working copy from a signed token (read-only, noindex).
+    """Render a page OR post working copy from a signed token (read-only).
 
     This is the one delivery route that bypasses the published-only filter:
-    it renders STAGED content for a page that may itself be a draft. The
-    *only* gate is the signed, time-limited, site-scoped token. Every
-    failure mode collapses to a flat 404 (no oracle), and the render is
-    strictly read-only: no lifecycle hooks, no analytics, no hit-counter,
-    no writes.
+    it renders STAGED content for a page/post that may itself be a draft.
+    The *only* gate is the signed, time-limited, site-scoped token. Every
+    failure mode collapses to a flat 404 (no oracle); the one exception is
+    a valid page token whose staged kind has no preview path (POST_INDEX),
+    which is a documented 400. The render is strictly read-only: no
+    lifecycle hooks, no analytics, no hit-counter, no writes.
+
+    The token's signed `kind` selects the branch. `verify_preview_token` is
+    pinned per-kind, so a page-kind token can't render a post and a
+    post-kind token can't render a page: each verify returns `None` for the
+    wrong kind, and we try page then post, both opaque on failure.
 
     Werkzeug ranks this static-prefixed rule above the catch-all
     `/<path:slug_path>` converter, so `/_preview/<token>` is matched here
     and never reaches the page/post dispatcher.
     """
-    from bragi.contrib.page.preview import (
-        PagePreviewView,
-        PreviewUnsupportedKind,
-        render_preview,
-        verify_preview_token,
-    )
-    from bragi.core.models.page_working_copy import PageWorkingCopy
+    from bragi.contrib.page.preview import verify_preview_token
+    from bragi.core.preview_token import KIND_POST
+    from bragi.core.preview_token import verify_preview_token as verify_core_token
     from bragi.settings import settings
 
     site = g.get("site")
     if site is None:
         abort(404)
 
-    payload = verify_preview_token(token, max_age=settings.working_copy_preview_ttl_seconds)
-    if payload is None:
-        # Tampered, expired, malformed, or wrong-kind token. Flat 404.
-        abort(404)
+    ttl = settings.working_copy_preview_ttl_seconds
+
+    # Page-kind token: render through the page seam.
+    page_payload = verify_preview_token(token, max_age=ttl)
+    if page_payload is not None:
+        return _render_page_preview(page_payload, site)
+
+    # Post-kind token: render through the post seam (still owned here, see
+    # the post-preview block in `bragi.contrib.page.preview`).
+    post_payload = verify_core_token(token, kind=KIND_POST, max_age=ttl)
+    if post_payload is not None:
+        return _render_post_preview_response(post_payload, site)
+
+    # Tampered, expired, malformed, or a kind we don't render. Flat 404.
+    abort(404)
+
+
+def _preview_response(body: str) -> Response:
+    """Wrap a rendered preview body in the read-only, no-index response.
+
+    Shared by the page and post preview branches so the crawler-exclusion
+    and no-shared-cache headers are identical for both.
+    """
+    response = make_response(body)
+    # Belt-and-suspenders crawler exclusion: the header keeps the preview
+    # out of any index even though the URL is unguessable and short-lived.
+    # noindex (don't index this URL) + nofollow (don't crawl its links).
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    # Never let a shared cache (CDN, reverse proxy) retain a preview: it is
+    # per-token, short-lived, and shows unpublished content.
+    response.headers["Cache-Control"] = "no-store, private"
+    return cast(Response, response)
+
+
+def _render_page_preview(payload: dict[str, Any], site: Site) -> ResponseReturnValue:
+    """Render a verified page-kind preview payload (read-only, noindex)."""
+    from bragi.contrib.page.preview import (
+        PagePreviewView,
+        PreviewUnsupportedKind,
+        render_preview,
+    )
+    from bragi.core.models.page_working_copy import PageWorkingCopy
 
     # Site-scoping, defence in depth (two independent checks):
     # 1. The token's embedded site_id must match the resolved host's site,
@@ -458,15 +498,46 @@ def preview_working_copy(token: str) -> ResponseReturnValue:
             # path in v1. 400, not 404: the token was fine, the kind isn't.
             abort(400)
 
-    response = make_response(body)
-    # Belt-and-suspenders crawler exclusion: the header keeps the preview
-    # out of any index even though the URL is unguessable and short-lived.
-    # noindex (don't index this URL) + nofollow (don't crawl its links).
-    response.headers["X-Robots-Tag"] = "noindex, nofollow"
-    # Never let a shared cache (CDN, reverse proxy) retain a preview: it is
-    # per-token, short-lived, and shows unpublished content.
-    response.headers["Cache-Control"] = "no-store, private"
-    return response
+    return _preview_response(body)
+
+
+def _render_post_preview_response(payload: dict[str, Any], site: Site) -> ResponseReturnValue:
+    """Render a verified post-kind preview payload (read-only, noindex).
+
+    The post-preview render seam (`PostPreviewView` / `render_post_preview`)
+    lives in `bragi.contrib.page.preview` because the page plugin already
+    owns public post rendering; it reads only core models, so this stays in
+    the page plugin without crossing into the post plugin. Tags are resolved
+    from the working copy's `tag_ids` to `Tag` objects for display (a plain
+    read; the live `post_tags` junction is never touched).
+    """
+    from bragi.contrib.page.preview import (
+        PostPreviewView,
+        render_post_preview,
+        resolve_staged_tags,
+    )
+    from bragi.core.models.post import Post
+    from bragi.core.models.post_working_copy import PostWorkingCopy
+
+    # Triple site-scope: token site_id, WC site_id, and live post site_id
+    # must all equal the Host-resolved site. Same defence-in-depth as the
+    # page branch.
+    if payload["site_id"] != site.id:
+        abort(404)
+
+    with SessionLocal() as db:
+        wc = db.get(PostWorkingCopy, payload["wc_id"])
+        if wc is None or wc.site_id != site.id:
+            abort(404)
+        live = db.get(Post, wc.post_id)
+        if live is None or live.site_id != site.id:
+            abort(404)
+
+        staged_tags = resolve_staged_tags(db, site.id, wc.tag_ids)
+        view = PostPreviewView(wc, live, staged_tags=staged_tags)
+        body = render_post_preview(view, request)
+
+    return _preview_response(body)
 
 
 # ============================================================

@@ -1011,21 +1011,19 @@ def _wc_for_page(db: Session, site_id: int, page_id: int) -> PageWorkingCopy | N
 
 
 def _working_copy_preview_url(wc: PageWorkingCopy, site: Site) -> str | None:
-    """Delivery-host URL to preview a working copy, or None if no origin.
+    """Delivery-host URL to preview a page working copy, or None if no origin.
 
-    The admin and delivery apps run on different origins; the signed token
-    is the only thing that crosses. Uses `settings.delivery_base_url` when
-    set (dev, where one delivery process serves every site on a local port
-    the per-site `canonical_url` can't express), else the site's public
+    Thin wrapper over the shared `bragi.core.preview_token` helper, binding
+    `kind="page"` and the working copy's ids. The admin and delivery apps
+    run on different origins; the signed token is the only thing that
+    crosses. The helper uses `settings.delivery_base_url` when set (dev,
+    where one delivery process serves every site on a local port the
+    per-site `canonical_url` can't express), else the site's public
     `canonical_url` (multisite prod, each site its own origin).
     """
-    from bragi.contrib.page.preview import mint_preview_token
-    from bragi.settings import settings
+    from bragi.core.preview_token import KIND_PAGE, working_copy_preview_url
 
-    base = (settings.delivery_base_url or site.canonical_url or "").rstrip("/")
-    if not base:
-        return None
-    return f"{base}/_preview/{mint_preview_token(wc)}"
+    return working_copy_preview_url(kind=KIND_PAGE, wc_id=wc.id, site_id=wc.site_id, site=site)
 
 
 @bp.route("/<int:page_id>/working-copy/stage", methods=["POST"])

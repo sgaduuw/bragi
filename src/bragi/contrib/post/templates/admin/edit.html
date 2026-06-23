@@ -19,10 +19,16 @@
   <p><strong>You're editing a working copy &mdash; the live post is unchanged.</strong></p>
   <p>
     Saves here go to the working copy only; they do not publish.
-    {# TODO(#414 Task 5b/5c): add Preview (signed delivery-host link) and
-       Promote (copy staged content onto the live post + publish) here,
-       mirroring the page working-copy banner. #}
+    {# TODO(#414 Task 5c): add Promote (copy staged content onto the live
+       post + publish) here, mirroring the page working-copy banner. #}
   </p>
+  {# Preview (Task 5b): opens the staged content rendered through the real
+     theme at the live post URL, on the delivery host, in a new tab.
+     Suppressed when the site has no canonical (delivery) URL configured
+     (preview_url is None). #}
+  {% if preview_url %}
+  <a href="{{ preview_url }}" target="_blank" rel="noopener" class="button">Preview &raquo;</a>
+  {% endif %}
   {# Discard (Task 5a): delete the working copy; the live post is
      unaffected, no hooks fire. #}
   <form method="post"

@@ -207,6 +207,7 @@ def _render_post_form(
     *,
     is_working_copy: bool = False,
     working_copy_post_id: int | None = None,
+    preview_url: str | None = None,
 ) -> str:
     """Render the post create/edit form (`admin/edit.html`).
 
@@ -218,8 +219,10 @@ def _render_post_form(
     `PostWorkingCopy`: both expose the same editable attribute names, so
     the template binds to either via the editable-source seam. The
     `is_working_copy` / `working_copy_post_id` flags drive the WC banner
-    and the form's WC POST target (both falsy-guarded in the template,
-    so a default is equivalent to the kwarg being absent).
+    and the form's WC POST target; `preview_url` drives the WC banner's
+    "Preview" link (the signed delivery-host preview URL). All are
+    falsy-guarded in the template, so a default is equivalent to the kwarg
+    being absent.
     """
     fid = form.get("featured_image_id")
     return render_template(
@@ -230,6 +233,7 @@ def _render_post_form(
         featured_image_thumb_key=_featured_image_thumb_key(db, fid, site_id),
         is_working_copy=is_working_copy,
         working_copy_post_id=working_copy_post_id,
+        preview_url=preview_url,
     )
 
 
@@ -648,6 +652,21 @@ def _wc_for_post(db: Session, site_id: int, post_id: int) -> PostWorkingCopy | N
     ).scalar_one_or_none()
 
 
+def _working_copy_preview_url(wc: PostWorkingCopy, site: Site) -> str | None:
+    """Delivery-host URL to preview a post working copy, or None if no origin.
+
+    Thin wrapper over the shared `bragi.core.preview_token` helper, binding
+    `kind="post"` and the working copy's ids. The admin and delivery apps
+    run on different origins; the signed token is the only thing that
+    crosses. The helper uses `settings.delivery_base_url` when set (dev),
+    else the site's public `canonical_url` (multisite prod), and returns
+    None when no origin is configured so the banner suppresses the link.
+    """
+    from bragi.core.preview_token import KIND_POST, working_copy_preview_url
+
+    return working_copy_preview_url(kind=KIND_POST, wc_id=wc.id, site_id=wc.site_id, site=site)
+
+
 def _tag_labels_for_ids(db: Session, site_id: int, tag_ids: list[int] | None) -> str:
     """Resolve a working copy's stored `tag_ids` to a comma-joined label
     string for the edit form's `tags` input.
@@ -774,6 +793,10 @@ def post_working_copy_editor(site_slug: str, post_id: int) -> ResponseReturnValu
         )
 
         tag_labels = _tag_labels_for_ids(db, site.id, wc.tag_ids)
+        # Preview (Task 5b): the delivery-host URL for the signed post
+        # token, opened in a new tab from the WC banner. None when the site
+        # has no delivery origin configured (the banner suppresses it).
+        preview_url = _working_copy_preview_url(wc, site)
         return _render_post_form(
             db,
             site.id,
@@ -781,6 +804,7 @@ def post_working_copy_editor(site_slug: str, post_id: int) -> ResponseReturnValu
             _form_from_working_copy(wc, tag_labels),
             is_working_copy=True,
             working_copy_post_id=post.id,
+            preview_url=preview_url,
         )
 
 
@@ -809,6 +833,10 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
             abort(404)
 
         def _rerender(form: dict[str, str]) -> str:
+            # The token previews the WC's last-saved state; on a validation
+            # error nothing was written, so the saved content is still what
+            # the token renders. Mint fresh so the link is always live.
+            preview_url = _working_copy_preview_url(wc, site)
             return _render_post_form(
                 db,
                 site.id,
@@ -816,6 +844,7 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
                 form,
                 is_working_copy=True,
                 working_copy_post_id=post.id,
+                preview_url=preview_url,
             )
 
         form = _form_from_request()

@@ -1,18 +1,20 @@
-"""Working-copy preview: signed token + render overlay (issue #414, Task 3).
+"""Working-copy preview: page render overlay + render seam (issue #414).
 
 A preview lets an operator see a `PageWorkingCopy`'s staged content rendered
 through the *real* delivery theme, at the live page's URL, before promoting.
 The admin and delivery apps run on different hosts; the only thing that
-crosses between them is a signed, time-limited token. This module owns three
-concerns, all read-only:
+crosses between them is a signed, time-limited token.
 
-1. **Token mint / verify** (`mint_preview_token` / `verify_preview_token`).
-   An `itsdangerous.URLSafeTimedSerializer` keyed on the app `SECRET_KEY`
-   signs `{"kind": "page", "wc_id": ..., "site_id": ...}`. The signature
-   makes the token unforgeable; `max_age` on verify makes it expire; the
-   embedded `site_id` lets the delivery route reject a token replayed on a
-   different site's host. A tampered, expired, or malformed token verifies
-   to `None` (the caller turns that into a 404, never a revealing error).
+The generic token concern (mint / verify) lives in
+`bragi.core.preview_token` so the page and post plugins can both mint a
+token without importing each other (the contrib boundary forbids
+contrib-to-contrib imports). This module keeps the page-specific render
+seam plus thin `mint_preview_token` / `verify_preview_token` wrappers that
+bind the `kind="page"` argument so the page admin / delivery call sites and
+their tests stay unchanged:
+
+1. **Token mint / verify wrappers** (`mint_preview_token` /
+   `verify_preview_token`). Delegate to the core token with `kind="page"`.
 
 2. **The render overlay** (`PagePreviewView`). The delivery render path
    (`_render_page` in this plugin) reads a set of attributes off a `Page`.
@@ -51,70 +53,39 @@ from __future__ import annotations
 from typing import Any
 
 from flask import current_app
-from itsdangerous import BadData, URLSafeTimedSerializer
 
 from bragi.core.models.page import Page, PageKind
 from bragi.core.models.page_working_copy import PageWorkingCopy
-
-# Namespace the serializer so a token minted for this purpose can never be
-# confused with a token from another itsdangerous user of the same
-# SECRET_KEY (Flask's session cookie, a future password-reset link, ...).
-_PREVIEW_SALT = "bragi.page.working-copy-preview"
-
-# The only `kind` this module mints/accepts in v1. Posts (Task 5) will add
-# their own kind; verify rejects anything else so a page route can't be
-# handed a post token.
-_KIND_PAGE = "page"
-
-
-def _serializer() -> URLSafeTimedSerializer:
-    """Build the signer keyed on the running app's SECRET_KEY.
-
-    Read from `current_app.config["SECRET_KEY"]` (set from
-    `settings.secret_key` in both app factories) rather than from settings
-    directly, so the token is bound to the exact key the app is configured
-    with. Both admin (mint) and delivery (verify) load the same
-    SECRET_KEY, which is what lets a token cross between the two hosts.
-    """
-    return URLSafeTimedSerializer(
-        current_app.config["SECRET_KEY"],
-        salt=_PREVIEW_SALT,
-    )
+from bragi.core.models.post import Post
+from bragi.core.models.post_working_copy import PostWorkingCopy
+from bragi.core.models.tag import Tag
+from bragi.core.preview_token import _PREVIEW_SALT as _PREVIEW_SALT  # noqa: PLC0414
+from bragi.core.preview_token import KIND_PAGE
+from bragi.core.preview_token import mint_preview_token as _core_mint
+from bragi.core.preview_token import verify_preview_token as _core_verify
 
 
 def mint_preview_token(wc: PageWorkingCopy) -> str:
     """Sign a preview token for the given page working copy.
 
-    Payload is `{"kind": "page", "wc_id": <id>, "site_id": <id>}`. The
+    Thin wrapper over `bragi.core.preview_token.mint_preview_token` binding
+    `kind="page"` and pulling `wc_id` / `site_id` off the working copy. The
     `site_id` is embedded so the delivery route can reject a token replayed
     against a different site's host even before it loads the working copy.
     """
-    return _serializer().dumps({"kind": _KIND_PAGE, "wc_id": wc.id, "site_id": wc.site_id})
+    return _core_mint(kind=KIND_PAGE, wc_id=wc.id, site_id=wc.site_id)
 
 
 def verify_preview_token(token: str, *, max_age: int) -> dict[str, Any] | None:
-    """Verify + decode a preview token, or return None.
+    """Verify + decode a page-kind preview token, or return None.
 
-    Returns the payload dict on a valid, unexpired, untampered, page-kind
-    token. Returns `None` (never raises to the caller, never distinguishes
-    the failure mode) when the token is malformed, the signature is bad, it
-    has expired past `max_age` seconds, or the decoded shape is not a
-    page-preview payload. The caller maps `None` to a flat 404 so there is
-    no oracle for an attacker probing tokens.
+    Thin wrapper over `bragi.core.preview_token.verify_preview_token` with
+    `kind="page"`, so a post-kind token verifies to `None` here and a page
+    route can't be handed a post token. Returns `None` (never raises) for a
+    malformed, bad-signature, expired, wrong-shape, or wrong-kind token; the
+    caller maps that to a flat 404 so there is no oracle.
     """
-    try:
-        payload = _serializer().loads(token, max_age=max_age)
-    except BadData:
-        # Covers SignatureExpired, BadSignature, BadTimeSignature, and any
-        # malformed/garbage input. One opaque failure for every cause.
-        return None
-    if not isinstance(payload, dict):
-        return None
-    if payload.get("kind") != _KIND_PAGE:
-        return None
-    if not isinstance(payload.get("wc_id"), int) or not isinstance(payload.get("site_id"), int):
-        return None
-    return payload
+    return _core_verify(token, kind=KIND_PAGE, max_age=max_age)
 
 
 class PagePreviewView:
@@ -255,4 +226,186 @@ def render_preview(view: PagePreviewView, request: Any) -> str:
         raise PreviewUnsupportedKind(view.kind)
     registry = current_app.extensions["registry"]
     spec = registry.content_type("page")
+    return str(spec.render(view, request))
+
+
+# ============================================================
+# Post working-copy preview (issue #414, Task 5b)
+#
+# The page plugin already owns public POST rendering (the dispatcher's
+# `render_post` drives the registered `post` content-type spec, because
+# post URLs derive from the site's POST_INDEX page). So the post-preview
+# render seam lives here too, alongside the page seam: it reads only
+# `bragi.core.models` (Post / PostWorkingCopy / Tag), never the post
+# plugin, which keeps the contrib boundary intact (a contrib plugin may
+# import core models but never a sibling contrib).
+# ============================================================
+
+
+class PostPreviewView:
+    """Read-only overlay: working-copy content over a live post's identity.
+
+    The registered `post` content-type renderer (the post plugin's
+    `_render_post`, plus `delivery/post.html`, `featured_image_url_for`,
+    and `related_posts_for`) reads a fixed set of attributes off its `post`
+    argument. This view exposes every one of them, sourcing:
+
+    - **content + meta** (`title`, `subtitle`, `body_html`, `body_markdown`,
+      `body_excerpt`, `meta_title`, `meta_description`, `canonical_url`,
+      `noindex`, `featured_image_id`, `is_pinned`, `pinned_until`, `tags`)
+      from the **working copy**, so the preview shows the staged edits; and
+    - **identity + URL** (`id`, `site_id`, `slug`, `author_id`,
+      `published_at`, `updated_at`, `featured_image`) from the **live
+      post**, so the preview renders at the live post's canonical URL with
+      its real author byline, publish date, and the live featured-image
+      relationship.
+
+    Why slug/identity come from the live row: the preview shows "what this
+    post will look like, in place." A staged slug change moves the *future*
+    URL, but the operator is previewing content; pinning the preview to the
+    live identity keeps `post_url_for` and the related-posts query (which
+    reads `view.id` / `view.site_id` and walks the **live** `post_tags`
+    junction, untouched by staging) stable against rows that actually exist
+    in `posts`. The staged slug still takes effect at promote.
+
+    **Tags** are resolved from the working copy's `tag_ids` to real `Tag`
+    objects by the caller (the live junction is never touched) and passed in
+    as `staged_tags`, so a theme that renders `post.tags` shows the staged
+    set, not the live one.
+
+    The view is a plain in-memory object. It is never added to a session and
+    holds no live ORM state beyond the two rows + the resolved tag list
+    passed in, so rendering it cannot write anything.
+    """
+
+    def __init__(
+        self,
+        wc: PostWorkingCopy,
+        live: Post,
+        *,
+        staged_tags: list[Tag],
+    ) -> None:
+        self._wc = wc
+        self._live = live
+        self._staged_tags = staged_tags
+
+    # --- identity / URL: from the live post ---
+    @property
+    def id(self) -> int:
+        return self._live.id
+
+    @property
+    def site_id(self) -> int:
+        return self._live.site_id
+
+    @property
+    def slug(self) -> str:
+        return self._live.slug
+
+    @property
+    def author_id(self) -> int:
+        return self._live.author_id
+
+    @property
+    def published_at(self) -> Any:
+        return self._live.published_at
+
+    @property
+    def updated_at(self) -> Any:
+        return self._live.updated_at
+
+    @property
+    def featured_image(self) -> Any:
+        # The eager-loaded relationship a theme may read for an inline hero.
+        # `featured_image_url_for` resolves by id (`featured_image_id`
+        # below); this mirrors the live row's loaded relationship for
+        # template parity.
+        return self._live.featured_image
+
+    # --- content / meta: from the working copy ---
+    @property
+    def title(self) -> str:
+        return self._wc.title
+
+    @property
+    def subtitle(self) -> str | None:
+        return self._wc.subtitle
+
+    @property
+    def body_html(self) -> str:
+        return self._wc.body_html
+
+    @property
+    def body_markdown(self) -> str:
+        return self._wc.body_markdown
+
+    @property
+    def body_excerpt(self) -> str:
+        return self._wc.body_excerpt
+
+    @property
+    def meta_title(self) -> str | None:
+        return self._wc.meta_title
+
+    @property
+    def meta_description(self) -> str | None:
+        return self._wc.meta_description
+
+    @property
+    def canonical_url(self) -> str | None:
+        return self._wc.canonical_url
+
+    @property
+    def noindex(self) -> bool:
+        return self._wc.noindex
+
+    @property
+    def featured_image_id(self) -> int | None:
+        return self._wc.featured_image_id
+
+    @property
+    def is_pinned(self) -> bool:
+        return self._wc.is_pinned
+
+    @property
+    def pinned_until(self) -> Any:
+        return self._wc.pinned_until
+
+    @property
+    def tags(self) -> list[Tag]:
+        # Resolved from the WC's `tag_ids` by the caller (live junction
+        # untouched). A theme reading `post.tags` shows the staged set.
+        return self._staged_tags
+
+
+def resolve_staged_tags(db: Any, site_id: int, tag_ids: list[int] | None) -> list[Tag]:
+    """Resolve a post working copy's `tag_ids` to `Tag` objects, for display.
+
+    Site-scoped; ids that no longer resolve (a tag deleted since staging)
+    are silently dropped. Order follows `tag_ids` so the preview is stable.
+    Read-only: a plain SELECT, no junction write (the live `post_tags` is
+    untouched until promote). Returns `[]` for an empty / None list.
+    """
+    if not tag_ids:
+        return []
+    from sqlalchemy import select
+
+    stmt = select(Tag).where(Tag.site_id == site_id, Tag.id.in_(tag_ids))
+    rows = db.execute(stmt).scalars().all()
+    by_id = {t.id: t for t in rows}
+    return [by_id[tid] for tid in tag_ids if tid in by_id]
+
+
+def render_post_preview(view: PostPreviewView, request: Any) -> str:
+    """Render a post preview view through the live `post` content renderer.
+
+    Drives the *same* registered `render` callable the live delivery path
+    uses (the post plugin's `_render_post`), so the preview goes through the
+    real theme template, not a parallel one. Returns the body string; the
+    caller (the delivery `_preview` route) attaches the `noindex` headers.
+    The overlay-vs-live-row distinction is invisible to `_render_post`,
+    which reads only attribute names the view also exposes.
+    """
+    registry = current_app.extensions["registry"]
+    spec = registry.content_type("post")
     return str(spec.render(view, request))
