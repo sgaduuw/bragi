@@ -46,6 +46,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
+from bragi.core.models.post_working_copy import PostWorkingCopy
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.permissions import (
@@ -155,6 +156,33 @@ def _snapshot_post(
     )
 
 
+def _resolve_tags_from_csv(
+    db: Session,
+    raw_tags: str,
+    site_id: int,
+) -> list[Tag]:
+    """Upsert Tag rows from the CSV input and return them (no junction write).
+
+    Shared by `_sync_post_tags` (live post; assigns the junction) and the
+    working-copy stage/save path (captures the resolved ids into
+    `tag_ids` without touching `post_tags`). New tags are created and
+    flushed so they get an id; existing tags are re-used by `(site_id,
+    slug)`.
+    """
+    parsed = _parse_tag_csv(raw_tags)
+    tags: list[Tag] = []
+    for slug, label in parsed:
+        existing = db.execute(
+            select(Tag).where(Tag.site_id == site_id, Tag.slug == slug)
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = Tag(site_id=site_id, slug=slug, label=label)
+            db.add(existing)
+            db.flush()
+        tags.append(existing)
+    return tags
+
+
 def _sync_post_tags(
     db: Session,
     post: Post,
@@ -168,28 +196,30 @@ def _sync_post_tags(
     deleted when they fall off a post (other posts may still use
     them; orphan cleanup is a later admin command).
     """
-    parsed = _parse_tag_csv(raw_tags)
-    tags: list[Tag] = []
-    for slug, label in parsed:
-        existing = db.execute(
-            select(Tag).where(Tag.site_id == site_id, Tag.slug == slug)
-        ).scalar_one_or_none()
-        if existing is None:
-            existing = Tag(site_id=site_id, slug=slug, label=label)
-            db.add(existing)
-            db.flush()
-        tags.append(existing)
-    post.tags = tags
+    post.tags = _resolve_tags_from_csv(db, raw_tags, site_id)
 
 
-def _render_post_form(db: Session, site_id: int, post: Post | None, form: dict[str, str]) -> str:
+def _render_post_form(
+    db: Session,
+    site_id: int,
+    post: Post | PostWorkingCopy | None,
+    form: dict[str, str],
+    *,
+    is_working_copy: bool = False,
+    working_copy_post_id: int | None = None,
+) -> str:
     """Render the post create/edit form (`admin/edit.html`).
 
-    Every GET and re-render-on-error path in `new_post` and
-    `edit_post` funnels through here so the identical render_template
-    kwarg list lives in one place. The featured-image preview is
-    derived from `form['featured_image_id']` (empty/absent -> no
-    thumbnail, no DB hit).
+    Every GET and re-render-on-error path in `new_post`, `edit_post`,
+    and the working-copy editor funnels through here so the identical
+    render_template kwarg list lives in one place. The featured-image
+    preview is derived from `form['featured_image_id']` (empty/absent ->
+    no thumbnail, no DB hit). `post` may be a live `Post` OR a
+    `PostWorkingCopy`: both expose the same editable attribute names, so
+    the template binds to either via the editable-source seam. The
+    `is_working_copy` / `working_copy_post_id` flags drive the WC banner
+    and the form's WC POST target (both falsy-guarded in the template,
+    so a default is equivalent to the kwarg being absent).
     """
     fid = form.get("featured_image_id")
     return render_template(
@@ -198,6 +228,8 @@ def _render_post_form(db: Session, site_id: int, post: Post | None, form: dict[s
         form=form,
         featured_image=_load_featured_image(db, fid, site_id),
         featured_image_thumb_key=_featured_image_thumb_key(db, fid, site_id),
+        is_working_copy=is_working_copy,
+        working_copy_post_id=working_copy_post_id,
     )
 
 
@@ -213,6 +245,124 @@ def _post_snapshot(post: Post) -> dict[str, object]:
         "status": post.status,
         "is_pinned": post.is_pinned,
         "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
+    }
+
+
+# ============================================================
+# Editable-source seam (issue #414, Task 5)
+#
+# A `PostWorkingCopy` and a live `Post` share an identically-named
+# editable surface by design. These helpers let the same edit form
+# and the same field-assignment logic work against EITHER object,
+# so the live-edit path (`edit_post`) and the working-copy path
+# (`save_post_working_copy`) don't drift. Mirrors the page plugin's
+# seam; the post deltas are `subtitle`, `is_pinned` / `pinned_until`,
+# and tags-as-`tag_ids` (no `parent_id` / `kind` / `resume_data`).
+# ============================================================
+
+# The editable columns shared, name-for-name, between Post and
+# PostWorkingCopy. `fork_post_working_copy` copies exactly these.
+# Deliberately excludes Post-only fields (author_id, source_id,
+# source_meta, published_at, scheduled_for) and the live-only
+# `status` (a working copy never carries status; the live row keeps
+# PUBLISHED through promote). Tags are NOT in this tuple: they live in
+# the junction on the live Post and as `tag_ids` on the working copy,
+# so they're handled separately (not a plain attribute copy).
+_EDITABLE_POST_FIELDS: tuple[str, ...] = (
+    "title",
+    "subtitle",
+    "slug",
+    "body_markdown",
+    "body_html",
+    "body_excerpt",
+    "meta_title",
+    "meta_description",
+    "canonical_url",
+    "noindex",
+    "featured_image_id",
+    "is_pinned",
+    "pinned_until",
+)
+
+
+def fork_post_working_copy(post: Post, *, editor_user_id: int | None) -> PostWorkingCopy:
+    """Build a `PostWorkingCopy` carrying the live post's editable fields.
+
+    Copies every column in `_EDITABLE_POST_FIELDS` verbatim from the
+    live row, captures the live tag ids into `tag_ids`, then stamps the
+    staging metadata (`site_id`, `post_id`, `editor_user_id`). The
+    returned object is detached; the caller `db.add()`s and commits it.
+    Does NOT touch the live `Post` row and fires no hooks (nothing is
+    live yet).
+    """
+    wc = PostWorkingCopy(
+        site_id=post.site_id,
+        post_id=post.id,
+        editor_user_id=editor_user_id,
+    )
+    for field in _EDITABLE_POST_FIELDS:
+        setattr(wc, field, getattr(post, field))
+    # Snapshot the live tag set as ids; the WC stores ids, not junction
+    # rows (promote, Task 5c, writes the real post_tags). Empty -> None.
+    wc.tag_ids = [t.id for t in post.tags] or None
+    return wc
+
+
+def _apply_post_form_fields(
+    target: Post | PostWorkingCopy,
+    form: dict[str, str],
+    *,
+    featured_image_id: int | None,
+    pinned_until: datetime | None,
+) -> None:
+    """Assign the post-edit form fields onto `target` (live Post or WC).
+
+    The single source of truth for the title/subtitle/slug/body/
+    featured-image/pin assignments plus the body_html render and excerpt
+    derivation, shared by `edit_post` (live) and `save_post_working_copy`
+    (working copy). `status` and tags are deliberately NOT set here:
+    `status` is live-only (the live-edit path sets it separately; a
+    working copy has no status column), and tags differ by target
+    (junction on the live post, `tag_ids` on the working copy), so each
+    caller handles tags itself. `featured_image_id` and `pinned_until`
+    are pre-resolved/validated by the caller (same shape as the page
+    seam passing pre-resolved `parent_id` / `featured_image_id`).
+
+    `subtitle` is deliberately NOT assigned: the post edit form carries
+    no subtitle input, so `edit_post` never touches it. The fork copies
+    the live subtitle into the working copy (and promote carries it
+    back), but a save must not blank a field the form can't set.
+    """
+    body_markdown = form["body_markdown"]
+    target.title = form["title"]
+    target.slug = form["slug"]
+    target.body_markdown = body_markdown
+    target.body_html = render_markdown(body_markdown)
+    target.body_excerpt = make_excerpt(body_markdown)
+    target.featured_image_id = featured_image_id
+    target.is_pinned = form["is_pinned"] == "1"
+    target.pinned_until = pinned_until
+
+
+def _form_from_working_copy(wc: PostWorkingCopy, tag_labels: str) -> dict[str, str]:
+    """Build the edit-form dict from a working copy (the WC-editor GET).
+
+    Mirrors the `edit_post` GET form-dict shape so `admin/edit.html`
+    renders identically whether bound to a live Post or a WC. A working
+    copy has no `status`, so it shows as draft-equivalent; the status
+    control is hidden in WC mode by the template, so the value is inert.
+    `tag_labels` is the comma-joined label string resolved from the WC's
+    stored `tag_ids` (the caller looks the Tag rows up).
+    """
+    return {
+        "title": wc.title,
+        "slug": wc.slug,
+        "body_markdown": wc.body_markdown,
+        "status": PostStatus.DRAFT,
+        "tags": tag_labels,
+        "featured_image_id": str(wc.featured_image_id) if wc.featured_image_id else "",
+        "is_pinned": "1" if wc.is_pinned else "",
+        "pinned_until": (wc.pinned_until.strftime("%Y-%m-%dT%H:%M") if wc.pinned_until else ""),
     }
 
 
@@ -387,28 +537,30 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             flash(featured_image_err, "error")
             return _render_post_form(db, post.site_id, post, form)
 
+        # Pinning. The checkbox semantics: "1" -> True, "" -> False.
+        # The datetime input has its own validator that surfaces a
+        # flash if the format is wrong. Parsed BEFORE mutating so a bad
+        # date re-renders the form without a half-applied edit.
+        pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
+        if pin_err is not None:
+            flash(pin_err, "error")
+            return _render_post_form(db, post.site_id, post, form)
+
         before = _post_snapshot(post)
         # Snapshot the pre-edit state so the editor can roll back
         # later. Captured BEFORE the mutation: the live row stays
         # "current" and the most recent revision is "what it was
         # before this save".
         _snapshot_post(db, post, editor_user_id=int(session["user_id"]))
-        post.title = form["title"]
-        post.slug = form["slug"]
-        post.body_markdown = form["body_markdown"]
-        post.body_html = render_markdown(form["body_markdown"])
-        post.body_excerpt = make_excerpt(form["body_markdown"])
-        post.featured_image_id = featured_image_id
-
-        # Pinning. The checkbox semantics: "1" -> True, "" -> False.
-        # The datetime input has its own validator that surfaces a
-        # flash if the format is wrong.
-        pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
-        if pin_err is not None:
-            flash(pin_err, "error")
-            return _render_post_form(db, post.site_id, post, form)
-        post.is_pinned = form["is_pinned"] == "1"
-        post.pinned_until = pinned_until
+        # Shared field-assignment (live Post or working copy go through
+        # the same seam). `status` is live-only, so it's set below, not
+        # in `_apply_post_form_fields`; tags are handled separately.
+        _apply_post_form_fields(
+            post,
+            form,
+            featured_image_id=featured_image_id,
+            pinned_until=pinned_until,
+        )
 
         # Transition to published sets published_at the first time
         # the column is empty (i.e. the post has never been
@@ -466,6 +618,262 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         extra={"before": before, "after": after},
     )
     return redirect(url_for("post_admin.list_posts"))
+
+
+# ============================================================
+# Working copy: stage / edit / discard (issue #414, Task 5)
+#
+# A working copy holds the editable surface of a PUBLISHED post so an
+# operator can edit and (later) preview/promote while the live row
+# stays untouched. Editing a working copy fires NO lifecycle hooks
+# (nothing is live) and never mutates the live `Post`. Mirrors the
+# page plugin's stage/edit/discard; the post deltas are subtitle,
+# pin state, and tags-as-`tag_ids` (captured without writing the
+# `post_tags` junction; promote, Task 5c, writes the real rows).
+# ============================================================
+
+
+def _wc_for_post(db: Session, site_id: int, post_id: int) -> PostWorkingCopy | None:
+    """Load the working copy for `post_id` on `site_id`, or None.
+
+    Site-scoped: a working copy from another site is invisible (the
+    UNIQUE is on `(site_id, post_id)`, and the query filters site_id
+    so a cross-site post id can't surface another tenant's WC).
+    """
+    return db.execute(
+        select(PostWorkingCopy).where(
+            PostWorkingCopy.site_id == site_id,
+            PostWorkingCopy.post_id == post_id,
+        )
+    ).scalar_one_or_none()
+
+
+def _tag_labels_for_ids(db: Session, site_id: int, tag_ids: list[int] | None) -> str:
+    """Resolve a working copy's stored `tag_ids` to a comma-joined label
+    string for the edit form's `tags` input.
+
+    Site-scoped; ids that no longer resolve (a tag deleted since
+    staging) are silently dropped. Order follows `tag_ids` so the form
+    is stable across reloads.
+    """
+    if not tag_ids:
+        return ""
+    rows = (
+        db.execute(select(Tag).where(Tag.site_id == site_id, Tag.id.in_(tag_ids))).scalars().all()
+    )
+    by_id = {t.id: t.label for t in rows}
+    return ", ".join(by_id[tid] for tid in tag_ids if tid in by_id)
+
+
+def _capture_tag_ids(db: Session, raw_tags: str, site_id: int) -> list[int] | None:
+    """Resolve the form's tag CSV to a list of tag ids for the WC.
+
+    Upserts Tag rows (so a newly-typed tag gets an id) via the shared
+    `_resolve_tags_from_csv`, then returns just their ids. Crucially does
+    NOT write the `post_tags` junction: the working copy stores ids only,
+    and promote (Task 5c) reconciles the junction atomically. Empty -> None
+    (matching the column default and the fork's empty-tags shape).
+    """
+    tags = _resolve_tags_from_csv(db, raw_tags, site_id)
+    return [t.id for t in tags] or None
+
+
+@bp.route("/<int:post_id>/working-copy/stage", methods=["POST"])
+def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Stage the operator's CURRENT edits into a working copy, then open
+    the working-copy editor.
+
+    Reached from the live edit form via a `formaction` submit button, so
+    the POST carries the full edit form (the operator's unsaved typing),
+    not just the post id. Those fields are applied to the working copy,
+    so staging captures what the operator is editing rather than forking
+    the stale stored row. Get-or-create: a second stage reuses the
+    existing working copy (`UNIQUE(site_id, post_id)`) and overwrites it
+    with the latest edits (latest edits win). The selected tags are
+    captured into `tag_ids` (no `post_tags` write). NO lifecycle hooks
+    (nothing is live); one commit. On a validation error the LIVE edit
+    form is re-rendered with the input preserved. Editor role;
+    site-scoped.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
+        # Same validation as the live edit / WC save paths; on error
+        # re-render the LIVE edit form (the operator is on it) with input
+        # preserved, not the WC editor.
+        form = _form_from_request()
+        if not form["title"] or not form["slug"]:
+            flash("Title and slug are required.", "error")
+            return _render_post_form(db, post.site_id, post, form)
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], post.site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return _render_post_form(db, post.site_id, post, form)
+        pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
+        if pin_err is not None:
+            flash(pin_err, "error")
+            return _render_post_form(db, post.site_id, post, form)
+
+        wc = _wc_for_post(db, site.id, post.id)
+        if wc is None:
+            # `fork` seeds the staging metadata + the fields the form does
+            # not carry (subtitle/meta_*/canonical/noindex); `_apply` then
+            # overwrites the edited fields from the posted form.
+            wc = fork_post_working_copy(post, editor_user_id=int(session["user_id"]))
+            db.add(wc)
+        else:
+            wc.editor_user_id = int(session["user_id"])
+        _apply_post_form_fields(
+            wc,
+            form,
+            featured_image_id=featured_image_id,
+            pinned_until=pinned_until,
+        )
+        # Capture the selected tags as ids on the WC; no junction write.
+        wc.tag_ids = _capture_tag_ids(db, form["tags"], site.id)
+        # No lifecycle hooks: nothing is live. Single commit.
+        db.commit()
+
+    return redirect(url_for("post_admin.post_working_copy_editor", post_id=post_id))
+
+
+@bp.route("/<int:post_id>/working-copy", methods=["GET"])
+def post_working_copy_editor(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Render the post-edit form bound to the working copy.
+
+    Reuses `admin/edit.html` via the editable-source seam: the working
+    copy exposes the same attribute names as a live Post, and the
+    `is_working_copy` flag drives the WC banner + the form's POST
+    target. The stored `tag_ids` are resolved back to a label CSV for
+    the tags input. Editor role; site-scoped. If no working copy exists
+    (e.g. a stale link after a discard) we send the operator back to
+    live edit.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
+        wc = _wc_for_post(db, site.id, post.id)
+        if wc is None:
+            flash("No working copy for this post; editing live.", "warning")
+            return redirect(url_for("post_admin.edit_post", post_id=post_id))
+
+        set_breadcrumbs(
+            Crumb("Posts", "post_admin.list_posts"),
+            Crumb(post.title or "Untitled", "post_admin.edit_post", {"post_id": post.id}),
+            Crumb("Working copy", None),
+        )
+
+        tag_labels = _tag_labels_for_ids(db, site.id, wc.tag_ids)
+        return _render_post_form(
+            db,
+            site.id,
+            wc,
+            _form_from_working_copy(wc, tag_labels),
+            is_working_copy=True,
+            working_copy_post_id=post.id,
+        )
+
+
+@bp.route("/<int:post_id>/working-copy/save", methods=["POST"])
+def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Save the working-copy form. Writes the WC fields, regenerates
+    body_html, captures the selected tags into `tag_ids`, fires NO
+    lifecycle hooks, single commit.
+
+    Crucially does NOT touch the live `Post` row and writes NO `post_tags`
+    junction rows. Slug uniqueness on a working copy is intentionally NOT
+    enforced against the live posts' `UNIQUE(site_id, slug)`: a working
+    copy may carry the same slug as its live post (the common case, and
+    expected). Only the structural validations (required fields,
+    resolvable featured image, valid pin date) run. Editor role;
+    site-scoped.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+        wc = _wc_for_post(db, site.id, post.id)
+        if wc is None:
+            abort(404)
+
+        def _rerender(form: dict[str, str]) -> str:
+            return _render_post_form(
+                db,
+                site.id,
+                wc,
+                form,
+                is_working_copy=True,
+                working_copy_post_id=post.id,
+            )
+
+        form = _form_from_request()
+        if not form["title"] or not form["slug"]:
+            flash("Title and slug are required.", "error")
+            return _rerender(form)
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], post.site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return _rerender(form)
+        pinned_until, pin_err = _parse_pinned_until(form["pinned_until"])
+        if pin_err is not None:
+            flash(pin_err, "error")
+            return _rerender(form)
+
+        # Shared seam: same field-assignment + body_html render as the
+        # live-edit path, applied to the working copy instead of the
+        # live Post. NO `status` (a working copy has none), NO snapshot
+        # (nothing live changed), NO hooks (nothing is live), one commit.
+        _apply_post_form_fields(
+            wc,
+            form,
+            featured_image_id=featured_image_id,
+            pinned_until=pinned_until,
+        )
+        # Capture the selected tags as ids; still no junction write.
+        wc.tag_ids = _capture_tag_ids(db, form["tags"], site.id)
+        db.commit()
+        flash("Working copy saved. The live post is unchanged.", "success")
+
+    return redirect(url_for("post_admin.post_working_copy_editor", post_id=post_id))
+
+
+@bp.route("/<int:post_id>/working-copy/discard", methods=["POST"])
+def discard_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Delete the working copy and return to the live post edit.
+
+    No live effect, no hooks: the working copy is transient staging
+    state. Editor role; site-scoped. A missing working copy is a no-op
+    (the operator likely discarded it in another tab).
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+        wc = _wc_for_post(db, site.id, post.id)
+        if wc is not None:
+            db.delete(wc)
+            db.commit()
+            flash("Working copy discarded.", "success")
+        else:
+            flash("No working copy to discard.", "warning")
+
+    return redirect(url_for("post_admin.edit_post", post_id=post_id))
 
 
 @bp.route("/<int:post_id>/pin-toggle", methods=["PATCH"])

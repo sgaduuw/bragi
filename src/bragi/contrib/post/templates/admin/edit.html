@@ -1,17 +1,42 @@
 {% extends "admin/base.html" %}
 {% from "admin/_image_picker_field.html" import image_picker_field %}
 {% set is_edit = post is not none %}
+{# In working-copy mode `post` is a PostWorkingCopy, so `post.id` is the
+   WC's id, NOT a live post id. `working_copy_post_id` is the live post
+   id; use it for every live-post route (form action, backlinks, etc.). #}
+{% set is_wc = is_working_copy | default(false) %}
 {% block title %}{{ 'Edit' if is_edit else 'New' }} post &middot; bragi admin{% endblock %}
 {% block content %}
 <h1>{{ 'Edit post' if is_edit else 'New post' }}</h1>
-{% if is_edit %}
+{% if is_edit and not is_wc %}
 <p style="margin-top: -0.5em; color: #666;">
   <a href="{{ url_for('internal_links_admin.backlinks', target_type='post', target_id=post.id) }}">Backlinks &raquo;</a>
 </p>
 {% endif %}
 
+{% if is_wc %}
+<div class="banner banner--info">
+  <p><strong>You're editing a working copy &mdash; the live post is unchanged.</strong></p>
+  <p>
+    Saves here go to the working copy only; they do not publish.
+    {# TODO(#414 Task 5b/5c): add Preview (signed delivery-host link) and
+       Promote (copy staged content onto the live post + publish) here,
+       mirroring the page working-copy banner. #}
+  </p>
+  {# Discard (Task 5a): delete the working copy; the live post is
+     unaffected, no hooks fire. #}
+  <form method="post"
+        action="{{ url_for('post_admin.discard_post_working_copy', post_id=working_copy_post_id) }}"
+        onsubmit="return confirm('Discard this working copy? The live post is unaffected.');"
+        style="display: inline; margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="danger">Discard working copy</button>
+  </form>
+</div>
+{% endif %}
+
 <form method="post"
-      action="{{ url_for('post_admin.edit_post', post_id=post.id) if is_edit else url_for('post_admin.new_post') }}">
+      action="{% if is_wc %}{{ url_for('post_admin.save_post_working_copy', post_id=working_copy_post_id) }}{% elif is_edit %}{{ url_for('post_admin.edit_post', post_id=post.id) }}{% else %}{{ url_for('post_admin.new_post') }}{% endif %}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   <fieldset>
     <label for="title">Title</label>
@@ -31,6 +56,10 @@
     <textarea name="body_markdown" id="body_markdown">{{ form.get('body_markdown', '') }}</textarea>
   </fieldset>
 
+  {# A working copy carries no status: the live row keeps its PUBLISHED
+     status through promote. Hide the control entirely in WC mode so the
+     save can't accidentally carry a status field. #}
+  {% if not is_wc %}
   <fieldset>
     <label for="status">Status</label>
     <select name="status" id="status">
@@ -41,8 +70,14 @@
       <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archived</option>
     </select>
   </fieldset>
+  {% endif %}
 
-  {% if form.get('status') == 'published' %}
+  {# Show the pin controls on a published live post, AND always in WC
+     mode: a working copy is forked from a published post, so its pin
+     state is meaningful and must stay editable (otherwise a WC save with
+     the controls hidden would silently submit no pin field and blank the
+     forked pin). #}
+  {% if is_wc or form.get('status') == 'published' %}
   <fieldset>
     <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
       <input type="checkbox" name="is_pinned" value="1"
@@ -77,7 +112,9 @@
        helper="Optional. Used as og:image / twitter:image, the landing-page card thumbnail, and the post-detail hero. Falls back to the site's default featured image when unset."
      ) }}
 
-  {% if is_edit %}
+  {# skip_redirect is meaningless for a working copy: a WC save fires no
+     hooks and inserts no 301 (nothing is live). Restricted to live edit. #}
+  {% if is_edit and not is_wc %}
   <fieldset style="flex-direction: row; align-items: center; gap: 0.5rem;">
     <input type="checkbox" name="skip_redirect" id="skip_redirect" value="1">
     <label for="skip_redirect" style="margin: 0;">
@@ -86,8 +123,29 @@
   </fieldset>
   {% endif %}
 
+  {# On a PUBLISHED post, the live Save is relabelled so the operator sees
+     that it publishes immediately; the staging affordance is a second
+     submit button on the SAME form (HTML forbids nested forms). Drafts
+     edit live as today, so the label stays the plain "Save". #}
+  {% set is_published_live = is_edit and not is_wc and post.status == 'published' %}
   <div class="actions">
-    <button type="submit">{{ 'Save' if is_edit else 'Create' }}</button>
+    <button type="submit">
+      {%- if is_wc %}Save working copy
+      {%- elif is_published_live %}Edit live (publishes immediately)
+      {%- elif is_edit %}Save
+      {%- else %}Create{% endif -%}
+    </button>
+    {# On a published post, stage the CURRENT form content (the operator's
+       unsaved edits) into a working copy. A second submit button on the
+       SAME form with its own `formaction` carries the typed body/title/
+       tags/etc. to stage_post; a separate form (illegal to nest) would
+       submit none of it. #}
+    {% if is_published_live %}
+    <button type="submit" class="btn"
+            formaction="{{ url_for('post_admin.stage_post', post_id=post.id) }}">
+      Stage edits (working copy)
+    </button>
+    {% endif %}
     <a href="{{ url_for('post_admin.list_posts') }}" class="btn secondary">Cancel</a>
   </div>
 </form>
