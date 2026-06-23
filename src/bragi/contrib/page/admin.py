@@ -1227,6 +1227,143 @@ def discard_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnVal
     return redirect(url_for("page_admin.edit_page", page_id=page_id))
 
 
+def _page_promote_snapshot(page: Page) -> dict[str, object]:
+    """The before/after field set promote hands to `on_post_updated`.
+
+    Matches the keys `edit_page` builds for its `on_post_updated`
+    (`slug`, `title`, `status`, `kind`, `parent_id`): the redirects
+    subscriber keys its slug/parent/kind-change 301s off exactly these,
+    so a staged slug or parent change in the working copy drives the
+    same auto-301 a hand edit would. Read into a plain dict so the
+    `before` snapshot survives the field copy that follows.
+    """
+    return {
+        "slug": page.slug,
+        "title": page.title,
+        "status": page.status,
+        "kind": page.kind,
+        "parent_id": page.parent_id,
+    }
+
+
+@bp.route("/<int:page_id>/working-copy/promote", methods=["POST"])
+def promote_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Atomically swap the working copy into its live `Page`, then publish.
+
+    The inverse of staging: the working copy's staged editable surface
+    becomes the live page's content. Reuses the #430 commit-once pattern
+    so the content copy, the FTS reindex, the slug/parent-change 301, and
+    the internal-links edge reconciliation all land in ONE atomic
+    transaction. Editor role; site-scoped (404 if either the page or its
+    working copy is missing / cross-site).
+
+    Step order (load -> snapshot -> copy -> flush -> hooks -> ONE commit
+    -> delete WC -> purge -> audit):
+
+    1. Load the live `Page` and its `PageWorkingCopy` (both site-scoped).
+    2. Snapshot the LIVE row into history (`_snapshot_page`) so promote
+       is undoable, exactly like `edit_page` does before mutating.
+    3. Capture `before` from the (still-live) row, then copy every
+       `_EDITABLE_PAGE_FIELDS` value off the working copy onto the live
+       page. `status` is NOT in that tuple and is NOT touched: staging
+       never stages status, so the live row keeps its PUBLISHED status
+       through promote. `body_html` is re-rendered from the staged
+       `body_markdown` so it can never drift from the canonical source
+       (markdown-is-the-source-of-truth), even though the WC already
+       carries a render.
+    4. `db.flush()` so the hooks' in-session reads (the redirects
+       subscriber's `page_url_for(..., db=session)`, internal_links'
+       body_html scan) see the promoted slug/parent/body before the
+       single post-chain commit (the session has autoflush off).
+    5. Fire `on_post_updated(item=page, before, after, session=db)`
+       unless the operator opted out via `skip_redirect` (a staged
+       slug/parent fix that shouldn't leave a stale-URL 301). Fire
+       `on_post_published` ONLY in the defensive case the live row was
+       not already published (a working copy is forked from a PUBLISHED
+       page, so this normally does not fire; it guards a hand-unpublish
+       between stage and promote).
+    6. ONE unconditional `db.commit()` AFTER the whole hook chain (#430):
+       committing before the hooks would roll back any write a hookimpl
+       makes on the supplied session (internal_links fires LAST in the
+       LIFO chain). The working-copy delete is staged into this SAME
+       transaction (one commit, not two) so the promote and the WC
+       removal are atomic: there is never a window where the content is
+       live but the stale working copy lingers.
+    7. `on_cache_purge` AFTER commit, then audit (noting the promotion).
+    """
+    skip_redirect = request.form.get("skip_redirect") == "1"
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        wc = _wc_for_page(db, site.id, page.id)
+        if wc is None:
+            abort(404)
+
+        # Snapshot the LIVE row BEFORE mutating so promote is undoable
+        # (mirrors edit_page / the revision-restore path).
+        _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+
+        before = _page_promote_snapshot(page)
+        was_published = page.status == PageStatus.PUBLISHED
+
+        # Copy the staged editable surface onto the live row. The WC and
+        # the live Page share these column names by construction (the
+        # `fork_page_working_copy` / `_EDITABLE_PAGE_FIELDS` seam), so
+        # the copy is field-for-field. `status` is deliberately absent
+        # from `_EDITABLE_PAGE_FIELDS`, so the live status is preserved.
+        for field in _EDITABLE_PAGE_FIELDS:
+            setattr(page, field, getattr(wc, field))
+        # Re-render body_html from the staged markdown so the live cache
+        # can't drift from its source, regardless of what the WC stored.
+        page.body_html = render_markdown(page.body_markdown)
+
+        after = _page_promote_snapshot(page)
+
+        # Flush the promoted content so the lifecycle hooks' in-session
+        # reads see the new slug/parent/body before the single commit.
+        db.flush()
+
+        pm = current_app.extensions["plugin_manager"]
+        # on_post_updated drives the staged slug/parent-change 301 (and
+        # FTS reindex, internal_links edge reconcile). Honour the same
+        # skip_redirect opt-out the edit form carries.
+        if not skip_redirect:
+            pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # Defensive only: a working copy is forked from a published page,
+        # so the live row is normally already PUBLISHED and this is a
+        # no-op. It guards a hand-unpublish between stage and promote.
+        if page.status == PageStatus.PUBLISHED and not was_published:
+            pm.hook.on_post_published(item=page, session=db)
+
+        # The working-copy delete joins the SAME transaction as the
+        # promote so the single commit is atomic across both (no second
+        # commit, no live-but-WC-lingering window).
+        db.delete(wc)
+        # ONE commit AFTER the whole hook chain so content + FTS +
+        # redirect + edges + the WC removal land atomically (#430).
+        # Unconditional: a skip_redirect promote (which fired no hook)
+        # must still persist the content copy and the WC delete.
+        db.commit()
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+        flash(f"Working copy promoted; '{page.title}' is now live.", "success")
+
+        promoted_id = page.id
+        promoted_slug = page.slug
+        promoted_site_id = page.site_id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=promoted_id,
+        site_id=promoted_site_id,
+        extra={"slug": promoted_slug, "via": "working-copy-promote"},
+    )
+    return redirect(url_for("page_admin.edit_page", page_id=promoted_id))
+
+
 def _delete_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:
     """Delete one page in the current transaction.
 

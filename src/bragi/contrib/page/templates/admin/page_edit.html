@@ -19,7 +19,8 @@
   <p><strong>You're editing a working copy &mdash; the live page is unchanged.</strong></p>
   <p>
     Saves here go to the working copy only; they do not publish.
-    {# Promote (Task 4) lands here later. #}
+    Use <strong>Promote</strong> to copy the staged content onto the
+    live page and publish it.
   </p>
   {# Preview (Task 3): opens the staged content rendered through the real
      theme at the live URL, on the delivery host, in a new tab. Suppressed
@@ -32,6 +33,21 @@
     <em>Preview is not available for post_index pages yet.</em>
   </p>
   {% endif %}
+  {# Promote (Task 4): copy the staged fields onto the live page and
+     publish, atomically (the #430 commit-once-after-hooks pattern). A
+     staged slug change leaves the old->new 301 unless skip_redirect is
+     checked. #}
+  <form method="post"
+        action="{{ url_for('page_admin.promote_page_working_copy', page_id=working_copy_page_id) }}"
+        onsubmit="return confirm('Promote this working copy? The staged content becomes the live page.');"
+        style="display: inline; margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label style="margin-right: 0.5em;">
+      <input type="checkbox" name="skip_redirect" value="1">
+      Skip 301 redirect on a slug change
+    </label>
+    <button type="submit" class="primary">Promote (publish working copy)</button>
+  </form>
   <form method="post"
         action="{{ url_for('page_admin.discard_page_working_copy', page_id=working_copy_page_id) }}"
         onsubmit="return confirm('Discard this working copy? The live page is unaffected.');"
