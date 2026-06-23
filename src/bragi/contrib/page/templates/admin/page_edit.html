@@ -19,8 +19,19 @@
   <p><strong>You're editing a working copy &mdash; the live page is unchanged.</strong></p>
   <p>
     Saves here go to the working copy only; they do not publish.
-    {# Preview (Task 3) and Promote (Task 4) land here later. #}
+    {# Promote (Task 4) lands here later. #}
   </p>
+  {# Preview (Task 3): opens the staged content rendered through the real
+     theme at the live URL, on the delivery host, in a new tab. Suppressed
+     for post_index working copies (no preview path in v1) and when the
+     site has no canonical (delivery) URL configured. #}
+  {% if preview_url and form.kind != 'post_index' %}
+  <a href="{{ preview_url }}" target="_blank" rel="noopener" class="button">Preview &raquo;</a>
+  {% elif form.kind == 'post_index' %}
+  <p style="margin: 0.25em 0; color: #666;">
+    <em>Preview is not available for post_index pages yet.</em>
+  </p>
+  {% endif %}
   <form method="post"
         action="{{ url_for('page_admin.discard_page_working_copy', page_id=working_copy_page_id) }}"
         onsubmit="return confirm('Discard this working copy? The live page is unaffected.');"

@@ -382,6 +382,7 @@ def _render_page_form(
     demotion_post_count: int | None = None,
     is_working_copy: bool = False,
     working_copy_page_id: int | None = None,
+    preview_url: str | None = None,
 ) -> str:
     """Render the page create/edit form (`admin/page_edit.html`).
 
@@ -392,10 +393,12 @@ def _render_page_form(
     (empty/absent -> no thumbnail, no DB hit); `resume_data_for_form`
     from `(page, form)`. The keyword flags drive the optional surfaces:
     `slug_full_path` the edit form's full-path preview, the
-    swap/demotion pairs the POST_INDEX confirmation banners, and
+    swap/demotion pairs the POST_INDEX confirmation banners,
     `is_working_copy` / `working_copy_page_id` the WC banner + the
-    form's WC POST target. All are falsy-guarded in the template, so a
-    default (`None`/`False`) is equivalent to the kwarg being absent
+    form's WC POST target, and `preview_url` the WC banner's "Preview"
+    link (the signed delivery-host preview URL). All are falsy-guarded
+    in the template, so a default (`None`/`False`) is equivalent to the
+    kwarg being absent
     (the pre-dedup shape). `page` may be a live `Page` OR a
     `PageWorkingCopy`: both expose the same editable attribute names,
     so the template binds to either via the editable-source seam.
@@ -417,6 +420,7 @@ def _render_page_form(
         demotion_post_count=demotion_post_count,
         is_working_copy=is_working_copy,
         working_copy_page_id=working_copy_page_id,
+        preview_url=preview_url,
     )
 
 
@@ -1069,7 +1073,21 @@ def working_copy_editor(site_slug: str, page_id: int) -> ResponseReturnValue:
         descendants = _descendant_ids(all_parents, page.id)
         parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
 
+        from bragi.contrib.page.preview import mint_preview_token
         from bragi.core.url import page_path_preview
+
+        # Preview (Task 3): mint a signed token and build the delivery-host
+        # URL. The admin and delivery apps run on different hosts; the token
+        # is the only thing that crosses. `site.canonical_url` is the public
+        # (delivery) origin. POST_INDEX working copies have no preview path
+        # in v1, so the template suppresses the button for that kind; we
+        # still mint the URL here (cheap, and ready for static/resume).
+        preview_token = mint_preview_token(wc)
+        preview_url = (
+            f"{site.canonical_url.rstrip('/')}/_preview/{preview_token}"
+            if site.canonical_url
+            else None
+        )
 
         return _render_page_form(
             db,
@@ -1082,6 +1100,7 @@ def working_copy_editor(site_slug: str, page_id: int) -> ResponseReturnValue:
             ),
             is_working_copy=True,
             working_copy_page_id=page.id,
+            preview_url=preview_url,
         )
 
 
@@ -1113,8 +1132,18 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
         parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
 
         def _rerender(form: dict[str, str]) -> str:
+            from bragi.contrib.page.preview import mint_preview_token
             from bragi.core.url import page_path_preview
 
+            # The token previews the WC's last-saved state; on a validation
+            # error nothing was written, so the saved content is still what
+            # the token renders. Mint fresh so the link is always live.
+            preview_token = mint_preview_token(wc)
+            preview_url = (
+                f"{site.canonical_url.rstrip('/')}/_preview/{preview_token}"
+                if site.canonical_url
+                else None
+            )
             return _render_page_form(
                 db,
                 site,
@@ -1126,6 +1155,7 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
                 ),
                 is_working_copy=True,
                 working_copy_page_id=page.id,
+                preview_url=preview_url,
             )
 
         form = _form_from_request()

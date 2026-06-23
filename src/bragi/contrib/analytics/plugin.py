@@ -76,6 +76,17 @@ def on_app_init(app: Flask, registry: object) -> None:
         content_type = response.headers.get("Content-Type", "")
         if not content_type.startswith("text/html"):
             return response
+        # Skip any response a handler marked noindex via X-Robots-Tag.
+        # A noindex response is by definition not a public content
+        # pageview: today that's the working-copy preview route (#414),
+        # which renders unpublished/staged content under a signed token
+        # and MUST be side-effect-free (no analytics sink). Honouring the
+        # generic header keeps analytics decoupled from any one plugin's
+        # routes: a handler signals "don't count this" by the same header
+        # it uses to signal "don't index this".
+        robots = response.headers.get("X-Robots-Tag", "")
+        if "noindex" in robots.lower():
+            return response
         site = g.get("site")
         if site is None:
             return response

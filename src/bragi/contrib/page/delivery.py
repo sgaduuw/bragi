@@ -393,6 +393,83 @@ def render_tag_feed(site: Site, tag_slug: str) -> Response | None:
 
 
 # ============================================================
+# Working-copy preview (issue #414, Task 3)
+# ============================================================
+
+
+@bp.route("/_preview/<token>", methods=["GET"])
+def preview_working_copy(token: str) -> ResponseReturnValue:
+    """Render a page working copy from a signed token (read-only, noindex).
+
+    This is the one delivery route that bypasses the published-only filter:
+    it renders STAGED content for a page that may itself be a draft. The
+    *only* gate is the signed, time-limited, site-scoped token. Every
+    failure mode collapses to a flat 404 (no oracle), and the render is
+    strictly read-only: no lifecycle hooks, no analytics, no hit-counter,
+    no writes.
+
+    Werkzeug ranks this static-prefixed rule above the catch-all
+    `/<path:slug_path>` converter, so `/_preview/<token>` is matched here
+    and never reaches the page/post dispatcher.
+    """
+    from bragi.contrib.page.preview import (
+        PagePreviewView,
+        PreviewUnsupportedKind,
+        render_preview,
+        verify_preview_token,
+    )
+    from bragi.core.models.page_working_copy import PageWorkingCopy
+    from bragi.settings import settings
+
+    site = g.get("site")
+    if site is None:
+        abort(404)
+
+    payload = verify_preview_token(token, max_age=settings.working_copy_preview_ttl_seconds)
+    if payload is None:
+        # Tampered, expired, malformed, or wrong-kind token. Flat 404.
+        abort(404)
+
+    # Site-scoping, defence in depth (two independent checks):
+    # 1. The token's embedded site_id must match the resolved host's site,
+    #    so a token minted for site A cannot render on site B's host.
+    if payload["site_id"] != site.id:
+        abort(404)
+
+    with SessionLocal() as db:
+        wc = db.get(PageWorkingCopy, payload["wc_id"])
+        if wc is None:
+            abort(404)
+        # 2. The loaded working copy's own site_id must match the resolved
+        #    host too (the token's site_id and the WC's site_id must agree
+        #    AND both equal g.site.id), so a forged-but-somehow-valid token
+        #    pointing at another tenant's WC can't render either.
+        if wc.site_id != site.id:
+            abort(404)
+        live = db.get(Page, wc.page_id)
+        if live is None or live.site_id != site.id:
+            abort(404)
+
+        view = PagePreviewView(wc, live)
+        try:
+            body = render_preview(view, request)
+        except PreviewUnsupportedKind:
+            # Valid token, but the staged kind (POST_INDEX) has no preview
+            # path in v1. 400, not 404: the token was fine, the kind isn't.
+            abort(400)
+
+    response = make_response(body)
+    # Belt-and-suspenders crawler exclusion: the header keeps the preview
+    # out of any index even though the URL is unguessable and short-lived.
+    # noindex (don't index this URL) + nofollow (don't crawl its links).
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    # Never let a shared cache (CDN, reverse proxy) retain a preview: it is
+    # per-token, short-lived, and shows unpublished content.
+    response.headers["Cache-Control"] = "no-store, private"
+    return response
+
+
+# ============================================================
 # Dispatcher
 # ============================================================
 
