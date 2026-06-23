@@ -1010,6 +1010,24 @@ def _wc_for_page(db: Session, site_id: int, page_id: int) -> PageWorkingCopy | N
     ).scalar_one_or_none()
 
 
+def _working_copy_preview_url(wc: PageWorkingCopy, site: Site) -> str | None:
+    """Delivery-host URL to preview a working copy, or None if no origin.
+
+    The admin and delivery apps run on different origins; the signed token
+    is the only thing that crosses. Uses `settings.delivery_base_url` when
+    set (dev, where one delivery process serves every site on a local port
+    the per-site `canonical_url` can't express), else the site's public
+    `canonical_url` (multisite prod, each site its own origin).
+    """
+    from bragi.contrib.page.preview import mint_preview_token
+    from bragi.settings import settings
+
+    base = (settings.delivery_base_url or site.canonical_url or "").rstrip("/")
+    if not base:
+        return None
+    return f"{base}/_preview/{mint_preview_token(wc)}"
+
+
 @bp.route("/<int:page_id>/working-copy/stage", methods=["POST"])
 def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
     """Fork a working copy from the live page (if none exists), then
@@ -1073,21 +1091,13 @@ def working_copy_editor(site_slug: str, page_id: int) -> ResponseReturnValue:
         descendants = _descendant_ids(all_parents, page.id)
         parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
 
-        from bragi.contrib.page.preview import mint_preview_token
         from bragi.core.url import page_path_preview
 
-        # Preview (Task 3): mint a signed token and build the delivery-host
-        # URL. The admin and delivery apps run on different hosts; the token
-        # is the only thing that crosses. `site.canonical_url` is the public
-        # (delivery) origin. POST_INDEX working copies have no preview path
-        # in v1, so the template suppresses the button for that kind; we
-        # still mint the URL here (cheap, and ready for static/resume).
-        preview_token = mint_preview_token(wc)
-        preview_url = (
-            f"{site.canonical_url.rstrip('/')}/_preview/{preview_token}"
-            if site.canonical_url
-            else None
-        )
+        # Preview (Task 3): the delivery-host URL for the signed token.
+        # POST_INDEX working copies have no preview path in v1, so the
+        # template suppresses the button for that kind; we still build the
+        # URL here (cheap, and ready for static/resume).
+        preview_url = _working_copy_preview_url(wc, site)
 
         return _render_page_form(
             db,
@@ -1132,18 +1142,12 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
         parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
 
         def _rerender(form: dict[str, str]) -> str:
-            from bragi.contrib.page.preview import mint_preview_token
             from bragi.core.url import page_path_preview
 
             # The token previews the WC's last-saved state; on a validation
             # error nothing was written, so the saved content is still what
             # the token renders. Mint fresh so the link is always live.
-            preview_token = mint_preview_token(wc)
-            preview_url = (
-                f"{site.canonical_url.rstrip('/')}/_preview/{preview_token}"
-                if site.canonical_url
-                else None
-            )
+            preview_url = _working_copy_preview_url(wc, site)
             return _render_page_form(
                 db,
                 site,

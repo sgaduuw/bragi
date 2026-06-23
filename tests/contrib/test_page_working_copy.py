@@ -23,7 +23,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
-from bragi.contrib.page.admin import _EDITABLE_PAGE_FIELDS, fork_page_working_copy
+from bragi.contrib.page.admin import (
+    _EDITABLE_PAGE_FIELDS,
+    _working_copy_preview_url,
+    fork_page_working_copy,
+)
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_working_copy import PageWorkingCopy
@@ -118,6 +122,39 @@ def test_fork_copies_every_editable_field(
         assert wc.site_id == page.site_id
         assert wc.page_id == page.id
         assert wc.editor_user_id == page.author_id
+
+
+def test_preview_url_prefers_delivery_base_then_canonical(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The preview link uses `settings.delivery_base_url` when set (dev,
+    where delivery runs on a port the per-site canonical can't express),
+    else the site's `canonical_url`, else None."""
+    import bragi.settings
+
+    with db_session_factory() as db, admin_app.app_context():
+        page = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+        site = db.get(Site, page.site_id)
+        assert site is not None
+        wc = fork_page_working_copy(page, editor_user_id=page.author_id)
+
+        # No override -> the public canonical origin (multisite prod shape).
+        monkeypatch.setattr(bragi.settings.settings, "delivery_base_url", "")
+        site.canonical_url = "https://blog.example.com"
+        url = _working_copy_preview_url(wc, site)
+        assert url is not None and url.startswith("https://blog.example.com/_preview/")
+
+        # Override set (dev) wins and carries the port the canonical lacks.
+        monkeypatch.setattr(bragi.settings.settings, "delivery_base_url", "http://localhost:8002")
+        url = _working_copy_preview_url(wc, site)
+        assert url is not None and url.startswith("http://localhost:8002/_preview/")
+
+        # Neither -> no preview link rather than a broken one.
+        monkeypatch.setattr(bragi.settings.settings, "delivery_base_url", "")
+        site.canonical_url = ""
+        assert _working_copy_preview_url(wc, site) is None
 
 
 # ---------------------------------------------------------------------------
