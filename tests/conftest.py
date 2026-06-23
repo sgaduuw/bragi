@@ -136,6 +136,28 @@ def db_engine() -> Iterator[Engine]:
     """
     engine = create_engine("sqlite:///:memory:", future=True)
     Base.metadata.create_all(engine)
+    # `create_all` can't see the FTS5 virtual tables (alembic owns
+    # them, not `Base.metadata`). Create them here so the search
+    # lifecycle hook's in-session FTS write succeeds exactly as in
+    # production. Since issue #430 the request handler commits ONCE
+    # after the whole hook chain: an FTS-absent OperationalError
+    # swallowed mid-chain would otherwise doom the outer transaction
+    # and roll back the content save plus every sibling hook's write
+    # (redirects' 301, internal_links' edges). Mirrors the alembic
+    # migration DDL (and the per-test `fts_tables_present` fixture in
+    # test_search.py, whose `IF NOT EXISTS` now no-ops).
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        for ddl in (
+            "CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5("
+            "title, body, meta_description, excerpt,"
+            " tokenize='porter unicode61')",
+            "CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5("
+            "title, body, meta_description, excerpt,"
+            " tokenize='porter unicode61')",
+        ):
+            conn.execute(text(ddl))
     yield engine
     engine.dispose()
 

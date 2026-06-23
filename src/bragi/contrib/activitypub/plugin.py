@@ -60,7 +60,13 @@ def on_post_published(item: Any, session: Any) -> None:
         site = session.get(Site, item.site_id)
         if site is None:
             return
-        path = post_url_for(site, item.slug)
+        # Pass `db=session`: since issue #430 the handler commits ONCE
+        # after the hook chain, so the new post is still pending
+        # (uncommitted) in this session. `post_url_for` without `db=`
+        # opens a fresh SessionLocal on a separate connection that can't
+        # see the uncommitted row, so the URL would resolve wrong (or to
+        # None) and the fanout would be skipped or misaddressed.
+        path = post_url_for(site, item.slug, db=session)
         if path is None:
             return
         fanout_for_post(session, item, post_path=path)
