@@ -684,6 +684,25 @@ def _tag_labels_for_ids(db: Session, site_id: int, tag_ids: list[int] | None) ->
     return ", ".join(by_id[tid] for tid in tag_ids if tid in by_id)
 
 
+def _resolve_tags_from_ids(db: Session, site_id: int, tag_ids: list[int] | None) -> list[Tag]:
+    """Resolve a working copy's stored `tag_ids` to the live `Tag` rows.
+
+    The promote-time counterpart of `_capture_tag_ids` (which writes ids
+    onto the WC). Site-scoped; ids that no longer resolve (a tag deleted
+    since staging) are silently dropped. Order follows `tag_ids` so the
+    reconciled junction is deterministic. The returned list is assigned
+    straight to `post.tags`, so the `post_tags` junction becomes EXACTLY
+    the staged set in the same transaction as the content copy.
+    """
+    if not tag_ids:
+        return []
+    rows = (
+        db.execute(select(Tag).where(Tag.site_id == site_id, Tag.id.in_(tag_ids))).scalars().all()
+    )
+    by_id = {t.id: t for t in rows}
+    return [by_id[tid] for tid in tag_ids if tid in by_id]
+
+
 def _capture_tag_ids(db: Session, raw_tags: str, site_id: int) -> list[int] | None:
     """Resolve the form's tag CSV to a list of tag ids for the WC.
 
@@ -903,6 +922,134 @@ def discard_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
             flash("No working copy to discard.", "warning")
 
     return redirect(url_for("post_admin.edit_post", post_id=post_id))
+
+
+@bp.route("/<int:post_id>/working-copy/promote", methods=["POST"])
+def promote_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
+    """Atomically swap the working copy into its live `Post`, then publish.
+
+    The inverse of staging: the working copy's staged editable surface
+    (content + pin state + tags) becomes the live post's. Reuses the #430
+    commit-once pattern so the content copy, the tags reconcile, the FTS
+    reindex, the slug-change 301, and the internal-links edge reconciliation
+    all land in ONE atomic transaction. Editor role; site-scoped (404 if
+    either the post or its working copy is missing / cross-site).
+
+    Step order (load -> snapshot -> copy + tags -> flush -> hooks -> ONE
+    commit -> delete WC -> purge -> audit):
+
+    1. Load the live `Post` and its `PostWorkingCopy` (both site-scoped).
+    2. Capture `before` from the (still-live) row (the same dict `edit_post`
+       builds for `on_post_updated`, so the staged slug change drives the
+       same auto-301).
+    3. Snapshot the LIVE row into history (`_snapshot_post`) so promote is
+       undoable, exactly like `edit_post` does before mutating.
+    4. Copy every `_EDITABLE_POST_FIELDS` value off the working copy onto
+       the live post. `status` is NOT in that tuple and is NOT touched:
+       staging never stages status, so the live row keeps its PUBLISHED
+       status through promote. `body_html` is re-rendered from the staged
+       `body_markdown` so the live cache can never drift from its canonical
+       source (markdown-is-the-source-of-truth), even though the WC already
+       carries a render.
+    5. Tags reconcile (the key post delta): resolve the WC's staged
+       `tag_ids` to `Tag` rows and assign `post.tags` to exactly that set.
+       Because this is a plain ORM relationship assignment on the same
+       session, the `post_tags` junction is rewritten (missing tags
+       detached, new tags attached) IN this transaction, atomic with the
+       content copy.
+    6. `db.flush()` so the hooks' in-session reads (the redirects
+       subscriber's slug 301, internal_links' body_html scan, search's FTS
+       reindex) see the promoted content before the single post-chain
+       commit (the session has autoflush off).
+    7. Fire `on_post_updated(item=post, before, after, session=db)` unless
+       the operator opted out via `skip_redirect` (a staged slug fix that
+       shouldn't leave a stale-URL 301). Fire `on_post_published` ONLY in
+       the defensive case the live row was not already published (a working
+       copy is forked from a PUBLISHED post, so this normally does not fire;
+       it guards a hand-unpublish between stage and promote).
+    8. ONE unconditional `db.commit()` AFTER the whole hook chain (#430):
+       committing before the hooks would roll back any write a hookimpl
+       makes on the supplied session (internal_links fires LAST in the LIFO
+       chain). The working-copy delete is staged into this SAME transaction
+       (one commit, not two) so promote and the WC removal are atomic: there
+       is never a window where the content is live but the stale working
+       copy lingers.
+    9. `on_cache_purge` AFTER commit, then audit (noting the promotion).
+    """
+    skip_redirect = request.form.get("skip_redirect") == "1"
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+        wc = _wc_for_post(db, site.id, post.id)
+        if wc is None:
+            abort(404)
+
+        before = _post_snapshot(post)
+        was_published = post.status == PostStatus.PUBLISHED
+
+        # Snapshot the LIVE row BEFORE mutating so promote is undoable
+        # (mirrors edit_post / the revision-restore path).
+        _snapshot_post(db, post, editor_user_id=int(session["user_id"]))
+
+        # Copy the staged editable surface onto the live row. The WC and
+        # the live Post share these column names by construction (the
+        # `fork_post_working_copy` / `_EDITABLE_POST_FIELDS` seam), so the
+        # copy is field-for-field. `status` is deliberately absent from
+        # `_EDITABLE_POST_FIELDS`, so the live status is preserved.
+        for field in _EDITABLE_POST_FIELDS:
+            setattr(post, field, getattr(wc, field))
+        # Re-render body_html from the staged markdown so the live cache
+        # can't drift from its source, regardless of what the WC stored.
+        post.body_html = render_markdown(post.body_markdown)
+        # Tags reconcile: make the live junction EXACTLY the staged set,
+        # in this same transaction (atomic with the content copy).
+        post.tags = _resolve_tags_from_ids(db, site.id, wc.tag_ids)
+
+        after = _post_snapshot(post)
+
+        # Flush the promoted content so the lifecycle hooks' in-session
+        # reads see the new slug/body/tags before the single commit.
+        db.flush()
+
+        pm = current_app.extensions["plugin_manager"]
+        # on_post_updated drives the staged slug-change 301 (and FTS
+        # reindex, internal_links edge reconcile). Honour the same
+        # skip_redirect opt-out the edit form carries.
+        if not skip_redirect:
+            pm.hook.on_post_updated(item=post, before=before, after=after, session=db)
+        # Defensive only: a working copy is forked from a published post,
+        # so the live row is normally already PUBLISHED and this is a
+        # no-op. It guards a hand-unpublish between stage and promote.
+        if post.status == PostStatus.PUBLISHED and not was_published:
+            pm.hook.on_post_published(item=post, session=db)
+
+        # The working-copy delete joins the SAME transaction as the promote
+        # so the single commit is atomic across both (no second commit, no
+        # live-but-WC-lingering window).
+        db.delete(wc)
+        # ONE commit AFTER the whole hook chain so content + tags + FTS +
+        # redirect + edges + the WC removal land atomically (#430).
+        # Unconditional: a skip_redirect promote (which fired no hook) must
+        # still persist the content copy, the tags, and the WC delete.
+        db.commit()
+        pm.hook.on_cache_purge(scope="post", key=str(post.id))
+        flash(f"Working copy promoted; '{post.title}' is now live.", "success")
+
+        promoted_id = post.id
+        promoted_slug = post.slug
+        promoted_site_id = post.site_id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="post",
+        target_id=promoted_id,
+        site_id=promoted_site_id,
+        extra={"slug": promoted_slug, "via": "working-copy-promote"},
+    )
+    return redirect(url_for("post_admin.edit_post", post_id=promoted_id))
 
 
 @bp.route("/<int:post_id>/pin-toggle", methods=["PATCH"])

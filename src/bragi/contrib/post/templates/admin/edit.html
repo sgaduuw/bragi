@@ -19,8 +19,8 @@
   <p><strong>You're editing a working copy &mdash; the live post is unchanged.</strong></p>
   <p>
     Saves here go to the working copy only; they do not publish.
-    {# TODO(#414 Task 5c): add Promote (copy staged content onto the live
-       post + publish) here, mirroring the page working-copy banner. #}
+    Use <strong>Promote</strong> to copy the staged content (and tags)
+    onto the live post and publish it.
   </p>
   {# Preview (Task 5b): opens the staged content rendered through the real
      theme at the live post URL, on the delivery host, in a new tab.
@@ -29,6 +29,21 @@
   {% if preview_url %}
   <a href="{{ preview_url }}" target="_blank" rel="noopener" class="button">Preview &raquo;</a>
   {% endif %}
+  {# Promote (Task 5c): copy the staged fields + tags onto the live post and
+     publish, atomically (the #430 commit-once-after-hooks pattern). A
+     staged slug change leaves the old->new 301 unless skip_redirect is
+     checked. #}
+  <form method="post"
+        action="{{ url_for('post_admin.promote_post_working_copy', post_id=working_copy_post_id) }}"
+        onsubmit="return confirm('Promote this working copy? The staged content becomes the live post.');"
+        style="display: inline; margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label style="margin-right: 0.5em;">
+      <input type="checkbox" name="skip_redirect" value="1">
+      Skip 301 redirect on a slug change
+    </label>
+    <button type="submit" class="primary">Promote (publish working copy)</button>
+  </form>
   {# Discard (Task 5a): delete the working copy; the live post is
      unaffected, no hooks fire. #}
   <form method="post"
