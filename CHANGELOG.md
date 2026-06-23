@@ -4,7 +4,7 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.36.2] - 2026-06-23
 
 ### Fixed
 - The TipTap editor toolbar now stays in reach while scrolling a long
