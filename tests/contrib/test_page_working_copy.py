@@ -20,6 +20,7 @@ from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from werkzeug.test import TestResponse
 
 from bragi.apps.admin import create_admin_app
 from bragi.contrib.auth_local.passwords import hash_password
@@ -162,22 +163,18 @@ def test_preview_url_prefers_delivery_base_then_canonical(
 # ---------------------------------------------------------------------------
 
 
-def test_stage_creates_working_copy_matching_live(
+def test_stage_with_no_edits_matches_live(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    """Staging a published page creates a WC whose fields equal the live
-    row; the live row is unchanged."""
+    """Staging without changing the form yields a WC equal to the live row;
+    the live row is unchanged."""
     client = admin_app.test_client()
     _login(client)
     with db_session_factory() as db:
         page_id = _page_id(db)
         live_before = (db.get(Page, page_id).title, db.get(Page, page_id).body_markdown)
 
-    token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
-    resp = client.post(
-        f"/admin/sites/blog/pages/{page_id}/working-copy/stage",
-        data={"_csrf_token": token},
-    )
+    resp = _stage(client, page_id)
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith(f"/pages/{page_id}/working-copy")
 
@@ -189,24 +186,56 @@ def test_stage_creates_working_copy_matching_live(
         assert wc.title == page.title == "About"
         assert wc.body_markdown == page.body_markdown == "Live body."
         assert wc.slug == page.slug
-        # Live row byte-unchanged.
         assert (page.title, page.body_markdown) == live_before
 
 
-def test_stage_is_idempotent(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
-    """A second stage reuses the existing WC (no duplicate, no IntegrityError)."""
+def test_stage_captures_current_form_edits_not_the_saved_row(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Staging captures the operator's CURRENT (unsaved) edits, not the
+    stored live row. Regression for the bug where 'Stage edits' forked the
+    saved page and dropped the unsaved typing (a 'version2' body never
+    reached the working copy)."""
     client = admin_app.test_client()
     _login(client)
     with db_session_factory() as db:
         page_id = _page_id(db)
 
-    token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
-    for _ in range(2):
-        resp = client.post(
-            f"/admin/sites/blog/pages/{page_id}/working-copy/stage",
-            data={"_csrf_token": token},
-        )
-        assert resp.status_code == 302
+    # The operator typed a new second line + retitled, then clicked Stage.
+    resp = _stage(
+        client,
+        page_id,
+        title="About (editing)",
+        body_markdown="Live body.\nversion2",
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        wc = db.execute(
+            select(PageWorkingCopy).where(PageWorkingCopy.page_id == page_id)
+        ).scalar_one()
+        page = db.get(Page, page_id)
+        # The working copy carries the edits...
+        assert wc.title == "About (editing)"
+        assert wc.body_markdown == "Live body.\nversion2"
+        assert "version2" in wc.body_html
+        # ...and the live row is untouched.
+        assert page.title == "About"
+        assert page.body_markdown == "Live body."
+
+
+def test_stage_is_idempotent_and_latest_edits_win(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A second stage reuses the existing WC (no duplicate) and overwrites
+    it with the latest edits."""
+    client = admin_app.test_client()
+    _login(client)
+    with db_session_factory() as db:
+        page_id = _page_id(db)
+
+    assert _stage(client, page_id, body_markdown="first").status_code == 302
+    assert _stage(client, page_id, body_markdown="second").status_code == 302
 
     with db_session_factory() as db:
         copies = (
@@ -215,6 +244,7 @@ def test_stage_is_idempotent(admin_app: Flask, db_session_factory: sessionmaker[
             .all()
         )
         assert len(copies) == 1
+        assert copies[0].body_markdown == "second"
 
 
 def test_stage_cross_site_page_404s(
@@ -242,12 +272,22 @@ def test_stage_cross_site_page_404s(
 # ---------------------------------------------------------------------------
 
 
-def _stage(client: FlaskClient, page_id: int) -> None:
+def _stage(client: FlaskClient, page_id: int, **overrides: str) -> TestResponse:
+    """POST the live edit form to the stage endpoint (the `formaction`
+    flow). Defaults match the seeded 'About' page; pass overrides to
+    simulate the operator's unsaved edits being captured into the WC."""
     token = csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
-    client.post(
-        f"/admin/sites/blog/pages/{page_id}/working-copy/stage",
-        data={"_csrf_token": token},
-    )
+    data = {
+        "title": "About",
+        "slug": "about",
+        "parent_id": "",
+        "body_markdown": "Live body.",
+        "kind": "static",
+        "menu_order": "0",
+        "_csrf_token": token,
+    }
+    data.update(overrides)
+    return client.post(f"/admin/sites/blog/pages/{page_id}/working-copy/stage", data=data)
 
 
 def test_save_changes_working_copy_only_not_live(

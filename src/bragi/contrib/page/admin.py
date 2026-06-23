@@ -1030,13 +1030,18 @@ def _working_copy_preview_url(wc: PageWorkingCopy, site: Site) -> str | None:
 
 @bp.route("/<int:page_id>/working-copy/stage", methods=["POST"])
 def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
-    """Fork a working copy from the live page (if none exists), then
-    open the working-copy editor.
+    """Stage the operator's CURRENT edits into a working copy, then open
+    the working-copy editor.
 
-    Idempotent: a second stage reuses the existing working copy rather
-    than forking a duplicate (the `UNIQUE(site_id, page_id)` constraint
-    backs this, but we check first so the common case never raises an
-    IntegrityError). Editor role; site-scoped.
+    Reached from the live edit form via a `formaction` submit button, so
+    the POST carries the full edit form (the operator's unsaved typing),
+    not just the page id. Those fields are applied to the working copy,
+    so staging captures what the operator is editing rather than forking
+    the stale stored row. Get-or-create: a second stage reuses the
+    existing working copy (`UNIQUE(site_id, page_id)`) and overwrites it
+    with the latest edits (latest edits win). NO lifecycle hooks (nothing
+    is live); one commit. On a validation error the LIVE edit form is
+    re-rendered with the input preserved. Editor role; site-scoped.
     """
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
@@ -1045,12 +1050,58 @@ def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
-        existing = _wc_for_page(db, site.id, page.id)
-        if existing is None:
+        all_parents = _all_pages_for_picker(db, page.site_id)
+        descendants = _descendant_ids(all_parents, page.id)
+        parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
+
+        # Same validation as the live edit / WC save paths; on error
+        # re-render the LIVE edit form (the operator is on it) with input
+        # preserved, not the WC editor.
+        form = _form_from_request()
+        if not form["title"] or not form["slug"]:
+            flash("Title and slug are required.", "error")
+            return _render_page_form(db, site, page, form, parents)
+        new_kind = str(form["kind"])
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
+            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
+            return _render_page_form(db, site, page, form, parents)
+        parent_id = _normalized_parent_id(form["parent_id"])
+        parent_id, parent_err = _validated_parent_id_or_error(
+            db, parent_id, page.site_id, exclude_page_id=page.id
+        )
+        if parent_err is not None:
+            flash(parent_err, "error")
+            return _render_page_form(db, site, page, form, parents)
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], page.site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return _render_page_form(db, site, page, form, parents)
+        resume_data_dict, resume_err = _validate_resume_data(form["resume_data"])
+        if resume_err is not None:
+            flash(resume_err, "error")
+            return _render_page_form(db, site, page, form, parents)
+
+        wc = _wc_for_page(db, site.id, page.id)
+        if wc is None:
+            # `fork` seeds the staging metadata + the fields the form does
+            # not carry (meta_*/canonical/noindex); `_apply` then overwrites
+            # the edited fields from the posted form.
             wc = fork_page_working_copy(page, editor_user_id=int(session["user_id"]))
             db.add(wc)
-            # No lifecycle hooks: nothing is live. Single commit.
-            db.commit()
+        else:
+            wc.editor_user_id = int(session["user_id"])
+        _apply_page_form_fields(
+            wc,
+            form,
+            parent_id=parent_id,
+            featured_image_id=featured_image_id,
+            resume_data_dict=resume_data_dict,
+            new_kind=new_kind,
+        )
+        # No lifecycle hooks: nothing is live. Single commit.
+        db.commit()
 
     return redirect(url_for("page_admin.working_copy_editor", page_id=page_id))
 

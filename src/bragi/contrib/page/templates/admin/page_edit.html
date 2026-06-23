@@ -239,27 +239,20 @@
       {%- elif is_edit %}Save
       {%- else %}Create{% endif -%}
     </button>
+    {# On a published page, stage the CURRENT form content (the operator's
+       unsaved edits) into a working copy. A second submit button on the
+       SAME form with its own `formaction` carries the typed body/title/etc.
+       to stage_page; a separate form (illegal to nest) would submit none of
+       it. #}
+    {% if is_published_live %}
+    <button type="submit" class="btn"
+            formaction="{{ url_for('page_admin.stage_page', page_id=page.id) }}">
+      Stage edits (working copy)
+    </button>
+    {% endif %}
     <a href="{{ url_for('page_admin.list_pages') }}" class="btn secondary">Cancel</a>
   </div>
 </form>
-
-{# Stage edits: a separate POST form (nested forms are illegal HTML) that
-   forks a working copy from the live published page and opens the WC
-   editor. Only offered on a PUBLISHED page in live-edit mode; drafts
-   edit live directly, and the WC editor itself has no further staging
-   affordance. #}
-{% if is_published_live %}
-<form method="post"
-      action="{{ url_for('page_admin.stage_page', page_id=page.id) }}"
-      style="margin-top: 1rem;">
-  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-  <button type="submit" class="btn">Stage edits (working copy)</button>
-  <small style="display: block; margin-top: 0.25rem; color: #666;">
-    Edit and (later) preview a copy of this page while the live version
-    stays published and unchanged.
-  </small>
-</form>
-{% endif %}
 
 {% if not is_edit %}
 <script>

@@ -120,7 +120,16 @@ def _stage_and_save(client: FlaskClient, page_id: int) -> None:
     token = _csrf_token(client, path=f"/admin/sites/blog/pages/{page_id}/edit")
     resp = client.post(
         f"/admin/sites/blog/pages/{page_id}/working-copy/stage",
-        data={"_csrf_token": token},
+        # Stage submits the live edit form (no edits here -> WC equals live).
+        data={
+            "title": "About (live)",
+            "slug": "about",
+            "parent_id": "",
+            "body_markdown": "Live body.",
+            "kind": "static",
+            "menu_order": "0",
+            "_csrf_token": token,
+        },
         headers={"Host": HOST},
     )
     assert resp.status_code == 302, f"stage failed: {resp.status_code}"
