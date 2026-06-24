@@ -4,6 +4,21 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Draft-alongside-published working copies for pages and posts. "Stage
+  edits" forks the live row into a working copy you can edit and preview
+  in the real theme (a signed, time-limited preview link on the delivery
+  host, `noindex`, strictly read-only) while the published version stays
+  live and unchanged; "Promote" atomically swaps the working copy onto
+  the live row, snapshotting the prior version, inserting the usual
+  slug-change 301, and reindexing (posts also reconcile their tags). New
+  optional settings: `BRAGI_DELIVERY_BASE_URL` (the admin->delivery
+  origin for the preview link in dev / single-host deploys; defaults to
+  each site's canonical URL) and `BRAGI_WORKING_COPY_PREVIEW_TTL_SECONDS`
+  (preview-token lifetime, default 3600).
+
 ## [1.36.2] - 2026-06-23
 
 ### Fixed
