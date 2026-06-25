@@ -180,6 +180,23 @@ class Settings(BaseSettings):
     # lock_configuration freeze in open_dataset.
     dataset_query_temp_limit: str = "1GB"
 
+    # Working-copy preview (issue #414). A preview token signed by the
+    # admin app (mint) and verified by the delivery app (verify) lets an
+    # operator view a page's staged working copy through the real theme at
+    # the live URL. This is how long the signed token stays valid; a longer
+    # window is more convenient (open-tab-and-come-back) but widens the
+    # replay window for a leaked token. The token is the only gate on a
+    # route that bypasses the published-only filter, so keep it modest.
+    working_copy_preview_ttl_seconds: int = 3600
+
+    # Cross-host delivery origin for admin->delivery links (the working-
+    # copy preview). Empty (default) uses each site's `canonical_url`,
+    # correct for multisite prod where every site has its own public host.
+    # Set it where one delivery process serves all sites on a local
+    # address the per-site canonical can't express -- notably dev, where
+    # delivery listens on a port: `BRAGI_DELIVERY_BASE_URL=http://localhost:8002`.
+    delivery_base_url: str = ""
+
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake
     # contact. Format: `mailto:...` or `https://...` per RFC 9116.

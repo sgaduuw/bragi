@@ -49,6 +49,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.htmx import is_htmx
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
+from bragi.core.models.page_working_copy import PageWorkingCopy
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.permissions import require_role, resolve_site_or_abort
@@ -154,7 +155,7 @@ def _validate_resume_data(raw: str) -> tuple[dict[str, object] | None, str | Non
     return data.model_dump(mode="json", exclude_defaults=True), None
 
 
-def _resume_data_for_form(page: Page | None, form: dict[str, str]) -> ResumeData:
+def _resume_data_for_form(page: Page | PageWorkingCopy | None, form: dict[str, str]) -> ResumeData:
     """Build the typed ResumeData object the resume fieldset template
     consumes. On GET-edit: from `page.resume_data` (or empty if NULL).
     On POST-rerender (validation error): from the raw JSON in `form`
@@ -370,7 +371,7 @@ def _parent_choices(
 def _render_page_form(
     db: Session,
     site: Site,
-    page: Page | None,
+    page: Page | PageWorkingCopy | None,
     form: dict[str, str],
     parents: list[Page],
     *,
@@ -379,19 +380,28 @@ def _render_page_form(
     swap_target: Page | None = None,
     demotion_pending: bool = False,
     demotion_post_count: int | None = None,
+    is_working_copy: bool = False,
+    working_copy_page_id: int | None = None,
+    preview_url: str | None = None,
 ) -> str:
     """Render the page create/edit form (`admin/page_edit.html`).
 
-    Every GET and re-render-on-error path in `new_page` and
-    `edit_page` funnels through here so the long, identical
-    render_template kwarg list lives in one place. The featured-image
-    preview is derived from `form['featured_image_id']` (empty/absent
-    -> no thumbnail, no DB hit); `resume_data_for_form` from
-    `(page, form)`. The keyword flags drive the optional surfaces:
+    Every GET and re-render-on-error path in `new_page`, `edit_page`,
+    and the working-copy editor funnels through here so the long,
+    identical render_template kwarg list lives in one place. The
+    featured-image preview is derived from `form['featured_image_id']`
+    (empty/absent -> no thumbnail, no DB hit); `resume_data_for_form`
+    from `(page, form)`. The keyword flags drive the optional surfaces:
     `slug_full_path` the edit form's full-path preview, the
-    swap/demotion pairs the POST_INDEX confirmation banners. All are
-    falsy-guarded in the template, so a default (`None`/`False`) is
-    equivalent to the kwarg being absent (the pre-dedup shape).
+    swap/demotion pairs the POST_INDEX confirmation banners,
+    `is_working_copy` / `working_copy_page_id` the WC banner + the
+    form's WC POST target, and `preview_url` the WC banner's "Preview"
+    link (the signed delivery-host preview URL). All are falsy-guarded
+    in the template, so a default (`None`/`False`) is equivalent to the
+    kwarg being absent
+    (the pre-dedup shape). `page` may be a live `Page` OR a
+    `PageWorkingCopy`: both expose the same editable attribute names,
+    so the template binds to either via the editable-source seam.
     """
     fid = form.get("featured_image_id")
     return render_template(
@@ -408,6 +418,9 @@ def _render_page_form(
         swap_target=swap_target,
         demotion_pending=demotion_pending,
         demotion_post_count=demotion_post_count,
+        is_working_copy=is_working_copy,
+        working_copy_page_id=working_copy_page_id,
+        preview_url=preview_url,
     )
 
 
@@ -423,6 +436,114 @@ def _page_nav_snapshot(page: Page) -> dict[str, object]:
         "status": page.status,
         "show_in_nav": page.show_in_nav,
         "menu_order": page.menu_order,
+    }
+
+
+# ============================================================
+# Editable-source seam (issue #414, Task 2)
+#
+# A `PageWorkingCopy` and a live `Page` share an identically-named
+# editable surface by design. These helpers let the same edit form
+# and the same field-assignment logic work against EITHER object,
+# so the live-edit path (`edit_page`) and the working-copy path
+# (`save_page_working_copy`) don't drift.
+# ============================================================
+
+# The editable columns shared, name-for-name, between Page and
+# PageWorkingCopy. `fork_page_working_copy` copies exactly these.
+# Deliberately excludes Page-only fields (author_id, source_id,
+# source_meta) and the live-only `status` (a working copy never
+# carries status; the live row keeps PUBLISHED through promote).
+_EDITABLE_PAGE_FIELDS: tuple[str, ...] = (
+    "title",
+    "slug",
+    "parent_id",
+    "kind",
+    "body_markdown",
+    "body_html",
+    "body_excerpt",
+    "meta_title",
+    "meta_description",
+    "canonical_url",
+    "noindex",
+    "featured_image_id",
+    "show_in_nav",
+    "menu_order",
+    "resume_data",
+)
+
+
+def fork_page_working_copy(page: Page, *, editor_user_id: int | None) -> PageWorkingCopy:
+    """Build a `PageWorkingCopy` carrying the live page's editable fields.
+
+    Copies every column in `_EDITABLE_PAGE_FIELDS` verbatim from the
+    live row, then stamps the staging metadata (`site_id`, `page_id`,
+    `editor_user_id`). The returned object is detached; the caller
+    `db.add()`s and commits it. Does NOT touch the live `Page` row and
+    fires no hooks (nothing is live yet).
+    """
+    wc = PageWorkingCopy(
+        site_id=page.site_id,
+        page_id=page.id,
+        editor_user_id=editor_user_id,
+    )
+    for field in _EDITABLE_PAGE_FIELDS:
+        setattr(wc, field, getattr(page, field))
+    return wc
+
+
+def _apply_page_form_fields(
+    target: Page | PageWorkingCopy,
+    form: dict[str, str],
+    *,
+    parent_id: int | None,
+    featured_image_id: int | None,
+    resume_data_dict: dict[str, object] | None,
+    new_kind: str,
+) -> None:
+    """Assign the page-edit form fields onto `target` (live Page or WC).
+
+    The single source of truth for the title/slug/parent/body/kind/
+    featured-image/resume/nav assignments plus the body_html render and
+    excerpt derivation, shared by `edit_page` (live) and
+    `save_page_working_copy` (working copy). `status` is deliberately
+    NOT set here: the live-edit path sets it separately (it's a live
+    field), and a working copy has no status column.
+    """
+    body_markdown = str(form["body_markdown"])
+    target.title = str(form["title"])
+    target.slug = str(form["slug"])
+    target.parent_id = parent_id
+    target.body_markdown = body_markdown
+    target.body_html = render_markdown(body_markdown)
+    target.body_excerpt = make_excerpt(body_markdown)
+    target.kind = new_kind
+    target.featured_image_id = featured_image_id
+    target.resume_data = resume_data_dict
+    target.show_in_nav = form.get("show_in_nav") == "1"
+    target.menu_order = _safe_int(form.get("menu_order"))
+
+
+def _form_from_working_copy(wc: PageWorkingCopy) -> dict[str, str]:
+    """Build the edit-form dict from a working copy (the WC-editor GET).
+
+    Mirrors the `edit_page` GET form-dict shape so `page_edit.html`
+    renders identically whether bound to a live Page or a WC. A working
+    copy has no `status`, so it shows as draft-equivalent in the form;
+    the status control is hidden in WC mode by the template, so this
+    value is inert.
+    """
+    return {
+        "title": wc.title,
+        "slug": wc.slug,
+        "body_markdown": wc.body_markdown,
+        "status": PageStatus.DRAFT,
+        "kind": wc.kind,
+        "parent_id": str(wc.parent_id) if wc.parent_id else "",
+        "featured_image_id": str(wc.featured_image_id) if wc.featured_image_id else "",
+        "resume_data": "",
+        "show_in_nav": "1" if wc.show_in_nav else "",
+        "menu_order": str(wc.menu_order),
     }
 
 
@@ -782,18 +903,18 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         if existing_index is not None:
             existing_index.kind = PageKind.STATIC
 
-        page.title = str(form["title"])
-        page.slug = slug
-        page.parent_id = parent_id
-        page.body_markdown = str(form["body_markdown"])
-        page.body_html = render_markdown(str(form["body_markdown"]))
-        page.body_excerpt = make_excerpt(str(form["body_markdown"]))
+        # Shared field-assignment (live Page or working copy go through
+        # the same seam). `status` is live-only, so it's set here, not
+        # in `_apply_page_form_fields`.
+        _apply_page_form_fields(
+            page,
+            form,
+            parent_id=parent_id,
+            featured_image_id=featured_image_id,
+            resume_data_dict=resume_data_dict,
+            new_kind=new_kind,
+        )
         page.status = str(form["status"])
-        page.kind = new_kind
-        page.featured_image_id = featured_image_id
-        page.resume_data = resume_data_dict
-        page.show_in_nav = form.get("show_in_nav") == "1"
-        page.menu_order = _safe_int(form.get("menu_order"))
 
         # `after` reads the just-mutated in-session attributes (no
         # commit needed for plain ORM reads).
@@ -862,6 +983,438 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         extra={"slug": slug},
     )
     return redirect(url_for("page_admin.list_pages"))
+
+
+# ============================================================
+# Working copy: stage / edit / discard (issue #414, Task 2)
+#
+# A working copy holds the editable surface of a PUBLISHED page so an
+# operator can edit and (later) preview/promote while the live row
+# stays untouched. Editing a working copy fires NO lifecycle hooks
+# (nothing is live) and never mutates the live `Page`.
+# ============================================================
+
+
+def _wc_for_page(db: Session, site_id: int, page_id: int) -> PageWorkingCopy | None:
+    """Load the working copy for `page_id` on `site_id`, or None.
+
+    Site-scoped: a working copy from another site is invisible (the
+    UNIQUE is on `(site_id, page_id)`, and the query filters site_id
+    so a cross-site page id can't surface another tenant's WC).
+    """
+    return db.execute(
+        select(PageWorkingCopy).where(
+            PageWorkingCopy.site_id == site_id,
+            PageWorkingCopy.page_id == page_id,
+        )
+    ).scalar_one_or_none()
+
+
+def _working_copy_preview_url(wc: PageWorkingCopy, site: Site) -> str | None:
+    """Delivery-host URL to preview a page working copy, or None if no origin.
+
+    Thin wrapper over the shared `bragi.core.preview_token` helper, binding
+    `kind="page"` and the working copy's ids. The admin and delivery apps
+    run on different origins; the signed token is the only thing that
+    crosses. The helper uses `settings.delivery_base_url` when set (dev,
+    where one delivery process serves every site on a local port the
+    per-site `canonical_url` can't express), else the site's public
+    `canonical_url` (multisite prod, each site its own origin).
+    """
+    from bragi.core.preview_token import KIND_PAGE, working_copy_preview_url
+
+    return working_copy_preview_url(kind=KIND_PAGE, wc_id=wc.id, site_id=wc.site_id, site=site)
+
+
+@bp.route("/<int:page_id>/working-copy/stage", methods=["POST"])
+def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Stage the operator's CURRENT edits into a working copy, then open
+    the working-copy editor.
+
+    Reached from the live edit form via a `formaction` submit button, so
+    the POST carries the full edit form (the operator's unsaved typing),
+    not just the page id. Those fields are applied to the working copy,
+    so staging captures what the operator is editing rather than forking
+    the stale stored row. Get-or-create: a second stage reuses the
+    existing working copy (`UNIQUE(site_id, page_id)`) and overwrites it
+    with the latest edits (latest edits win). NO lifecycle hooks (nothing
+    is live); one commit. On a validation error the LIVE edit form is
+    re-rendered with the input preserved. Editor role; site-scoped.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        all_parents = _all_pages_for_picker(db, page.site_id)
+        descendants = _descendant_ids(all_parents, page.id)
+        parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
+
+        # Same validation as the live edit / WC save paths; on error
+        # re-render the LIVE edit form (the operator is on it) with input
+        # preserved, not the WC editor.
+        form = _form_from_request()
+        if not form["title"] or not form["slug"]:
+            flash("Title and slug are required.", "error")
+            return _render_page_form(db, site, page, form, parents)
+        new_kind = str(form["kind"])
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
+            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
+            return _render_page_form(db, site, page, form, parents)
+        parent_id = _normalized_parent_id(form["parent_id"])
+        parent_id, parent_err = _validated_parent_id_or_error(
+            db, parent_id, page.site_id, exclude_page_id=page.id
+        )
+        if parent_err is not None:
+            flash(parent_err, "error")
+            return _render_page_form(db, site, page, form, parents)
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], page.site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return _render_page_form(db, site, page, form, parents)
+        resume_data_dict, resume_err = _validate_resume_data(form["resume_data"])
+        if resume_err is not None:
+            flash(resume_err, "error")
+            return _render_page_form(db, site, page, form, parents)
+
+        wc = _wc_for_page(db, site.id, page.id)
+        if wc is None:
+            # `fork` seeds the staging metadata + the fields the form does
+            # not carry (meta_*/canonical/noindex); `_apply` then overwrites
+            # the edited fields from the posted form.
+            wc = fork_page_working_copy(page, editor_user_id=int(session["user_id"]))
+            db.add(wc)
+        else:
+            wc.editor_user_id = int(session["user_id"])
+        _apply_page_form_fields(
+            wc,
+            form,
+            parent_id=parent_id,
+            featured_image_id=featured_image_id,
+            resume_data_dict=resume_data_dict,
+            new_kind=new_kind,
+        )
+        # No lifecycle hooks: nothing is live. Single commit.
+        db.commit()
+
+    return redirect(url_for("page_admin.working_copy_editor", page_id=page_id))
+
+
+@bp.route("/<int:page_id>/working-copy", methods=["GET"])
+def working_copy_editor(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Render the page-edit form bound to the working copy.
+
+    Reuses `page_edit.html` via the editable-source seam: the working
+    copy exposes the same attribute names as a live Page, and the
+    `is_working_copy` flag drives the WC banner + the form's POST
+    target. Editor role; site-scoped. If no working copy exists (e.g. a
+    stale link after a discard) we send the operator back to live edit.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
+        wc = _wc_for_page(db, site.id, page.id)
+        if wc is None:
+            flash("No working copy for this page; editing live.", "warning")
+            return redirect(url_for("page_admin.edit_page", page_id=page_id))
+
+        set_breadcrumbs(
+            Crumb("Pages", "page_admin.list_pages"),
+            Crumb(page.title or "Untitled", "page_admin.edit_page", {"page_id": page.id}),
+            Crumb("Working copy", None),
+        )
+
+        # The parent picker excludes the live page itself and its
+        # descendants (same cycle guard as live edit). A working copy's
+        # parent is still a `pages.id`, so it can't sit under its own
+        # subtree either.
+        all_parents = _all_pages_for_picker(db, page.site_id)
+        descendants = _descendant_ids(all_parents, page.id)
+        parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
+
+        from bragi.core.url import page_path_preview
+
+        # Preview (Task 3): the delivery-host URL for the signed token.
+        # POST_INDEX working copies have no preview path in v1, so the
+        # template suppresses the button for that kind; we still build the
+        # URL here (cheap, and ready for static/resume).
+        preview_url = _working_copy_preview_url(wc, site)
+
+        return _render_page_form(
+            db,
+            site,
+            wc,
+            _form_from_working_copy(wc),
+            parents,
+            slug_full_path=page_path_preview(
+                db, site=site, parent_id=wc.parent_id, slug=wc.slug, page_id=page.id
+            ),
+            is_working_copy=True,
+            working_copy_page_id=page.id,
+            preview_url=preview_url,
+        )
+
+
+@bp.route("/<int:page_id>/working-copy/save", methods=["POST"])
+def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Save the working-copy form. Writes the WC fields, regenerates
+    body_html, fires NO lifecycle hooks, single commit.
+
+    Crucially does NOT touch the live `Page` row. Slug uniqueness on a
+    working copy is intentionally NOT enforced against the live pages'
+    `UNIQUE(site_id, parent_id, slug)`: a working copy may carry the
+    same slug as its live page (the common case, and expected). Only
+    the structural validations (required fields, valid kind, in-site
+    parent without a cycle, resolvable featured image, valid
+    resume_data) run. Editor role; site-scoped.
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        wc = _wc_for_page(db, site.id, page.id)
+        if wc is None:
+            abort(404)
+
+        all_parents = _all_pages_for_picker(db, page.site_id)
+        descendants = _descendant_ids(all_parents, page.id)
+        parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
+
+        def _rerender(form: dict[str, str]) -> str:
+            from bragi.core.url import page_path_preview
+
+            # The token previews the WC's last-saved state; on a validation
+            # error nothing was written, so the saved content is still what
+            # the token renders. Mint fresh so the link is always live.
+            preview_url = _working_copy_preview_url(wc, site)
+            return _render_page_form(
+                db,
+                site,
+                wc,
+                form,
+                parents,
+                slug_full_path=page_path_preview(
+                    db, site=site, parent_id=wc.parent_id, slug=wc.slug, page_id=page.id
+                ),
+                is_working_copy=True,
+                working_copy_page_id=page.id,
+                preview_url=preview_url,
+            )
+
+        form = _form_from_request()
+        if not form["title"] or not form["slug"]:
+            flash("Title and slug are required.", "error")
+            return _rerender(form)
+        new_kind = str(form["kind"])
+        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
+            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
+            return _rerender(form)
+        parent_id = _normalized_parent_id(form["parent_id"])
+        parent_id, parent_err = _validated_parent_id_or_error(
+            db, parent_id, page.site_id, exclude_page_id=page.id
+        )
+        if parent_err is not None:
+            flash(parent_err, "error")
+            return _rerender(form)
+        featured_image_id, featured_image_err = _resolve_featured_image_id(
+            db, form["featured_image_id"], page.site_id
+        )
+        if featured_image_err is not None:
+            flash(featured_image_err, "error")
+            return _rerender(form)
+        resume_data_dict, resume_err = _validate_resume_data(form["resume_data"])
+        if resume_err is not None:
+            flash(resume_err, "error")
+            return _rerender(form)
+
+        # Shared seam: same field-assignment + body_html render as the
+        # live-edit path, applied to the working copy instead of the
+        # live Page. NO `status` (a working copy has none), NO snapshot
+        # (nothing live changed), NO hooks (nothing is live), one commit.
+        _apply_page_form_fields(
+            wc,
+            form,
+            parent_id=parent_id,
+            featured_image_id=featured_image_id,
+            resume_data_dict=resume_data_dict,
+            new_kind=new_kind,
+        )
+        db.commit()
+        flash("Working copy saved. The live page is unchanged.", "success")
+
+    return redirect(url_for("page_admin.working_copy_editor", page_id=page_id))
+
+
+@bp.route("/<int:page_id>/working-copy/discard", methods=["POST"])
+def discard_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Delete the working copy and return to the live page edit.
+
+    No live effect, no hooks: the working copy is transient staging
+    state. Editor role; site-scoped. A missing working copy is a no-op
+    (the operator likely discarded it in another tab).
+    """
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        wc = _wc_for_page(db, site.id, page.id)
+        if wc is not None:
+            db.delete(wc)
+            db.commit()
+            flash("Working copy discarded.", "success")
+        else:
+            flash("No working copy to discard.", "warning")
+
+    return redirect(url_for("page_admin.edit_page", page_id=page_id))
+
+
+def _page_promote_snapshot(page: Page) -> dict[str, object]:
+    """The before/after field set promote hands to `on_post_updated`.
+
+    Matches the keys `edit_page` builds for its `on_post_updated`
+    (`slug`, `title`, `status`, `kind`, `parent_id`): the redirects
+    subscriber keys its slug/parent/kind-change 301s off exactly these,
+    so a staged slug or parent change in the working copy drives the
+    same auto-301 a hand edit would. Read into a plain dict so the
+    `before` snapshot survives the field copy that follows.
+    """
+    return {
+        "slug": page.slug,
+        "title": page.title,
+        "status": page.status,
+        "kind": page.kind,
+        "parent_id": page.parent_id,
+    }
+
+
+@bp.route("/<int:page_id>/working-copy/promote", methods=["POST"])
+def promote_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Atomically swap the working copy into its live `Page`, then publish.
+
+    The inverse of staging: the working copy's staged editable surface
+    becomes the live page's content. Reuses the #430 commit-once pattern
+    so the content copy, the FTS reindex, the slug/parent-change 301, and
+    the internal-links edge reconciliation all land in ONE atomic
+    transaction. Editor role; site-scoped (404 if either the page or its
+    working copy is missing / cross-site).
+
+    Step order (load -> snapshot -> copy -> flush -> hooks -> ONE commit
+    -> delete WC -> purge -> audit):
+
+    1. Load the live `Page` and its `PageWorkingCopy` (both site-scoped).
+    2. Snapshot the LIVE row into history (`_snapshot_page`) so promote
+       is undoable, exactly like `edit_page` does before mutating.
+    3. Capture `before` from the (still-live) row, then copy every
+       `_EDITABLE_PAGE_FIELDS` value off the working copy onto the live
+       page. `status` is NOT in that tuple and is NOT touched: staging
+       never stages status, so the live row keeps its PUBLISHED status
+       through promote. `body_html` is re-rendered from the staged
+       `body_markdown` so it can never drift from the canonical source
+       (markdown-is-the-source-of-truth), even though the WC already
+       carries a render.
+    4. `db.flush()` so the hooks' in-session reads (the redirects
+       subscriber's `page_url_for(..., db=session)`, internal_links'
+       body_html scan) see the promoted slug/parent/body before the
+       single post-chain commit (the session has autoflush off).
+    5. Fire `on_post_updated(item=page, before, after, session=db)`
+       unless the operator opted out via `skip_redirect` (a staged
+       slug/parent fix that shouldn't leave a stale-URL 301). Fire
+       `on_post_published` ONLY in the defensive case the live row was
+       not already published (a working copy is forked from a PUBLISHED
+       page, so this normally does not fire; it guards a hand-unpublish
+       between stage and promote).
+    6. ONE unconditional `db.commit()` AFTER the whole hook chain (#430):
+       committing before the hooks would roll back any write a hookimpl
+       makes on the supplied session (internal_links fires LAST in the
+       LIFO chain). The working-copy delete is staged into this SAME
+       transaction (one commit, not two) so the promote and the WC
+       removal are atomic: there is never a window where the content is
+       live but the stale working copy lingers.
+    7. `on_cache_purge` AFTER commit, then audit (noting the promotion).
+    """
+    skip_redirect = request.form.get("skip_redirect") == "1"
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+        wc = _wc_for_page(db, site.id, page.id)
+        if wc is None:
+            abort(404)
+
+        # Snapshot the LIVE row BEFORE mutating so promote is undoable
+        # (mirrors edit_page / the revision-restore path).
+        _snapshot_page(db, page, editor_user_id=int(session["user_id"]))
+
+        before = _page_promote_snapshot(page)
+        was_published = page.status == PageStatus.PUBLISHED
+
+        # Copy the staged editable surface onto the live row. The WC and
+        # the live Page share these column names by construction (the
+        # `fork_page_working_copy` / `_EDITABLE_PAGE_FIELDS` seam), so
+        # the copy is field-for-field. `status` is deliberately absent
+        # from `_EDITABLE_PAGE_FIELDS`, so the live status is preserved.
+        for field in _EDITABLE_PAGE_FIELDS:
+            setattr(page, field, getattr(wc, field))
+        # Re-render body_html from the staged markdown so the live cache
+        # can't drift from its source, regardless of what the WC stored.
+        page.body_html = render_markdown(page.body_markdown)
+
+        after = _page_promote_snapshot(page)
+
+        # Flush the promoted content so the lifecycle hooks' in-session
+        # reads see the new slug/parent/body before the single commit.
+        db.flush()
+
+        pm = current_app.extensions["plugin_manager"]
+        # on_post_updated drives the staged slug/parent-change 301 (and
+        # FTS reindex, internal_links edge reconcile). Honour the same
+        # skip_redirect opt-out the edit form carries.
+        if not skip_redirect:
+            pm.hook.on_post_updated(item=page, before=before, after=after, session=db)
+        # Defensive only: a working copy is forked from a published page,
+        # so the live row is normally already PUBLISHED and this is a
+        # no-op. It guards a hand-unpublish between stage and promote.
+        if page.status == PageStatus.PUBLISHED and not was_published:
+            pm.hook.on_post_published(item=page, session=db)
+
+        # The working-copy delete joins the SAME transaction as the
+        # promote so the single commit is atomic across both (no second
+        # commit, no live-but-WC-lingering window).
+        db.delete(wc)
+        # ONE commit AFTER the whole hook chain so content + FTS +
+        # redirect + edges + the WC removal land atomically (#430).
+        # Unconditional: a skip_redirect promote (which fired no hook)
+        # must still persist the content copy and the WC delete.
+        db.commit()
+        pm.hook.on_cache_purge(scope="page", key=str(page.id))
+        flash(f"Working copy promoted; '{page.title}' is now live.", "success")
+
+        promoted_id = page.id
+        promoted_slug = page.slug
+        promoted_site_id = page.site_id
+
+    audit(
+        AuditAction.POST_UPDATED,
+        target_type="page",
+        target_id=promoted_id,
+        site_id=promoted_site_id,
+        extra={"slug": promoted_slug, "via": "working-copy-promote"},
+    )
+    return redirect(url_for("page_admin.edit_page", page_id=promoted_id))
 
 
 def _delete_one_page(db: Session, site: Site, page: Page) -> BulkOutcome:

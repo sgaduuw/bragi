@@ -30,7 +30,10 @@ file registry with an explore console, saved queries, and a
 from title (edit-form, page-list inline, and bulk) with a
 full-URL-path column in the page list, inline parent editing in the
 page list (double-click the Parent cell to reparent; published moves
-insert a subtree 301), four in-tree themes with
+insert a subtree 301), draft-alongside-published working copies for
+pages and posts (stage edits into a working copy, preview them in the
+real theme via a signed link without touching the live page, then
+promote atomically), four in-tree themes with
 auto light/dark, sitemap / feed / JSON-LD, audit-driven hardening
 from v1.12 through v1.19.
 
