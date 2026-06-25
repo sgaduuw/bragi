@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.36.2 (2026-06-23).
+**Latest release:** 1.37.0 (2026-06-26).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -30,7 +30,10 @@ file registry with an explore console, saved queries, and a
 from title (edit-form, page-list inline, and bulk) with a
 full-URL-path column in the page list, inline parent editing in the
 page list (double-click the Parent cell to reparent; published moves
-insert a subtree 301), four in-tree themes with
+insert a subtree 301), draft-alongside-published working copies for
+pages and posts (stage edits into a working copy, preview them in the
+real theme via a signed link without touching the live page, then
+promote atomically), four in-tree themes with
 auto light/dark, sitemap / feed / JSON-LD, audit-driven hardening
 from v1.12 through v1.19.
 
@@ -130,12 +133,15 @@ and ARM homelabs run natively rather than through QEMU emulation.
   fires on every content commit so a CDN invalidator has
   something to subscribe to.
 - **Push-crawl via IndexNow.** Post / page publish, update, and
-  delete fire a fire-and-forget POST to the configured IndexNow
-  endpoint so participating search engines (Bing, Yandex, Seznam,
-  Naver, ...) hear about the change immediately. Per-site key
-  bootstrapped with `bragi indexnow setup --site <slug>`; the
-  verification key file lives at `/<key>.txt` on the delivery
-  app.
+  delete enqueue a debounced ping so participating search engines
+  (Bing, Yandex, Seznam, Naver, ...) hear about the change. The POST
+  is off the request path: the lifecycle hook records the URL and the
+  `bragi-tasks` worker (`bragi indexnow send-pending`) sends it once
+  the hold-off window (`BRAGI_INDEXNOW_DEBOUNCE_SECONDS`, default
+  300s) closes, so N edits to a URL within the window coalesce into
+  one ping. Per-site key bootstrapped with `bragi indexnow setup
+  --site <slug>`; the verification key file lives at `/<key>.txt` on
+  the delivery app.
 - **Programmatic posting via API tokens.** Personal access
   tokens at `/admin/account/tokens/` (list / create / revoke;
   plaintext shown once on create) authenticate scripts and bots
@@ -145,10 +151,15 @@ and ARM homelabs run natively rather than through QEMU emulation.
   `post:write`. Argon2id-hashed at rest; expiry honoured; every
   use recorded in the audit log.
 - **Indieweb webmentions (send + receive).** Outbound: on
-  publish, every external link in a post is queued; the
-  cron-driven `bragi webmentions send-pending` performs W3C
+  publish or update, every external link in a post is queued
+  behind a debounce hold-off window; edits within the window
+  coalesce (the window starts at the first edit) and a link
+  added then removed before the window closes never sends. The
+  cron-driven `bragi webmentions send-pending` then performs W3C
   endpoint discovery (Link header, then
-  `<link rel="webmention">`) and POSTs the mention. Inbound:
+  `<link rel="webmention">`) and POSTs the mention once due.
+  `BRAGI_WEBMENTION_DEBOUNCE_SECONDS` (default 300) tunes the
+  window. Inbound:
   `POST /webmentions` on the delivery app validates the source
   actually links to the target, extracts an h-card author
   shape, and stores the mention pending admin moderation.
@@ -407,7 +418,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.36.2 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.37.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -783,7 +794,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.36.2
+pip install bragi-cms==1.37.0
 ```
 
 The import path stays `import bragi`. Container images remain the

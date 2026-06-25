@@ -4,6 +4,49 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] - 2026-06-26
+
+### Added
+- Draft-alongside-published working copies for pages and posts. "Stage
+  edits" forks the live row into a working copy you can edit and preview
+  in the real theme (a signed, time-limited preview link on the delivery
+  host, `noindex`, strictly read-only) while the published version stays
+  live and unchanged; "Promote" atomically swaps the working copy onto
+  the live row, snapshotting the prior version, inserting the usual
+  slug-change 301, and reindexing (posts also reconcile their tags). New
+  optional settings: `BRAGI_DELIVERY_BASE_URL` (the admin->delivery
+  origin for the preview link in dev / single-host deploys; defaults to
+  each site's canonical URL) and `BRAGI_WORKING_COPY_PREVIEW_TTL_SECONDS`
+  (preview-token lifetime, default 3600).
+
+### Changed
+- IndexNow pings are now debounced and sent off the request path
+  (#443). Publishing, updating, or deleting a post or page no longer
+  POSTs to the IndexNow endpoint inline; instead the lifecycle hook
+  enqueues the URL and the `bragi-tasks` worker
+  (`bragi indexnow send-pending`) sends it once a hold-off window
+  closes. N edits to the same URL within the window coalesce into a
+  single ping (leading-edge: the window starts at the first edit),
+  protecting publish latency and IndexNow quota. New optional setting
+  `BRAGI_INDEXNOW_DEBOUNCE_SECONDS` (default 300) tunes the window.
+  Observable effect: pings now arrive a few minutes after publish
+  rather than immediately. Operators running the task worker need no
+  action; the `indexnow send-pending` command is already wired into
+  the scheduler loop.
+- Outbound webmentions are now debounced and coalesced (#447).
+  Publishing or editing a post no longer queues every external link
+  for immediate send; instead each new link waits out a hold-off
+  window before `bragi webmentions send-pending` delivers it. Edits
+  within the window coalesce (leading-edge: the window starts at the
+  first edit), and a link added then removed before its window closes
+  is dropped on the next re-scan and never sends, closing the
+  retract-within-window gap where a transient link would still fan
+  out. The sender now processes only rows whose window has closed and
+  commits per row, so an edit landing mid-drain reliably sees settled
+  state. New optional setting `BRAGI_WEBMENTION_DEBOUNCE_SECONDS`
+  (default 300) tunes the window. Already-sent mentions are unaffected;
+  explicit retraction of a delivered mention is not handled.
+
 ## [1.36.2] - 2026-06-23
 
 ### Fixed

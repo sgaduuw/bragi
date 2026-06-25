@@ -6,8 +6,11 @@ help:  ## Show this help
 install:  ## Install all dependencies via uv
 	uv sync
 
-dev:  ## Run admin + delivery side by side (in-repo Procfile supervisor)
-	uv run python scripts/run-procfile.py Procfile.dev
+dev: migrate  ## Apply migrations, then run admin + delivery side by side
+	# BRAGI_DELIVERY_BASE_URL points admin->delivery links (the working-copy
+	# preview) at the local delivery port, which the per-site canonical_url
+	# can't express in dev. Matches the delivery port in Procfile.dev.
+	BRAGI_DELIVERY_BASE_URL=http://localhost:8002 uv run python scripts/run-procfile.py Procfile.dev
 
 test:  ## Run the full test suite
 	uv run pytest

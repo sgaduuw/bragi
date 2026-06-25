@@ -1,13 +1,61 @@
 {% extends "admin/base.html" %}
 {% from "admin/_image_picker_field.html" import image_picker_field %}
 {% set is_edit = page is not none %}
+{# In working-copy mode `page` is a PageWorkingCopy, so `page.id` is the
+   WC's id, NOT a live page id. `working_copy_page_id` is the live page
+   id; use it for every live-page route (form action, backlinks, etc.). #}
+{% set is_wc = is_working_copy | default(false) %}
 {% block title %}{{ 'Edit' if is_edit else 'New' }} page &middot; bragi admin{% endblock %}
 {% block content %}
 <h1>{{ 'Edit page' if is_edit else 'New page' }}</h1>
-{% if is_edit %}
+{% if is_edit and not is_wc %}
 <p style="margin-top: -0.5em; color: #666;">
   <a href="{{ url_for('internal_links_admin.backlinks', target_type='page', target_id=page.id) }}">Backlinks &raquo;</a>
 </p>
+{% endif %}
+
+{% if is_wc %}
+<div class="banner banner--info">
+  <p><strong>You're editing a working copy &mdash; the live page is unchanged.</strong></p>
+  <p>
+    Saves here go to the working copy only; they do not publish.
+    Use <strong>Promote</strong> to copy the staged content onto the
+    live page and publish it.
+  </p>
+  {# Preview (Task 3): opens the staged content rendered through the real
+     theme at the live URL, on the delivery host, in a new tab. Suppressed
+     for post_index working copies (no preview path in v1) and when the
+     site has no canonical (delivery) URL configured. #}
+  {% if preview_url and form.kind != 'post_index' %}
+  <a href="{{ preview_url }}" target="_blank" rel="noopener" class="button">Preview &raquo;</a>
+  {% elif form.kind == 'post_index' %}
+  <p style="margin: 0.25em 0; color: #666;">
+    <em>Preview is not available for post_index pages yet.</em>
+  </p>
+  {% endif %}
+  {# Promote (Task 4): copy the staged fields onto the live page and
+     publish, atomically (the #430 commit-once-after-hooks pattern). A
+     staged slug change leaves the old->new 301 unless skip_redirect is
+     checked. #}
+  <form method="post"
+        action="{{ url_for('page_admin.promote_page_working_copy', page_id=working_copy_page_id) }}"
+        onsubmit="return confirm('Promote this working copy? The staged content becomes the live page.');"
+        style="display: inline; margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label style="margin-right: 0.5em;">
+      <input type="checkbox" name="skip_redirect" value="1">
+      Skip 301 redirect on a slug change
+    </label>
+    <button type="submit" class="primary">Promote (publish working copy)</button>
+  </form>
+  <form method="post"
+        action="{{ url_for('page_admin.discard_page_working_copy', page_id=working_copy_page_id) }}"
+        onsubmit="return confirm('Discard this working copy? The live page is unaffected.');"
+        style="display: inline; margin: 0;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="danger">Discard working copy</button>
+  </form>
+</div>
 {% endif %}
 
 {% if swap_pending %}
@@ -48,7 +96,7 @@
 {% endif %}
 
 <form method="post"
-      action="{{ url_for('page_admin.edit_page', page_id=page.id) if is_edit else url_for('page_admin.new_page') }}">
+      action="{% if is_wc %}{{ url_for('page_admin.save_page_working_copy', page_id=working_copy_page_id) }}{% elif is_edit %}{{ url_for('page_admin.edit_page', page_id=page.id) }}{% else %}{{ url_for('page_admin.new_page') }}{% endif %}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   {% if swap_pending %}<input type="hidden" name="acknowledge_swap" value="1">{% endif %}
   {% if demotion_pending %}<input type="hidden" name="acknowledge_demotion" value="1">{% endif %}
@@ -67,7 +115,7 @@
             full_path=slug_full_path,
             error=none,
             is_edit=is_edit,
-            page_id=(page.id if page else none),
+            page_id=(working_copy_page_id if is_wc else (page.id if page else none)),
             site_slug=request.view_args['site_slug'] %}
       {% include "admin/_page_slug_field.html" %}
     {% endwith %}
@@ -97,6 +145,10 @@
     {% include "admin/_resume_fieldset.html" %}
   {% endif %}
 
+  {# A working copy carries no status: the live row keeps its PUBLISHED
+     status through promote. Hide the control entirely in WC mode so the
+     save can't accidentally carry a status field. #}
+  {% if not is_wc %}
   <fieldset>
     <label for="status">Status</label>
     <select name="status" id="status">
@@ -106,6 +158,7 @@
       <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archived</option>
     </select>
   </fieldset>
+  {% endif %}
 
   <fieldset>
     <label for="kind">Kind</label>
@@ -123,7 +176,7 @@
 
   <fieldset>
     <legend>Navigation</legend>
-    {% if is_edit and site is defined and site.home_page_id == page.id %}
+    {% if is_edit and not is_wc and site is defined and site.home_page_id == page.id %}
     <p class="banner banner--info" style="margin: 0 0 0.75rem 0;">
       This page is mapped to <code>/</code> (your site's home).
       It is automatically hidden from the navigation menu
@@ -159,17 +212,44 @@
        helper="Optional. Used as og:image / twitter:image and as a card thumbnail. Falls back to the site's default featured image when unset."
      ) }}
 
-  {% if is_edit %}
+  {# skip_redirect is meaningless for a working copy: a WC save fires no
+     hooks and inserts no 301 (nothing is live). The recompute-from-title
+     button references #skip_redirect, so render a hidden input in WC mode
+     to keep that script's getElementById from null-dereferencing. #}
+  {% if is_edit and not is_wc %}
   <fieldset style="flex-direction: row; align-items: center; gap: 0.5rem;">
     <input type="checkbox" name="skip_redirect" id="skip_redirect" value="1">
     <label for="skip_redirect" style="margin: 0;">
       Skip redirect when slug changes (use for typo fixes in drafts)
     </label>
   </fieldset>
+  {% elif is_wc %}
+  <input type="hidden" id="skip_redirect">
   {% endif %}
 
+  {# On a PUBLISHED page, the live Save is relabelled so the operator
+     sees that it publishes immediately; the prominent staging affordance
+     sits in its own form below (HTML forbids nested forms). Drafts edit
+     live as today, so the label stays the plain "Save". #}
+  {% set is_published_live = is_edit and not is_wc and page.status == 'published' %}
   <div class="actions">
-    <button type="submit">{{ 'Save' if is_edit else 'Create' }}</button>
+    <button type="submit">
+      {%- if is_wc %}Save working copy
+      {%- elif is_published_live %}Edit live (publishes immediately)
+      {%- elif is_edit %}Save
+      {%- else %}Create{% endif -%}
+    </button>
+    {# On a published page, stage the CURRENT form content (the operator's
+       unsaved edits) into a working copy. A second submit button on the
+       SAME form with its own `formaction` carries the typed body/title/etc.
+       to stage_page; a separate form (illegal to nest) would submit none of
+       it. #}
+    {% if is_published_live %}
+    <button type="submit" class="btn"
+            formaction="{{ url_for('page_admin.stage_page', page_id=page.id) }}">
+      Stage edits (working copy)
+    </button>
+    {% endif %}
     <a href="{{ url_for('page_admin.list_pages') }}" class="btn secondary">Cancel</a>
   </div>
 </form>
@@ -210,7 +290,11 @@
    Saving in that state silently wipes the orphaned fields back to their
    defaults (kind -> static, status -> draft). Keep these contributions
    OUTSIDE the main form. #}
-{% if is_edit and current_kind == 'resume' %}
+{# Resume-source widgets (LinkedIn upload, etc.) post to their own
+   endpoints that mutate the LIVE page's resume_data directly, so they
+   don't belong on the working-copy editor (they'd bypass staging).
+   Restricted to live edit. #}
+{% if is_edit and not is_wc and current_kind == 'resume' %}
   {% for partial_path in resume_admin_extras() %}
     {% include partial_path %}
   {% endfor %}

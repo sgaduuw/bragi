@@ -16,7 +16,7 @@ Covers:
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -45,6 +45,7 @@ from bragi.core.models.webmention import (
     WebmentionOutboxStatus,
     WebmentionStatus,
 )
+from bragi.core.time import naive_utcnow
 from tests.conftest import make_test_user, seed_blog_index
 
 # --------------------------- parse helpers ---------------------------
@@ -209,6 +210,39 @@ def test_outbox_mappers_tolerate_deleted_row_during_flight() -> None:
     assert ActivityPubOutbox.__mapper__.confirm_deleted_rows is False
 
 
+def test_outbox_not_before_defaults_to_now_and_roundtrips(db_session: Session) -> None:
+    """WebmentionOutbox rows created without an explicit not_before get a
+    Python-side default of naive_utcnow (due immediately), and the value
+    round-trips through the DB unchanged.
+
+    Task 2 will always set not_before explicitly (now + debounce window);
+    the default exists so any code path that omits the argument remains
+    immediately eligible for sending rather than getting a NULL or an error.
+    """
+    site, _, post = _seed_blog(db_session)
+
+    before = naive_utcnow() - timedelta(seconds=1)
+    row = WebmentionOutbox(
+        site_id=site.id,
+        post_id=post.id,
+        target_url="https://ext.example/page/",
+    )
+    db_session.add(row)
+    db_session.flush()
+    after = naive_utcnow() + timedelta(seconds=1)
+
+    assert row.not_before is not None
+    # Default should be "now": between the timestamps bracketing the flush.
+    assert before <= row.not_before <= after
+
+    # Persist and reload to confirm the column round-trips.
+    db_session.commit()
+    db_session.expire(row)
+    reloaded = db_session.get(WebmentionOutbox, row.id)
+    assert reloaded is not None
+    assert before <= reloaded.not_before <= after
+
+
 def test_on_post_updated_drops_pending_outbox_when_unpublishing(
     db_session: Session,
 ) -> None:
@@ -240,6 +274,21 @@ def test_on_post_updated_drops_pending_outbox_when_unpublishing(
 # --------------------------- sender ---------------------------
 
 
+def _make_due(db: Session) -> None:
+    """Backdate every PENDING outbox row past its debounce window.
+
+    The enqueue path now stamps `not_before = now + debounce_window`
+    (#447), so a freshly-queued row is NOT due. Tests that want the
+    sender to actually process the row backdate it first; this mirrors
+    "the window has closed" without sleeping.
+    """
+    for row in db.execute(
+        select(WebmentionOutbox).where(WebmentionOutbox.status == WebmentionOutboxStatus.PENDING)
+    ).scalars():
+        row.not_before = naive_utcnow() - timedelta(seconds=1)
+    db.commit()
+
+
 def test_send_pending_marks_sent_on_2xx(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
@@ -249,6 +298,7 @@ def test_send_pending_marks_sent_on_2xx(
     _, _, post = _seed_blog(db_session)
     _queue_outbox_for_post(post, db_session)
     db_session.commit()
+    _make_due(db_session)
 
     class _HeadResp:
         url = "https://other.example/x"
@@ -277,6 +327,48 @@ def test_send_pending_marks_sent_on_2xx(
     assert row.endpoint_url == "https://other.example/wm"
 
 
+def test_send_pending_skips_row_deleted_mid_drain(
+    patched_session_locals: sessionmaker[Session],
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A due PENDING row dropped mid-drain (the #447 reconcile-drop firing
+    on a concurrent edit) is skipped, not crashed on. With per-row commit
+    + expire_on_commit, advancing to a now-deleted row would otherwise
+    raise ObjectDeletedError and abort the whole pass."""
+    del patched_session_locals
+    site, _, post = _seed_blog(db_session)
+    for target in ("https://a.example/x", "https://b.example/y"):
+        db_session.add(
+            WebmentionOutbox(
+                site_id=site.id,
+                post_id=post.id,
+                target_url=target,
+                status=WebmentionOutboxStatus.PENDING,
+                not_before=naive_utcnow() - timedelta(seconds=1),
+            )
+        )
+    db_session.commit()
+
+    import bragi.contrib.webmentions.sender as sender_mod
+
+    def fake_send_one(db: Session, outbox: WebmentionOutbox) -> None:
+        # Simulate a concurrent reconcile-drop deleting the OTHER pending
+        # row while this one is in flight.
+        for other in db.execute(
+            select(WebmentionOutbox).where(WebmentionOutbox.id != outbox.id)
+        ).scalars():
+            db.delete(other)
+        outbox.status = WebmentionOutboxStatus.SENT
+
+    monkeypatch.setattr(sender_mod, "send_one", fake_send_one)
+
+    counts = send_pending(db_session)  # must not raise
+    assert counts["sent"] == 1
+    rows = db_session.execute(select(WebmentionOutbox)).scalars().all()
+    assert len(rows) == 1 and rows[0].status == WebmentionOutboxStatus.SENT
+
+
 def test_send_pending_skips_when_no_endpoint(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
@@ -286,6 +378,7 @@ def test_send_pending_skips_when_no_endpoint(
     _, _, post = _seed_blog(db_session)
     _queue_outbox_for_post(post, db_session)
     db_session.commit()
+    _make_due(db_session)
 
     class _HeadResp:
         url = "https://other.example/x"
@@ -303,6 +396,224 @@ def test_send_pending_skips_when_no_endpoint(
     assert counts["skipped"] == 1
     row = db_session.execute(select(WebmentionOutbox)).scalars().one()
     assert row.status == WebmentionOutboxStatus.SKIPPED
+
+
+# --------------------------- debounce + reconcile (#447) ---------------------------
+
+
+def _link_2xx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock the SSRF-guarded helpers so any due row discovers an
+    endpoint (via Link header) and gets a 200 back."""
+
+    class _HeadResp:
+        url = "https://other.example/x"
+        headers = {"Link": '<https://other.example/wm>; rel="webmention"'}
+
+    class _PostResp:
+        status_code = 200
+
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_head", lambda u, **k: _HeadResp())
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_post", lambda u, **k: _PostResp())
+
+
+def _rescan(db: Session, post: Post, body_html: str) -> None:
+    """Re-run the update-path scan with a new rendered body (published)."""
+    from bragi.contrib.webmentions.plugin import on_post_updated
+
+    post.body_html = body_html
+    on_post_updated(
+        post,
+        before={"status": "published"},
+        after={"status": "published"},
+        session=db,
+    )
+
+
+def test_queue_outbox_sets_future_not_before(db_session: Session) -> None:
+    """A newly-queued mention is held off by the debounce window."""
+    _, _, post = _seed_blog(db_session)
+    _queue_outbox_for_post(post, db_session)
+    db_session.commit()
+    row = db_session.execute(select(WebmentionOutbox)).scalars().one()
+    assert row.not_before > naive_utcnow()
+
+
+def test_send_pending_skips_rows_before_window(
+    patched_session_locals: sessionmaker[Session],
+    db_session: Session,
+) -> None:
+    """A row still inside its debounce window is not processed (the
+    sender's `not_before <= now` filter excludes it). No HTTP, no
+    attempt-count bump: it waits for the window to close."""
+    del patched_session_locals
+    _, _, post = _seed_blog(db_session)
+    _queue_outbox_for_post(post, db_session)  # not_before = now + 300
+    db_session.commit()
+
+    counts = send_pending(db_session)
+
+    assert counts["sent"] == 0
+    row = db_session.execute(select(WebmentionOutbox)).scalars().one()
+    assert row.status == WebmentionOutboxStatus.PENDING
+    # Untouched: the row was never selected, so send_one never ran.
+    assert row.attempt_count == 0
+
+
+def test_requeue_preserves_not_before_leading_edge(db_session: Session) -> None:
+    """Re-queueing the same target leaves the existing PENDING row (and
+    its not_before) untouched, and creates no duplicate: the window
+    starts at the FIRST edit and edits within it coalesce."""
+    _, _, post = _seed_blog(db_session)
+    _queue_outbox_for_post(post, db_session)
+    db_session.commit()
+    first_not_before = db_session.execute(select(WebmentionOutbox)).scalars().one().not_before
+
+    # A re-scan (update path) of the same body.
+    _rescan(db_session, post, post.body_html or "")
+    db_session.commit()
+
+    rows = db_session.execute(select(WebmentionOutbox)).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].not_before == first_not_before
+
+
+def test_link_added_then_removed_within_window_never_sends(
+    patched_session_locals: sessionmaker[Session],
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Headline fix (#447): a link added then removed before its
+    debounce window closes is dropped on re-scan and never sends; a
+    link that stays is queued and sent once its window closes."""
+    del patched_session_locals
+    _, _, post = _seed_blog(db_session)
+    target_a = "https://other.example/x"  # already in the seed body
+    target_b = "https://added.example/y"
+
+    # Initial publish scan: A only.
+    _queue_outbox_for_post(post, db_session)
+    db_session.commit()
+    assert {r.target_url for r in db_session.execute(select(WebmentionOutbox)).scalars()} == {
+        target_a
+    }
+
+    # Edit adds B (still within A's window).
+    _rescan(
+        db_session,
+        post,
+        f'<p><a href="{target_a}">a</a> <a href="{target_b}">b</a></p>',
+    )
+    db_session.commit()
+    assert {r.target_url for r in db_session.execute(select(WebmentionOutbox)).scalars()} == {
+        target_a,
+        target_b,
+    }
+
+    # Next edit removes B again, still within B's window.
+    _rescan(db_session, post, f'<p><a href="{target_a}">a</a></p>')
+    db_session.commit()
+    rows = db_session.execute(select(WebmentionOutbox)).scalars().all()
+    assert {r.target_url for r in rows} == {target_a}  # B's PENDING row dropped
+
+    # A survives and sends once its window closes; B can never send (gone).
+    _make_due(db_session)
+    _link_2xx(monkeypatch)
+    counts = send_pending(db_session)
+    assert counts["sent"] == 1
+    sent = db_session.execute(select(WebmentionOutbox)).scalars().all()
+    assert len(sent) == 1
+    assert sent[0].target_url == target_a
+    assert sent[0].status == WebmentionOutboxStatus.SENT
+
+
+def test_reconcile_spares_already_sent_rows(db_session: Session) -> None:
+    """A removed link whose row was already SENT is NOT deleted by the
+    reconcile (only PENDING rows are dropped). An already-sent mention's
+    retraction is a separate, out-of-scope feature."""
+    site, _, post = _seed_blog(db_session)
+    target_a = "https://other.example/x"
+    db_session.add(
+        WebmentionOutbox(
+            site_id=site.id,
+            post_id=post.id,
+            target_url=target_a,
+            status=WebmentionOutboxStatus.SENT,
+            attempt_count=1,
+        )
+    )
+    db_session.commit()
+
+    # Re-scan with a body that no longer links to A.
+    _rescan(db_session, post, '<p><a href="https://blog.example.com/page">self</a></p>')
+    db_session.commit()
+
+    rows = db_session.execute(select(WebmentionOutbox)).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].target_url == target_a
+    assert rows[0].status == WebmentionOutboxStatus.SENT  # untouched
+
+
+def test_send_pending_commits_per_row(
+    patched_session_locals: sessionmaker[Session],
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-row commit (#447, carrying the #443 review's window fix):
+    each successful send is committed before the next row is processed,
+    so an error mid-drain cannot roll back an already-sent row's status.
+
+    Mirrors the #443 reasoning: a row that blows up partway through the
+    drain leaves prior sends settled (durable), not rolled back with the
+    whole batch."""
+    del patched_session_locals
+    from bragi.contrib.webmentions import sender as sender_mod
+
+    site, _, post = _seed_blog(db_session)
+    # Two due PENDING rows; A sorts first (older not_before).
+    db_session.add(
+        WebmentionOutbox(
+            site_id=site.id,
+            post_id=post.id,
+            target_url="https://first.example/a",
+            status=WebmentionOutboxStatus.PENDING,
+            not_before=naive_utcnow() - timedelta(seconds=2),
+        )
+    )
+    db_session.add(
+        WebmentionOutbox(
+            site_id=site.id,
+            post_id=post.id,
+            target_url="https://second.example/b",
+            status=WebmentionOutboxStatus.PENDING,
+            not_before=naive_utcnow() - timedelta(seconds=1),
+        )
+    )
+    db_session.commit()
+
+    # First row "sends" cleanly; the second blows up before its commit.
+    calls = {"n": 0}
+
+    def fake_send_one(db: Session, row: WebmentionOutbox) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            row.status = WebmentionOutboxStatus.SENT
+            return
+        raise RuntimeError("boom mid-drain")
+
+    monkeypatch.setattr(sender_mod, "send_one", fake_send_one)
+
+    with pytest.raises(RuntimeError):
+        send_pending(db_session)
+
+    # Drop any uncommitted state, then read what actually persisted.
+    db_session.rollback()
+    statuses = {
+        r.target_url: r.status for r in db_session.execute(select(WebmentionOutbox)).scalars()
+    }
+    # A's SENT flip was committed before B failed; a single end-of-drain
+    # commit would have lost it on the rollback.
+    assert statuses["https://first.example/a"] == WebmentionOutboxStatus.SENT
+    assert statuses["https://second.example/b"] == WebmentionOutboxStatus.PENDING
 
 
 # --------------------------- inbox ---------------------------

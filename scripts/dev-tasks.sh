@@ -3,7 +3,8 @@
 # but invoked from the in-repo Procfile supervisor
 # (`scripts/run-procfile.py`) so `make dev` exercises the
 # scheduled-publish / webmentions-send / activitypub-send /
-# embeds-rerender code paths against the local SQLite DB.
+# indexnow-send / embeds-rerender code paths against the local
+# SQLite DB.
 #
 # Cadence is a deliberately tight 60s (vs the production
 # 60s-to-1-week range) so a dev iterating on a related feature
@@ -31,6 +32,7 @@ while true; do
     run_cmd embeds rerender-pending
     run_cmd webmentions send-pending
     run_cmd activitypub send-pending
+    run_cmd indexnow send-pending
     run_cmd media process-renditions
     sleep "$SLEEP_BETWEEN_PASSES"
 done

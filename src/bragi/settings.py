@@ -180,6 +180,23 @@ class Settings(BaseSettings):
     # lock_configuration freeze in open_dataset.
     dataset_query_temp_limit: str = "1GB"
 
+    # Working-copy preview (issue #414). A preview token signed by the
+    # admin app (mint) and verified by the delivery app (verify) lets an
+    # operator view a page's staged working copy through the real theme at
+    # the live URL. This is how long the signed token stays valid; a longer
+    # window is more convenient (open-tab-and-come-back) but widens the
+    # replay window for a leaked token. The token is the only gate on a
+    # route that bypasses the published-only filter, so keep it modest.
+    working_copy_preview_ttl_seconds: int = 3600
+
+    # Cross-host delivery origin for admin->delivery links (the working-
+    # copy preview). Empty (default) uses each site's `canonical_url`,
+    # correct for multisite prod where every site has its own public host.
+    # Set it where one delivery process serves all sites on a local
+    # address the per-site canonical can't express -- notably dev, where
+    # delivery listens on a port: `BRAGI_DELIVERY_BASE_URL=http://localhost:8002`.
+    delivery_base_url: str = ""
+
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake
     # contact. Format: `mailto:...` or `https://...` per RFC 9116.
@@ -206,6 +223,20 @@ class Settings(BaseSettings):
     # search engine (Bing, Yandex, Seznam, Naver, ...); set this to
     # a specific provider's endpoint when only one matters.
     indexnow_endpoint: str = "https://api.indexnow.org/indexnow"
+
+    # Hold-off window before an IndexNow ping is sent. Edits to the
+    # same URL within this window coalesce into one ping (leading-edge:
+    # the not_before timestamp is set on the FIRST enqueue and not
+    # pushed forward by subsequent edits), protecting request latency
+    # and IndexNow quota. Default: 300 s (5 minutes).
+    indexnow_debounce_seconds: int = 300
+
+    # Hold-off window before an outbound webmention is sent (#447). Links
+    # added during an edit session only send after this window; a link
+    # added then removed within the window never sends (leading-edge
+    # coalesce: not_before is set on the FIRST enqueue and not pushed
+    # forward by subsequent edits to the same post). Default: 300 s (5 min).
+    webmention_debounce_seconds: int = 300
 
     # Embeds plugin (bragi.contrib.embeds). Save-time render reaches
     # out to provider oEmbed endpoints; readers never make external
