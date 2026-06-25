@@ -231,6 +231,13 @@ class Settings(BaseSettings):
     # and IndexNow quota. Default: 300 s (5 minutes).
     indexnow_debounce_seconds: int = 300
 
+    # Hold-off window before an outbound webmention is sent (#447). Links
+    # added during an edit session only send after this window; a link
+    # added then removed within the window never sends (leading-edge
+    # coalesce: not_before is set on the FIRST enqueue and not pushed
+    # forward by subsequent edits to the same post). Default: 300 s (5 min).
+    webmention_debounce_seconds: int = 300
+
     # Embeds plugin (bragi.contrib.embeds). Save-time render reaches
     # out to provider oEmbed endpoints; readers never make external
     # calls because the resolved HTML is cached in body_html. A

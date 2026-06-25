@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -36,6 +37,8 @@ from bragi.core.models.webmention import (
     WebmentionStatus,
 )
 from bragi.core.safe_urls import is_idn_host
+from bragi.core.time import naive_utcnow
+from bragi.settings import settings
 
 LOG = logging.getLogger(__name__)
 
@@ -57,12 +60,31 @@ def _drop_pending_outbox_for_post(post: Post, session: Any) -> None:
         session.delete(row)
 
 
-def _queue_outbox_for_post(post: Post, session: Any) -> None:
-    """Insert one WebmentionOutbox row per external link in `post`.
+def _queue_outbox_for_post(post: Post, session: Any, *, reconcile: bool = False) -> None:
+    """Queue (and, on re-scan, reconcile) outbox rows for `post`.
 
-    Idempotent: re-queueing the same (post_id, target_url) pair
-    is silently skipped, so an `on_post_updated` republish
-    doesn't duplicate work.
+    Scans the rendered body for external links and, for each one not
+    already queued, inserts a PENDING `WebmentionOutbox` row debounced
+    by `settings.webmention_debounce_seconds` (#447):
+
+    - **Leading-edge coalesce.** A NEW row gets
+      `not_before = now + window`. An EXISTING row for
+      `(post_id, target_url)` (any status) is left UNTOUCHED, so the
+      window starts at the FIRST edit and N edits within it collapse
+      into one send; the existing row's `not_before` is preserved.
+    - **Retract-within-window reconcile (`reconcile=True`).** On a
+      re-scan from `on_post_updated`, after computing the current
+      body's external link set, DELETE the PENDING rows whose target
+      is no longer in that set. A link added then removed before its
+      window closes must never send. Only PENDING (unsent) rows are
+      dropped: SENT / FAILED / SKIPPED rows are kept as audit, and an
+      already-SENT mention's retraction is a separate, out-of-scope
+      feature (not handled here). First publish (`reconcile=False`)
+      skips this: there is nothing to reconcile.
+
+    All writes ride the SUPPLIED `session` (#430): no fresh
+    `SessionLocal()`, no own commit. The rows commit atomically with
+    the content change the request handler owns.
     """
     site = session.get(Site, post.site_id)
     if site is None:
@@ -80,16 +102,22 @@ def _queue_outbox_for_post(post: Post, session: Any) -> None:
     # the just-fixed `is_external` is worth one character.
     our_host = (site.hostname or (urlparse(base).hostname or "")).lower()
 
-    existing_targets = {
-        row.target_url
-        for row in session.execute(
+    existing_rows = list(
+        session.execute(
             select(WebmentionOutbox).where(WebmentionOutbox.post_id == post.id)
         ).scalars()
-    }
+    )
+    existing_targets = {row.target_url for row in existing_rows}
+
+    not_before = naive_utcnow() + timedelta(seconds=settings.webmention_debounce_seconds)
+    current_targets: set[str] = set()
     for href in extract_links(body_html, base):
         if not is_external(href, our_host):
             continue
+        current_targets.add(href)
         if href in existing_targets:
+            # Leading-edge coalesce: keep the existing row (and its
+            # not_before) untouched.
             continue
         session.add(
             WebmentionOutbox(
@@ -98,9 +126,18 @@ def _queue_outbox_for_post(post: Post, session: Any) -> None:
                 target_url=href,
                 status=WebmentionOutboxStatus.PENDING,
                 attempt_count=0,
+                not_before=not_before,
             )
         )
         existing_targets.add(href)
+
+    if reconcile:
+        for row in existing_rows:
+            if (
+                row.status == WebmentionOutboxStatus.PENDING
+                and row.target_url not in current_targets
+            ):
+                session.delete(row)
 
 
 def _webmention_endpoint_url() -> str | None:
@@ -158,11 +195,14 @@ def on_post_published(item: Any, session: Any) -> None:
 
 @hookimpl
 def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], session: Any) -> None:
-    """Re-scan on update so newly-added links get queued.
+    """Re-scan on update so the outbox tracks the current link set.
 
     No-op on draft posts (no public URL to mention from). The
     outbox queue de-dups by target_url, so an unchanged link set
-    creates no new rows.
+    creates no new rows; `reconcile=True` additionally DROPS the
+    PENDING rows for links removed since the last scan (the
+    retract-within-window fix, #447), so a link added then removed
+    before its debounce window closes never sends.
 
     Unpublish handling: when a post leaves the published state
     (`before['status']=='published'`, `after['status']!='published'`),
@@ -182,7 +222,7 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], se
         return
     if not is_published:
         return
-    _queue_outbox_for_post(item, session)
+    _queue_outbox_for_post(item, session, reconcile=True)
 
 
 @hookimpl
