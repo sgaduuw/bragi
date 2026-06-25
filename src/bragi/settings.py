@@ -224,6 +224,13 @@ class Settings(BaseSettings):
     # a specific provider's endpoint when only one matters.
     indexnow_endpoint: str = "https://api.indexnow.org/indexnow"
 
+    # Hold-off window before an IndexNow ping is sent. Edits to the
+    # same URL within this window coalesce into one ping (leading-edge:
+    # the not_before timestamp is set on the FIRST enqueue and not
+    # pushed forward by subsequent edits), protecting request latency
+    # and IndexNow quota. Default: 300 s (5 minutes).
+    indexnow_debounce_seconds: int = 300
+
     # Embeds plugin (bragi.contrib.embeds). Save-time render reaches
     # out to provider oEmbed endpoints; readers never make external
     # calls because the resolved HTML is cached in body_html. A
