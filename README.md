@@ -151,10 +151,15 @@ and ARM homelabs run natively rather than through QEMU emulation.
   `post:write`. Argon2id-hashed at rest; expiry honoured; every
   use recorded in the audit log.
 - **Indieweb webmentions (send + receive).** Outbound: on
-  publish, every external link in a post is queued; the
-  cron-driven `bragi webmentions send-pending` performs W3C
+  publish or update, every external link in a post is queued
+  behind a debounce hold-off window; edits within the window
+  coalesce (the window starts at the first edit) and a link
+  added then removed before the window closes never sends. The
+  cron-driven `bragi webmentions send-pending` then performs W3C
   endpoint discovery (Link header, then
-  `<link rel="webmention">`) and POSTs the mention. Inbound:
+  `<link rel="webmention">`) and POSTs the mention once due.
+  `BRAGI_WEBMENTION_DEBOUNCE_SECONDS` (default 300) tunes the
+  window. Inbound:
   `POST /webmentions` on the delivery app validates the source
   actually links to the target, extracts an h-card author
   shape, and stores the mention pending admin moderation.

@@ -118,17 +118,44 @@ def send_one(db: Session, outbox: WebmentionOutbox) -> None:
 
 
 def send_pending(db: Session, *, limit: int | None = None) -> dict[str, int]:
-    """Process every PENDING row up to `limit`. Returns per-status counts."""
-    query = select(WebmentionOutbox).where(
-        WebmentionOutbox.status == WebmentionOutboxStatus.PENDING
+    """Process every DUE PENDING row up to `limit`. Returns per-status counts.
+
+    A row is due once its debounce window has closed
+    (`not_before <= now`, #447); rows still inside their window are
+    left for a later run, oldest-window-first.
+
+    Commits PER ROW, right after each `send_one`, rather than once at
+    the end of the drain (the #443 whole-diff-review window fix carried
+    to webmentions, where delivery matters more than fire-and-forget
+    IndexNow). A single end-of-drain commit leaves a window in which an
+    edit landing mid-drain sees not-yet-settled state: the per-row
+    commit means each send's status flip is durable before the next row
+    starts, so a concurrent edit reliably sees settled state and
+    re-queues rather than racing the batch. It also stops one row's
+    error from rolling back already-sent rows' SENT status.
+
+    The commit does NOT widen the write-lock window across the HTTP
+    POST: `send_one` mutates the row in memory only (the session is
+    `autoflush=False`, and its `db.get(...)` lookups are reads), so the
+    SQLite write lock is taken only at this `db.commit()` AFTER
+    `safe_post` has returned, and released immediately.
+    """
+    query = (
+        select(WebmentionOutbox)
+        .where(
+            WebmentionOutbox.status == WebmentionOutboxStatus.PENDING,
+            WebmentionOutbox.not_before <= naive_utcnow(),
+        )
+        .order_by(WebmentionOutbox.not_before)
     )
     if limit is not None:
         query = query.limit(limit)
     counts = {"sent": 0, "skipped": 0, "failed": 0, "pending": 0}
-    for row in db.execute(query).scalars():
+    for row in db.execute(query).scalars().all():
         send_one(db, row)
+        # Read row.status before the commit expires the instance.
         counts[row.status] = counts.get(row.status, 0) + 1
-    db.commit()
+        db.commit()
     return counts
 
 

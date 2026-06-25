@@ -33,6 +33,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rather than immediately. Operators running the task worker need no
   action; the `indexnow send-pending` command is already wired into
   the scheduler loop.
+- Outbound webmentions are now debounced and coalesced (#447).
+  Publishing or editing a post no longer queues every external link
+  for immediate send; instead each new link waits out a hold-off
+  window before `bragi webmentions send-pending` delivers it. Edits
+  within the window coalesce (leading-edge: the window starts at the
+  first edit), and a link added then removed before its window closes
+  is dropped on the next re-scan and never sends, closing the
+  retract-within-window gap where a transient link would still fan
+  out. The sender now processes only rows whose window has closed and
+  commits per row, so an edit landing mid-drain reliably sees settled
+  state. New optional setting `BRAGI_WEBMENTION_DEBOUNCE_SECONDS`
+  (default 300) tunes the window. Already-sent mentions are unaffected;
+  explicit retraction of a delivered mention is not handled.
 
 ## [1.36.2] - 2026-06-23
 
