@@ -10,33 +10,40 @@ than carrying its own set). For each fire:
   its `url_for` to build the public path. Falls back gracefully
   when neither lookup succeeds (e.g. a plugin-defined custom
   content type that didn't register a spec).
-- POST the absolute URL to the configured endpoint. Best-effort:
-  HTTP errors are logged and swallowed.
+- ENQUEUE the absolute URL as a debounced ping on the supplied
+  session (no inline HTTP). The `bragi-tasks` worker drains the
+  queue a few minutes later via `bragi.contrib.indexnow.sender`.
+  Taking the HTTP POST off the request path keeps publish latency
+  flat and coalesces N edits to a URL within the window into one
+  ping (issue #443).
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 import click
 from flask import Blueprint, current_app
-from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert
 
 from bragi.api import SiteSetting, hookimpl
 from bragi.contrib.indexnow.cli import indexnow_group
-from bragi.contrib.indexnow.client import submit
 from bragi.contrib.indexnow.views import bp as indexnow_bp
+from bragi.core.models.indexnow_ping import IndexNowPing
 from bragi.core.models.site import Site
+from bragi.core.time import naive_utcnow
 from bragi.settings import settings
 
 LOG = logging.getLogger(__name__)
 
 
 def _push_url_for_item(item: Any, session: Any) -> None:
-    """Resolve site + URL + key, POST. Quiet on every miss path
-    so a missing key, a missing site, or a missing content-type
-    spec never raises into the calling lifecycle hook."""
+    """Resolve site + URL + key, then enqueue a debounced ping on
+    the supplied session. Quiet on every miss path so a missing key,
+    a missing site, or a missing content-type spec never raises into
+    the calling lifecycle hook."""
     site_id = getattr(item, "site_id", None)
     if not isinstance(site_id, int):
         return
@@ -65,24 +72,32 @@ def _push_url_for_item(item: Any, session: Any) -> None:
         return
     if path is None:
         # No public URL on this site (e.g. a post when the site
-        # has no POST_INDEX page). Nothing to submit.
+        # has no POST_INDEX page). Nothing to enqueue.
         return
 
     canonical = site.canonical_url.rstrip("/")
     url = f"{canonical}{path}"
-    # The host is the part the endpoint validates against the key
-    # file; strip scheme + path so a canonical_url like
-    # `https://blog.example.com/sub/` still resolves to the bare
-    # hostname.
-    host = canonical.split("://", 1)[-1].split("/", 1)[0]
-    key_location = f"{canonical}/{key}.txt"
-    submit(
-        endpoint=settings.indexnow_endpoint,
-        host=host,
-        key=key,
-        key_location=key_location,
-        urls=[url],
+
+    # Enqueue a debounced ping on the SUPPLIED session (#430): no
+    # fresh SessionLocal(), no inline HTTP, and no separate commit;
+    # the row commits atomically with the content change the request
+    # handler owns.
+    #
+    # INSERT ... ON CONFLICT (site_id, url) DO NOTHING gives us two
+    # properties at once:
+    #   - Leading-edge coalesce: an existing pending row keeps its
+    #     not_before, so the ping fires ~window after the FIRST edit
+    #     and covers every edit within the window.
+    #   - Race-safety: a concurrent or duplicate enqueue is a silent
+    #     no-op rather than a UNIQUE violation, so this statement can
+    #     NEVER raise and break the content commit it rides on.
+    not_before = naive_utcnow() + timedelta(seconds=settings.indexnow_debounce_seconds)
+    stmt = (
+        insert(IndexNowPing)
+        .values(site_id=site_id, url=url, not_before=not_before)
+        .on_conflict_do_nothing(index_elements=["site_id", "url"])
     )
+    session.execute(stmt)
 
 
 def _is_published(state: Any) -> bool:
@@ -163,9 +178,3 @@ __all__ = [
     "register_delivery_blueprint",
     "register_site_setting",
 ]
-
-
-# Silence the "unused import" complaint on `select`: the import
-# stays because callers may want a session-bound site lookup
-# helper to land here next.
-_ = select

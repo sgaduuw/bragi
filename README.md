@@ -133,12 +133,15 @@ and ARM homelabs run natively rather than through QEMU emulation.
   fires on every content commit so a CDN invalidator has
   something to subscribe to.
 - **Push-crawl via IndexNow.** Post / page publish, update, and
-  delete fire a fire-and-forget POST to the configured IndexNow
-  endpoint so participating search engines (Bing, Yandex, Seznam,
-  Naver, ...) hear about the change immediately. Per-site key
-  bootstrapped with `bragi indexnow setup --site <slug>`; the
-  verification key file lives at `/<key>.txt` on the delivery
-  app.
+  delete enqueue a debounced ping so participating search engines
+  (Bing, Yandex, Seznam, Naver, ...) hear about the change. The POST
+  is off the request path: the lifecycle hook records the URL and the
+  `bragi-tasks` worker (`bragi indexnow send-pending`) sends it once
+  the hold-off window (`BRAGI_INDEXNOW_DEBOUNCE_SECONDS`, default
+  300s) closes, so N edits to a URL within the window coalesce into
+  one ping. Per-site key bootstrapped with `bragi indexnow setup
+  --site <slug>`; the verification key file lives at `/<key>.txt` on
+  the delivery app.
 - **Programmatic posting via API tokens.** Personal access
   tokens at `/admin/account/tokens/` (list / create / revoke;
   plaintext shown once on create) authenticate scripts and bots
