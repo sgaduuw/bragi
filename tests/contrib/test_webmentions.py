@@ -327,6 +327,48 @@ def test_send_pending_marks_sent_on_2xx(
     assert row.endpoint_url == "https://other.example/wm"
 
 
+def test_send_pending_skips_row_deleted_mid_drain(
+    patched_session_locals: sessionmaker[Session],
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A due PENDING row dropped mid-drain (the #447 reconcile-drop firing
+    on a concurrent edit) is skipped, not crashed on. With per-row commit
+    + expire_on_commit, advancing to a now-deleted row would otherwise
+    raise ObjectDeletedError and abort the whole pass."""
+    del patched_session_locals
+    site, _, post = _seed_blog(db_session)
+    for target in ("https://a.example/x", "https://b.example/y"):
+        db_session.add(
+            WebmentionOutbox(
+                site_id=site.id,
+                post_id=post.id,
+                target_url=target,
+                status=WebmentionOutboxStatus.PENDING,
+                not_before=naive_utcnow() - timedelta(seconds=1),
+            )
+        )
+    db_session.commit()
+
+    import bragi.contrib.webmentions.sender as sender_mod
+
+    def fake_send_one(db: Session, outbox: WebmentionOutbox) -> None:
+        # Simulate a concurrent reconcile-drop deleting the OTHER pending
+        # row while this one is in flight.
+        for other in db.execute(
+            select(WebmentionOutbox).where(WebmentionOutbox.id != outbox.id)
+        ).scalars():
+            db.delete(other)
+        outbox.status = WebmentionOutboxStatus.SENT
+
+    monkeypatch.setattr(sender_mod, "send_one", fake_send_one)
+
+    counts = send_pending(db_session)  # must not raise
+    assert counts["sent"] == 1
+    rows = db_session.execute(select(WebmentionOutbox)).scalars().all()
+    assert len(rows) == 1 and rows[0].status == WebmentionOutboxStatus.SENT
+
+
 def test_send_pending_skips_when_no_endpoint(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
