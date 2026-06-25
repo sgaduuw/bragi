@@ -16,7 +16,7 @@ Covers:
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -45,6 +45,7 @@ from bragi.core.models.webmention import (
     WebmentionOutboxStatus,
     WebmentionStatus,
 )
+from bragi.core.time import naive_utcnow
 from tests.conftest import make_test_user, seed_blog_index
 
 # --------------------------- parse helpers ---------------------------
@@ -207,6 +208,39 @@ def test_outbox_mappers_tolerate_deleted_row_during_flight() -> None:
 
     assert WebmentionOutbox.__mapper__.confirm_deleted_rows is False
     assert ActivityPubOutbox.__mapper__.confirm_deleted_rows is False
+
+
+def test_outbox_not_before_defaults_to_now_and_roundtrips(db_session: Session) -> None:
+    """WebmentionOutbox rows created without an explicit not_before get a
+    Python-side default of naive_utcnow (due immediately), and the value
+    round-trips through the DB unchanged.
+
+    Task 2 will always set not_before explicitly (now + debounce window);
+    the default exists so any code path that omits the argument remains
+    immediately eligible for sending rather than getting a NULL or an error.
+    """
+    site, _, post = _seed_blog(db_session)
+
+    before = naive_utcnow() - timedelta(seconds=1)
+    row = WebmentionOutbox(
+        site_id=site.id,
+        post_id=post.id,
+        target_url="https://ext.example/page/",
+    )
+    db_session.add(row)
+    db_session.flush()
+    after = naive_utcnow() + timedelta(seconds=1)
+
+    assert row.not_before is not None
+    # Default should be "now": between the timestamps bracketing the flush.
+    assert before <= row.not_before <= after
+
+    # Persist and reload to confirm the column round-trips.
+    db_session.commit()
+    db_session.expire(row)
+    reloaded = db_session.get(WebmentionOutbox, row.id)
+    assert reloaded is not None
+    assert before <= reloaded.not_before <= after
 
 
 def test_on_post_updated_drops_pending_outbox_when_unpublishing(

@@ -28,6 +28,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
 from bragi.core.models._mixins import IdMixin, TimestampsMixin
+from bragi.core.time import naive_utcnow
 
 
 class WebmentionStatus:
@@ -103,6 +104,11 @@ class WebmentionOutbox(IdMixin, TimestampsMixin, Base):
     target_url: Mapped[str] = mapped_column(String(2048))
     status: Mapped[str] = mapped_column(String(16), default=WebmentionOutboxStatus.PENDING)
     attempt_count: Mapped[int] = mapped_column(default=0)
+    # Leading-edge debounce hold-off: the worker only processes rows whose
+    # not_before has passed (#447). The enqueue path (Task 2) sets this
+    # explicitly; new rows created without it default to "due now" so any
+    # code path that omits the argument is immediately eligible for sending.
+    not_before: Mapped[datetime] = mapped_column(index=True, default=naive_utcnow)
     last_attempt_at: Mapped[datetime | None] = mapped_column(default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     endpoint_url: Mapped[str | None] = mapped_column(String(2048), default=None)
