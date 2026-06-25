@@ -19,6 +19,21 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   each site's canonical URL) and `BRAGI_WORKING_COPY_PREVIEW_TTL_SECONDS`
   (preview-token lifetime, default 3600).
 
+### Changed
+- IndexNow pings are now debounced and sent off the request path
+  (#443). Publishing, updating, or deleting a post or page no longer
+  POSTs to the IndexNow endpoint inline; instead the lifecycle hook
+  enqueues the URL and the `bragi-tasks` worker
+  (`bragi indexnow send-pending`) sends it once a hold-off window
+  closes. N edits to the same URL within the window coalesce into a
+  single ping (leading-edge: the window starts at the first edit),
+  protecting publish latency and IndexNow quota. New optional setting
+  `BRAGI_INDEXNOW_DEBOUNCE_SECONDS` (default 300) tunes the window.
+  Observable effect: pings now arrive a few minutes after publish
+  rather than immediately. Operators running the task worker need no
+  action; the `indexnow send-pending` command is already wired into
+  the scheduler loop.
+
 ## [1.36.2] - 2026-06-23
 
 ### Fixed

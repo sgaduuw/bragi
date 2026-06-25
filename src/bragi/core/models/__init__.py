@@ -24,6 +24,7 @@ from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.dataset import Dataset, DatasetQuery
+from bragi.core.models.indexnow_ping import IndexNowPing
 from bragi.core.models.internal_link import InternalLink
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageStatus
@@ -61,6 +62,7 @@ __all__ = [
     "Base",
     "Dataset",
     "DatasetQuery",
+    "IndexNowPing",
     "InternalLink",
     "LocalCredential",
     "MatchType",
