@@ -6,6 +6,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Admin chrome redesigned from the two-row top nav to a left sidebar
+  with labeled sections. Site navigation is regrouped into **Write**
+  (Posts, Pages, Media, Datasets), **Reach** (Analytics, Webmentions),
+  and **Manage** (Site settings, Profile links, Redirects, Team,
+  Import); global items move to a **Platform** group. "Attachments" is
+  relabeled **Media**. Keyboard-focus rings and reduced-motion handling
+  added; the chrome stays zero-JavaScript (the rail is an off-canvas
+  drawer on mobile via a CSS-only toggle).
+
 ### Added
 - Per-site profile links: a site-scoped admin page
   (`/admin/sites/<slug>/profile-links/`, editor role) curates a list of

@@ -53,13 +53,13 @@ def register_admin_blueprint() -> Blueprint:
 
 @hookimpl
 def register_admin_nav() -> list[NavItem]:
-    """Add a Datasets entry to the admin nav (content section)."""
+    """Add a Datasets entry to the admin nav (Write section)."""
     return [
         NavItem(
             label="Datasets",
             endpoint="dataset_admin.list_datasets",
-            section="content",
-            weight=30,
+            section="write",
+            weight=40,
             scope="site",
         ),
     ]

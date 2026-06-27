@@ -21,7 +21,7 @@ def register_admin_nav() -> list[NavItem]:
         NavItem(
             label="Audit log",
             endpoint="audit_admin.list_audit",
-            section="system",
+            section="platform",
             weight=30,
             permission="superuser",
         ),

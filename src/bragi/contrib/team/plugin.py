@@ -27,8 +27,8 @@ def register_admin_nav() -> list[NavItem]:
         NavItem(
             label="Team",
             endpoint="team_admin.list_team",
-            section="content",
-            weight=50,
+            section="manage",
+            weight=40,
             scope="site",
             permission="site_owner",
         ),

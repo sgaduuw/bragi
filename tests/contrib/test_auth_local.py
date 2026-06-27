@@ -365,9 +365,9 @@ def test_admin_index_renders_chrome_with_nav(admin_app: Flask) -> None:
     resp = client.get("/")
     assert resp.status_code == 200
     body = resp.data.decode()
-    # The base template's global nav row must be present (row 1 of
-    # the redesigned two-row chrome).
-    assert '<nav class="admin-nav-row-1"' in body
+    # The base template's left rail must be present (the chrome
+    # renders only for an authenticated session).
+    assert '<aside class="admin-rail"' in body
     # The logout form (which only renders for an authenticated
     # session) confirms the chrome is fully wired, not just an
     # empty nav stub. The new nav labels this "Logout" (one word).

@@ -1,5 +1,7 @@
-{# Admin chrome shell. The nav itself lives in `_admin_nav.html`;
-   page chrome (CSS link, flash slot, htmx script) lives here. #}
+{# Admin chrome shell. The rail lives in `_admin_nav.html`; this
+   file owns the layout shell (fixed rail + content column), the
+   zero-JS mobile toggle, the conditional breadcrumb bar, and the
+   flash / notice slots. #}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,46 +17,52 @@
   {% endif %}
   {% block head_extra %}{% endblock %}
 </head>
-<body>
+<body class="admin">
+  {# Zero-JS mobile toggle: the checkbox precedes the rail so the
+     `#nav-toggle:checked ~ .admin-rail` selector can slide it in.
+     The hamburger label floats over content (mobile only). #}
+  <input type="checkbox" id="nav-toggle">
+  <label for="nav-toggle" class="nav-hamburger" aria-label="Toggle navigation">☰</label>
+
   {% include "admin/_admin_nav.html" %}
-  <main>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, msg in messages %}
-        <div class="flash {{ category }}">{{ msg }}</div>
-      {% endfor %}
-    {% endwith %}
-    {# Sticky notice rail: shown on per-site pages (g.current_site is
-       set) when action_required or status notices are active. The
-       `ignore missing` guard keeps the page renderable when the
-       admin_notices plugin is disabled and the template is absent. #}
-    {% if g.current_site %}
-      {% include "admin/_notice_rail.html" ignore missing %}
+
+  <div class="admin-content">
+    {# Breadcrumbs: conditional, suppressed when the chain is empty. #}
+    {% if breadcrumbs %}
+      <nav class="admin-breadcrumbs" aria-label="Breadcrumb">
+        {% for crumb in breadcrumbs %}
+          {% if not loop.first %}<span class="crumb-sep">›</span>{% endif %}
+          {% if crumb.endpoint %}
+            <a href="{{ url_for(crumb.endpoint, **(crumb.values or {})) }}">{{ crumb.label }}</a>
+          {% else %}
+            <span class="crumb-current">{{ crumb.label }}</span>
+          {% endif %}
+        {% endfor %}
+      </nav>
     {% endif %}
-    {% block content %}{% endblock %}
-  </main>
+
+    <main>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, msg in messages %}
+          <div class="flash {{ category }}">{{ msg }}</div>
+        {% endfor %}
+      {% endwith %}
+      {# Sticky notice rail: shown on per-site pages (g.current_site is
+         set) when action_required or status notices are active. The
+         `ignore missing` guard keeps the page renderable when the
+         admin_notices plugin is disabled and the template is absent. #}
+      {% if g.current_site %}
+        {% include "admin/_notice_rail.html" ignore missing %}
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
   {# htmx, CDN-hosted for v1. Self-hosted bundle (and a
      Subresource Integrity hash) is a follow-up; the admin is
      gated behind auth so the surface is the operator's own
      browser, not the public. #}
   <script src="https://unpkg.com/htmx.org@1.9.10" crossorigin="anonymous"></script>
   <script src="{{ url_for('admin_static.static', filename='inline-edit.js') }}"></script>
-  <script>
-    // The admin nav is sticky at top:0 (z-index 100). Any sticky page
-    // content (e.g. the editor toolbar) must pin BELOW it, not behind
-    // it, so expose the nav's live height as --admin-nav-height for
-    // `top: var(--admin-nav-height)`. The height varies (the site row
-    // is conditional; mobile collapses to one row), but only across the
-    // mobile breakpoint, which fires `resize` -- the wrapper is
-    // otherwise static after server render -- so a resize listener is
-    // all the tracking needed.
-    (function () {
-      const nav = document.querySelector('.admin-nav-sticky');
-      if (!nav) return;
-      const sync = () => document.documentElement.style.setProperty(
-        '--admin-nav-height', nav.offsetHeight + 'px');
-      sync();
-      window.addEventListener('resize', sync);
-    })();
-  </script>
 </body>
 </html>

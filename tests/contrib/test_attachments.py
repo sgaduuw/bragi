@@ -552,7 +552,7 @@ def test_attachments_plugin_registers(admin_app: Flask, delivery_app: Flask) -> 
     assert "attachment_delivery" in delivery_app.blueprints
     registry = admin_app.extensions["registry"]
     labels = {item.label for item in registry.admin_nav}
-    assert "Attachments" in labels
+    assert "Media" in labels
 
 
 # --------------------------- image dimensions ---------------------------

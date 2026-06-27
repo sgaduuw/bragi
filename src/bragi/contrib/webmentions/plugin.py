@@ -241,8 +241,8 @@ def register_admin_nav() -> list[NavItem]:
         NavItem(
             label="Webmentions",
             endpoint="webmentions_admin.list_webmentions",
-            section="content",
-            weight=80,
+            section="reach",
+            weight=20,
             scope="site",
         ),
     ]

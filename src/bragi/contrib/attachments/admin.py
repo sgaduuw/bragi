@@ -603,7 +603,7 @@ def edit_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue:
             abort(404)
 
         set_breadcrumbs(
-            Crumb("Attachments", "attachment_admin.list_attachments"),
+            Crumb("Media", "attachment_admin.list_attachments"),
             Crumb(row.filename, None),
         )
 
