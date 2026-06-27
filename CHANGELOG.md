@@ -4,6 +4,18 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Per-site profile links: a site-scoped admin page
+  (`/admin/sites/<slug>/profile-links/`, editor role) curates a list of
+  the owner's own profiles (GitHub, Mastodon, ...), rendered in the
+  default theme footer as `rel="me"` + schema.org `sameAs` anchors (so
+  Mastodon can verify the profile). Stored as JSON under
+  `Site.extra_settings["profile_links"]`; themes can render the list via
+  the `profile_links()` Jinja global / the `delivery/_profile_links.html`
+  partial.
+
 ## [1.37.0] - 2026-06-26
 
 ### Added
