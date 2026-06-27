@@ -601,6 +601,7 @@ bragi/
 │       ├── nav/                # auto-derived public site navigation from the page tree
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
+│       ├── profile_links/      # per-site rel="me" profile links (footer + admin)
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301
 │       ├── search/             # SQLite FTS5 over post + page bodies
 │       ├── seo/                # sitemap, robots.txt, security.txt, feed.xml
