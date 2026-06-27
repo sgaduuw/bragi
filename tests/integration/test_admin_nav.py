@@ -1,9 +1,9 @@
-"""Integration tests for the redesigned admin chrome.
+"""Integration tests for the admin chrome (v3: left rail).
 
-Hits the admin app via test_client to assert nav structure (two
-rows, section dividers, site switcher, user menu, mobile drawer
-scaffold) and the breadcrumbs row. This task adds the first piece:
-the chrome stylesheet is served from /admin/static/admin-chrome.css.
+Hits the admin app via test_client to assert the rail structure
+(labeled section groups, site switcher, account menu, zero-JS mobile
+toggle) and the conditional breadcrumb bar. The chrome stylesheet is
+served from /admin/static/admin-chrome.css.
 """
 
 from __future__ import annotations
@@ -54,16 +54,16 @@ def _login(client: FlaskClient) -> None:
 def test_admin_chrome_css_served(admin_app: Flask) -> None:
     """The admin chrome stylesheet is served from the admin app
     at /admin/static/admin-chrome.css, content-type text/css, and
-    includes the documented mobile breakpoint."""
+    includes the documented mobile breakpoint + rail token."""
     client = admin_app.test_client()
     resp = client.get("/admin/static/admin-chrome.css")
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("text/css")
     body = resp.data.decode()
     assert "@media (max-width: 768px)" in body
-    # Spec calls out a row colour palette; assert the row 1 colour
-    # is at least defined somewhere.
-    assert "#1a1a1a" in body
+    # The rail surface token is defined.
+    assert "--rail-bg" in body
+    assert "#1b1d22" in body
 
 
 def test_bulk_select_assets_served(admin_app: Flask) -> None:
@@ -100,97 +100,96 @@ def test_bulk_select_list_templates_use_bare_filenames() -> None:
         assert "filename='admin/bulk_select" not in text, f"{tmpl}: double-prefix bug"
 
 
-def test_global_only_renders_one_row(admin_app: Flask) -> None:
-    """Outside a site context, row 2 is suppressed entirely."""
+def test_rail_present_with_switcher(admin_app: Flask) -> None:
+    """The left rail renders with the site switcher; outside a site
+    context the switcher dims to "Choose a site" and no site-section
+    groups (write/reach/manage) render."""
     client = admin_app.test_client()
     _login(client)
     resp = client.get("/admin/sites/")
     assert resp.status_code == 200
     body = resp.data.decode()
-    assert 'class="admin-nav-row-1"' in body
-    assert 'class="admin-nav-row-2"' not in body
-    # Site switcher dims to "Choose a site"
+    assert 'class="admin-rail"' in body
     assert "Choose a site" in body
+    # No site context => no site-section groups.
+    assert 'class="rail-group__label">write' not in body
+    assert 'class="rail-group__label">manage' not in body
+    # The Platform group (global) still renders in the rail foot.
+    assert 'class="rail-group__label">platform' in body
 
 
-def test_in_site_renders_two_rows_with_dividers(admin_app: Flask) -> None:
-    """In a site context, both rows render and the section divider
-    appears between content and site groups in row 2."""
+def test_in_site_renders_labeled_section_groups(admin_app: Flask) -> None:
+    """In a site context, the rail body renders the write / reach /
+    manage section groups, each with its typographic label."""
     client = admin_app.test_client()
     _login(client)
     resp = client.get("/admin/sites/blog/posts/")
     assert resp.status_code == 200
     body = resp.data.decode()
-    assert 'class="admin-nav-row-1"' in body
-    assert 'class="admin-nav-row-2"' in body
-    assert 'class="section-divider"' in body
+    assert 'class="admin-rail"' in body
+    assert 'class="rail-group__label">write' in body
+    assert 'class="rail-group__label">reach' in body
+    assert 'class="rail-group__label">manage' in body
+    # The active page's link is marked current.
+    assert 'class="rail-link is-current"' in body
 
 
-def test_site_settings_link_present_in_site_row(admin_app: Flask) -> None:
-    """The new 'Site settings' NavItem renders in row 2 with the
-    slug-keyed edit_site_current href."""
+def test_site_settings_link_present_in_manage_group(admin_app: Flask) -> None:
+    """The 'Site settings' NavItem renders in the rail with the
+    slug-keyed edit_site_current href (now in the Manage group)."""
     client = admin_app.test_client()
     _login(client)
     resp = client.get("/admin/sites/blog/posts/")
     body = resp.data.decode()
-    # Label appears as a link
     assert "Site settings" in body
-    # URL is the slug-keyed endpoint
     assert "/admin/sites/blog/current/edit" in body
+    # And the new Profile links sibling is there too.
+    assert "Profile links" in body
 
 
-def test_user_menu_contains_account_items(admin_app: Flask) -> None:
+def test_account_menu_contains_account_items(admin_app: Flask) -> None:
     """My sessions, API tokens, and Logout all land inside the
-    user menu dropdown (id='user-menu'); the dropdown anchors the
-    'account' section items + the logout form."""
+    account menu dropdown (id='user-menu')."""
     client = admin_app.test_client()
     _login(client)
     resp = client.get("/admin/sites/")
     body = resp.data.decode()
     assert 'id="user-menu"' in body
-    user_menu_start = body.index('id="user-menu"')
-    # Take a generous chunk after the user-menu opening tag to
-    # cover the entire <details> block.
-    user_menu_block = body[user_menu_start : user_menu_start + 2500]
-    # My sessions and API tokens render inside the menu by URL.
-    assert "/admin/account/sessions" in user_menu_block
-    assert "/admin/account/tokens" in user_menu_block
-    # Logout is a POST form to auth_local.logout inside the menu.
-    assert "auth_local" in user_menu_block or "/auth/logout" in user_menu_block
-    assert "Logout" in user_menu_block
+    menu_start = body.index('id="user-menu"')
+    menu_block = body[menu_start : menu_start + 2500]
+    assert "/admin/account/sessions" in menu_block
+    assert "/admin/account/tokens" in menu_block
+    assert "auth_local" in menu_block or "/auth/logout" in menu_block
+    assert "Logout" in menu_block
 
 
-def test_account_items_absent_from_row1_main_list(admin_app: Flask) -> None:
-    """API tokens / My sessions do NOT appear as direct links in
-    row 1's main list (they're inside the user menu instead)."""
+def test_account_items_only_render_in_account_menu(admin_app: Flask) -> None:
+    """Account items (My sessions, API tokens) render once, inside the
+    account menu, never as standalone rail-section links."""
     client = admin_app.test_client()
     _login(client)
-    resp = client.get("/admin/sites/")
+    resp = client.get("/admin/sites/blog/posts/")
     body = resp.data.decode()
-    row1_start = body.index('class="admin-nav-row-1"')
-    # End of row 1's main list is the .nav-spacer span (everything
-    # after that is the spacer + dropdowns).
-    spacer_idx = body.index('class="nav-spacer"', row1_start)
-    row1_main = body[row1_start:spacer_idx]
-    # Account-section URLs must not appear in the main list portion.
-    assert "/admin/account/tokens" not in row1_main
-    assert "/admin/account/sessions" not in row1_main
+    # Each account URL appears exactly once (in the account menu), so it
+    # is not duplicated as a section link in the rail body/foot.
+    assert body.count("/admin/account/tokens") == 1
+    assert body.count("/admin/account/sessions") == 1
 
 
-def test_mobile_drawer_scaffold_present(admin_app: Flask) -> None:
-    """The hidden checkbox + drawer div + hamburger label all
-    render so the no-JS mobile pattern works at runtime."""
+def test_mobile_toggle_scaffold_present(admin_app: Flask) -> None:
+    """The hidden checkbox + hamburger label + rail all render so the
+    no-JS off-canvas pattern works at runtime."""
     client = admin_app.test_client()
     _login(client)
     resp = client.get("/admin/sites/blog/posts/")
     body = resp.data.decode()
     assert '<input type="checkbox" id="nav-toggle"' in body
-    assert 'class="admin-nav-drawer"' in body
     assert 'class="nav-hamburger"' in body
+    assert 'class="admin-rail"' in body
 
 
 def test_breadcrumbs_absent_on_list_view(admin_app: Flask) -> None:
-    """List views don't set breadcrumbs; the nav row is the crumb."""
+    """List views don't set breadcrumbs; the rail is the locator."""
     client = admin_app.test_client()
     _login(client)
     resp = client.get("/admin/sites/blog/posts/")
@@ -201,14 +200,7 @@ def test_breadcrumbs_absent_on_list_view(admin_app: Flask) -> None:
 def test_breadcrumbs_present_with_chain_on_edit_view(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    """Edit-post view sets breadcrumbs; the row renders with the
-    expected chain.
-
-    This test is the TDD setup for Task 11 (post breadcrumbs). It will
-    FAIL until Task 11 adds the `set_breadcrumbs` call in
-    `post_admin.edit_post`. That is by design: the same pattern Task 2
-    used to set up Task 3.
-    """
+    """Edit-post view sets breadcrumbs; the bar renders with the chain."""
     from datetime import UTC, datetime
 
     from sqlalchemy import select
@@ -239,7 +231,6 @@ def test_breadcrumbs_present_with_chain_on_edit_view(
     assert resp.status_code == 200, resp.data.decode()[:500]
     body = resp.data.decode()
     assert 'aria-label="Breadcrumb"' in body
-    # First crumb is a link to the post list; final crumb is plain text.
     assert "/admin/sites/blog/posts/" in body
     assert "Hello" in body
 
@@ -253,5 +244,4 @@ def test_breadcrumbs_hidden_on_mobile_via_css() -> None:
     assert "@media (max-width: 768px)" in src
     media_block = src[src.index("@media (max-width: 768px)") :]
     assert ".admin-breadcrumbs" in media_block
-    # Either display:none or display: none (with or without space)
     assert "display: none" in media_block or "display:none" in media_block

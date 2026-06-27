@@ -133,8 +133,8 @@ def register_admin_nav() -> list[NavItem]:
         NavItem(
             label="Analytics",
             endpoint="analytics_admin.list_analytics",
-            section="content",
-            weight=40,
+            section="reach",
+            weight=10,
             scope="site",
         ),
     ]

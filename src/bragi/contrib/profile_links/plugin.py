@@ -70,7 +70,7 @@ def register_admin_nav() -> list[NavItem]:
             label="Profile links",
             endpoint="profile_links_admin.edit",
             scope="site",
-            section="site",
-            weight=92,  # just after "Site settings" (weight=90)
+            section="manage",
+            weight=20,  # just after "Site settings" (weight=10)
         ),
     ]

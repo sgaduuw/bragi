@@ -26,14 +26,14 @@ def register_admin_blueprint() -> Blueprint:
 def register_admin_nav() -> list[NavItem]:
     """Register two nav entries for the sites surface.
 
-    Sites (global, section="site") is the cross-site management
+    Sites (global, section="platform") is the cross-site management
     list, reachable from any admin page; "sites you can access"
     works for any logged-in user with no `permission` gate (write
     actions on the page self-gate via the blueprint's
     `before_request` hook and the template's `is_superuser`
     conditional).
 
-    Site settings (site, section="site") is the per-site config
+    Site settings (site, section="manage") is the per-site config
     edit page, visible only inside a site context; clicking
     lands on `site_admin.edit_site_current` which resolves the
     site through the admin's site-resolver middleware and renders
@@ -46,14 +46,14 @@ def register_admin_nav() -> list[NavItem]:
             label="Sites",
             endpoint="site_admin.list_sites",
             scope="global",
-            section="site",
+            section="platform",
             weight=10,
         ),
         NavItem(
             label="Site settings",
             endpoint="site_admin.edit_site_current",
             scope="site",
-            section="site",
-            weight=90,
+            section="manage",
+            weight=10,
         ),
     ]

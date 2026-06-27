@@ -1,10 +1,11 @@
 """Unit tests for the admin chrome's nav-grouping helper.
 
-`_group_nav_by_section` takes a list of NavItems and returns a
-list of (section_name, items_in_weight_order) tuples, ordered
-with `content` first and `system` last (other sections
-alphabetical between). Within a section, items keep input order
-(callers pre-sort by weight, so input order IS weight order).
+`_group_nav_by_section` takes a list of NavItems and returns a list
+of (section_name, items_in_weight_order) tuples, ordered by
+`_SECTION_RANK` (write -> reach -> manage for site groups; platform
+for the lone global group; unknown sections fall to rank 1, sorted
+alphabetically among that rank). Within a section, items keep input
+order (callers pre-sort by weight, so input order IS weight order).
 """
 
 from __future__ import annotations
@@ -22,50 +23,46 @@ def test_empty_in_empty_out() -> None:
 
 
 def test_single_section() -> None:
-    items = [_ni("Posts", "content", 10), _ni("Pages", "content", 20)]
+    items = [_ni("Posts", "write", 10), _ni("Pages", "write", 20)]
     groups = _group_nav_by_section(items)
-    assert groups == [("content", items)]
+    assert groups == [("write", items)]
 
 
-def test_content_pinned_first() -> None:
+def test_site_groups_ordered_write_reach_manage() -> None:
+    """The shipped site-section order is the load-bearing assertion:
+    write first, manage last, reach between (regardless of input order)."""
     items = [
-        _ni("Audit log", "system", 30),
-        _ni("Posts", "content", 10),
+        _ni("Site settings", "manage", 10),
+        _ni("Analytics", "reach", 10),
+        _ni("Posts", "write", 10),
     ]
     groups = _group_nav_by_section(items)
-    assert [name for name, _ in groups] == ["content", "system"]
+    assert [name for name, _ in groups] == ["write", "reach", "manage"]
 
 
-def test_system_pinned_last() -> None:
+def test_unknown_section_sorts_among_rank1() -> None:
+    """An unknown section falls to rank 1 (alongside reach) and sorts
+    alphabetically there: write(0) < {misc, reach}(1) < manage(2)."""
     items = [
-        _ni("Sites", "site", 10),
-        _ni("Audit log", "system", 30),
-    ]
-    groups = _group_nav_by_section(items)
-    assert [name for name, _ in groups] == ["site", "system"]
-
-
-def test_other_sections_alphabetical_between_pins() -> None:
-    items = [
-        _ni("Audit log", "system", 30),
-        _ni("Site settings", "site", 90),
-        _ni("Posts", "content", 10),
+        _ni("Site settings", "manage", 10),
+        _ni("Analytics", "reach", 10),
+        _ni("Posts", "write", 10),
         _ni("Something", "misc", 10),
     ]
     groups = _group_nav_by_section(items)
-    assert [name for name, _ in groups] == ["content", "misc", "site", "system"]
+    assert [name for name, _ in groups] == ["write", "misc", "reach", "manage"]
 
 
 def test_within_section_preserves_input_order() -> None:
     """Callers pre-sort by weight; the helper preserves that order."""
     items = [
-        _ni("Posts", "content", 10),
-        _ni("Pages", "content", 20),
-        _ni("Attachments", "content", 20),
-        _ni("Team", "content", 50),
+        _ni("Posts", "write", 10),
+        _ni("Pages", "write", 20),
+        _ni("Media", "write", 30),
+        _ni("Datasets", "write", 40),
     ]
     groups = _group_nav_by_section(items)
     assert len(groups) == 1
     section_name, in_order = groups[0]
-    assert section_name == "content"
-    assert [i.label for i in in_order] == ["Posts", "Pages", "Attachments", "Team"]
+    assert section_name == "write"
+    assert [i.label for i in in_order] == ["Posts", "Pages", "Media", "Datasets"]

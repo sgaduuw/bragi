@@ -241,7 +241,7 @@ def register_admin_nav() -> list[NavItem]:
         NavItem(
             label="Posts",
             endpoint="post_admin.list_posts",
-            section="content",
+            section="write",
             weight=10,
             scope="site",
         ),

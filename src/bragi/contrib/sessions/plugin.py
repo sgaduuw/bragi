@@ -21,12 +21,12 @@ def register_admin_nav() -> list[NavItem]:
     """Register the two sessions nav entries.
 
     'My sessions' (section='account') renders inside the admin
-    chrome's user-menu dropdown via the per-section template
-    rule: any section='account' global item lands in the menu
-    next to API tokens and the Logout form. 'All sessions'
-    (section='system', superuser-gated) renders in the global
-    row alongside Audit log; gating is enforced by the context
-    processor in `bragi.apps.admin._inject_admin_context`.
+    chrome's account menu via the per-section template rule: any
+    section='account' global item lands in the menu next to API
+    tokens and the Logout form. 'All sessions' (section='platform',
+    superuser-gated) renders in the rail's Platform group alongside
+    Sites and Audit log; gating is enforced by the context processor
+    in `bragi.apps.admin._inject_admin_context`.
     """
     return [
         NavItem(
@@ -38,7 +38,7 @@ def register_admin_nav() -> list[NavItem]:
         NavItem(
             label="All sessions",
             endpoint="sessions_admin.list_all_sessions",
-            section="system",
+            section="platform",
             weight=20,
             permission="superuser",
         ),

@@ -207,13 +207,13 @@ def register_admin_blueprint() -> Blueprint:
 
 @hookimpl
 def register_admin_nav() -> list[NavItem]:
-    """Add a Redirects entry under section 'site'."""
+    """Add a Redirects entry under the Manage section."""
     return [
         NavItem(
             label="Redirects",
             endpoint="redirect_admin.list_redirects",
-            section="site",
-            weight=20,
+            section="manage",
+            weight=30,
             scope="site",
         ),
     ]

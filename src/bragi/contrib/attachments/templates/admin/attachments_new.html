@@ -1,7 +1,7 @@
 {% extends "admin/base.html" %}
-{% block title %}Upload attachment &middot; bragi admin{% endblock %}
+{% block title %}Upload media &middot; bragi admin{% endblock %}
 {% block content %}
-<h1>Upload attachment</h1>
+<h1>Upload media</h1>
 
 <form method="post" enctype="multipart/form-data"
       action="{{ url_for('attachment_admin.upload_attachment') }}">

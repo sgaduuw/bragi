@@ -120,11 +120,11 @@
        above the viewport once the operator is more than a screen
        deep. Sticky pins it as the page scrolls past it; the solid
        background keeps content from showing through. It must pin
-       BELOW the admin nav (itself sticky at top:0, z-index 100),
-       not behind it, so offset `top` by the nav's live height
-       (--admin-nav-height, set in base.html). Without the offset
-       the toolbar pins at top:0 and the opaque nav renders over
-       it, so it looks like it scrolled away. */
+       at the top of the content column. The chrome is now a fixed
+       LEFT rail (no top bar), so the toolbar pins at top:0 and the
+       rail never overlaps it. --admin-nav-height is unset and falls
+       back to 0px, kept so a future top strip could reintroduce an
+       offset without touching this rule. */
     position: sticky; top: var(--admin-nav-height, 0px); z-index: 5;
   }
   .editor-toolbar button {
