@@ -124,3 +124,66 @@ def test_full_page_includes_htmx_script(admin_app: Flask) -> None:
     _login(client)
     resp = client.get("/admin/sites/blog/posts/")
     assert b"htmx.org" in resp.data
+
+
+def test_boosted_get_returns_full_page_not_partial(admin_app: Flask) -> None:
+    """A boosted rail navigation sends BOTH HX-Request and HX-Boosted.
+
+    It is a full-page navigation that swaps only `.admin-content`, so the
+    view must return the WHOLE page (chrome included) for htmx to select
+    the content column out of. Returning the bare partial would swap a
+    chrome-less fragment into the content column and lose the rail.
+    """
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(
+        "/admin/sites/blog/posts/",
+        headers={"HX-Request": "true", "HX-Boosted": "true"},
+    )
+    body = resp.data.decode()
+    assert resp.status_code == 200
+    # Full document, including the swap target the rail selects.
+    assert "<!DOCTYPE html>" in body
+    assert '<aside class="admin-rail"' in body
+    assert '<div class="admin-content">' in body
+    # The partial wrapper is present (inside the content column).
+    assert 'id="post-list-table"' in body
+
+
+def test_rail_section_nav_carries_boost_attributes(admin_app: Flask) -> None:
+    """The rail's section navs boost into `.admin-content` (rail persists)."""
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/posts/").data.decode()
+    # Both section navs (site body + platform foot) opt into boosting.
+    assert body.count('hx-boost="true"') >= 2
+    assert 'hx-target=".admin-content"' in body
+    assert 'hx-select=".admin-content"' in body
+
+
+def test_logout_form_is_not_inside_a_boosted_nav(admin_app: Flask) -> None:
+    """The logout POST and account/switcher links must NOT be boosted.
+
+    Boosting them would AJAX-follow the post-logout redirect and run
+    `hx-select=".admin-content"` against the chrome-less login page,
+    finding nothing and blanking the column. They live outside the two
+    boosted `<nav>`s by construction; this guards that a future edit
+    doesn't move them in. (The expired-session case is also handled by
+    the guard's `HX-Redirect`, but keeping these links plain is the
+    structural belt-and-braces.)
+    """
+    from bs4 import BeautifulSoup
+
+    client = admin_app.test_client()
+    _login(client)
+    soup = BeautifulSoup(client.get("/admin/sites/blog/posts/").data, "html.parser")
+
+    logout = soup.find("form", action=lambda v: bool(v) and "logout" in v)
+    assert logout is not None, "logout form should be present in the rail"
+    assert not logout.find_parent(attrs={"hx-boost": "true"})
+
+    # Sanity: a real section link IS inside a boosted nav, so the test
+    # would actually catch a regression rather than pass vacuously.
+    section_link = soup.find("a", class_="rail-link")
+    assert section_link is not None
+    assert section_link.find_parent(attrs={"hx-boost": "true"})

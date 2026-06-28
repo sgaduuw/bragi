@@ -10,7 +10,25 @@ from bragi.api import AuthMethodSpec, hookimpl
 from bragi.contrib.auth_local.cli import user_group
 from bragi.contrib.auth_local.views import bp as auth_local_bp
 from bragi.contrib.auth_local.views import login as login_view
+from bragi.core.htmx import is_htmx
 from bragi.core.security import current_user
+
+
+def _auth_redirect(target: str) -> ResponseReturnValue:
+    """Send the browser to `target`, htmx-aware.
+
+    A plain 302 is transparent to htmx: the browser follows it and htmx
+    swaps the followed page into the request's target. For an admin that
+    boosts its rail (swapping only `.admin-content`) or fires in-page
+    partial requests, that means a swap of the chrome-less login page,
+    which `hx-select=".admin-content"` can't find, blanking the column.
+    `HX-Redirect` instead tells htmx to do a full client-side navigation
+    to the login page. Non-htmx requests get the ordinary 302.
+    """
+    if is_htmx():
+        return "", 204, {"HX-Redirect": target}
+    return redirect(target)
+
 
 # Endpoints that anonymous users may hit without being redirected
 # to /login. Includes Flask's `static` and the login/logout views
@@ -68,11 +86,11 @@ def _require_authentication() -> ResponseReturnValue | None:
     # still resolve through the same call (current_user reads
     # `session["user_id"]` when no g cache exists).
     if current_user() is None:
-        return redirect(url_for("auth_local.login", next=request.path))
+        return _auth_redirect(url_for("auth_local.login", next=request.path))
     if session.get("must_change_password"):
         if request.endpoint in MUST_CHANGE_ALLOWED_ENDPOINTS:
             return None
-        return redirect(url_for("auth_local.change_password"))
+        return _auth_redirect(url_for("auth_local.change_password"))
     return None
 
 
