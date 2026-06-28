@@ -11,7 +11,7 @@ Views in bragi follow a specific dispatch convention (per bragi/CLAUDE.md "htmx 
 
 1. **Crawlers ALWAYS see the full page.** A cold request (no `HX-Request` header) returns the full HTML document with `<html>`, `<head>`, `<body>`. Partial swaps are a UX affordance, never a content gate.
 
-2. **Dispatch on `is_htmx()`** from `bragi.core.htmx`. Do NOT inspect `request.headers.get("HX-Request")` directly — use the helper so the rule stays uniform (single point to change if behaviour ever needs to bypass htmx for staging, testing, etc.).
+2. **Dispatch on `wants_partial()`** from `bragi.core.htmx` (NOT `is_htmx()` alone, and never `request.headers.get(...)` directly). The admin rail boosts its section links (`hx-boost` → swap only `.admin-content`), and a boosted navigation sends BOTH `HX-Request: true` AND `HX-Boosted: true`. Such a request is a full-page navigation: it must get the WHOLE page so htmx can select the content column out of it, never the bare partial. `wants_partial()` (= `is_htmx() and not is_boosted()`) is True only for genuine in-page swaps. Any admin GET view a rail link can reach (a section list view) MUST use `wants_partial()`; `is_htmx()` is still correct for partial forks a boosted GET can never reach (POST-only bulk/dismiss/run handlers, delivery-side search).
 
 3. **Template pairing**: a partial template lives next to its full-page sibling with a `_` prefix.
    - Full page: `templates/admin/post_list.html`
@@ -28,7 +28,7 @@ Views in bragi follow a specific dispatch convention (per bragi/CLAUDE.md "htmx 
 ### View
 
 ```python
-from bragi.core.htmx import is_htmx
+from bragi.core.htmx import wants_partial
 from flask import Blueprint, render_template
 
 bp = Blueprint("posts", __name__)
@@ -38,7 +38,7 @@ def list_posts():
     posts = _query_posts_for_site(g.site.id)
     template = (
         "admin/_post_list_table.html"
-        if is_htmx()
+        if wants_partial()  # in-page swap; boosted nav gets the full page
         else "admin/post_list.html"
     )
     return render_template(template, posts=posts)

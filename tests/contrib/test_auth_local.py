@@ -338,6 +338,22 @@ def test_anonymous_admin_hit_redirects_to_login(admin_app: Flask) -> None:
     assert "next=/" in location or "next=%2F" in location
 
 
+def test_anonymous_htmx_hit_uses_hx_redirect_not_302(admin_app: Flask) -> None:
+    """An htmx request hitting the guard must get `HX-Redirect`, not a 302.
+
+    htmx follows a 302 transparently and swaps the followed page into the
+    request's target; for a boosted rail nav (target `.admin-content`)
+    that swaps the chrome-less login page and blanks the column. A 204 +
+    `HX-Redirect` makes htmx do a full client-side navigation to login.
+    """
+    client = admin_app.test_client()
+    resp = client.get("/", headers={"HX-Request": "true"}, follow_redirects=False)
+    assert resp.status_code == 204
+    assert "/auth/login" in resp.headers["HX-Redirect"]
+    # And it must NOT also send a body/Location that htmx would swap.
+    assert resp.data == b""
+
+
 def test_authenticated_admin_hit_passes_through(admin_app: Flask) -> None:
     client = admin_app.test_client()
     token = csrf_token(client)

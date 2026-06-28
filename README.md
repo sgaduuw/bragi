@@ -66,9 +66,10 @@ and ARM homelabs run natively rather than through QEMU emulation.
   and one plugin manager; only the middleware stacks and registered
   Blueprints differ. Admin runs on its own subdomain.
 - **htmx as the render strategy.** Server-rendered HTML always;
-  partial swaps via the `HX-Request` header. No SPA, no
-  client-side routing, no separate prerender step. Crawlers see
-  complete pages.
+  partial swaps via the `HX-Request` header, plus boosted admin
+  navigation (the rail swaps just the content column, no full
+  reload). No SPA, no separate prerender step; crawlers and
+  no-JavaScript clients get complete pages.
 - **Markdown source of truth.** Post and Page bodies persist as
   markdown text with a cached HTML render alongside. TipTap (with
   its markdown serializer) is the admin editor; the data model is
@@ -418,7 +419,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.37.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.39.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start

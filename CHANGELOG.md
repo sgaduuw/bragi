@@ -4,6 +4,23 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.0] - 2026-06-28
+
+### Changed
+- Admin sidebar navigation is now boosted (htmx `hx-boost`): clicking a
+  section link swaps only the content column instead of reloading the
+  whole page, so the rail stays in place and the active highlight and
+  URL update without a full document refresh. The browser back/forward
+  buttons are handled. Without JavaScript the rail links fall back to
+  ordinary full-page navigation, so crawlers and no-JS clients are
+  unaffected.
+
+### Fixed
+- An expired session that lands on an htmx request (a boosted rail
+  navigation or an in-page swap) is now redirected to the login page via
+  `HX-Redirect` instead of being silently swapped in as a chrome-less
+  fragment.
+
 ## [1.38.0] - 2026-06-28
 
 ### Changed
