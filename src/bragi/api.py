@@ -279,7 +279,9 @@ class NavItem:
     label: str
     endpoint: str  # Flask endpoint name
     icon: str | None = None
-    section: str = "content"  # 'content'|'site'|'system'
+    # rail group: write|reach|manage (site) / platform (global);
+    # "account" peels into the user menu (see _admin_nav.html).
+    section: str = "manage"
     weight: int = 100  # sort order within section (lower = earlier)
     permission: str | None = None  # required permission, if any
     # 'global' items show at the root admin chrome (/admin/sites/,

@@ -322,7 +322,7 @@ def register_admin_nav() -> list[NavItem]:
         NavItem(
             label="Pages",
             endpoint="page_admin.list_pages",
-            section="content",
+            section="write",
             weight=20,
             scope="site",
         ),

@@ -5,8 +5,8 @@ per-section template rule depends on:
 - 'My sessions' (personal) lives in section='account', so the
   admin chrome's user-menu dropdown picks it up via the
   'any section=account global item -> user menu' rule.
-- 'All sessions' (superuser sysadmin) stays in section='system',
-  rendering in the global row alongside Audit log.
+- 'All sessions' (superuser sysadmin) lives in section='platform',
+  rendering in the rail's Platform group alongside Sites and Audit.
 """
 
 from __future__ import annotations
@@ -22,12 +22,12 @@ def test_my_sessions_is_account_section() -> None:
     assert by_label["My sessions"].section == "account"
 
 
-def test_all_sessions_stays_system_section() -> None:
-    """Superuser session-revocation surface stays in the system group."""
+def test_all_sessions_in_platform_section() -> None:
+    """Superuser session-revocation surface sits in the Platform group."""
     items = register_admin_nav()
     by_label = {i.label: i for i in items}
     assert "All sessions" in by_label, "All sessions NavItem missing"
-    assert by_label["All sessions"].section == "system"
+    assert by_label["All sessions"].section == "platform"
 
 
 def test_all_sessions_is_superuser_gated() -> None:

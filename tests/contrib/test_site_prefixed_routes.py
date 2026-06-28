@@ -293,7 +293,7 @@ def test_dashboard_404_for_unknown_slug(admin_app: Flask) -> None:
 
 def test_dashboard_shows_site_nav_items(admin_app: Flask) -> None:
     """The dashboard surfaces the site-scoped sections (Posts,
-    Pages, Redirects, Attachments, Analytics) so users have a
+    Pages, Redirects, Media, Analytics) so users have a
     one-screen landing into the site's content surface. Team
     (P4 / #80) is owner-only and is asserted separately in
     `test_team_admin`."""
@@ -304,5 +304,5 @@ def test_dashboard_shows_site_nav_items(admin_app: Flask) -> None:
     assert "Posts" in body
     assert "Pages" in body
     assert "Redirects" in body
-    assert "Attachments" in body
+    assert "Media" in body
     assert "Analytics" in body

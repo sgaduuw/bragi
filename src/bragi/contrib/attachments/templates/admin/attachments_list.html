@@ -1,5 +1,5 @@
 {% extends "admin/base.html" %}
-{% block title %}Attachments &middot; bragi admin{% endblock %}
+{% block title %}Media &middot; bragi admin{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="{{ url_for('admin_static.static', filename='bulk_select.css') }}">
 {% endblock %}
@@ -44,7 +44,7 @@
   </form>
 </section>
 <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
-  <h1 style="margin: 0;">Attachments</h1>
+  <h1 style="margin: 0;">Media</h1>
   <a href="{{ url_for('attachment_admin.upload_attachment') }}" class="btn">Upload</a>
   {% if missing_alt %}
     <a href="{{ url_for('attachment_admin.list_attachments') }}" class="btn secondary">

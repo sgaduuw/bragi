@@ -35,12 +35,12 @@ from bragi.settings import assert_secret_key_safe, settings
 # admin response should never be cacheable, even on 3xx/4xx.
 CACHE_POLICIES_ADMIN = CACHE_POLICIES["admin"]
 
-# Section ordering rule: `content` always first; `system` always
-# last; everything else alphabetical between. Same rule applies to
-# both the global row and the site row. The pins exist so the
-# muscle-memory ordering of "the day's work first; admin/audit
-# last" survives an arbitrary contrib adding a new section name.
-_SECTION_RANK: dict[str, int] = {"content": 0, "system": 2}
+# Section ordering rule: site groups render write -> reach -> manage
+# (the day's work first, site administration last); the lone global
+# group is `platform`. The pins exist so an arbitrary contrib adding
+# a new section name still sorts predictably (unknown sections fall
+# to rank 1, alphabetical among that rank).
+_SECTION_RANK: dict[str, int] = {"write": 0, "reach": 1, "manage": 2, "platform": 0}
 
 # Admin-internal Blueprint serving `src/bragi/static/admin/` at
 # `/admin/static/`. Lives in core (not a plugin) because the chrome

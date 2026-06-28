@@ -4,6 +4,28 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.0] - 2026-06-28
+
+### Changed
+- Admin chrome redesigned from the two-row top nav to a left sidebar
+  with labeled sections. Site navigation is regrouped into **Write**
+  (Posts, Pages, Media, Datasets), **Reach** (Analytics, Webmentions),
+  and **Manage** (Site settings, Profile links, Redirects, Team,
+  Import); global items move to a **Platform** group. "Attachments" is
+  relabeled **Media**. Keyboard-focus rings and reduced-motion handling
+  added; the chrome stays zero-JavaScript (the rail is an off-canvas
+  drawer on mobile via a CSS-only toggle).
+
+### Added
+- Per-site profile links: a site-scoped admin page
+  (`/admin/sites/<slug>/profile-links/`, editor role) curates a list of
+  the owner's own profiles (GitHub, Mastodon, ...), rendered in the
+  default theme footer as `rel="me"` + schema.org `sameAs` anchors (so
+  Mastodon can verify the profile). Stored as JSON under
+  `Site.extra_settings["profile_links"]`; themes can render the list via
+  the `profile_links()` Jinja global / the `delivery/_profile_links.html`
+  partial.
+
 ## [1.37.0] - 2026-06-26
 
 ### Added

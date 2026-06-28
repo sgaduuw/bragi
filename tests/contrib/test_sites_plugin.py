@@ -81,13 +81,13 @@ def test_register_admin_nav_returns_two_items() -> None:
     assert labels == ["Sites", "Site settings"]
 
 
-def test_sites_nav_item_is_global_section_site() -> None:
+def test_sites_nav_item_is_global_section_platform() -> None:
     items = register_admin_nav()
     sites = items[0]
     assert isinstance(sites, NavItem)
     assert sites.endpoint == "site_admin.list_sites"
     assert sites.scope == "global"
-    assert sites.section == "site"
+    assert sites.section == "platform"
     assert sites.weight == 10
 
 
@@ -97,8 +97,8 @@ def test_site_settings_nav_item_is_site_scope() -> None:
     assert isinstance(settings, NavItem)
     assert settings.endpoint == "site_admin.edit_site_current"
     assert settings.scope == "site"
-    assert settings.section == "site"
-    assert settings.weight == 90
+    assert settings.section == "manage"
+    assert settings.weight == 10
 
 
 # ---------------------------------------------------------------------------

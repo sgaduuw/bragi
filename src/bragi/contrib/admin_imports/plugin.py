@@ -80,16 +80,15 @@ def register_admin_blueprint() -> Blueprint:
 def register_admin_nav() -> list[NavItem]:
     """Contribute the 'Import' entry to the site-scoped admin sidebar.
 
-    Weight 80 places it after Posts (10) and Pages (20), in the
-    site-management area. The section is 'site' to match the existing
-    convention for site-scoped tools (Attachments uses the same pattern).
+    Section 'manage', weight 50: the site-management area,
+    after Site settings / Profile links / Redirects / Team.
     """
     return [
         NavItem(
             label="Import",
             endpoint="admin_imports.index",
-            section="site",
-            weight=80,
+            section="manage",
+            weight=50,
             scope="site",
         ),
     ]

@@ -1,0 +1,27 @@
+{# Site-level profile links.
+
+   Reads `profile_links()` from the Jinja env (registered by
+   `bragi.contrib.profile_links.plugin`). Renders nothing when the
+   list is empty so sites with no links configured don't grow empty
+   markup. Stable `.profile-links__*` hooks let each theme style
+   without touching this markup.
+
+   ponytail: `rel="me"` + `itemprop="sameAs"` are hardcoded for the
+   identity-only v1 (every link is one of the owner's own profiles).
+   When a `rel`/`kind` field lands (see
+   `_claude/specs/2026-06-27-profile-links-site-section-design.md`),
+   switch to `rel="{{ link.rel }}"` and gate `sameAs` on
+   `rel == "me"`. #}
+{% set links = profile_links() %}
+{% if links %}
+<nav class="profile-links" aria-label="Profile links">
+  <ul class="profile-links__list">
+    {% for link in links %}
+      <li class="profile-links__item">
+        <a class="profile-links__link" href="{{ link.url }}"
+           rel="me" itemprop="sameAs">{{ link.label }}</a>
+      </li>
+    {% endfor %}
+  </ul>
+</nav>
+{% endif %}

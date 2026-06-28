@@ -82,8 +82,8 @@ def test_full_page_includes_chrome_and_partial(admin_app: Flask) -> None:
     assert resp.status_code == 200
     # Chrome from the base template.
     assert "<!DOCTYPE html>" in body
-    # Row 1 of the redesigned two-row admin chrome.
-    assert '<nav class="admin-nav-row-1"' in body
+    # The left rail from the base chrome.
+    assert '<aside class="admin-rail"' in body
     # And the partial wrapper.
     assert 'id="post-list-table"' in body
     # And the seeded row.
@@ -99,8 +99,8 @@ def test_htmx_get_returns_partial_only(admin_app: Flask) -> None:
     assert resp.status_code == 200
     # No full-document chrome.
     assert "<!DOCTYPE html>" not in body
-    # Row 1 of the redesigned chrome must not appear in a partial response.
-    assert '<nav class="admin-nav-row-1"' not in body
+    # The rail chrome must not appear in a partial response.
+    assert '<aside class="admin-rail"' not in body
     # The partial wrapper IS present.
     assert 'id="post-list-table"' in body
     # And the seeded row.

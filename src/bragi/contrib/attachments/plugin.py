@@ -116,13 +116,13 @@ def register_delivery_blueprint() -> Blueprint:
 
 @hookimpl
 def register_admin_nav() -> list[NavItem]:
-    """Add an Attachments entry to the admin nav (content section)."""
+    """Add a Media entry to the admin nav (Write section)."""
     return [
         NavItem(
-            label="Attachments",
+            label="Media",
             endpoint="attachment_admin.list_attachments",
-            section="content",
-            weight=20,
+            section="write",
+            weight=30,
             scope="site",
         ),
     ]

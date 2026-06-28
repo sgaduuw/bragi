@@ -1,107 +1,155 @@
-/* bragi admin chrome v2: two-row nav, breadcrumbs, mobile drawer.
+/* bragi admin chrome v3: fixed left rail with labeled sections.
  *
  * Loaded by `src/bragi/templates/admin/base.html` from
  * /admin/static/admin-chrome.css, served by the `admin_static`
  * Blueprint registered in `bragi.apps.admin.create_admin_app`.
  *
  * Layout summary:
- *   .admin-nav-row-1   global row (#1a1a1a)
- *   .admin-nav-row-2   site row   (#2a2a2a)
- *   .admin-breadcrumbs row 3, conditional (#f6f6f6)
- *   .admin-nav-drawer  mobile dropdown panel
- *   #nav-toggle        hidden checkbox driving the drawer
+ *   .admin-rail        fixed left nav (--rail-bg); brand + site
+ *                      switcher (head), labeled section groups
+ *                      (body), Platform group + account menu (foot)
+ *   .admin-content     content column, offset by --rail-w
+ *   .admin-breadcrumbs conditional crumb bar at the top of content
+ *   #nav-toggle        hidden checkbox driving the off-canvas rail
+ *   .nav-hamburger     mobile toggle (hidden on desktop)
+ *
+ * The chrome ships zero JavaScript: the site switcher and account
+ * menu are <details>/<summary>; the mobile rail is a hidden
+ * checkbox + sibling-combinator CSS.
  */
 
-body {
+:root {
+  --rail-w: 240px;
+  --rail-bg: #1b1d22;
+  --rail-fg: #e6e7ea;
+  --rail-fg-dim: #888d97;
+  --rail-fg-active: #fff;
+  --accent: #6ea8fe;
+  --bg: #fff;
+  --rule: #e3e3e0;
+}
+
+body.admin {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   margin: 0;
   color: #222;
+  background: var(--bg);
 }
 
-/* Sticky wrapper: rows 1 + 2 cling to the top together as the
-   page scrolls. The wrapper has no background of its own; each
-   row paints its own. z-index keeps the nav above any
-   positioned page content (the dropdown panels inside the nav
-   also rely on it -- they are stacked relative to the
-   wrapper). Breadcrumbs and the mobile drawer sit outside the
-   wrapper and stay in normal flow. */
-.admin-nav-sticky {
-  position: sticky;
+/* ---------- Left rail ---------- */
+.admin-rail,
+.admin-rail * {
+  box-sizing: border-box;
+}
+.admin-rail {
+  position: fixed;
   top: 0;
-  z-index: 100;
-}
-
-/* Nav rows (desktop) */
-.admin-nav-row-1,
-.admin-nav-row-2 {
+  left: 0;
+  bottom: 0;
+  width: var(--rail-w);
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.55rem 1rem;
-  color: #eee;
-  font-size: 0.85em;
+  flex-direction: column;
+  background: var(--rail-bg);
+  color: var(--rail-fg);
+  overflow-y: auto;
+  z-index: 200;
 }
-.admin-nav-row-1 { background: #1a1a1a; }
-.admin-nav-row-2 { background: #2a2a2a; gap: 0.9rem; font-size: 0.82em; color: #ddd; }
-.admin-nav-row-1 .brand { font-weight: 700; letter-spacing: 0.4px; }
-.admin-nav-row-1 a,
-.admin-nav-row-2 a {
-  color: inherit;
-  text-decoration: none;
-  padding: 0.15rem 0.4rem;
-  border-radius: 3px;
+.rail-head {
+  padding: 1rem 1rem 0.6rem;
 }
-.admin-nav-row-1 a:hover,
-.admin-nav-row-2 a:hover {
-  background: rgba(255, 255, 255, 0.08);
+.rail-brand {
+  display: block;
+  margin-bottom: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  font-size: 1.05rem;
 }
-.admin-nav-row-1 a.is-current,
-.admin-nav-row-2 a.is-current {
-  box-shadow: inset 0 -2px 0 #06c;
+.rail-body {
+  flex: 1;
+  padding: 0.25rem 0;
 }
-.section-divider {
-  color: rgba(255, 255, 255, 0.2);
-  user-select: none;
+.rail-foot {
+  padding: 0.4rem 0 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-.nav-spacer { flex: 1; }
-.current-site-label {
-  font-weight: 600;
-  opacity: 0.7;
-  font-size: 0.95em;
-}
-.context-dot { opacity: 0.4; }
 
-/* Dropdowns (site switcher + user menu, <details>) */
-.admin-nav-row-1 details,
-.admin-nav-row-2 details {
-  position: relative;
+/* Labeled section groups. The label IS the section key (write /
+   reach / manage / platform), uppercased here; it carries the
+   navigational structure, so it's typographic, not decorative. */
+.rail-group {
+  padding: 0.45rem 0;
 }
-.admin-nav-row-1 details > summary,
-.admin-nav-row-2 details > summary {
+.rail-group__label {
+  margin: 0;
+  padding: 0 1rem 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rail-fg-dim);
+}
+.rail-link {
+  display: block;
+  padding: 0.4rem 1rem;
+  border-left: 3px solid transparent;
+  color: var(--rail-fg);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.rail-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.rail-link.is-current {
+  border-left-color: var(--accent);
+  background: rgba(110, 168, 254, 0.12);
+  color: var(--rail-fg-active);
+  font-weight: 600;
+}
+
+/* Site switcher + account menu (<details> dropdowns). The panels
+   flow in-document inside the scrolling rail (accordion-style), so
+   no positioning context is needed. */
+.rail-switcher > summary,
+.rail-account > summary {
   list-style: none;
   cursor: pointer;
-  padding: 0.15rem 0.4rem;
-  border-radius: 3px;
+  color: var(--rail-fg);
+  font-size: 0.9rem;
 }
-.admin-nav-row-1 details > summary::-webkit-details-marker,
-.admin-nav-row-2 details > summary::-webkit-details-marker { display: none; }
-.admin-nav-row-1 details[open] > summary,
-.admin-nav-row-2 details[open] > summary {
-  background: rgba(255, 255, 255, 0.12);
+.rail-switcher > summary {
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
 }
-.admin-nav-row-1 details > .dropdown-panel,
-.admin-nav-row-2 details > .dropdown-panel {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  right: 0;
-  min-width: 14rem;
+.rail-account {
+  padding: 0.5rem 1rem 0;
+}
+.rail-account > summary {
+  display: flex;
+  align-items: center;
+  padding: 0.3rem 0;
+}
+.rail-switcher > summary::-webkit-details-marker,
+.rail-account > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Keyboard focus (was absent before v3) */
+.rail-link:focus-visible,
+.rail-switcher > summary:focus-visible,
+.rail-account > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.dropdown-panel {
   background: #fff;
   color: #222;
   border: 1px solid #ccc;
   border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
   padding: 0.35rem 0;
-  z-index: 50;
+  margin-top: 0.3rem;
 }
 .dropdown-panel a,
 .dropdown-panel button {
@@ -111,7 +159,7 @@ body {
   background: transparent;
   border: 0;
   padding: 0.45rem 0.9rem;
-  font-size: 0.85em;
+  font-size: 0.85rem;
   color: #222;
   text-decoration: none;
   cursor: pointer;
@@ -119,6 +167,9 @@ body {
 .dropdown-panel a:hover,
 .dropdown-panel button:hover {
   background: #f3f3f3;
+}
+.dropdown-panel a.muted {
+  opacity: 0.6;
 }
 .dropdown-panel hr {
   border: 0;
@@ -139,64 +190,111 @@ body {
   font-weight: 600;
 }
 
-/* Breadcrumbs row */
+/* ---------- Content column ---------- */
+.admin-content {
+  margin-left: var(--rail-w);
+  min-width: 0;
+}
+
+/* Breadcrumbs (conditional; rendered only when a chain is set) */
 .admin-breadcrumbs {
-  background: #f6f6f6;
-  color: #444;
-  padding: 0.45rem 1rem;
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  font-size: 0.78em;
-  border-bottom: 1px solid #ddd;
+  padding: 0.45rem 1.5rem;
+  background: #f6f6f6;
+  color: #444;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--rule);
 }
 .admin-breadcrumbs a {
   color: #06c;
   text-decoration: none;
 }
-.admin-breadcrumbs a:hover { text-decoration: underline; }
-.admin-breadcrumbs .crumb-current { opacity: 0.85; }
-.admin-breadcrumbs .crumb-sep { opacity: 0.45; }
+.admin-breadcrumbs a:hover {
+  text-decoration: underline;
+}
+.admin-breadcrumbs .crumb-current {
+  opacity: 0.85;
+}
+.admin-breadcrumbs .crumb-sep {
+  opacity: 0.45;
+}
 
-/* Mobile (drawer) */
-#nav-toggle { display: none; }
+/* ---------- Mobile (off-canvas rail) ---------- */
+/* Desktop: the rail is always visible, so the toggle does nothing
+   and is removed from the tab order. It becomes a focusable (but
+   visually hidden) control inside the mobile media query, so the
+   nav can be opened by keyboard (Space) there. */
+#nav-toggle {
+  display: none;
+}
 .nav-hamburger {
   display: none;
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 250;
   cursor: pointer;
-  padding: 0.2rem 0.4rem;
-  border-radius: 3px;
-  font-size: 1.2em;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  background: var(--rail-bg);
+  color: var(--rail-fg);
+  font-size: 1.2rem;
   line-height: 1;
 }
-.nav-hamburger:hover { background: rgba(255, 255, 255, 0.08); }
-.admin-nav-drawer { display: none; }
 
 @media (max-width: 768px) {
-  .admin-nav-row-1 .desktop-only,
-  .admin-nav-row-2 { display: none; }
-  .nav-hamburger { display: inline-block; }
-  #nav-toggle:checked ~ .admin-nav-drawer { display: block; }
-  .admin-nav-drawer {
-    background: #2a2a2a;
-    color: #ddd;
-    padding: 0.4rem 1rem;
-  }
-  .admin-nav-drawer a {
+  /* Focusable-but-invisible checkbox so the rail opens by keyboard
+     (Space); the visible control is the .nav-hamburger label. */
+  #nav-toggle {
     display: block;
-    color: inherit;
-    text-decoration: none;
-    padding: 0.45rem 0.2rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    z-index: 251;
   }
-  .admin-nav-drawer hr {
-    border: 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    margin: 0.3rem 0;
+  #nav-toggle:focus-visible ~ .nav-hamburger {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
-  .admin-breadcrumbs { display: none; }
+  .admin-rail {
+    width: min(82%, 300px);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0.2s ease;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.4);
+  }
+  #nav-toggle:checked ~ .admin-rail {
+    transform: none;
+    visibility: visible;
+  }
+  .admin-content {
+    margin-left: 0;
+  }
+  .nav-hamburger {
+    display: inline-block;
+  }
+  .admin-breadcrumbs {
+    display: none;
+  }
+  /* Keep the page H1 clear of the floating hamburger. */
+  .admin-content > main {
+    padding-top: 2.75rem;
+  }
 }
 
-/* Page chrome (preserved from prior base.html) */
+@media (prefers-reduced-motion: reduce) {
+  .admin-rail {
+    transition: visibility 0.2s ease;
+  }
+}
+
+/* ---------- Page chrome (preserved from v2) ---------- */
 main { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
 h1 { margin-top: 0; }
 table { width: 100%; border-collapse: collapse; }
@@ -205,7 +303,8 @@ th { background: #f5f5f5; font-size: 0.9em; }
 form { display: flex; flex-direction: column; gap: 0.75rem; }
 form fieldset { border: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
 form label { font-weight: 600; font-size: 0.9em; }
-form input[type="text"], form input[type="email"], form select, form textarea {
+form input[type="text"], form input[type="email"], form input[type="url"],
+form select, form textarea {
   padding: 0.5rem; font-size: 1em; border: 1px solid #bbb; border-radius: 4px;
 }
 form textarea { min-height: 14rem; font-family: ui-monospace, Menlo, Consolas, monospace; }
@@ -239,6 +338,7 @@ td.is-editable { background: rgba(0, 0, 0, 0.04); cursor: pointer; }
 td.is-editing  { background: rgba(0, 0, 0, 0.08); }
 td.is-editing .inline-edit-hint  { font-size: 0.75em; color: #666; margin-top: 0.15rem; }
 td.is-editing .inline-edit-error { font-size: 0.75em; color: #b22; margin-top: 0.15rem; }
+.inline-edit-error { font-size: 0.75em; color: #b22; margin-top: 0.15rem; }
 @media (prefers-color-scheme: dark) {
   td.is-editable { background: rgba(255, 255, 255, 0.06); }
   td.is-editing  { background: rgba(255, 255, 255, 0.12); }
