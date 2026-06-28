@@ -53,8 +53,19 @@
     </details>
   </div>
 
-  {# Body: site sections (only inside a site context). #}
-  <nav class="rail-body" aria-label="Site navigation">
+  {# Body: site sections (only inside a site context).
+
+     Boosted: section links swap only `.admin-content` (rail persists,
+     URL pushes), so they feel instant instead of a full document
+     reload. The attributes inherit to the descendant <a>; the switcher
+     and account menu (outside these <nav>s) stay plain links so logout
+     and cross-site jumps do a normal navigation. The active highlight
+     is moved client-side after the swap (see base.html); without JS the
+     links degrade to ordinary anchors with the server-rendered
+     `is-current`. #}
+  <nav class="rail-body" aria-label="Site navigation"
+       hx-boost="true" hx-target=".admin-content"
+       hx-select=".admin-content" hx-swap="outerHTML show:window:top">
     {% if current_site and site_nav_groups %}
       {% for section_name, items in site_nav_groups %}
         {{ nav_group(section_name, items) }}
@@ -64,7 +75,9 @@
 
   {# Foot: the Platform group + the account menu. #}
   <div class="rail-foot">
-    <nav aria-label="Platform navigation">
+    <nav aria-label="Platform navigation"
+         hx-boost="true" hx-target=".admin-content"
+         hx-select=".admin-content" hx-swap="outerHTML show:window:top">
       {% for section_name, items in global_nav_groups %}
         {{ nav_group(section_name, items) }}
       {% endfor %}

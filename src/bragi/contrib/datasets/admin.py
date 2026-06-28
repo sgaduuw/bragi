@@ -31,7 +31,7 @@ from bragi.contrib.datasets.render import render_table
 from bragi.contrib.datasets.rerender import rerender_for_dataset
 from bragi.core.audit import audit
 from bragi.core.db import SessionLocal
-from bragi.core.htmx import is_htmx
+from bragi.core.htmx import is_htmx, wants_partial
 from bragi.core.models import Attachment, AttachmentRendition, Dataset, DatasetQuery
 from bragi.core.models.dataset import DATASET_FORMATS, DATASET_SOURCE_TYPES
 from bragi.core.models.site import Site
@@ -109,7 +109,7 @@ def list_datasets(site_slug: str) -> ResponseReturnValue:
             .all()
         )
     set_breadcrumbs(Crumb("Datasets", None))
-    if is_htmx():
+    if wants_partial():
         return render_template("admin/datasets/_list_table.html", rows=rows)
     return render_template("admin/datasets/list.html", rows=rows)
 

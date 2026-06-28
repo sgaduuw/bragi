@@ -46,7 +46,7 @@ from bragi.core.bulk_action import (
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
-from bragi.core.htmx import is_htmx
+from bragi.core.htmx import is_htmx, wants_partial
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
 from bragi.core.models.page_working_copy import PageWorkingCopy
@@ -575,7 +575,7 @@ def list_pages(site_slug: str) -> ResponseReturnValue:
             )
             for p in pages
         }
-    if is_htmx():
+    if wants_partial():
         return render_template(
             "admin/_page_list_table.html",
             pages=pages,

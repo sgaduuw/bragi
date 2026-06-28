@@ -43,7 +43,7 @@ from bragi.core.bulk_action import (
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
-from bragi.core.htmx import is_htmx
+from bragi.core.htmx import is_htmx, wants_partial
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
 from bragi.core.models.post_working_copy import PostWorkingCopy
@@ -392,7 +392,7 @@ def list_posts(site_slug: str) -> ResponseReturnValue:
         )
     # htmx dispatch: return just the table partial for hx-get
     # refreshes; full page for cold loads (and crawlers).
-    if is_htmx():
+    if wants_partial():
         return render_template("admin/_post_list_table.html", posts=posts, site=site)
     return render_template("admin/list.html", posts=posts, site=site)
 

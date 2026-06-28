@@ -55,7 +55,7 @@ from bragi.core.bulk_action import (
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
-from bragi.core.htmx import is_htmx
+from bragi.core.htmx import is_htmx, wants_partial
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.site import Site
@@ -222,7 +222,7 @@ def list_attachments(site_slug: str) -> ResponseReturnValue:
         failed_rendition_count=failed_rendition_count,
         thumb_storage_key_by_id=thumb_storage_key_by_id,
     )
-    if is_htmx():
+    if wants_partial():
         return render_template("admin/_attachments_list_table.html", **context)
     return render_template("admin/attachments_list.html", **context)
 
