@@ -518,6 +518,16 @@ inherits the row, memory, and temp caps for render-time queries.
 Leave at defaults unless a specific file size or query workload
 demands otherwise.
 
+`BRAGI_NOTFOUND_BLOCKLIST` is a JSON list of fnmatch globs
+(matched against the request path) that the 404 recorder drops
+before writing, so vulnerability-scanner probes never reach the
+triage table. It defaults to the common exploit paths (`/wp-*`,
+`*.php`, `/.env`, `/.git/*`, ...); override with
+`BRAGI_NOTFOUND_BLOCKLIST='["/wp-*","*.php"]'` to replace the list
+(`.well-known/*` is never blocked). The per-site "404s" admin page
+lists the surviving dead paths so you can redirect them, create the
+missing content, mark them Gone (410), or dismiss them.
+
 SQLite write-contention knobs (set on every app process; read once
 at connect time) default to `BRAGI_SQLITE_BUSY_TIMEOUT_MS=10000`, how
 long a write waits for the single write lock before raising `database
@@ -600,6 +610,7 @@ bragi/
 │       ├── internal_links/     # [text](post:42) save-time + delivery-time resolver + admin picker
 │       ├── markdown_extras/    # bundled markdown-it extensions (footnotes, ...)
 │       ├── nav/                # auto-derived public site navigation from the page tree
+│       ├── notfound/           # detected-404 triage: recorder + admin (redirect / create / dismiss)
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── profile_links/      # per-site rel="me" profile links (footer + admin)

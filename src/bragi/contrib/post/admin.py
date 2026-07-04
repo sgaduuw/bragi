@@ -414,7 +414,17 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         )
 
         if request.method == "GET":
-            return _render_post_form(db, site_id, None, {})
+            # Seed slug/title from query args so other admin pages (e.g.
+            # the 404-triage list) can deep-link into "new post" with
+            # the slug pre-filled. Only keys the form/template actually
+            # reads; an absent arg leaves the empty-form behaviour
+            # unchanged.
+            seed_form: dict[str, str] = {}
+            if "slug" in request.args:
+                seed_form["slug"] = request.args.get("slug", "")
+            if "title" in request.args:
+                seed_form["title"] = request.args.get("title", "")
+            return _render_post_form(db, site_id, None, seed_form)
 
         form = _form_from_request()
         if not form["slug"] and form["title"]:

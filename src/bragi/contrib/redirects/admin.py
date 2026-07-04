@@ -165,12 +165,21 @@ def new_redirect(site_slug: str) -> ResponseReturnValue:
         site_id = site.id
 
     if request.method == "GET":
-        # Default the form: exact match, 301, active.
+        # Seed the form from query args so other admin pages (e.g. the
+        # 404-triage list) can deep-link into "new redirect" with the
+        # source path pre-filled. Untrusted args only populate inputs
+        # here; nothing persists until POST, where `_validate` runs
+        # against the submitted form as usual.
+        raw_status = request.args.get("status_code")
+        try:
+            status_code = int(raw_status) if raw_status is not None else 301
+        except ValueError:
+            status_code = 301
         form: dict[str, object] = {
-            "source_path": "",
-            "target": "",
-            "status_code": 301,
-            "match_type": MatchType.EXACT,
+            "source_path": request.args.get("source_path", ""),
+            "target": request.args.get("target", ""),
+            "status_code": status_code,
+            "match_type": request.args.get("match_type", MatchType.EXACT),
             "active": True,
             "note": None,
         }

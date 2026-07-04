@@ -61,6 +61,18 @@ def test_list_requires_auth(admin_app: Flask) -> None:
     assert resp.status_code == 302
 
 
+def test_new_get_prefills_slug_and_title_from_query_args(admin_app: Flask) -> None:
+    """P4 404-triage deep-link: a page like the 404 log can send an
+    author here with `slug`/`title` pre-filled. Untrusted args only
+    populate the form's inputs; nothing persists until POST."""
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/pages/new?slug=my-slug&title=My+Title")
+    assert resp.status_code == 200
+    assert b'value="my-slug"' in resp.data
+    assert b'value="My Title"' in resp.data
+
+
 def test_new_creates_root_page(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     client = admin_app.test_client()
     _login(client)
