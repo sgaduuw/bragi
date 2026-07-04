@@ -164,7 +164,9 @@ def list_notfound(site_slug: str) -> ResponseReturnValue:
         peek = db.execute(query.limit(1).offset(offset + PAGE_SIZE)).scalar_one_or_none()
         has_more = peek is not None
 
-        candidates = _gather_candidates(db, site)
+        # Skip the content scan entirely on an empty page (the common
+        # steady state): no rows means nothing to suggest against.
+        candidates = _gather_candidates(db, site) if rows else []
         entries = [
             {"nf": nf, "leaf": _leaf(nf.path), "suggestion": suggest(nf.path, candidates)}
             for nf in rows

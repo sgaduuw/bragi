@@ -82,7 +82,11 @@ def _record(site_id: int, path: str, referrer: str | None) -> None:
     404 volume is low and coalesced to one row per path; if 404-write
     contention ever shows, offload to the bragi-tasks worker via the
     IndexNow not_before-queue pattern (CONTEXT.md "Database write
-    concurrency" tier 2).
+    concurrency" tier 2). Ceiling: a scanner probing many DISTINCT
+    novel paths that dodge the blocklist inserts one row (and one
+    write) each, unbounded. Acceptable at bragi's personal scale; a
+    busy public deploy would want a per-site open-row cap or a
+    stronger blocklist before this bites (CONTEXT.md "404 triage").
     """
     now = naive_utcnow()
     ref = referrer[:_MAX_PATH_LEN] if referrer else None
