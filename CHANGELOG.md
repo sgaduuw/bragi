@@ -4,6 +4,29 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- 404 triage: the delivery app now records the dead URLs it returns
+  (coalesced per path, minus a scanner blocklist), and a per-site
+  admin page (`/admin/sites/<slug>/not-found/`, editor role, under
+  **Manage**) lists them with a suggested fix and one-click actions:
+  create a redirect, mark the path Gone (410), deep-link into
+  new-page / new-post with the slug pre-filled, or dismiss it. A row
+  drops off the list automatically once an active exact redirect
+  covers its path. Suggestions come from an exact/fuzzy slug match
+  against published content (redirect target) and archived content
+  (informational).
+- `BRAGI_NOTFOUND_BLOCKLIST`: JSON list of fnmatch globs the 404
+  recorder drops before writing (defaults to common exploit-probe
+  paths; `.well-known/*` is never blocked).
+
+### Changed
+- The admin new-redirect, new-page, and new-post forms now pre-fill
+  from query args (`?source_path=`, `?target=`, `?status_code=`,
+  `?slug=`, `?title=`), so other admin pages can deep-link into them
+  with fields seeded.
+
 ## [1.39.0] - 2026-06-28
 
 ### Changed

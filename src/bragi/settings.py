@@ -259,6 +259,32 @@ class Settings(BaseSettings):
     embed_rerender_timeout_per: float = 15.0
     embed_user_agent: str = "bragi-embeds (+https://github.com/sgaduuw/bragi)"
 
+    # 404 triage (bragi.contrib.notfound). Paths matching any of these
+    # fnmatch globs are dropped BEFORE the recorder writes, so scanner
+    # noise (vulnerability probes hammering random paths) never reaches
+    # the not_founds table. Matched against `request.path`. Override as
+    # JSON, e.g. BRAGI_NOTFOUND_BLOCKLIST='["/wp-*","*.php"]'. Note:
+    # `.well-known/*` is deliberately NOT blocked (security.txt,
+    # webfinger live there). `*.php`/`*.asp*` are safe to drop because
+    # bragi content is slug-based and never ends in those.
+    notfound_blocklist: list[str] = [
+        "/wp-admin/*",
+        "/wp-login.php",
+        "/wp-content/*",
+        "/wp-includes/*",
+        "/xmlrpc.php",
+        "*.php",
+        "*.asp",
+        "*.aspx",
+        "/.env",
+        "/.git/*",
+        "/.aws/*",
+        "/vendor/*",
+        "/cgi-bin/*",
+        "/phpmyadmin/*",
+        "/administrator/*",
+    ]
+
 
 settings = Settings()
 

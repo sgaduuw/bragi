@@ -152,6 +152,18 @@ def test_new_redirect_round_trip(
     assert row.note == "From a typo"
 
 
+def test_new_get_prefills_from_query_args(admin_app: Flask) -> None:
+    """P4 404-triage deep-link: a page like the 404 log can send an
+    editor here with `source_path`/`target` pre-filled. Untrusted args
+    only populate the form's inputs; nothing persists until POST."""
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get("/admin/sites/blog/redirects/new?source_path=/old-path/&target=/new-target/")
+    assert resp.status_code == 200
+    assert b'value="/old-path/"' in resp.data
+    assert b'value="/new-target/"' in resp.data
+
+
 def test_new_requires_source_to_start_with_slash(admin_app: Flask) -> None:
     client = admin_app.test_client()
     _login(client)

@@ -1,0 +1,17 @@
+{% extends "admin/base.html" %}
+{% block title %}404s &middot; bragi admin{% endblock %}
+{% block content %}
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
+  <h1 style="margin: 0;">404s</h1>
+  <button type="button"
+          class="btn secondary"
+          hx-get="{{ url_for('notfound_admin.list_notfound', page=page) }}"
+          hx-target="#notfound-list-table"
+          hx-swap="outerHTML">Refresh</button>
+</div>
+<p><small>Dead URLs the public site returned. Redirect them, create the
+   missing content, or dismiss the noise. Scanner probes are filtered
+   out before recording.</small></p>
+
+{% include "admin/_notfound_list_table.html" %}
+{% endblock %}
