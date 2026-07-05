@@ -542,6 +542,41 @@ def test_analytics_top_referrers_excludes_same_site(
     assert "internal-nav-source" not in body
 
 
+def test_analytics_referrer_dangerous_scheme_not_linkified(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A javascript:/data: referrer is shown as text but never as an href.
+
+    The referrer is the raw attacker-controlled Referer header; linkifying
+    it verbatim would let a stored `javascript:` URL execute in the admin
+    origin on click. `safe_external_url` must gate the link.
+    """
+    blog_id = _id_of(db_session_factory, Site, slug="blog")
+    _seed_pathed(
+        db_session_factory,
+        blog_id,
+        path="/a/",
+        referrer="javascript:alert(document.cookie)",
+        count=2,
+    )
+    _seed_pathed(
+        db_session_factory,
+        blog_id,
+        path="/b/",
+        referrer="https://good.example.org/post/",
+        count=1,
+    )
+
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/analytics/").data.decode()
+    # The safe URL is linkified.
+    assert 'href="https://good.example.org/post/"' in body
+    # The dangerous one appears (escaped text) but never inside an href.
+    assert 'href="javascript:' not in body
+    assert "javascript:alert" in body
+
+
 def test_analytics_page_detail_partial_vs_full(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:

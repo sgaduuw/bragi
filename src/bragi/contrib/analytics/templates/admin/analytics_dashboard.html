@@ -92,7 +92,7 @@
       <thead><tr><th>Referrer</th><th>Pageviews</th></tr></thead>
       <tbody>
         {% for r in top_referrers %}
-        <tr><td><a href="{{ r.referrer }}" target="_blank" rel="noreferrer noopener">{{ r.referrer }}</a></td><td>{{ r.count }}</td></tr>
+        <tr><td>{% if r.href %}<a href="{{ r.href }}" target="_blank" rel="noreferrer noopener">{{ r.referrer }}</a>{% else %}{{ r.referrer }}{% endif %}</td><td>{{ r.count }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

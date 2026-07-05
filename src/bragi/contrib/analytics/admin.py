@@ -38,6 +38,7 @@ from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.permissions import resolve_site_or_abort
+from bragi.core.safe_urls import safe_external_url
 from bragi.core.time import naive_utcnow_plus
 from bragi.core.url import page_url_for, post_index_url_for, prewarm_page_url_cache
 
@@ -62,8 +63,8 @@ def _norm(path: str | None) -> str:
     return path if path.endswith("/") else path + "/"
 
 
-def _title_map(db: Session, site: Site) -> dict[str, tuple[str, str]]:
-    """Map each published page/post's canonical path -> (title, kind).
+def _title_map(db: Session, site: Site) -> dict[str, str]:
+    """Map each published page/post's canonical path -> title.
 
     Built forward (compute each row's URL via `core.url`) rather than by
     reverse-parsing the analytics `path`, because URL derivation (nested
@@ -77,7 +78,7 @@ def _title_map(db: Session, site: Site) -> dict[str, tuple[str, str]]:
     shows the raw path.
     """
     prewarm_page_url_cache(db, site.id)
-    out: dict[str, tuple[str, str]] = {}
+    out: dict[str, str] = {}
 
     pages = (
         db.execute(
@@ -91,7 +92,7 @@ def _title_map(db: Session, site: Site) -> dict[str, tuple[str, str]]:
     )
     for page in pages:
         path = "/" if site.home_page_id == page.id else page_url_for(page, db=db)
-        out[path] = (page.title, "page")
+        out[path] = page.title
 
     prefix = post_index_url_for(site, db=db)
     if prefix is not None:
@@ -108,8 +109,8 @@ def _title_map(db: Session, site: Site) -> dict[str, tuple[str, str]]:
         for post in posts:
             path = f"/{post.slug}/" if prefix == "/" else f"{prefix}{post.slug}/"
             # setdefault: a page at the same path (shouldn't happen under
-            # a distinct post_index prefix) keeps its page identity.
-            out.setdefault(path, (post.title, "post"))
+            # a distinct post_index prefix) keeps its page title.
+            out.setdefault(path, post.title)
 
     return out
 
@@ -170,7 +171,11 @@ def list_analytics(site_slug: str) -> ResponseReturnValue:
             AnalyticsEventRow.referrer != "",
         ]
         if base:
-            ref_where.append(AnalyticsEventRow.referrer.not_like(f"{base}%"))
+            # Escape LIKE wildcards in the base so an underscore or percent
+            # in a canonical hostname can't turn the same-site filter into a
+            # lookalike-host match.
+            like_prefix = base.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            ref_where.append(AnalyticsEventRow.referrer.not_like(f"{like_prefix}%", escape="\\"))
         top_referrers_rows = db.execute(
             select(
                 AnalyticsEventRow.referrer,
@@ -199,11 +204,18 @@ def list_analytics(site_slug: str) -> ResponseReturnValue:
         {
             "path": path,
             "count": int(count),
-            "title": titles.get(_norm(path), (None, None))[0],
+            "title": titles.get(_norm(path)),
         }
         for path, count in top_pages_rows
     ]
-    top_referrers = [{"referrer": ref, "count": int(count)} for ref, count in top_referrers_rows]
+    # `referrer` is the raw attacker-controlled Referer header. Only linkify
+    # it when `safe_external_url` confirms an http(s) URL, so a stored
+    # `javascript:` / `data:` referrer can't execute in the admin origin
+    # when the operator clicks it. The text is always shown (autoescaped).
+    top_referrers = [
+        {"referrer": ref, "count": int(count), "href": safe_external_url(ref)}
+        for ref, count in top_referrers_rows
+    ]
 
     return render_template(
         "admin/analytics_dashboard.html",
@@ -251,7 +263,9 @@ def page_detail(site_slug: str) -> ResponseReturnValue:
             .group_by("day")
             .order_by("day")
         ).all()
-        title = _title_map(db, site).get(_norm(path), (None, None))[0]
+        # Don't resolve a title for an empty path: `_norm("")` is "/", which
+        # would mislabel a missing-arg drill-down with the home page's title.
+        title = _title_map(db, site).get(_norm(path)) if path else None
         base = (site.canonical_url or "").rstrip("/")
 
     trend = [{"day": str(day), "count": int(count)} for day, count in rows]
