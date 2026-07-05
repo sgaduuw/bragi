@@ -1,0 +1,6 @@
+{% extends "admin/base.html" %}
+{% block title %}Page analytics &middot; bragi admin{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('analytics_admin.list_analytics', site_slug=site_slug) }}">&larr; Analytics</a></p>
+{% include "admin/_analytics_page_trend.html" %}
+{% endblock %}

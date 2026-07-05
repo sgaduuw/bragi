@@ -16,6 +16,7 @@ from bragi.apps.delivery import create_delivery_app
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.analytics_event import AnalyticsEvent as AnalyticsEventRow
 from bragi.core.models.local_credential import LocalCredential
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
@@ -382,3 +383,185 @@ def test_analytics_nav_entry_shows_in_site_context(
     resp = client.get("/admin/sites/blog/posts/")
     body = resp.data.decode()
     assert "Analytics" in body
+
+
+# ============================================================
+# Per-page analytics: top pages, top referrers, trend drill-down
+# ============================================================
+
+
+def _seed_pathed(
+    db_session_factory: sessionmaker[Session],
+    site_id: int,
+    *,
+    path: str,
+    referrer: str | None = None,
+    count: int = 1,
+    ua_class: str = "browser",
+) -> None:
+    base = datetime.now(UTC).replace(tzinfo=None)
+    with db_session_factory() as db:
+        for i in range(count):
+            db.add(
+                AnalyticsEventRow(
+                    site_id=site_id,
+                    event_type="pageview",
+                    path=path,
+                    referrer=referrer,
+                    user_agent_class=ua_class,
+                    occurred_at=base - timedelta(seconds=i),
+                    extra={},
+                )
+            )
+        db.commit()
+
+
+def _id_of(db_session_factory: sessionmaker[Session], model: type, **filters: object) -> int:
+    with db_session_factory() as db:
+        stmt = select(model)
+        for col, val in filters.items():
+            stmt = stmt.where(getattr(model, col) == val)
+        return db.execute(stmt).scalar_one().id
+
+
+def test_analytics_top_pages_rollup_and_site_scope(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Top-pages groups by path, orders by count, and stays site-scoped."""
+    blog_id = _id_of(db_session_factory, Site, slug="blog")
+    other_id = _id_of(db_session_factory, Site, slug="other")
+    _seed_pathed(db_session_factory, blog_id, path="/popular/", count=5)
+    _seed_pathed(db_session_factory, blog_id, path="/quiet/", count=1)
+    # A path that only exists on `other` must not leak into blog's list.
+    _seed_pathed(db_session_factory, other_id, path="/secret-other/", count=9)
+
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/analytics/").data.decode()
+
+    assert "/popular/" in body
+    assert "/quiet/" in body
+    assert "/secret-other/" not in body
+    # Ordered by count desc: the hot path renders before the quiet one.
+    assert body.index("/popular/") < body.index("/quiet/")
+
+
+def test_analytics_top_pages_resolves_page_title(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A published page's title is shown next to its path."""
+    blog_id = _id_of(db_session_factory, Site, slug="blog")
+    ada_id = _id_of(db_session_factory, User, email="ada@example.com")
+    with db_session_factory() as db:
+        db.add(
+            Page(
+                site_id=blog_id,
+                slug="about",
+                title="About Us",
+                author_id=ada_id,
+                status=PageStatus.PUBLISHED,
+            )
+        )
+        db.commit()
+    _seed_pathed(db_session_factory, blog_id, path="/about/", count=3)
+
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/analytics/").data.decode()
+    assert "About Us" in body
+
+
+def test_analytics_top_pages_resolves_post_title(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A post under the post_index prefix resolves to its title.
+
+    Exercises the post branch of the reverse title map: path is the
+    post_index page's URL ("/blog/") + post slug.
+    """
+    blog_id = _id_of(db_session_factory, Site, slug="blog")
+    ada_id = _id_of(db_session_factory, User, email="ada@example.com")
+    with db_session_factory() as db:
+        db.add(
+            Page(
+                site_id=blog_id,
+                slug="blog",
+                title="Blog",
+                author_id=ada_id,
+                status=PageStatus.PUBLISHED,
+                kind=PageKind.POST_INDEX,
+            )
+        )
+        db.add(
+            Post(
+                site_id=blog_id,
+                slug="hello-world",
+                title="Hello World Post",
+                author_id=ada_id,
+                status=PostStatus.PUBLISHED,
+            )
+        )
+        db.commit()
+    _seed_pathed(db_session_factory, blog_id, path="/blog/hello-world/", count=4)
+
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/analytics/").data.decode()
+    assert "Hello World Post" in body
+
+
+def test_analytics_top_referrers_excludes_same_site(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """External referrers show; same-site (internal nav) ones are filtered."""
+    blog_id = _id_of(db_session_factory, Site, slug="blog")
+    _seed_pathed(
+        db_session_factory,
+        blog_id,
+        path="/a/",
+        referrer="https://news.ycombinator.com/item?id=1",
+        count=2,
+    )
+    # canonical_url is https://blog.example.com -> internal navigation.
+    # Point it at a path that is NOT itself a seeded pageview, so the only
+    # place this URL could appear is the referrers table (the top-pages
+    # table renders each path's own live link, which would otherwise
+    # collide with a same-host referrer string).
+    _seed_pathed(
+        db_session_factory,
+        blog_id,
+        path="/b/",
+        referrer="https://blog.example.com/internal-nav-source/",
+        count=5,
+    )
+
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/analytics/").data.decode()
+    assert "news.ycombinator.com" in body
+    assert "internal-nav-source" not in body
+
+
+def test_analytics_page_detail_partial_vs_full(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The drill-down returns a bare partial to htmx, a full page to a
+    direct visit (the boost-safe `wants_partial` contract)."""
+    blog_id = _id_of(db_session_factory, Site, slug="blog")
+    _seed_pathed(db_session_factory, blog_id, path="/deep/", count=3)
+
+    client = admin_app.test_client()
+    _login(client)
+    url = "/admin/sites/blog/analytics/page?path=/deep/"
+
+    full = client.get(url)
+    assert full.status_code == 200
+    full_body = full.data.decode()
+    assert "<html" in full_body.lower()
+    assert "/deep/" in full_body
+
+    partial = client.get(url, headers={"HX-Request": "true"})
+    assert partial.status_code == 200
+    partial_body = partial.data.decode()
+    assert "<html" not in partial_body.lower()
+    assert "/deep/" in partial_body

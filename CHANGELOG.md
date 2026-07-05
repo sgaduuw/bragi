@@ -4,6 +4,18 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Per-page analytics on the site analytics dashboard
+  (`/admin/sites/<slug>/analytics/`): a **Top pages** table ranks the
+  most-viewed paths over the 30-day window, each resolved to its
+  content title (page or post) and linking to a per-path daily-trend
+  drill-down; a **Top referrers** table shows external traffic sources
+  (same-site navigation is filtered out). No new data is collected:
+  `path` and `referrer` were already recorded on every pageview, so
+  this is a read-path addition with no schema change.
+
 ## [1.40.0] - 2026-07-05
 
 ### Added
