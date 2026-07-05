@@ -80,6 +80,24 @@ def test_404_on_real_site_is_themed(delivery_app: Flask) -> None:
     assert b"404" in resp.data
     assert b"My Blog" in resp.data  # theme chrome (brand)
     assert b"noindex" in resp.data  # error pages aren't indexed
+    assert resp.headers["Cache-Control"] == "no-store"  # not cached by intermediaries
+
+
+def test_uncaught_exception_renders_themed_500(delivery_app: Flask) -> None:
+    # The registered errorhandler(500) path (not the redirect-loop shortcut):
+    # a view that raises must yield a themed 500 with no exception leak.
+    delivery_app.config["PROPAGATE_EXCEPTIONS"] = False
+
+    def _boom() -> str:
+        raise RuntimeError("boom-secret-internal-detail")
+
+    delivery_app.add_url_rule("/_boom", "_boom_route", _boom)
+    resp = delivery_app.test_client().get("/_boom", headers={"Host": HOST})
+    assert resp.status_code == 500
+    assert b"500" in resp.data
+    assert b"My Blog" in resp.data  # themed
+    assert b"noindex" in resp.data
+    assert b"boom-secret-internal-detail" not in resp.data  # no exception leak
 
 
 def test_410_is_themed(delivery_app: Flask) -> None:

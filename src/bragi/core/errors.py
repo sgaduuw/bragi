@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from http import HTTPStatus
 
-from flask import Flask, Response, g, render_template
+from flask import Flask, Response, g, has_request_context, render_template
 from markupsafe import escape
 
 LOG = logging.getLogger(__name__)
@@ -45,7 +45,10 @@ def render_error(status: int, message: str | None = None) -> Response:
     """
     msg = message or _DEFAULT_MESSAGES.get(status, "An error occurred.")
     title = _phrase(status)
-    site = g.get("site")
+    # `has_request_context()` guard so the "never raises" contract holds
+    # even if a future non-request caller appears (bare `g.get` would
+    # RuntimeError outside a request); today all callers are handlers.
+    site = g.get("site") if has_request_context() else None
     # No resolved site means no theme (an unresolved Host, e.g. a scanner
     # hitting a bad hostname). Skip straight to the minimal page: there is
     # no `delivery/base.html` to extend, and attempting the themed render
@@ -60,13 +63,22 @@ def render_error(status: int, message: str | None = None) -> Response:
                 message=msg,
                 noindex=True,
             )
-            return Response(html, status=status)
+            return _response(html, status)
         except Exception:
             # A real site whose themed render failed (broken theme, or the
             # DB is down mid-500). Log it (this one is unexpected) and fall
             # through to the minimal page so the error path can't itself error.
             LOG.exception("Themed error page render failed for status=%s", status)
-    return Response(_fallback_html(status, title, msg), status=status)
+    return _response(_fallback_html(status, title, msg), status)
+
+
+def _response(body: str, status: int) -> Response:
+    resp = Response(body, status=status)
+    # Error pages are transient (a 404 path may later gain content, a 500
+    # is a passing failure), so keep browsers and shared caches from
+    # holding onto them.
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 def _fallback_html(status: int, title: str, message: str) -> str:
