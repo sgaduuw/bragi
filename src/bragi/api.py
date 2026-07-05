@@ -246,15 +246,33 @@ class ExternalUser:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
+def _always_configured() -> bool:
+    return True
+
+
 @dataclass
 class OAuthProviderSpec:
-    """Registration record for an OAuth (or OIDC) provider."""
+    """Registration record for an OAuth (or OIDC) provider.
+
+    `login_endpoint` is the Flask endpoint that starts the provider's
+    OAuth flow (e.g. ``"auth_github.login"``); the login page and the
+    account "Connections" page build their buttons from it via
+    ``url_for``, so a provider is surfaced generically without the UI
+    knowing its name. `is_configured` returns whether the provider has
+    its credentials set, so the login page only shows a button that
+    will actually work (an unconfigured provider's login route 503s).
+    Both were added when GitHub OAuth became first-class (login-page
+    button + account linking); older single-field construction still
+    works because `is_configured` defaults to "always".
+    """
 
     name: str  # 'github', 'authentik', 'google'
     label: str  # 'GitHub', 'Authentik'
     authlib_client_factory: Callable[[], Any]  # builds an Authlib client
     fetch_user_info: Callable[[dict[str, Any]], ExternalUser]
     # given a token dict, return a profile
+    login_endpoint: str  # Flask endpoint that starts the flow
+    is_configured: Callable[[], bool] = _always_configured
 
 
 @dataclass

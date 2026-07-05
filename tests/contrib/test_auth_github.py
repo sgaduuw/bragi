@@ -348,3 +348,168 @@ def test_github_oauth_provider_registered(admin_app: Flask) -> None:
 
 def test_auth_github_blueprint_registered(admin_app: Flask) -> None:
     assert "auth_github" in admin_app.blueprints
+
+
+# ============================================================
+# First-class: provider spec, login button, link / unlink
+# ============================================================
+
+from bragi.contrib.auth_local.passwords import hash_password  # noqa: E402
+from bragi.core.models.local_credential import LocalCredential  # noqa: E402
+from tests.conftest import csrf_token  # noqa: E402
+
+
+def _login_as(client: Any, user_id: int, *, link: bool = False) -> None:
+    with client.session_transaction() as sess:
+        sess["user_id"] = user_id
+        if link:
+            sess["oauth_link"] = True
+
+
+def test_oauth_provider_spec_carries_login_endpoint_and_configured(admin_app: Flask) -> None:
+    registry = admin_app.extensions["registry"]
+    gh = next(p for p in registry.oauth_providers if p.name == "github")
+    assert gh.login_endpoint == "auth_github.login"
+    assert gh.is_configured() is True  # fixture sets client id/secret
+
+
+def test_login_page_shows_github_button_when_configured(admin_app: Flask) -> None:
+    resp = admin_app.test_client().get("/auth/login")
+    assert resp.status_code == 200
+    assert b"Sign in with GitHub" in resp.data
+    assert b"/auth/github/login" in resp.data
+
+
+def test_callback_link_attaches_identity_to_current_user(
+    admin_app: Flask,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_test_user(db_session, email="linker@example.com")
+    db_session.commit()
+    uid = user.id
+    _mock_authlib_client(monkeypatch)  # GitHub id 42 / login "ada"
+    client = admin_app.test_client()
+    _login_as(client, uid, link=True)
+
+    resp = client.get("/auth/github/callback?code=abc", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "/admin/account/connections" in resp.headers["Location"]
+
+    with db_session_factory() as db:
+        idents = db.execute(select(UserIdentity)).scalars().all()
+        ada = db.execute(select(User).where(User.email == "ada@example.com")).scalar_one_or_none()
+    # Linked to the current user; no new "ada" user auto-created.
+    assert ada is None
+    assert len(idents) == 1
+    assert idents[0].user_id == uid
+    assert idents[0].provider_user_id == "42"
+
+
+def test_callback_link_refuses_identity_owned_by_another_user(
+    admin_app: Flask,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = make_test_user(db_session, email="owner-a@example.com")
+    db_session.flush()
+    db_session.add(
+        UserIdentity(
+            user_id=owner.id,
+            provider="github",
+            provider_user_id="42",
+            provider_username="ada",
+            raw={},
+        )
+    )
+    other = make_test_user(db_session, email="other-b@example.com")
+    db_session.commit()
+    owner_id, other_id = owner.id, other.id
+
+    _mock_authlib_client(monkeypatch)  # GitHub id 42 == owner's identity
+    client = admin_app.test_client()
+    _login_as(client, other_id, link=True)  # logged in as OTHER, tries to grab it
+
+    resp = client.get("/auth/github/callback?code=abc", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "/admin/account/connections" in resp.headers["Location"]
+
+    with db_session_factory() as db:
+        idents = db.execute(select(UserIdentity)).scalars().all()
+    assert len(idents) == 1
+    assert idents[0].user_id == owner_id  # not stolen
+
+
+def test_connections_page_lists_github(admin_app: Flask, db_session: Session) -> None:
+    user = make_test_user(db_session, email="conn@example.com")
+    db_session.commit()
+    client = admin_app.test_client()
+    _login_as(client, user.id)
+    resp = client.get("/admin/account/connections/")
+    assert resp.status_code == 200
+    assert b"GitHub" in resp.data
+    assert b"Link" in resp.data  # not linked -> Link affordance
+
+
+def test_unlink_removes_identity_when_password_present(
+    admin_app: Flask,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    user = make_test_user(db_session, email="hasboth@example.com")
+    db_session.flush()
+    db_session.add(
+        LocalCredential(user_id=user.id, password_hash=hash_password("pw-strong-enough"))
+    )
+    db_session.add(
+        UserIdentity(
+            user_id=user.id,
+            provider="github",
+            provider_user_id="42",
+            provider_username="ada",
+            raw={},
+        )
+    )
+    db_session.commit()
+    uid = user.id
+
+    client = admin_app.test_client()
+    _login_as(client, uid)
+    token = csrf_token(client, path="/admin/account/connections/")
+    resp = client.post("/admin/account/connections/github/unlink", data={"_csrf_token": token})
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        idents = db.execute(select(UserIdentity).where(UserIdentity.user_id == uid)).scalars().all()
+    assert idents == []
+
+
+def test_unlink_refuses_last_sign_in_method(
+    admin_app: Flask,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    # No password, only a GitHub identity: unlinking would lock the user out.
+    user = make_test_user(db_session, email="onlygithub@example.com")
+    db_session.flush()
+    db_session.add(
+        UserIdentity(
+            user_id=user.id,
+            provider="github",
+            provider_user_id="42",
+            provider_username="ada",
+            raw={},
+        )
+    )
+    db_session.commit()
+    uid = user.id
+
+    client = admin_app.test_client()
+    _login_as(client, uid)
+    token = csrf_token(client, path="/admin/account/connections/")
+    resp = client.post("/admin/account/connections/github/unlink", data={"_csrf_token": token})
+    assert resp.status_code == 302  # bounced back with an error flash
+    with db_session_factory() as db:
+        idents = db.execute(select(UserIdentity).where(UserIdentity.user_id == uid)).scalars().all()
+    assert len(idents) == 1  # NOT removed

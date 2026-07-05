@@ -31,6 +31,30 @@
       border-radius: 4px;
     }
     button:hover { background: #444; }
+    .oauth-sep {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin: 1.25rem 0;
+      color: #888;
+      font-size: 0.85em;
+    }
+    .oauth-sep::before, .oauth-sep::after {
+      content: "";
+      flex: 1;
+      border-top: 1px solid #ddd;
+    }
+    .oauth-btn {
+      display: block;
+      text-align: center;
+      padding: 0.6rem 1rem;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      color: #222;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .oauth-btn:hover { background: #f3f3f3; }
     .flash {
       padding: 0.5rem 0.75rem;
       margin-bottom: 1rem;
@@ -57,5 +81,12 @@
     <input type="password" name="password" id="password" required>
     <button type="submit">Log in</button>
   </form>
+
+  {% if oauth_providers %}
+  <div class="oauth-sep"><span>or</span></div>
+  {% for p in oauth_providers %}
+    <a class="oauth-btn" href="{{ url_for(p.login_endpoint, next=next) }}">Sign in with {{ p.label }}</a>
+  {% endfor %}
+  {% endif %}
 </body>
 </html>

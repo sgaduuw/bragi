@@ -41,6 +41,11 @@ class AuditAction:
     AUTH_LOGIN_FAILURE = "auth.login.failure"
     AUTH_LOGOUT = "auth.logout"
 
+    # OAuth identity linking from the account Connections page.
+    IDENTITY_LINKED = "identity.linked"
+    IDENTITY_UNLINKED = "identity.unlinked"
+    IDENTITY_LINK_FAILURE = "identity.link_failure"
+
     SITE_OWNER_TRANSFERRED = "site.owner.transferred"
     SITE_PROFILE_LINKS_UPDATED = "site.profile_links.updated"
 

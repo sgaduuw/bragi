@@ -16,7 +16,9 @@ header row), structured CV / resume page kind
 (`PageKind.RESUME` with typed sections, Project↔Position linkage,
 schema.org microdata, print-friendly), auto-derived public
 navigation from the page tree (with per-page `show_in_nav` and
-`menu_order` controls), GitHub OAuth + local
+`menu_order` controls), GitHub sign-in (a "Sign in with GitHub"
+button on the login page plus an account Connections page to
+link/unlink GitHub) alongside local-password
 bootstrap, redirects as a first-class subsystem, importers for
 Hugo / Ghost / WordPress / LinkedIn, attachments + media library with
 theme-aware multi-format multi-width renditions (`<picture>` with
@@ -597,7 +599,7 @@ bragi/
 │       ├── api_tokens/         # personal access tokens + JSON REST surface
 │       ├── attachments/        # upload + serve + media library
 │       ├── audit/              # audit-log admin
-│       ├── auth_github/        # OAuth via Authlib
+│       ├── auth_github/        # GitHub OAuth (Authlib) + account Connections (link/unlink)
 │       ├── auth_local/         # email + password + must-change rotation
 │       ├── datasets/           # per-site data file registry + explore console + directive
 │       ├── embeds/             # external-content embeds (directive + providers + rerender)
