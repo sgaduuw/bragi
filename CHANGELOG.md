@@ -7,6 +7,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Branded error pages: the delivery app's 404, 410, and 500 responses
+  now render through the active site's theme (chrome, nav, footer)
+  instead of bare `"Not Found"` / `"Gone"` text, with `noindex`. A theme
+  can ship `templates/delivery/error.html` to fully customize; otherwise
+  the default extends the theme's `base.html` so every theme gets a
+  branded page for free. An unresolved Host (or a themed render that
+  itself fails, e.g. the DB being down during a 500) falls back to a
+  minimal self-contained page, so the error path can never itself error.
 - 404 triage: the delivery app now records the dead URLs it returns
   (coalesced per path, minus a scanner blocklist), and a per-site
   admin page (`/admin/sites/<slug>/not-found/`, editor role, under
