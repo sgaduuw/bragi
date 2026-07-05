@@ -39,6 +39,12 @@ class AuditAction:
 
     AUTH_LOGIN_SUCCESS = "auth.login.success"
     AUTH_LOGIN_FAILURE = "auth.login.failure"
+    # Recorded when a login POST is rejected by the per-IP throttle
+    # before any credential check. A DISTINCT action from FAILURE so a
+    # throttled attempt is NOT itself counted toward the throttle
+    # window (otherwise a persistent attacker would keep the window
+    # open forever); the block lifts once the real failures age out.
+    AUTH_LOGIN_THROTTLED = "auth.login.throttled"
     AUTH_LOGOUT = "auth.logout"
 
     # OAuth identity linking from the account Connections page.
