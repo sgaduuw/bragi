@@ -1,32 +1,104 @@
 {% extends "admin/base.html" %}
 {% block title %}Analytics &middot; bragi admin{% endblock %}
 {% block content %}
+{# Zero-JS tabs: real radios (keyboard + focus accessible) toggle panes
+   via CSS :has(). The admin commits to JS only for mutation flows; a
+   read-only view switch stays JS-free. #}
+<style>
+  .analytics-tabs .tablabels {
+    display: flex; gap: .25rem; margin-bottom: 1rem;
+    border-bottom: 1px solid rgba(127, 127, 127, .3);
+  }
+  .analytics-tabs .tab {
+    padding: .4rem .9rem; cursor: pointer;
+    border-radius: 4px 4px 0 0;
+  }
+  .analytics-tabs .tab input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .analytics-tabs .tab:hover { background: rgba(127, 127, 127, .15); }
+  .analytics-tabs .tab:has(input:checked) { background: rgba(127, 127, 127, .22); font-weight: 600; }
+  .analytics-tabs .tab:has(input:focus-visible) { outline: 2px solid; outline-offset: 1px; }
+  .analytics-tabs .pane { display: none; }
+  .analytics-tabs:has(input[value="pages"]:checked) .pane-pages,
+  .analytics-tabs:has(input[value="day"]:checked) .pane-day,
+  .analytics-tabs:has(input[value="ref"]:checked) .pane-ref { display: block; }
+</style>
+
 <h1>Analytics</h1>
 <p>Pageviews over the last {{ window }} days: <strong>{{ total_30d }}</strong>.
    Bots are filtered at emit time; only browser / feed-reader / other UA classes
    are recorded.</p>
 
-{% if days %}
-<table>
-  <thead>
-    <tr>
-      <th>Day</th>
-      {% for c in classes %}<th>{{ c }}</th>{% endfor %}
-      <th>Total</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for day in days %}
-      {% set row = by_day[day] %}
-      <tr>
-        <td><code>{{ day }}</code></td>
-        {% for c in classes %}<td>{{ row.get(c, 0) }}</td>{% endfor %}
-        <td><strong>{{ row.values() | sum }}</strong></td>
-      </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p>No pageviews recorded in the last {{ window }} days.</p>
-{% endif %}
+<div class="analytics-tabs">
+  <div class="tablabels" role="tablist">
+    <label class="tab"><input type="radio" name="atab" value="pages" checked> Top pages</label>
+    <label class="tab"><input type="radio" name="atab" value="day"> By day</label>
+    <label class="tab"><input type="radio" name="atab" value="ref"> Top referrers</label>
+  </div>
+
+  <section class="pane pane-pages">
+    {% if top_pages %}
+    <table>
+      <thead><tr><th>Page</th><th>Path</th><th>Pageviews</th></tr></thead>
+      <tbody>
+        {% for p in top_pages %}
+        <tr>
+          {# Title link swaps the per-path daily trend into #page-trend
+             (a plain htmx GET, so page_detail returns its partial). #}
+          <td><a href="#page-trend"
+                 hx-get="{{ url_for('analytics_admin.page_detail', site_slug=site_slug, path=p.path) }}"
+                 hx-target="#page-trend"
+                 hx-swap="innerHTML">{{ p.title or p.path }}</a></td>
+          <td><a href="{{ site_base }}{{ p.path }}" target="_blank" rel="noopener"><code>{{ p.path }}</code></a></td>
+          <td>{{ p.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div id="page-trend"></div>
+    {% else %}
+    <p>No pageviews recorded in the last {{ window }} days.</p>
+    {% endif %}
+  </section>
+
+  <section class="pane pane-day">
+    {% if days %}
+    <table>
+      <thead>
+        <tr>
+          <th>Day</th>
+          {% for c in classes %}<th>{{ c }}</th>{% endfor %}
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for day in days %}
+          {% set row = by_day[day] %}
+          <tr>
+            <td><code>{{ day }}</code></td>
+            {% for c in classes %}<td>{{ row.get(c, 0) }}</td>{% endfor %}
+            <td><strong>{{ row.values() | sum }}</strong></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No pageviews recorded in the last {{ window }} days.</p>
+    {% endif %}
+  </section>
+
+  <section class="pane pane-ref">
+    {% if top_referrers %}
+    <table>
+      <thead><tr><th>Referrer</th><th>Pageviews</th></tr></thead>
+      <tbody>
+        {% for r in top_referrers %}
+        <tr><td>{% if r.href %}<a href="{{ r.href }}" target="_blank" rel="noreferrer noopener">{{ r.referrer }}</a>{% else %}{{ r.referrer }}{% endif %}</td><td>{{ r.count }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p>No external referrers recorded in the last {{ window }} days.</p>
+    {% endif %}
+  </section>
+</div>
 {% endblock %}
