@@ -41,7 +41,7 @@ def _inject_oauth_providers() -> dict[str, list[OAuthProviderSpec]]:
     registry = current_app.extensions.get("registry")
     providers: list[OAuthProviderSpec] = []
     if registry is not None:
-        providers = [p for p in registry.oauth_providers if p.is_configured()]
+        providers = registry.configured_oauth_providers()
     return {"oauth_providers": providers}
 
 

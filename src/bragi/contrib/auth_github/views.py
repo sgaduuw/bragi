@@ -75,6 +75,9 @@ def callback() -> ResponseReturnValue:
     # creating a user. The flag was set on the session by `login()` only
     # when a real user initiated it.
     if session.pop("oauth_link", False):
+        # Drop the login-flow `next` so it can't dangle and hijack a later
+        # real login's redirect (the link flow returns to Connections).
+        session.pop("oauth_post_login_next", None)
         me = current_user()
         if me is None:
             flash("Your session expired; sign in again to link GitHub.", "error")
@@ -240,6 +243,22 @@ def _link_identity(db: Session, external: ExternalUser, user_id: int) -> Respons
             )
         return redirect(connections_url)
 
+    # One identity per provider per user: refuse a second GitHub account so
+    # the Connections lookup stays single-valued (a second row would 500 the
+    # unlink's scalar_one_or_none and wedge the page).
+    already = db.execute(
+        select(UserIdentity).where(
+            UserIdentity.user_id == user_id,
+            UserIdentity.provider == external.provider,
+        )
+    ).scalar_one_or_none()
+    if already is not None:
+        flash(
+            "You already have a GitHub account linked. Unlink it first to link a different one.",
+            "error",
+        )
+        return redirect(connections_url)
+
     db.add(
         UserIdentity(
             user_id=user_id,
@@ -249,7 +268,15 @@ def _link_identity(db: Session, external: ExternalUser, user_id: int) -> Respons
             raw=external.raw,
         )
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Concurrent double-submit of the same identity: the
+        # (provider, provider_user_id) unique key rejects the second write.
+        # Treat as already-linked rather than 500 (mirrors the login path).
+        db.rollback()
+        flash("Your GitHub account is already linked.", "success")
+        return redirect(connections_url)
     audit(
         AuditAction.IDENTITY_LINKED,
         target_type="user",

@@ -513,3 +513,80 @@ def test_unlink_refuses_last_sign_in_method(
     with db_session_factory() as db:
         idents = db.execute(select(UserIdentity).where(UserIdentity.user_id == uid)).scalars().all()
     assert len(idents) == 1  # NOT removed
+
+
+def test_link_refuses_second_github_account(
+    admin_app: Flask,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = make_test_user(db_session, email="hasgithub@example.com")
+    db_session.flush()
+    db_session.add(
+        UserIdentity(
+            user_id=user.id,
+            provider="github",
+            provider_user_id="42",
+            provider_username="ada",
+            raw={},
+        )
+    )
+    db_session.commit()
+    uid = user.id
+
+    # The OAuth flow now returns a DIFFERENT GitHub account (id 99).
+    other = {"id": 99, "login": "grace", "name": "Grace", "email": "grace@example.com"}
+    _mock_authlib_client(monkeypatch, profile=other)
+    client = admin_app.test_client()
+    _login_as(client, uid, link=True)
+
+    resp = client.get("/auth/github/callback?code=abc", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "/admin/account/connections" in resp.headers["Location"]
+    with db_session_factory() as db:
+        idents = db.execute(select(UserIdentity).where(UserIdentity.user_id == uid)).scalars().all()
+    assert len(idents) == 1  # second account refused
+    assert idents[0].provider_user_id == "42"  # original kept
+
+
+def test_unlink_allowed_with_second_identity_and_no_password(
+    admin_app: Flask,
+    db_session: Session,
+    db_session_factory: sessionmaker[Session],
+) -> None:
+    # No password, but two linked identities: unlinking one keeps the other,
+    # so the last-credential guard must allow it.
+    user = make_test_user(db_session, email="twoids@example.com")
+    db_session.flush()
+    db_session.add(
+        UserIdentity(
+            user_id=user.id,
+            provider="github",
+            provider_user_id="42",
+            provider_username="ada",
+            raw={},
+        )
+    )
+    db_session.add(
+        UserIdentity(
+            user_id=user.id,
+            provider="authentik",
+            provider_user_id="sub-1",
+            provider_username="ada2",
+            raw={},
+        )
+    )
+    db_session.commit()
+    uid = user.id
+
+    client = admin_app.test_client()
+    _login_as(client, uid)
+    token = csrf_token(client, path="/admin/account/connections/")
+    resp = client.post("/admin/account/connections/github/unlink", data={"_csrf_token": token})
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        remaining = (
+            db.execute(select(UserIdentity).where(UserIdentity.user_id == uid)).scalars().all()
+        )
+    assert {i.provider for i in remaining} == {"authentik"}  # github removed, other kept

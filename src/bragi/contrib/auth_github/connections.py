@@ -31,6 +31,7 @@ from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user_identity import UserIdentity
+from bragi.core.registry import Registry
 from bragi.core.security import current_user
 
 bp = Blueprint(
@@ -49,10 +50,10 @@ def _require_user_id() -> int:
 
 
 def _configured_providers() -> list[OAuthProviderSpec]:
-    registry = current_app.extensions.get("registry")
+    registry: Registry | None = current_app.extensions.get("registry")
     if registry is None:
         return []
-    return [p for p in registry.oauth_providers if p.is_configured()]
+    return registry.configured_oauth_providers()
 
 
 @bp.route("/", methods=["GET"])
@@ -82,7 +83,6 @@ def list_connections() -> ResponseReturnValue:
     return render_template(
         "admin/connections/list.html",
         providers=providers,
-        has_password=has_password,
         can_unlink_any=can_unlink_any,
     )
 
@@ -100,22 +100,30 @@ def unlink(provider: str) -> ResponseReturnValue:
         if identity is None:
             abort(404)
 
-        # Last-credential guard: refuse if removing this identity would
-        # leave the user with no password and no other identity (lockout).
+        # Last-credential guard, re-asserted AFTER the delete inside the
+        # same transaction. A pre-delete count is check-then-act: two
+        # concurrent unlinks of sibling identities could each pass on a
+        # stale count and both delete, locking the user out. Deleting then
+        # re-counting (SQLite serialises writers, so the second unlink sees
+        # the first's delete) refuses the one that would zero out the
+        # credentials. ponytail: no BEGIN IMMEDIATE helper in bragi yet;
+        # flush+recheck closes the lockout window without one (the residual
+        # truly-simultaneous case fails safe to a 500, never a silent
+        # lockout, and `bragi admin create-user` recovers either way).
+        db.delete(identity)
+        db.flush()
         has_password = db.get(LocalCredential, user_id) is not None
-        other_identities = db.execute(
-            select(func.count())
-            .select_from(UserIdentity)
-            .where(UserIdentity.user_id == user_id, UserIdentity.provider != provider)
+        remaining = db.execute(
+            select(func.count()).select_from(UserIdentity).where(UserIdentity.user_id == user_id)
         ).scalar_one()
-        if not has_password and other_identities == 0:
+        if not has_password and remaining == 0:
+            db.rollback()
             flash(
                 "You can't unlink your only sign-in method. Set a password first.",
                 "error",
             )
             return redirect(url_for("account_connections.list_connections"))
 
-        db.delete(identity)
         db.commit()
         audit(
             AuditAction.IDENTITY_UNLINKED,

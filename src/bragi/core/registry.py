@@ -88,6 +88,12 @@ class Registry:
                 raise DuplicateRegistration("oauth_provider", spec.name)
         self.oauth_providers.append(spec)
 
+    def configured_oauth_providers(self) -> list[OAuthProviderSpec]:
+        """Registered providers whose credentials are set (login route
+        won't 503). The login page and the account Connections page both
+        render buttons from this, so the filter lives here, once."""
+        return [p for p in self.oauth_providers if p.is_configured()]
+
     def add_auth_method(self, spec: AuthMethodSpec) -> None:
         for existing in self.auth_methods:
             if existing.name == spec.name:
