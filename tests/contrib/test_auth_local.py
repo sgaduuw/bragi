@@ -1064,6 +1064,16 @@ def test_user_reset_password_writes_audit_log_entry(
 # --------------------------- login throttle ----------------------
 
 
+@pytest.fixture
+def trusted_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Activate the throttle: it only runs when trusted_proxy_hops > 0
+    (so remote_addr is the real per-client address, not a shared proxy).
+    The tests drive remote_addr directly via environ_base, so ProxyFix
+    (built at app-create time with hops=0) is not re-applied; only the
+    view's runtime `settings.trusted_proxy_hops` read matters here."""
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 1)
+
+
 def _post_login(
     client: FlaskClient, *, password: str, ip: str, token: str, email: str = TEST_EMAIL
 ) -> Any:
@@ -1087,7 +1097,7 @@ def _failure_rows(ip: str) -> int:
         ).scalar_one()
 
 
-def test_login_throttle_blocks_after_max_failures(admin_app: Flask) -> None:
+def test_login_throttle_blocks_after_max_failures(admin_app: Flask, trusted_proxy: None) -> None:
     client = admin_app.test_client()
     token = csrf_token(client)
     ip = "10.0.0.1"
@@ -1101,7 +1111,7 @@ def test_login_throttle_blocks_after_max_failures(admin_app: Flask) -> None:
     assert b"Too many failed attempts" in blocked.data
 
 
-def test_login_throttle_is_per_ip(admin_app: Flask) -> None:
+def test_login_throttle_is_per_ip(admin_app: Flask, trusted_proxy: None) -> None:
     client = admin_app.test_client()
     token = csrf_token(client)
     for _ in range(settings.login_throttle_max_failures):
@@ -1111,7 +1121,7 @@ def test_login_throttle_is_per_ip(admin_app: Flask) -> None:
     assert _post_login(client, password="wrong", ip="10.0.0.2", token=token).status_code == 200
 
 
-def test_throttled_attempt_is_not_counted(admin_app: Flask) -> None:
+def test_throttled_attempt_is_not_counted(admin_app: Flask, trusted_proxy: None) -> None:
     client = admin_app.test_client()
     token = csrf_token(client)
     ip = "10.0.0.3"
@@ -1124,12 +1134,21 @@ def test_throttled_attempt_is_not_counted(admin_app: Flask) -> None:
     assert _failure_rows(ip) == settings.login_throttle_max_failures
 
 
-def test_login_throttle_window_excludes_old_failures(admin_app: Flask, db_session: Session) -> None:
+def test_login_throttle_window_excludes_old_failures(
+    admin_app: Flask, trusted_proxy: None, db_session: Session
+) -> None:
     ip = "10.0.0.4"
     old = naive_utcnow() - timedelta(seconds=settings.login_throttle_window_seconds + 60)
+    # Seed real login-form failures (reason=invalid-credentials, which is
+    # what the throttle counts) but dated outside the window.
     for _ in range(settings.login_throttle_max_failures + 2):
         db_session.add(
-            AuditLog(action=AuditAction.AUTH_LOGIN_FAILURE, ip=ip, occurred_at=old, extra={})
+            AuditLog(
+                action=AuditAction.AUTH_LOGIN_FAILURE,
+                ip=ip,
+                occurred_at=old,
+                extra={"reason": "invalid-credentials"},
+            )
         )
     db_session.commit()
     client = admin_app.test_client()
@@ -1138,7 +1157,33 @@ def test_login_throttle_window_excludes_old_failures(admin_app: Flask, db_sessio
     assert _post_login(client, password="wrong", ip=ip, token=token).status_code == 200
 
 
-def test_login_throttle_can_be_disabled(admin_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_change_password_failures_do_not_throttle_login(
+    admin_app: Flask, trusted_proxy: None, db_session: Session
+) -> None:
+    # `auth.login.failure` rows from the change-password / OAuth paths
+    # carry a different reason and must NOT feed the login throttle.
+    ip = "10.0.0.7"
+    now = naive_utcnow()
+    for _ in range(settings.login_throttle_max_failures + 3):
+        db_session.add(
+            AuditLog(
+                action=AuditAction.AUTH_LOGIN_FAILURE,
+                ip=ip,
+                occurred_at=now,
+                extra={"reason": "bad-current-password"},
+            )
+        )
+    db_session.commit()
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    # Despite 8 recent failure rows, none are login-form failures, so login
+    # is not throttled.
+    assert _post_login(client, password="wrong", ip=ip, token=token).status_code == 200
+
+
+def test_login_throttle_can_be_disabled(
+    admin_app: Flask, trusted_proxy: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(settings, "login_throttle_enabled", False)
     client = admin_app.test_client()
     token = csrf_token(client)
@@ -1147,7 +1192,19 @@ def test_login_throttle_can_be_disabled(admin_app: Flask, monkeypatch: pytest.Mo
         assert _post_login(client, password="wrong", ip=ip, token=token).status_code == 200
 
 
-def test_correct_password_blocked_once_ip_over_threshold(admin_app: Flask) -> None:
+def test_login_throttle_inactive_without_trusted_proxy(admin_app: Flask) -> None:
+    # With trusted_proxy_hops=0 (the default) remote_addr can't be trusted
+    # as a per-client key, so the gate stays off (no global-lockout weapon).
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    ip = "10.0.0.8"
+    for _ in range(settings.login_throttle_max_failures + 3):
+        assert _post_login(client, password="wrong", ip=ip, token=token).status_code == 200
+
+
+def test_correct_password_blocked_once_ip_over_threshold(
+    admin_app: Flask, trusted_proxy: None
+) -> None:
     # Documents the deliberate per-IP collateral: the gate runs before
     # the credential check, so once an IP is throttled even a correct
     # password is rejected until the failures age out of the window.

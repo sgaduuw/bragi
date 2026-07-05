@@ -54,8 +54,15 @@ def login() -> ResponseReturnValue:
             # a throttled endpoint from doubling as a timing oracle, and
             # the distinct THROTTLED audit action (not counted) means a
             # persistent attacker can't hold the window open forever.
+            #
+            # Activates only when trusted_proxy_hops > 0, i.e. when
+            # remote_addr is the real per-client address. Behind a proxy
+            # with hops=0 every client shares the proxy's address, so a
+            # per-IP bucket would collapse to one global bucket and an
+            # attacker could lock everyone out; better to run no throttle
+            # than a global-lockout weapon (the plugin warns at startup).
             ip = request.remote_addr
-            if settings.login_throttle_enabled and ip:
+            if settings.login_throttle_enabled and settings.trusted_proxy_hops > 0 and ip:
                 recent = recent_ip_failure_count(
                     db, ip, window_seconds=settings.login_throttle_window_seconds
                 )

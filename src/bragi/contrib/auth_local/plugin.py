@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import click
 from flask import Blueprint, Flask, redirect, request, session, url_for
 from flask.typing import ResponseReturnValue
@@ -12,6 +14,9 @@ from bragi.contrib.auth_local.views import bp as auth_local_bp
 from bragi.contrib.auth_local.views import login as login_view
 from bragi.core.htmx import is_htmx
 from bragi.core.security import current_user
+from bragi.settings import settings
+
+LOG = logging.getLogger(__name__)
 
 
 def _auth_redirect(target: str) -> ResponseReturnValue:
@@ -105,6 +110,22 @@ def on_app_init(app: Flask, registry: object) -> None:
     del registry  # not used here; reserved for future plugin needs
     if app.name == "bragi-admin":
         app.before_request(_require_authentication)
+        # The login throttle keys on remote_addr, which is only the real
+        # per-client address when a trusted proxy is declared. With
+        # hops=0 behind a proxy it would be one shared bucket (global
+        # lockout), so the gate stays inactive there; warn in production
+        # so the operator knows their throttle isn't running.
+        if (
+            settings.login_throttle_enabled
+            and settings.trusted_proxy_hops == 0
+            and settings.env == "production"
+        ):
+            LOG.warning(
+                "Local-login throttle is enabled but trusted_proxy_hops=0, so "
+                "request.remote_addr cannot be trusted as the client address; "
+                "the throttle is INACTIVE. Set BRAGI_TRUSTED_PROXY_HOPS to the "
+                "real proxy hop count to activate it."
+            )
 
 
 @hookimpl
