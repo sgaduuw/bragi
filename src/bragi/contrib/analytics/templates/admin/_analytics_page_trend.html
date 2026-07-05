@@ -1,0 +1,14 @@
+{# Per-path daily pageview trend. Rendered standalone (htmx swap into
+   #page-trend) or included by analytics_page_detail.html (full page). #}
+<h3>{{ title or path }} <small>({{ total }} pageviews / {{ window }}d)</small></h3>
+<p><a href="{{ site_base }}{{ path }}" target="_blank" rel="noopener"><code>{{ path }}</code></a></p>
+{% if trend %}
+<table>
+  <thead><tr><th>Day</th><th>Pageviews</th></tr></thead>
+  <tbody>
+    {% for t in trend %}<tr><td><code>{{ t.day }}</code></td><td>{{ t.count }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No pageviews for this path in the last {{ window }} days.</p>
+{% endif %}
