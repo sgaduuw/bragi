@@ -36,7 +36,8 @@ insert a subtree 301), draft-alongside-published working copies for
 pages and posts (stage edits into a working copy, preview them in the
 real theme via a signed link without touching the live page, then
 promote atomically), four in-tree themes with
-auto light/dark, sitemap / feed / JSON-LD, audit-driven hardening
+auto light/dark, sitemap / feed / JSON-LD, branded theme-aware
+404 / 410 / 500 error pages, audit-driven hardening
 from v1.12 through v1.19.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
@@ -744,7 +745,10 @@ starting scaffold and restyle from there.
 ships `delivery/post_detail.html` shadows the post plugin's
 default, etc. Override only the templates you actually want to
 change; the rest fall through to the plugin's own
-`templates/delivery/`.
+`templates/delivery/`. This includes `delivery/error.html` (the
+404 / 410 / 500 page): the core default extends your
+`delivery/base.html`, so error pages are branded out of the box;
+ship your own only to change the error markup itself.
 
 **Static assets.** If `static_dir` is set, the delivery app
 serves your files at `/theme/<slug>/static/<path>`. Reference
