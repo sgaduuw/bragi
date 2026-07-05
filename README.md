@@ -482,6 +482,17 @@ attachment uploads up to `BRAGI_ATTACHMENTS_MAX_BYTES`
 (default 20 MiB) still go through. Raise both knobs in lockstep
 for larger uploads.
 
+`BRAGI_LOGIN_THROTTLE_MAX_FAILURES` (default 5) and
+`BRAGI_LOGIN_THROTTLE_WINDOW_SECONDS` (default 900) throttle
+local-login brute force: a login POST from an IP that already has
+that many failed attempts in the window is rejected with `429`
+(+ `Retry-After`) before the password is checked. Keyed on client
+IP only (no per-account lockout, so an attacker cannot lock an
+operator out by guessing their email), so it relies on
+`BRAGI_TRUSTED_PROXY_HOPS` being set correctly for
+`request.remote_addr` to be the real client. Set
+`BRAGI_LOGIN_THROTTLE_ENABLED=false` to turn it off.
+
 Both apps run under gunicorn inside the container (sync worker
 class; `--access-logfile -` to stdout). Worker counts default to
 2 for admin and 4 for delivery; tune via `ADMIN_WORKERS` /

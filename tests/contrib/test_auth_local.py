@@ -13,11 +13,13 @@ Covers:
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from typing import Any
 
 import pytest
 from flask import Flask
-from sqlalchemy import select
+from flask.testing import FlaskClient
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.admin import create_admin_app
@@ -26,8 +28,12 @@ from bragi.contrib.auth_local.passwords import (
     needs_rehash,
     verify_password,
 )
+from bragi.core.audit import AuditAction
+from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user import User
+from bragi.core.time import naive_utcnow
+from bragi.settings import settings
 from tests.conftest import csrf_token
 
 TEST_EMAIL = "ada@example.com"
@@ -1053,3 +1059,104 @@ def test_user_reset_password_writes_audit_log_entry(
     assert row.extra["by_cli"] is True
     assert row.extra["must_change"] is False
     assert row.extra["revoke_sessions"] is False
+
+
+# --------------------------- login throttle ----------------------
+
+
+def _post_login(
+    client: FlaskClient, *, password: str, ip: str, token: str, email: str = TEST_EMAIL
+) -> Any:
+    """POST /auth/login from a chosen client IP (per-IP throttle key)."""
+    return client.post(
+        "/auth/login",
+        data={"email": email, "password": password, "_csrf_token": token},
+        environ_base={"REMOTE_ADDR": ip},
+    )
+
+
+def _failure_rows(ip: str) -> int:
+    """Count auth.login.failure audit rows for an IP (fresh session)."""
+    from bragi.core.db import SessionLocal
+
+    with SessionLocal() as db:
+        return db.execute(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.action == AuditAction.AUTH_LOGIN_FAILURE, AuditLog.ip == ip)
+        ).scalar_one()
+
+
+def test_login_throttle_blocks_after_max_failures(admin_app: Flask) -> None:
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    ip = "10.0.0.1"
+    # The first `max_failures` bad attempts are allowed (form re-renders).
+    for _ in range(settings.login_throttle_max_failures):
+        assert _post_login(client, password="wrong", ip=ip, token=token).status_code == 200
+    # The next one trips the gate: 429 + Retry-After, before any check.
+    blocked = _post_login(client, password="wrong", ip=ip, token=token)
+    assert blocked.status_code == 429
+    assert blocked.headers["Retry-After"] == str(settings.login_throttle_window_seconds)
+    assert b"Too many failed attempts" in blocked.data
+
+
+def test_login_throttle_is_per_ip(admin_app: Flask) -> None:
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    for _ in range(settings.login_throttle_max_failures):
+        _post_login(client, password="wrong", ip="10.0.0.1", token=token)
+    assert _post_login(client, password="wrong", ip="10.0.0.1", token=token).status_code == 429
+    # A different IP has its own bucket and is unaffected.
+    assert _post_login(client, password="wrong", ip="10.0.0.2", token=token).status_code == 200
+
+
+def test_throttled_attempt_is_not_counted(admin_app: Flask) -> None:
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    ip = "10.0.0.3"
+    for _ in range(settings.login_throttle_max_failures):
+        _post_login(client, password="wrong", ip=ip, token=token)
+    # Blocked attempts must record THROTTLED, not FAILURE, so the window
+    # can't be held open forever by a persistent attacker.
+    for _ in range(3):
+        assert _post_login(client, password="wrong", ip=ip, token=token).status_code == 429
+    assert _failure_rows(ip) == settings.login_throttle_max_failures
+
+
+def test_login_throttle_window_excludes_old_failures(admin_app: Flask, db_session: Session) -> None:
+    ip = "10.0.0.4"
+    old = naive_utcnow() - timedelta(seconds=settings.login_throttle_window_seconds + 60)
+    for _ in range(settings.login_throttle_max_failures + 2):
+        db_session.add(
+            AuditLog(action=AuditAction.AUTH_LOGIN_FAILURE, ip=ip, occurred_at=old, extra={})
+        )
+    db_session.commit()
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    # Seven failures, all older than the window: a fresh attempt is allowed.
+    assert _post_login(client, password="wrong", ip=ip, token=token).status_code == 200
+
+
+def test_login_throttle_can_be_disabled(admin_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "login_throttle_enabled", False)
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    ip = "10.0.0.5"
+    for _ in range(settings.login_throttle_max_failures + 3):
+        assert _post_login(client, password="wrong", ip=ip, token=token).status_code == 200
+
+
+def test_correct_password_blocked_once_ip_over_threshold(admin_app: Flask) -> None:
+    # Documents the deliberate per-IP collateral: the gate runs before
+    # the credential check, so once an IP is throttled even a correct
+    # password is rejected until the failures age out of the window.
+    client = admin_app.test_client()
+    token = csrf_token(client)
+    ip = "10.0.0.6"
+    for _ in range(settings.login_throttle_max_failures):
+        _post_login(client, password="wrong", ip=ip, token=token)
+    blocked = _post_login(client, password=TEST_PASSWORD, ip=ip, token=token)
+    assert blocked.status_code == 429
+    with client.session_transaction() as sess:
+        assert "user_id" not in sess

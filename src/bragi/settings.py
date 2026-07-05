@@ -259,6 +259,21 @@ class Settings(BaseSettings):
     embed_rerender_timeout_per: float = 15.0
     embed_user_agent: str = "bragi-embeds (+https://github.com/sgaduuw/bragi)"
 
+    # Local-login brute-force throttle (bragi.contrib.auth_local). A
+    # login POST from an IP that already has >= max_failures
+    # `auth.login.failure` audit rows within the last window_seconds is
+    # rejected with 429 before the password is checked (so the argon2
+    # cost is skipped and the endpoint can't be used as a timing
+    # oracle). Keyed on IP ONLY: there is deliberately no per-account
+    # lockout, so an attacker who knows an operator's email cannot lock
+    # that account out (account-DoS). Per-IP correctness depends on
+    # `trusted_proxy_hops` matching the deploy so `request.remote_addr`
+    # is the real client (same requirement the audit log / analytics
+    # IPs already have). Set enabled=false to disable the gate.
+    login_throttle_enabled: bool = True
+    login_throttle_max_failures: int = 5
+    login_throttle_window_seconds: int = 900
+
     # 404 triage (bragi.contrib.notfound). Paths matching any of these
     # fnmatch globs are dropped BEFORE the recorder writes, so scanner
     # noise (vulnerability probes hammering random paths) never reaches
