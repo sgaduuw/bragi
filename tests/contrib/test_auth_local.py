@@ -88,6 +88,13 @@ def test_login_get_serves_form(admin_app: Flask) -> None:
     assert b'name="password"' in resp.data
 
 
+def test_login_page_has_no_oauth_button_when_unconfigured(admin_app: Flask) -> None:
+    # GitHub is a registered provider but has no client id/secret here,
+    # so `is_configured()` is False and no button is offered.
+    resp = admin_app.test_client().get("/auth/login")
+    assert b"Sign in with GitHub" not in resp.data
+
+
 def test_login_post_with_valid_creds_sets_session(admin_app: Flask) -> None:
     client = admin_app.test_client()
     token = csrf_token(client)

@@ -16,6 +16,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.api import OAuthProviderSpec
 from bragi.contrib.auth_local.passwords import dummy_verify, hash_password, verify_password
 from bragi.contrib.auth_local.throttle import recent_ip_failure_count
 from bragi.core.audit import AuditAction, audit
@@ -32,6 +33,19 @@ bp = Blueprint(
     template_folder="templates",
     url_prefix="/auth",
 )
+
+
+@bp.context_processor
+def _inject_oauth_providers() -> dict[str, list[OAuthProviderSpec]]:
+    """Expose the configured OAuth providers to the login template so it
+    can render a 'Sign in with <provider>' button per registered
+    provider. Only configured providers are offered (an unconfigured
+    one's login route 503s)."""
+    registry = current_app.extensions.get("registry")
+    providers: list[OAuthProviderSpec] = []
+    if registry is not None:
+        providers = registry.configured_oauth_providers()
+    return {"oauth_providers": providers}
 
 
 @bp.route("/login", methods=["GET", "POST"])

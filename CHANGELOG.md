@@ -20,6 +20,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `BRAGI_NOTFOUND_BLOCKLIST`: JSON list of fnmatch globs the 404
   recorder drops before writing (defaults to common exploit-probe
   paths; `.well-known/*` is never blocked).
+- GitHub sign-in is now first-class: the login page shows a "Sign in
+  with GitHub" button when GitHub is configured, and a new account
+  **Connections** page (`/admin/account/connections/`) lets a
+  logged-in user link or unlink their GitHub account. Linking attaches
+  the GitHub identity to the current user (refusing an identity already
+  owned by another user); unlinking is blocked if it would remove your
+  last sign-in method. This resolves the previous dead-end where an
+  operator whose GitHub email collided with an existing local account
+  could never link the two.
 - Local-login brute-force throttle: a login POST from an IP with
   `BRAGI_LOGIN_THROTTLE_MAX_FAILURES` (default 5) failed attempts in
   the last `BRAGI_LOGIN_THROTTLE_WINDOW_SECONDS` (default 900) is

@@ -1,0 +1,49 @@
+{% extends "admin/base.html" %}
+{% block title %}Connections &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Connections</h1>
+<p><small>Link an external account to sign in with it. You always keep at
+   least one way in, so your last sign-in method can't be unlinked.</small></p>
+
+{% if not providers %}
+<p>No sign-in providers are configured.</p>
+{% else %}
+<table>
+  <thead>
+    <tr><th>Provider</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for p in providers %}
+    <tr>
+      <td>{{ p.label }}</td>
+      <td>
+        {% if p.identity %}
+          Linked{% if p.identity.provider_username %} as
+          <code>{{ p.identity.provider_username }}</code>{% endif %}
+        {% else %}
+          <small>Not linked</small>
+        {% endif %}
+      </td>
+      <td>
+        {% if p.identity %}
+          <form method="post"
+                action="{{ url_for('account_connections.unlink', provider=p.name) }}"
+                style="display: inline; margin: 0;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="danger"
+                    {% if not can_unlink_any %}disabled
+                    title="Set a password before unlinking your only sign-in method"{% endif %}>
+              Unlink
+            </button>
+          </form>
+        {% else %}
+          <a class="btn"
+             href="{{ url_for(p.login_endpoint, mode='link', next=url_for('account_connections.list_connections')) }}">Link</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
