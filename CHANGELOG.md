@@ -20,6 +20,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `BRAGI_NOTFOUND_BLOCKLIST`: JSON list of fnmatch globs the 404
   recorder drops before writing (defaults to common exploit-probe
   paths; `.well-known/*` is never blocked).
+- Local-login brute-force throttle: a login POST from an IP with
+  `BRAGI_LOGIN_THROTTLE_MAX_FAILURES` (default 5) failed attempts in
+  the last `BRAGI_LOGIN_THROTTLE_WINDOW_SECONDS` (default 900) is
+  rejected with `429` + `Retry-After` before the password is checked.
+  Keyed on client IP only (no per-account lockout). Built on the
+  existing audit trail (no new table); disable with
+  `BRAGI_LOGIN_THROTTLE_ENABLED=false`.
 
 ### Changed
 - The admin new-redirect, new-page, and new-post forms now pre-fill

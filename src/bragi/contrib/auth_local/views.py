@@ -6,6 +6,7 @@ from flask import (
     Blueprint,
     current_app,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
@@ -16,12 +17,14 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
 from bragi.contrib.auth_local.passwords import dummy_verify, hash_password, verify_password
+from bragi.contrib.auth_local.throttle import recent_ip_failure_count
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.middleware.sessions import rotate_sid
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.user import User
 from bragi.core.safe_urls import safe_relative_path
+from bragi.settings import settings
 
 bp = Blueprint(
     "auth_local",
@@ -45,6 +48,37 @@ def login() -> ResponseReturnValue:
             return render_template("auth_local/login.html", email=email, next=next_url)
 
         with SessionLocal() as db:
+            # Per-IP brute-force gate: if this IP has already reached
+            # the failure ceiling within the window, reject before any
+            # credential work. Skipping the lookup + argon2 verify keeps
+            # a throttled endpoint from doubling as a timing oracle, and
+            # the distinct THROTTLED audit action (not counted) means a
+            # persistent attacker can't hold the window open forever.
+            #
+            # Activates only when trusted_proxy_hops > 0, i.e. when
+            # remote_addr is the real per-client address. Behind a proxy
+            # with hops=0 every client shares the proxy's address, so a
+            # per-IP bucket would collapse to one global bucket and an
+            # attacker could lock everyone out; better to run no throttle
+            # than a global-lockout weapon (the plugin warns at startup).
+            ip = request.remote_addr
+            if settings.login_throttle_enabled and settings.trusted_proxy_hops > 0 and ip:
+                recent = recent_ip_failure_count(
+                    db, ip, window_seconds=settings.login_throttle_window_seconds
+                )
+                if recent >= settings.login_throttle_max_failures:
+                    audit(AuditAction.AUTH_LOGIN_THROTTLED, extra={"email": email})
+                    flash(
+                        "Too many failed attempts. Please try again in a few minutes.",
+                        "error",
+                    )
+                    resp = make_response(
+                        render_template("auth_local/login.html", email=email, next=next_url),
+                        429,
+                    )
+                    resp.headers["Retry-After"] = str(settings.login_throttle_window_seconds)
+                    return resp
+
             user = db.execute(
                 select(User).where(User.email == email, User.is_active.is_(True))
             ).scalar_one_or_none()
