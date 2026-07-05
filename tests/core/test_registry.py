@@ -60,6 +60,7 @@ def _oauth_spec(name: str) -> OAuthProviderSpec:
         label=name.title(),
         authlib_client_factory=lambda: object(),
         fetch_user_info=lambda _t: None,  # type: ignore[arg-type,return-value]
+        login_endpoint=f"auth_{name}.login",
     )
 
 

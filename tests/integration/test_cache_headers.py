@@ -142,13 +142,14 @@ def test_robots_uses_long_cache(delivery_app: Flask) -> None:
     assert resp.headers["Cache-Control"] == "public, max-age=86400"
 
 
-def test_404_response_has_no_cache_header(delivery_app: Flask) -> None:
-    """The default after_request only sets cache headers on 2xx; a
-    404 might be in flux (a slug-change redirect could land any
-    moment) and shouldn't be aggressively cached."""
+def test_404_response_is_not_cached(delivery_app: Flask) -> None:
+    """A 404 might be in flux (a slug-change redirect could land any
+    moment), so error pages are explicitly `no-store`: the 2xx-only
+    content cache policy never applies to them, and `render_error`
+    sets `no-store` so intermediaries don't heuristically cache them."""
     resp = delivery_app.test_client().get("/posts/nope/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 404
-    assert resp.headers.get("Cache-Control") in (None, "")
+    assert resp.headers.get("Cache-Control") == "no-store"
 
 
 # ============================================================

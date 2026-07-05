@@ -27,6 +27,7 @@ from bragi.core.models.dataset import Dataset, DatasetQuery
 from bragi.core.models.indexnow_ping import IndexNowPing
 from bragi.core.models.internal_link import InternalLink
 from bragi.core.models.local_credential import LocalCredential
+from bragi.core.models.not_found import NotFound, NotFoundStatus
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.page_revision import PageRevision
 from bragi.core.models.page_working_copy import PageWorkingCopy
@@ -66,6 +67,8 @@ __all__ = [
     "InternalLink",
     "LocalCredential",
     "MatchType",
+    "NotFound",
+    "NotFoundStatus",
     "Page",
     "PageRevision",
     "PageStatus",

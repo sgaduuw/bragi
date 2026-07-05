@@ -4,6 +4,53 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.0] - 2026-07-05
+
+### Added
+- Branded error pages: the delivery app's 404, 410, and 500 responses
+  now render through the active site's theme (chrome, nav, footer)
+  instead of bare `"Not Found"` / `"Gone"` text, with `noindex`. A theme
+  can ship `templates/delivery/error.html` to fully customize; otherwise
+  the default extends the theme's `base.html` so every theme gets a
+  branded page for free. An unresolved Host (or a themed render that
+  itself fails, e.g. the DB being down during a 500) falls back to a
+  minimal self-contained page, so the error path can never itself error.
+- 404 triage: the delivery app now records the dead URLs it returns
+  (coalesced per path, minus a scanner blocklist), and a per-site
+  admin page (`/admin/sites/<slug>/not-found/`, editor role, under
+  **Manage**) lists them with a suggested fix and one-click actions:
+  create a redirect, mark the path Gone (410), deep-link into
+  new-page / new-post with the slug pre-filled, or dismiss it. A row
+  drops off the list automatically once an active exact redirect
+  covers its path. Suggestions come from an exact/fuzzy slug match
+  against published content (redirect target) and archived content
+  (informational).
+- `BRAGI_NOTFOUND_BLOCKLIST`: JSON list of fnmatch globs the 404
+  recorder drops before writing (defaults to common exploit-probe
+  paths; `.well-known/*` is never blocked).
+- GitHub sign-in is now first-class: the login page shows a "Sign in
+  with GitHub" button when GitHub is configured, and a new account
+  **Connections** page (`/admin/account/connections/`) lets a
+  logged-in user link or unlink their GitHub account. Linking attaches
+  the GitHub identity to the current user (refusing an identity already
+  owned by another user); unlinking is blocked if it would remove your
+  last sign-in method. This resolves the previous dead-end where an
+  operator whose GitHub email collided with an existing local account
+  could never link the two.
+- Local-login brute-force throttle: a login POST from an IP with
+  `BRAGI_LOGIN_THROTTLE_MAX_FAILURES` (default 5) failed attempts in
+  the last `BRAGI_LOGIN_THROTTLE_WINDOW_SECONDS` (default 900) is
+  rejected with `429` + `Retry-After` before the password is checked.
+  Keyed on client IP only (no per-account lockout). Built on the
+  existing audit trail (no new table); disable with
+  `BRAGI_LOGIN_THROTTLE_ENABLED=false`.
+
+### Changed
+- The admin new-redirect, new-page, and new-post forms now pre-fill
+  from query args (`?source_path=`, `?target=`, `?status_code=`,
+  `?slug=`, `?title=`), so other admin pages can deep-link into them
+  with fields seeded.
+
 ## [1.39.0] - 2026-06-28
 
 ### Changed

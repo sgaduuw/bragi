@@ -32,8 +32,10 @@ calling the hook (there's nothing to look up against).
 
 from __future__ import annotations
 
-from flask import Flask, current_app, g, make_response, redirect, request
+from flask import Flask, current_app, g, redirect, request
 from werkzeug.wrappers import Response
+
+from bragi.core.errors import render_error
 
 # CONTEXT.md "Redirects as a first-class subsystem": chain follow
 # up to 3 hops, loop detected = 500. The cap balances cleanup of
@@ -48,7 +50,7 @@ def register_redirect_handler(app: Flask) -> None:
     def _handle_404(_exc: object) -> Response:
         site = g.get("site")
         if site is None:
-            return make_response("Not Found", 404)
+            return render_error(404)
 
         pm = current_app.extensions["plugin_manager"]
         initial_path = request.path
@@ -66,7 +68,7 @@ def register_redirect_handler(app: Flask) -> None:
             # 410 anywhere in the chain is terminal: the destination
             # is gone, so the chain dead-ends.
             if result.status_code == 410:
-                return make_response("Gone", 410)
+                return render_error(410)
             final_target = result.target
             # Direct or indirect loop: a target already in the chain
             # means another step would revisit it. Serve 500 with a
@@ -77,7 +79,7 @@ def register_redirect_handler(app: Flask) -> None:
                     initial_path,
                     list(seen) + [final_target],
                 )
-                return make_response("Internal Server Error: redirect loop", 500)
+                return render_error(500)
             seen.add(final_target)
             # External absolute URLs end the chain: we can't (and
             # shouldn't try to) resolve them through our own
@@ -87,7 +89,7 @@ def register_redirect_handler(app: Flask) -> None:
             current_path = final_target
 
         if final_target is None:
-            return make_response("Not Found", 404)
+            return render_error(404)
         # `first_status` is set whenever `final_target` is, by the
         # loop body's "first non-None hop" path.
         assert first_status is not None

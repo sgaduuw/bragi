@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, ClassVar
 
-from pydantic import BeforeValidator
+from pydantic import BeforeValidator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -258,6 +258,54 @@ class Settings(BaseSettings):
     # per call than the save path.
     embed_rerender_timeout_per: float = 15.0
     embed_user_agent: str = "bragi-embeds (+https://github.com/sgaduuw/bragi)"
+
+    # Local-login brute-force throttle (bragi.contrib.auth_local). A
+    # login POST from an IP that already has >= max_failures failed
+    # login-form attempts within the last window_seconds is rejected
+    # with 429 before the password is checked (so the argon2 cost is
+    # skipped and the endpoint can't be used as a timing oracle). Keyed
+    # on IP ONLY: there is deliberately no per-account lockout, so an
+    # attacker who knows an operator's email cannot lock that account
+    # out (account-DoS).
+    #
+    # The gate ACTIVATES ONLY when `trusted_proxy_hops > 0`. Behind a
+    # reverse proxy with hops=0, `request.remote_addr` is the proxy's
+    # address for every client, so a per-IP bucket would collapse to
+    # one global bucket and an attacker's failures would lock everyone
+    # out. Requiring hops>0 means the throttle runs only when the
+    # client IP is actually trustworthy; the admin app logs a warning
+    # in production if it is enabled while hops=0 (throttle inactive).
+    # `max_failures`/`window_seconds` are >=1 (a 0 would brick or
+    # disable the gate). Set enabled=false to turn it off outright.
+    login_throttle_enabled: bool = True
+    login_throttle_max_failures: int = Field(default=5, ge=1)
+    login_throttle_window_seconds: int = Field(default=900, ge=1)
+
+    # 404 triage (bragi.contrib.notfound). Paths matching any of these
+    # fnmatch globs are dropped BEFORE the recorder writes, so scanner
+    # noise (vulnerability probes hammering random paths) never reaches
+    # the not_founds table. Matched against `request.path`. Override as
+    # JSON, e.g. BRAGI_NOTFOUND_BLOCKLIST='["/wp-*","*.php"]'. Note:
+    # `.well-known/*` is deliberately NOT blocked (security.txt,
+    # webfinger live there). `*.php`/`*.asp*` are safe to drop because
+    # bragi content is slug-based and never ends in those.
+    notfound_blocklist: list[str] = [
+        "/wp-admin/*",
+        "/wp-login.php",
+        "/wp-content/*",
+        "/wp-includes/*",
+        "/xmlrpc.php",
+        "*.php",
+        "*.asp",
+        "*.aspx",
+        "/.env",
+        "/.git/*",
+        "/.aws/*",
+        "/vendor/*",
+        "/cgi-bin/*",
+        "/phpmyadmin/*",
+        "/administrator/*",
+    ]
 
 
 settings = Settings()

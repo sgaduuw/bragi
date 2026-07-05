@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.37.0 (2026-06-26).
+**Latest release:** 1.40.0 (2026-07-05).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -16,7 +16,9 @@ header row), structured CV / resume page kind
 (`PageKind.RESUME` with typed sections, Project↔Position linkage,
 schema.org microdata, print-friendly), auto-derived public
 navigation from the page tree (with per-page `show_in_nav` and
-`menu_order` controls), GitHub OAuth + local
+`menu_order` controls), GitHub sign-in (a "Sign in with GitHub"
+button on the login page plus an account Connections page to
+link/unlink GitHub) alongside local-password
 bootstrap, redirects as a first-class subsystem, importers for
 Hugo / Ghost / WordPress / LinkedIn, attachments + media library with
 theme-aware multi-format multi-width renditions (`<picture>` with
@@ -34,7 +36,8 @@ insert a subtree 301), draft-alongside-published working copies for
 pages and posts (stage edits into a working copy, preview them in the
 real theme via a signed link without touching the live page, then
 promote atomically), four in-tree themes with
-auto light/dark, sitemap / feed / JSON-LD, audit-driven hardening
+auto light/dark, sitemap / feed / JSON-LD, branded theme-aware
+404 / 410 / 500 error pages, audit-driven hardening
 from v1.12 through v1.19.
 
 See [CHANGELOG.md](CHANGELOG.md) for per-release detail.
@@ -419,7 +422,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.39.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.40.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -482,6 +485,20 @@ attachment uploads up to `BRAGI_ATTACHMENTS_MAX_BYTES`
 (default 20 MiB) still go through. Raise both knobs in lockstep
 for larger uploads.
 
+`BRAGI_LOGIN_THROTTLE_MAX_FAILURES` (default 5) and
+`BRAGI_LOGIN_THROTTLE_WINDOW_SECONDS` (default 900) throttle
+local-login brute force: a login POST from an IP that already has
+that many failed login-form attempts in the window is rejected with
+`429` (+ `Retry-After`) before the password is checked. Keyed on
+client IP only (no per-account lockout, so an attacker cannot lock an
+operator out by guessing their email). It **activates only when
+`BRAGI_TRUSTED_PROXY_HOPS` is greater than 0**, i.e. when
+`request.remote_addr` is the real per-client address; behind a proxy
+with hops unset every client would share the proxy's address and one
+attacker could lock everyone out, so the gate stays inactive there
+(the admin app logs a warning in production). Set
+`BRAGI_LOGIN_THROTTLE_ENABLED=false` to turn it off entirely.
+
 Both apps run under gunicorn inside the container (sync worker
 class; `--access-logfile -` to stdout). Worker counts default to
 2 for admin and 4 for delivery; tune via `ADMIN_WORKERS` /
@@ -517,6 +534,16 @@ temp-spill bound is what stops a heavy query from filling the disk
 inherits the row, memory, and temp caps for render-time queries.
 Leave at defaults unless a specific file size or query workload
 demands otherwise.
+
+`BRAGI_NOTFOUND_BLOCKLIST` is a JSON list of fnmatch globs
+(matched against the request path) that the 404 recorder drops
+before writing, so vulnerability-scanner probes never reach the
+triage table. It defaults to the common exploit paths (`/wp-*`,
+`*.php`, `/.env`, `/.git/*`, ...); override with
+`BRAGI_NOTFOUND_BLOCKLIST='["/wp-*","*.php"]'` to replace the list
+(`.well-known/*` is never blocked). The per-site "404s" admin page
+lists the surviving dead paths so you can redirect them, create the
+missing content, mark them Gone (410), or dismiss them.
 
 SQLite write-contention knobs (set on every app process; read once
 at connect time) default to `BRAGI_SQLITE_BUSY_TIMEOUT_MS=10000`, how
@@ -587,7 +614,7 @@ bragi/
 │       ├── api_tokens/         # personal access tokens + JSON REST surface
 │       ├── attachments/        # upload + serve + media library
 │       ├── audit/              # audit-log admin
-│       ├── auth_github/        # OAuth via Authlib
+│       ├── auth_github/        # GitHub OAuth (Authlib) + account Connections (link/unlink)
 │       ├── auth_local/         # email + password + must-change rotation
 │       ├── datasets/           # per-site data file registry + explore console + directive
 │       ├── embeds/             # external-content embeds (directive + providers + rerender)
@@ -600,6 +627,7 @@ bragi/
 │       ├── internal_links/     # [text](post:42) save-time + delivery-time resolver + admin picker
 │       ├── markdown_extras/    # bundled markdown-it extensions (footnotes, ...)
 │       ├── nav/                # auto-derived public site navigation from the page tree
+│       ├── notfound/           # detected-404 triage: recorder + admin (redirect / create / dismiss)
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
 │       ├── profile_links/      # per-site rel="me" profile links (footer + admin)
@@ -717,7 +745,10 @@ starting scaffold and restyle from there.
 ships `delivery/post_detail.html` shadows the post plugin's
 default, etc. Override only the templates you actually want to
 change; the rest fall through to the plugin's own
-`templates/delivery/`.
+`templates/delivery/`. This includes `delivery/error.html` (the
+404 / 410 / 500 page): the core default extends your
+`delivery/base.html`, so error pages are branded out of the box;
+ship your own only to change the error markup itself.
 
 **Static assets.** If `static_dir` is set, the delivery app
 serves your files at `/theme/<slug>/static/<path>`. Reference
@@ -796,7 +827,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.37.0
+pip install bragi-cms==1.40.0
 ```
 
 The import path stays `import bragi`. Container images remain the

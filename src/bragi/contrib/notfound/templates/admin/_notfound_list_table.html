@@ -1,0 +1,69 @@
+<div id="notfound-list-table">
+{% if entries %}
+<table>
+  <thead>
+    <tr>
+      <th>Path</th>
+      <th>Hits</th>
+      <th>Last seen</th>
+      <th>Referrer</th>
+      <th>Suggestion</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    {% set nf = e.nf %}
+    <tr>
+      <td><code>{{ nf.path }}</code></td>
+      <td>{{ nf.count }}</td>
+      <td>{{ nf.last_seen.strftime('%Y-%m-%d') }}</td>
+      <td>
+        {% if nf.last_referrer %}<small>{{ nf.last_referrer }}</small>
+        {% else %}<small>(none)</small>{% endif %}
+      </td>
+      <td>
+        {% if e.suggestion and e.suggestion.kind == 'redirect' %}
+          &rarr; <code>{{ e.suggestion.candidate.url }}</code>
+        {% elif e.suggestion and e.suggestion.kind == 'archived' %}
+          <small>archived: <a href="{{ e.suggestion.candidate.edit_url }}">{{ e.suggestion.candidate.title }}</a></small>
+        {% else %}
+          <small>(none)</small>
+        {% endif %}
+      </td>
+      <td>
+        {# Create redirect: pre-fills source_path and (when we have a
+           confident target) the suggested URL, via the redirects form. #}
+        <a class="btn secondary"
+           href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=(e.suggestion.candidate.url if e.suggestion and e.suggestion.kind == 'redirect' else ''), status_code=301) }}">Redirect</a>
+        {# Mark Gone: 410 ignores the target, but the form validates a
+           relative one, so pass the dead path itself. #}
+        <a class="btn secondary"
+           href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=nf.path, status_code=410) }}">Gone</a>
+        <a class="btn secondary" href="{{ url_for('page_admin.new_page', slug=e.leaf) }}">New page</a>
+        <a class="btn secondary" href="{{ url_for('post_admin.new_post', slug=e.leaf) }}">New post</a>
+        <form method="post"
+              action="{{ url_for('notfound_admin.dismiss', nf_id=nf.id) }}"
+              style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">Dismiss</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<nav style="margin-top: 1rem;">
+  {% if page > 1 %}
+    <a class="btn secondary" href="{{ url_for('notfound_admin.list_notfound', page=page-1) }}">&laquo; Prev</a>
+  {% endif %}
+  <span style="margin: 0 1rem;">Page {{ page }}</span>
+  {% if has_more %}
+    <a class="btn secondary" href="{{ url_for('notfound_admin.list_notfound', page=page+1) }}">Next &raquo;</a>
+  {% endif %}
+</nav>
+{% else %}
+<p>No detected 404s for this site.</p>
+{% endif %}
+</div>

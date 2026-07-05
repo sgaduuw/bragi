@@ -1,0 +1,9 @@
+{% extends "delivery/base.html" %}
+{% block title %}{{ status }} {{ title }}{% if site %} &middot; {{ site.title }}{% endif %}{% endblock %}
+{% block content %}
+<article class="error-page">
+  <h1>{{ status }} &middot; {{ title }}</h1>
+  <p>{{ message }}</p>
+  <p><a href="/">{% if site %}Back to {{ site.title }}{% else %}Go to the homepage{% endif %}</a></p>
+</article>
+{% endblock %}
