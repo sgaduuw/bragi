@@ -73,7 +73,7 @@ def _gather_candidates(db: Any, site: Any) -> list[Candidate]:
             select(Post)
             .where(
                 Post.site_id == site.id,
-                Post.status.in_([PostStatus.PUBLISHED, PostStatus.ARCHIVED]),
+                Post.status.in_([PostStatus.PUBLISHED, PostStatus.UNLISTED, PostStatus.ARCHIVED]),
             )
             .order_by(Post.updated_at.desc())
             .limit(_CANDIDATE_CAP)

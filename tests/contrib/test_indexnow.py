@@ -321,6 +321,38 @@ def test_unpublish_enqueues(
         assert _pending_urls(db) == ["https://blog.example.com/posts/hello/"]
 
 
+def test_delist_to_unlisted_does_not_enqueue(
+    admin_app: Flask,
+    db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """published→unlisted must NOT ping IndexNow: unlisted is hidden from
+    discovery, so asking an engine to re-crawl it is backwards (the URL
+    stays 200 and is not auto-noindex)."""
+    with db_session_factory() as db:
+        post = db.execute(select(Post).where(Post.slug == "hello")).scalar_one()
+        post.status = PostStatus.PUBLISHED
+        db.commit()
+        post_id = post.id
+
+    _captured_post(monkeypatch)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/posts/{post_id}/edit")
+    client.post(
+        f"/admin/sites/blog/posts/{post_id}/edit",
+        data={
+            "title": "Hello",
+            "slug": "hello",
+            "body_markdown": "h",
+            "status": "unlisted",
+            "_csrf_token": token,
+        },
+    )
+    with db_session_factory() as db:
+        assert _pending_urls(db) == []
+
+
 def test_slug_change_enqueues_new_url(
     admin_app: Flask,
     db_session_factory: sessionmaker[Session],

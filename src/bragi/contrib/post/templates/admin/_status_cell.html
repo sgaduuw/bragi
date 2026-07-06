@@ -10,7 +10,7 @@
         style="margin: 0;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <select name="status" hx-trigger="change" hx-include="closest form">
-      {% for s in ['draft', 'scheduled', 'published', 'archived'] %}
+      {% for s in ['draft', 'scheduled', 'published', 'unlisted', 'archived'] %}
         <option value="{{ s }}"{% if s == post.status %} selected{% endif %}>{{ s }}</option>
       {% endfor %}
     </select>

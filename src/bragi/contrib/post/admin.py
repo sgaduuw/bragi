@@ -76,6 +76,20 @@ bp = Blueprint(
 )
 
 
+def _stamp_public_url_date(post: Post, new_status: str) -> None:
+    """Stamp `published_at` the first time a post acquires a public URL.
+
+    Both PUBLISHED and UNLISTED are reachable and need a date for their
+    permalink, so both stamp; the `is None` guard preserves the original
+    across a republish or a published<->unlisted flip. This is separate
+    from firing `on_post_published` (federation / ping), which stays
+    gated to PUBLISHED so an unlisted post never federates. Every publish
+    path funnels through here so the rule can't drift across them.
+    """
+    if new_status in (PostStatus.PUBLISHED, PostStatus.UNLISTED) and post.published_at is None:
+        post.published_at = naive_utcnow()
+
+
 def _form_from_request() -> dict[str, str]:
     """Pull the post-edit form fields off the current request."""
     return {
@@ -462,7 +476,11 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             body_excerpt=make_excerpt(body_markdown),
             author_id=int(session["user_id"]),
             status=new_status,
-            published_at=(naive_utcnow() if new_status == PostStatus.PUBLISHED else None),
+            published_at=(
+                naive_utcnow()
+                if new_status in (PostStatus.PUBLISHED, PostStatus.UNLISTED)
+                else None
+            ),
             featured_image_id=featured_image_id,
             is_pinned=(form["is_pinned"] == "1"),
             pinned_until=pinned_until,
@@ -588,8 +606,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         was_unpublished = post.status != PostStatus.PUBLISHED
         becoming_published = form["status"] == PostStatus.PUBLISHED
         is_first_publish = was_unpublished and becoming_published
-        if is_first_publish and post.published_at is None:
-            post.published_at = naive_utcnow()
+        _stamp_public_url_date(post, form["status"])
         post.status = form["status"]
 
         _sync_post_tags(db, post, form["tags"], post.site_id)
@@ -1293,7 +1310,7 @@ def patch_slug(site_slug: str, post_id: int) -> ResponseReturnValue:
     )
 
 
-_VALID_POST_STATUSES = frozenset({"draft", "published", "archived"})
+_VALID_POST_STATUSES = frozenset({"draft", "published", "unlisted", "archived"})
 # "scheduled" deliberately omitted from the overview inline-edit
 # path: it requires a `scheduled_for` datetime that's not entered
 # from the table. The full edit page handles that flow.
@@ -1351,8 +1368,7 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         is_first_publish = was_unpublished and becoming_published
 
         before = _post_snapshot(post)
-        if is_first_publish and post.published_at is None:
-            post.published_at = naive_utcnow()
+        _stamp_public_url_date(post, raw)
         post.status = raw
         after = _post_snapshot(post)
 
@@ -1603,8 +1619,7 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         # transition. Without this, a restored draft that becomes
         # published silently misses federation fan-out.
         is_first_publish = was_unpublished and post.status == PostStatus.PUBLISHED
-        if is_first_publish and post.published_at is None:
-            post.published_at = naive_utcnow()
+        _stamp_public_url_date(post, post.status)
         restored_id = post.id
         site_id_for_audit = post.site_id
         after = _post_snapshot(post)
