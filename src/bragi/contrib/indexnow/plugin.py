@@ -129,6 +129,16 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], se
     # A draft→draft edit (typo fix on a never-published post) is
     # silent: pinging IndexNow with a URL that 404s in delivery
     # wastes quota and trains the engine to downweight the host.
+    #
+    # An UNLISTED target is never pinged: unlisted means "hidden from
+    # discovery", so asking a search engine to (re-)crawl it is exactly
+    # backwards. It stays reachable and not-noindex, so any prior
+    # published snapshot persists regardless; we just don't re-promote it.
+    after_status = (
+        after.get("status") if isinstance(after, dict) else getattr(after, "status", None)
+    )
+    if after_status == "unlisted":
+        return
     if not _is_published(after) and not _is_published(before):
         return
     _push_url_for_item(item, session)

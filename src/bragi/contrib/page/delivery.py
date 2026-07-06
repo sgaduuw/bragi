@@ -303,7 +303,11 @@ def render_post(site: Site, post_slug: str, *, require_dateless: bool = False) -
             select(Post).where(
                 Post.site_id == site.id,
                 Post.slug == post_slug,
-                Post.status == PostStatus.PUBLISHED,
+                # UNLISTED posts resolve by direct URL (this is the only
+                # public read path that includes them); every listing /
+                # feed / sitemap / search / federation surface stays on
+                # `== PUBLISHED` and excludes them.
+                Post.status.in_((PostStatus.PUBLISHED, PostStatus.UNLISTED)),
             )
         ).scalar_one_or_none()
         if post is None:
