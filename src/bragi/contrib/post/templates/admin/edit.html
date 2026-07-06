@@ -88,6 +88,7 @@
       <option value="draft" {% if current_status == 'draft' %}selected{% endif %}>Draft</option>
       <option value="scheduled" {% if current_status == 'scheduled' %}selected{% endif %}>Scheduled</option>
       <option value="published" {% if current_status == 'published' %}selected{% endif %}>Published</option>
+      <option value="unlisted" {% if current_status == 'unlisted' %}selected{% endif %}>Unlisted (reachable by link, hidden from listings)</option>
       <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archived</option>
     </select>
   </fieldset>

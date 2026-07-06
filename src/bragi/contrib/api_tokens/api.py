@@ -192,7 +192,12 @@ def create_post(site_slug: str) -> ResponseReturnValue:
         abort(400, description="slug and title are required")
 
     status = payload.get("status") or PostStatus.DRAFT
-    if status not in {PostStatus.DRAFT, PostStatus.PUBLISHED, PostStatus.ARCHIVED}:
+    if status not in {
+        PostStatus.DRAFT,
+        PostStatus.PUBLISHED,
+        PostStatus.UNLISTED,
+        PostStatus.ARCHIVED,
+    }:
         abort(400, description=f"invalid status {status!r}")
 
     published_at = _parse_dt(payload.get("published_at"))
@@ -290,6 +295,7 @@ def update_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             if payload["status"] not in {
                 PostStatus.DRAFT,
                 PostStatus.PUBLISHED,
+                PostStatus.UNLISTED,
                 PostStatus.ARCHIVED,
             }:
                 abort(400, description=f"invalid status {payload['status']!r}")
