@@ -7,6 +7,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Code-block affordances: a copy-to-clipboard button on every highlighted
+  block, plus opt-in fenced-code metadata for a filename label
+  (`title="app.py"`), highlighted lines (`{1,3-5}`), and a line-number
+  gutter (`linenos`), e.g. ```` ```python title="app.py" {2,4} linenos ````.
+  Pygments server-side highlighting is unchanged for plain fences.
 - Configurable dated post permalinks. The blog-index (post index) page's
   edit form gains a **Post permalinks** setting (shown only when the page
   kind is "post index") choosing the URL structure for its posts: flat

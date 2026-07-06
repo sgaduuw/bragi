@@ -18,11 +18,14 @@ from datetime import UTC, datetime
 
 import pytest
 from flask import Flask
+from markdown_it import MarkdownIt
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.delivery import create_delivery_app
+from bragi.contrib.highlight.meta import configure_code_meta
 from bragi.contrib.highlight.transform import (
     highlight_code_blocks,
+    inject_copy_script,
     stylesheet_css,
 )
 from bragi.core.models.post import Post, PostStatus
@@ -182,3 +185,68 @@ def test_published_post_renders_highlighted_code(
     assert "/static/pygments.css" in body
     # The original raw pre/code wrapper is NOT present.
     assert '<pre><code class="language-python">' not in body
+
+
+# --------------------------- affordances ---------------------------
+
+
+def test_copy_button_wraps_every_block() -> None:
+    out = highlight_code_blocks('<pre><code class="language-python">x = 1</code></pre>')
+    assert 'class="code-block"' in out
+    assert 'class="code-copy"' in out
+
+
+def test_filename_label() -> None:
+    out = highlight_code_blocks(
+        '<pre data-filename="app.py"><code class="language-python">x = 1</code></pre>'
+    )
+    assert '<span class="filename">app.py</span>' in out
+
+
+def test_line_highlight() -> None:
+    out = highlight_code_blocks(
+        '<pre data-hl-lines="2"><code class="language-python">a = 1\nb = 2\n</code></pre>'
+    )
+    assert 'class="hll"' in out
+
+
+def test_line_numbers() -> None:
+    out = highlight_code_blocks(
+        '<pre data-linenos="1"><code class="language-python">a = 1\nb = 2\n</code></pre>'
+    )
+    assert "highlighttable" in out
+
+
+def test_inject_copy_script_only_when_code_present() -> None:
+    with_code = inject_copy_script('<div class="code-block">x</div>')
+    assert "/static/highlight/copy-code.js" in with_code
+    # Idempotent: a second pass doesn't double-inject.
+    assert inject_copy_script(with_code).count("copy-code.js") == 1
+    # No code block -> no script.
+    assert inject_copy_script("<p>plain</p>") == "<p>plain</p>"
+
+
+def test_delivery_serves_copy_script(patched_session_locals: sessionmaker[Session]) -> None:
+    app = create_delivery_app()
+    resp = app.test_client().get("/static/highlight/copy-code.js")
+    assert resp.status_code == 200
+    # The path the injector references actually resolves (asset-404 guard).
+    assert "/static/highlight/copy-code.js" in inject_copy_script('<div class="code-block">x</div>')
+
+
+def test_metadata_through_render_markdown(patched_session_locals: sessionmaker[Session]) -> None:
+    app = create_delivery_app()
+    with app.app_context():
+        out = render_markdown('```python title="app.py" {1}\nx = 1\ny = 2\n```\n')
+    assert '<span class="filename">app.py</span>' in out
+    assert 'class="hll"' in out
+    assert 'class="code-block"' in out
+
+
+def test_plain_fence_still_has_no_data_attrs() -> None:
+    """A fence with no metadata renders exactly as before (the override
+    reproduces markdown-it's default output plus nothing)."""
+    md = MarkdownIt("commonmark")
+    configure_code_meta(md)
+    out = md.render("```python\nx = 1\n```\n")
+    assert out == '<pre><code class="language-python">x = 1\n</code></pre>\n'
