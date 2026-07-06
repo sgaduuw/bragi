@@ -199,6 +199,19 @@ def test_toolbar_includes_table_actions(admin_app: Flask) -> None:
         assert f'data-action="{action}"' in body, f"missing table action: {action}"
 
 
+def test_toolbar_includes_callout_actions(admin_app: Flask) -> None:
+    """The callout dropdown exposes an insert button per type, and the
+    editor imports the markdown-it-container mirror for round-trip parse."""
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/posts/new").data.decode()
+    for callout_type in ("note", "tip", "info", "warning", "danger"):
+        assert f'data-action="callout-{callout_type}"' in body, (
+            f"missing callout action: {callout_type}"
+        )
+    assert "esm.sh/markdown-it-container" in body
+
+
 def test_editor_includes_table_styles(admin_app: Flask) -> None:
     """Editor mount has table CSS and the dropdown panel is styled."""
     client = admin_app.test_client()

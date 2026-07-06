@@ -166,6 +166,16 @@
       color: inherit;
       text-decoration: underline;
     }
+    /* Callouts (admonitions): note / tip / info / warning / danger. */
+    .callout { margin: 1.5rem 0; padding: 0.75rem 1rem; background: var(--aside-bg); border: 1px solid var(--aside-rule); border-left: 4px solid var(--callout-accent, var(--aside-rule)); border-radius: 4px; }
+    .callout__title { margin: 0 0 0.25rem; font-weight: 700; color: var(--callout-accent, inherit); }
+    .callout__body > :first-child { margin-top: 0; }
+    .callout__body > :last-child { margin-bottom: 0; }
+    .callout--note { --callout-accent: #3b82f6; }
+    .callout--tip { --callout-accent: #10b981; }
+    .callout--info { --callout-accent: #06b6d4; }
+    .callout--warning { --callout-accent: #d97706; }
+    .callout--danger { --callout-accent: #ef4444; }
   </style>
 </head>
 <body>

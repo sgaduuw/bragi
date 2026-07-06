@@ -7,6 +7,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Callouts / admonitions: `::: note` / `tip` / `info` / `warning` / `danger`
+  markdown blocks with parsed inner content and an optional custom title
+  (`::: warning Heads up`), rendered as a themeable
+  `<aside class="callout callout--<type>">` and styled by all four built-in
+  themes. Authorable in the TipTap editor via a Callout toolbar dropdown.
 - Configurable dated post permalinks. The blog-index (post index) page's
   edit form gains a **Post permalinks** setting (shown only when the page
   kind is "post index") choosing the URL structure for its posts: flat

@@ -42,6 +42,16 @@
       <button type="button" data-action="table-delete" title="Delete table">Delete table</button>
     </div>
   </details>
+  <details class="toolbar-menu">
+    <summary title="Callout">Callout &#9662;</summary>
+    <div class="toolbar-menu__panel">
+      <button type="button" data-action="callout-note" title="Insert note callout">Note</button>
+      <button type="button" data-action="callout-tip" title="Insert tip callout">Tip</button>
+      <button type="button" data-action="callout-info" title="Insert info callout">Info</button>
+      <button type="button" data-action="callout-warning" title="Insert warning callout">Warning</button>
+      <button type="button" data-action="callout-danger" title="Insert danger callout">Danger</button>
+    </div>
+  </details>
 </div>
 
 <dialog id="image-picker-dialog"
@@ -223,7 +233,7 @@
   // TipTap + Markdown via CDN ESM. Self-hosted bundle + Subresource
   // Integrity is a follow-up; admin is behind auth so the surface
   // is the operator's own browser.
-  import { Editor } from 'https://esm.sh/@tiptap/core@2.6';
+  import { Editor, Node } from 'https://esm.sh/@tiptap/core@2.6';
   import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2.6';
   import Link from 'https://esm.sh/@tiptap/extension-link@2.6';
   // Image is not part of StarterKit. Without an Image node in the
@@ -243,6 +253,12 @@
   // back into the Image node's `class` attribute. Without this,
   // class survives save but is dropped on reload.
   import markdownItAttrs from 'https://esm.sh/markdown-it-attrs@4';
+  // markdown-it-container — the JS mirror of mdit-py-plugins'
+  // container_plugin used by bragi.contrib.callouts. Registered per
+  // callout type in the Callout node's parse.setup so a reloaded
+  // `::: note ... :::` produces the same <aside class="callout"> HTML
+  // the Python directive emits, which Callout.parseHTML then captures.
+  import markdownItContainer from 'https://esm.sh/markdown-it-container@4';
   // Pipe-table support. StarterKit ships no table node, so these four
   // add the schema (table > tableRow > tableHeader|tableCell). Parse
   // (markdown -> editor) is free: tiptap-markdown renders markdown to
@@ -520,6 +536,93 @@
     return md.split(ADMIN_ATTACHMENT_MARKER).join(PUBLIC_ATTACHMENT_MARKER);
   }
 
+  // Callout / admonition node: `::: <type> ... :::` <-> a styled <aside>.
+  // Delivery renders these server-side (bragi.contrib.callouts); this node
+  // gives the editor the same box and round-trips the markdown. Body is
+  // block content (parseHTML pulls it from `.callout__body`); the title
+  // stays out of the content. Keep the type list aligned with the Python
+  // directive's CALLOUT_TYPES.
+  const CALLOUT_TYPES = ['note', 'tip', 'info', 'warning', 'danger'];
+  const calloutTitleCase = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  const calloutTypeFromEl = (el) => {
+    for (const t of CALLOUT_TYPES) {
+      if (el.classList.contains('callout--' + t)) return t;
+    }
+    return 'note';
+  };
+
+  const Callout = Node.create({
+    name: 'callout',
+    group: 'block',
+    content: 'block+',
+    defining: true,
+    addAttributes() {
+      return {
+        calloutType: {
+          default: 'note',
+          parseHTML: (el) => calloutTypeFromEl(el),
+          renderHTML: () => ({}),  // carried in the class, not a DOM attr
+        },
+        title: {
+          default: null,
+          parseHTML: (el) => {
+            const titleEl = el.querySelector('.callout__title');
+            if (!titleEl) return null;
+            const text = titleEl.textContent.trim();
+            // A title equal to the capitalized type is the default; store
+            // null so serialize doesn't re-emit a redundant custom title.
+            return text === calloutTitleCase(calloutTypeFromEl(el)) ? null : text;
+          },
+          renderHTML: () => ({}),
+        },
+      };
+    },
+    parseHTML() {
+      return [{ tag: 'aside.callout', contentElement: '.callout__body' }];
+    },
+    renderHTML({ node }) {
+      const type = node.attrs.calloutType || 'note';
+      const title = node.attrs.title || calloutTitleCase(type);
+      return [
+        'aside',
+        { class: 'callout callout--' + type },
+        ['p', { class: 'callout__title' }, title],
+        ['div', { class: 'callout__body' }, 0],
+      ];
+    },
+    addStorage() {
+      return {
+        markdown: {
+          serialize(state, node) {
+            const type = node.attrs.calloutType || 'note';
+            const header = node.attrs.title ? `${type} ${node.attrs.title}` : type;
+            state.write(`::: ${header}\n`);
+            state.renderContent(node);
+            state.write(':::');
+            state.closeBlock(node);
+          },
+          parse: {
+            setup(md) {
+              CALLOUT_TYPES.forEach((type) => {
+                md.use(markdownItContainer, type, {
+                  render(tokens, idx) {
+                    const token = tokens[idx];
+                    if (token.nesting !== 1) return '</div></aside>\n';
+                    const rest = token.info.trim().split(/\s+/).slice(1).join(' ');
+                    const title = md.utils.escapeHtml(rest || calloutTitleCase(type));
+                    return `<aside class="callout callout--${type}">`
+                      + `<p class="callout__title">${title}</p>`
+                      + `<div class="callout__body">`;
+                  },
+                });
+              });
+            },
+          },
+        },
+      };
+    },
+  });
+
   const textarea = document.getElementById('body_markdown');
   const mount = document.getElementById('tiptap-editor');
   const toolbar = document.getElementById('tiptap-editor-toolbar');
@@ -541,6 +644,7 @@
         TableRow,
         InlineTableHeader,
         InlineTableCell,
+        Callout,
         Markdown.configure({
           html: false,
           linkify: true,
@@ -666,6 +770,17 @@
         case 'table-col-delete': chain.deleteColumn().run(); break;
         case 'table-header-toggle': chain.toggleHeaderRow().run(); break;
         case 'table-delete': chain.deleteTable().run(); break;
+        case 'callout-note':
+        case 'callout-tip':
+        case 'callout-info':
+        case 'callout-warning':
+        case 'callout-danger':
+          chain.insertContent({
+            type: 'callout',
+            attrs: { calloutType: btn.dataset.action.slice('callout-'.length) },
+            content: [{ type: 'paragraph' }],
+          }).run();
+          break;
       }
     });
 
