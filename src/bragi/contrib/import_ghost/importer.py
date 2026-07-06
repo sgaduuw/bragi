@@ -472,7 +472,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             # post_index isn't named "posts". Skip when no
             # post_index exists yet (post URLs are unreachable
             # until one does).
-            target = post_url_for(site, slug, db=db)
+            target = post_url_for(site, slug, published_at=post.published_at, db=db)
             if status == PostStatus.PUBLISHED and target is not None:
                 source_path = f"/{slug}/"
                 redirects_inserted += _upsert_ghost_redirect(db, site_id, source_path, target)

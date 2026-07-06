@@ -33,6 +33,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint, text
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bragi.core.models._base import Base
@@ -151,3 +152,13 @@ class Page(IdMixin, TimestampsMixin, Base):
     # "no structured resume sections" — the page still renders, with
     # only the header and Summary (from body_markdown) visible.
     resume_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None, nullable=True)
+
+    # Per-page settings bag, mirroring Site.extra_settings. Currently
+    # holds the POST_INDEX page's `permalink_style` (the dated-permalink
+    # structure for posts under this blog); kind-specific settings that
+    # belong to one page rather than the whole site land here. MutableDict
+    # tracks in-place mutation so `page.extra_settings["x"] = 1` survives
+    # commit without a manual reassignment.
+    extra_settings: Mapped[dict[str, Any]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )

@@ -4,6 +4,22 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Configurable dated post permalinks. The blog-index (post index) page's
+  edit form gains a **Post permalinks** setting (shown only when the page
+  kind is "post index") choosing the URL structure for its posts: flat
+  `/<slug>/` (default, unchanged), `/YYYY/<slug>/`, `/YYYY/MM/<slug>/`, or
+  `/YYYY/MM/DD/<slug>/`. Date segments come from each post's publish date
+  in UTC. The setting persists in a new per-page `extra_settings` bag
+  (`pages.extra_settings`), mirroring `sites.extra_settings`.
+
+### Changed
+- Switching a blog to a dated permalink structure does not redirect the
+  old flat URLs: they return 404 until relinked. (Deliberate: no bulk
+  re-redirect on structure change.)
+
 ## [1.41.0] - 2026-07-06
 
 ### Added

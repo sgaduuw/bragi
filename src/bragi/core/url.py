@@ -13,6 +13,7 @@ most one DB query for the post_index lookup.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 from flask import g, has_app_context
 from sqlalchemy import select
@@ -26,6 +27,21 @@ _G_CACHE_KEY = "_bragi_post_index_cache"
 
 DEFAULT_TAG_SEGMENT = "tag"
 _TAG_SEGMENT_RE = re.compile(r"^[a-z0-9-]+$")
+
+# Dated-permalink structure for posts, stored on the POST_INDEX page's
+# `extra_settings["permalink_style"]`. Each style prepends N date segments
+# (derived from the post's publish date) between the blog prefix and the
+# post slug: flat -> /blog/slug/, year -> /blog/2026/slug/, etc.
+PERMALINK_FLAT = "flat"
+PERMALINK_YEAR = "year"
+PERMALINK_YEAR_MONTH = "year_month"
+PERMALINK_YEAR_MONTH_DAY = "year_month_day"
+_PERMALINK_DEPTH = {
+    PERMALINK_FLAT: 0,
+    PERMALINK_YEAR: 1,
+    PERMALINK_YEAR_MONTH: 2,
+    PERMALINK_YEAR_MONTH_DAY: 3,
+}
 
 
 def _resolve_segments(db: Session, page: Page) -> list[str]:
@@ -200,23 +216,98 @@ def post_index_url_for(site: Site, *, db: Session | None = None) -> str | None:
     return page_url_for(page, db=db)
 
 
-def post_url_for(site: Site, post_slug: str, *, db: Session | None = None) -> str | None:
+def normalize_permalink_style(raw: object) -> str:
+    """Return `raw` if it's a known permalink style, else "flat".
+
+    Single validation point for both the admin write (coercing a
+    submitted form value) and the reader below (coercing a stored value):
+    an unknown or non-string value must never 500 a render.
+    """
+    return raw if isinstance(raw, str) and raw in _PERMALINK_DEPTH else PERMALINK_FLAT
+
+
+def permalink_style_for(site: Site, *, db: Session | None = None) -> str:
+    """Resolve the dated-permalink structure for posts on `site`.
+
+    Stored on the site's POST_INDEX page (the blog index) under
+    `extra_settings["permalink_style"]`. Falls back to "flat" (no date
+    segments, the historical behaviour) when unset, not a known style, or
+    when the site has no post_index page.
+    """
+    page = post_index_page_for(site, db=db)
+    if page is None:
+        return PERMALINK_FLAT
+    return normalize_permalink_style(getattr(page, "extra_settings", {}).get("permalink_style"))
+
+
+def permalink_depth(style: str) -> int:
+    """Number of leading date segments `style` prepends to a post slug."""
+    return _PERMALINK_DEPTH.get(style, 0)
+
+
+def _permalink_date_segments(published_at: datetime | None, style: str) -> list[str]:
+    """Date path segments a post's permalink prepends under `style`.
+
+    Derived from `published_at` in naive UTC (as stored), to stay
+    consistent with the archive views, which bucket by the same value and
+    ignore `site.timezone`. A post with no publish date (draft / never
+    published) yields no segments, so its admin / preview / internal-link
+    URL degrades to the flat shape rather than crashing.
+    """
+    depth = permalink_depth(style)
+    if depth == 0 or published_at is None:
+        return []
+    parts = [f"{published_at.year:04d}", f"{published_at.month:02d}", f"{published_at.day:02d}"]
+    return parts[:depth]
+
+
+def valid_permalink_date_segments(segments: list[str]) -> bool:
+    """True if `segments` are structurally valid Y[/M[/D]] date parts.
+
+    Guards the reverse route so a non-dated path (or a junk numeric path)
+    is not mistaken for a dated post URL. Ranges are loose (the unique
+    per-site slug is the real lookup key, and the on-page canonical link
+    dedupes any off-by-one date), but shapes must match: 4-digit year,
+    month 1-12, day 1-31. Uses `isascii() and isdigit()` because bare
+    `str.isdigit()` accepts unicode digit forms `int()` then rejects.
+    """
+    if not segments:
+        return True
+    year, *rest = segments
+    if not (year.isascii() and year.isdigit() and len(year) == 4):
+        return False
+    for seg, (lo, hi) in zip(rest, [(1, 12), (1, 31)], strict=False):
+        if not (seg.isascii() and seg.isdigit()) or not (lo <= int(seg) <= hi):
+            return False
+    return True
+
+
+def post_url_for(
+    site: Site,
+    post_slug: str,
+    *,
+    published_at: datetime | None = None,
+    db: Session | None = None,
+) -> str | None:
     """Build a post's public URL from the site's post_index prefix.
 
-    `post_slug` is appended as a single path segment; callers
-    supply only the post's own slug, never a slash-joined chain.
-    Returns None when no post_index page exists on the site.
+    `post_slug` is appended as a single path segment; callers supply only
+    the post's own slug, never a slash-joined chain. Under a dated
+    `permalink_style` (set on the blog index page), the post's publish
+    date is inserted as leading segments between the prefix and the slug;
+    pass `published_at` so the URL matches. A missing date (draft) yields
+    the flat shape. Returns None when no post_index page exists.
 
     Pass `db=` from within an open session so nested SessionLocal
-    rollbacks don't drop the caller's pending writes (importer use
-    case under SQLite's SingletonThreadPool).
+    rollbacks don't drop the caller's pending writes (importer use case
+    under SQLite's SingletonThreadPool).
     """
     prefix = post_index_url_for(site, db=db)
     if prefix is None:
         return None
-    if prefix == "/":
-        return f"/{post_slug}/"
-    return f"{prefix}{post_slug}/"
+    segments = _permalink_date_segments(published_at, permalink_style_for(site, db=db))
+    tail = "/".join([*segments, post_slug]) + "/"
+    return f"/{tail}" if prefix == "/" else f"{prefix}{tail}"
 
 
 def tag_segment_for(site: Site) -> str:
@@ -232,6 +323,11 @@ def tag_segment_for(site: Site) -> str:
     if not isinstance(raw, str):
         return DEFAULT_TAG_SEGMENT
     if not _TAG_SEGMENT_RE.match(raw):
+        return DEFAULT_TAG_SEGMENT
+    # An all-digit segment (e.g. "2026") would collide with a `year`-style
+    # dated post URL (both are `<index>/<n>/<slug>/`), shadowing the post;
+    # reject it defensively, same posture as the other fallbacks here.
+    if raw.isascii() and raw.isdigit():
         return DEFAULT_TAG_SEGMENT
     return raw
 

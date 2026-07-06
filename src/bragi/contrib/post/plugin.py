@@ -91,7 +91,7 @@ def _url_for_post(post: Any) -> str | None:
             if site is None:
                 return None
             db.expunge(site)
-    return post_url_for(site, post.slug)
+    return post_url_for(site, post.slug, published_at=post.published_at)
 
 
 def _resolve_internal_post_link(key: str, site_id: int) -> InternalLinkResolution | None:
@@ -110,7 +110,7 @@ def _resolve_internal_post_link(key: str, site_id: int) -> InternalLinkResolutio
     except ValueError:
         int_id = None
     with SessionLocal() as db:
-        stmt = select(Post.id, Post.slug).where(Post.site_id == site_id)
+        stmt = select(Post.id, Post.slug, Post.published_at).where(Post.site_id == site_id)
         if int_id is not None:
             stmt = stmt.where(or_(Post.id == int_id, Post.slug == key))
         else:
@@ -119,7 +119,7 @@ def _resolve_internal_post_link(key: str, site_id: int) -> InternalLinkResolutio
     if row is None:
         return None
     site = g.get("site")
-    href = post_url_for(site, row.slug) if site is not None else None
+    href = post_url_for(site, row.slug, published_at=row.published_at) if site is not None else None
     if href is None:
         return None
     return InternalLinkResolution(entity_id=row.id, href=href)
@@ -128,7 +128,9 @@ def _resolve_internal_post_link(key: str, site_id: int) -> InternalLinkResolutio
 def _render_post(post: Any, _request: Any) -> str:
     """Render a Post into a full HTML page via Jinja."""
     site = g.get("site")
-    post_path = post_url_for(site, post.slug) if site is not None else None
+    post_path = (
+        post_url_for(site, post.slug, published_at=post.published_at) if site is not None else None
+    )
     canonical = post.canonical_url or (
         f"{site.canonical_url}{post_path}" if site and site.canonical_url and post_path else None
     )

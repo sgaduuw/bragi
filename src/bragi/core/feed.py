@@ -27,7 +27,7 @@ def _iso(dt: datetime | None) -> str:
 
 
 def _entry_xml(post: Post, author_name: str, site_canonical: str, site: Site) -> str:
-    post_path = post_url_for(site, post.slug)
+    post_path = post_url_for(site, post.slug, published_at=post.published_at)
     if post_path is None:
         # No POST_INDEX page on this site -> no public URL.
         # Caller filters these out; this branch is defensive.

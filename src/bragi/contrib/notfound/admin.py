@@ -87,7 +87,9 @@ def _gather_candidates(db: Any, site: Any) -> list[Candidate]:
             Candidate(
                 slug=p.slug,
                 title=p.title,
-                url=None if archived else post_url_for(site, p.slug, db=db),
+                url=None
+                if archived
+                else post_url_for(site, p.slug, published_at=p.published_at, db=db),
                 edit_url=url_for("post_admin.edit_post", post_id=p.id),
                 archived=archived,
             )

@@ -223,7 +223,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             # `post_url_for` so the redirect targets the URL the
             # delivery app will actually serve.
             if post.status == PostStatus.PUBLISHED:
-                target = post_url_for(site, post.slug, db=db)
+                target = post_url_for(site, post.slug, published_at=post.published_at, db=db)
                 if target is not None and _maybe_emit_redirect(
                     db, site_id, _link_path(item["link"]), target
                 ):
