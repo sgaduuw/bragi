@@ -25,6 +25,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   old flat URLs: they return 404 until relinked. (Deliberate: no bulk
   re-redirect on structure change.)
 
+### Fixed
+- Post/page excerpts (and OG descriptions) no longer leak footnote
+  definition text or the inline `[^1]` markers: `make_excerpt` now skips
+  the trailing footnotes section and the footnote-ref markers.
+
 ## [1.41.0] - 2026-07-06
 
 ### Added

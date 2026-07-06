@@ -140,8 +140,28 @@ def make_excerpt(text: str, *, max_chars: int = 200) -> str:
         def __init__(self) -> None:
             super().__init__()
             self.parts: list[str] = []
+            # Footnotes render as a trailing `<section class="footnotes">`
+            # (definition prose) plus inline `<sup class="footnote-ref">`
+            # markers. Both would leak into the excerpt / OG description,
+            # so skip them: once the footnotes section starts it runs to
+            # end-of-document, and each ref marker is skipped for its span.
+            self._in_footnotes = False
+            self._skip_ref = False
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            cls = dict(attrs).get("class") or ""
+            if tag == "section" and "footnotes" in cls:
+                self._in_footnotes = True
+            elif tag == "sup" and "footnote-ref" in cls:
+                self._skip_ref = True
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag == "sup":
+                self._skip_ref = False
 
         def handle_data(self, data: str) -> None:
+            if self._in_footnotes or self._skip_ref:
+                return
             self.parts.append(data)
 
     parser = _TextExtractor()

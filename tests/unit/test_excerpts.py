@@ -14,6 +14,24 @@ from bragi.core.render.markdown import make_excerpt
 # ============================================================
 
 
+def test_make_excerpt_strips_footnotes(
+    patched_session_locals: object,
+) -> None:
+    """Footnote definitions and inline ref markers must not leak into the
+    excerpt / OG description. Needs the app-bound renderer (the footnote
+    plugin is registered via register_markdown_extension)."""
+    from bragi.apps.delivery import create_delivery_app
+
+    app = create_delivery_app()
+    body = "Intro prose here.[^1] Visible tail.\n\n[^1]: hidden definition text.\n"
+    with app.app_context():
+        out = make_excerpt(body)
+    assert "hidden definition" not in out
+    assert "[^1]" not in out
+    assert "Intro prose here." in out
+    assert "Visible tail." in out
+
+
 def test_make_excerpt_drops_backslash_escapes() -> None:
     """The Ghost importer's markdownify over-escapes (`1\\.9`,
     `HTTP\\-103`). The excerpt should consume those escapes via
