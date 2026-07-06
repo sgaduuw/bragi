@@ -284,12 +284,19 @@ def render_post_index_page(site: Site, page: Page) -> Response:
         return response
 
 
-def render_post(site: Site, post_slug: str) -> Response | None:
+def render_post(site: Site, post_slug: str, *, require_dateless: bool = False) -> Response | None:
     """Look up `post_slug` under `site` and render it via Post Spec.
 
     Returns None when the post isn't reachable (missing, draft,
     scheduled, archived). The dispatcher treats None as "defer"
     and falls through to 404.
+
+    `require_dateless` serves the flat-URL fallback for a published post
+    that has no `published_at`: such a post has no date to build a dated
+    permalink from, so `post_url_for` emits its flat URL even under a
+    dated style, and this lets that flat URL resolve. A post that DOES
+    have a date returns None here (its real URL is the dated one, so its
+    flat URL is the accepted 404 fallout).
     """
     with SessionLocal() as db:
         post = db.execute(
@@ -300,6 +307,8 @@ def render_post(site: Site, post_slug: str) -> Response | None:
             )
         ).scalar_one_or_none()
         if post is None:
+            return None
+        if require_dateless and post.published_at is not None:
             return None
         etag = etag_for("post", post.id, post.updated_at)
         not_modified = maybe_304(request, etag=etag, last_modified=post.updated_at)
@@ -668,5 +677,15 @@ def show_page(slug_path: str) -> ResponseReturnValue:
         if response is None:
             abort(404)
         return response
+
+    # Flat-URL fallback for a published post with no publish date: it has
+    # no dated URL to advertise, so `post_url_for` emits its flat
+    # `<index>/<slug>/` even under a dated style. Resolve that here (only
+    # when the post is genuinely dateless) so a post's advertised URL
+    # always works. A dated post's own flat URL still 404s (the fallout).
+    if depth > 0 and len(remainder) == 1:
+        response = render_post(site, remainder[0], require_dateless=True)
+        if response is not None:
+            return response
 
     abort(404)

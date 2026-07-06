@@ -86,6 +86,19 @@ def test_valid_permalink_date_segments() -> None:
     assert valid_permalink_date_segments(["２０２６"]) is False
 
 
+def test_tag_segment_rejects_numeric() -> None:
+    """An all-digit tag_segment would collide with a year-style dated post
+    URL, so tag_segment_for falls back to the default."""
+    from types import SimpleNamespace
+
+    from bragi.core.url import tag_segment_for
+
+    numeric = SimpleNamespace(extra_settings={"tag_segment": "2026"})
+    named = SimpleNamespace(extra_settings={"tag_segment": "category"})
+    assert tag_segment_for(numeric) == "tag"
+    assert tag_segment_for(named) == "category"
+
+
 # ============================================================
 # Delivery round-trip: forward URL + reverse resolution per style
 # ============================================================
@@ -123,6 +136,21 @@ def delivery_app(
             author_id=user.id,
             status=PostStatus.PUBLISHED,
             published_at=datetime(2026, 5, 1, tzinfo=UTC),
+        )
+    )
+    # A PUBLISHED post with no publish date (an importer can produce this
+    # from source frontmatter that carries no date). It has no dated URL.
+    db_session.add(
+        Post(
+            site_id=site.id,
+            slug="undated",
+            title="Undated Post",
+            body_markdown="x",
+            body_html="<p>x</p>",
+            body_excerpt="x",
+            author_id=user.id,
+            status=PostStatus.PUBLISHED,
+            published_at=None,
         )
     )
     db_session.commit()
@@ -202,6 +230,30 @@ def test_wrong_date_still_resolves_by_unique_slug(
     resp = client.get("/posts/1999/hello/", headers=HOST)
     assert resp.status_code == 200
     assert "https://blog.example.com/posts/2026/hello/" in resp.data.decode()
+
+
+def test_dateless_published_post_resolves_flat_under_dated_style(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A published post with no publish date has no dated URL, so its
+    advertised flat URL must still resolve under a dated style (whereas a
+    dated post's flat URL 404s)."""
+    _set_style(db_session_factory, "year")
+    client = delivery_app.test_client()
+    assert client.get("/posts/undated/", headers=HOST).status_code == 200
+    # The dated post's flat URL is still the accepted fallout.
+    assert client.get("/posts/hello/", headers=HOST).status_code == 404
+
+
+def test_archive_still_wins_under_year_style(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """`<index>/archive/` must dispatch to the archive, not be mistaken
+    for a `year`-style post URL (the archive branch is ordered first and
+    keys on the literal `archive`)."""
+    _set_style(db_session_factory, "year")
+    client = delivery_app.test_client()
+    assert client.get("/posts/archive/", headers=HOST).status_code == 200
 
 
 def test_post_url_for_dated(db_session: Session, db_session_factory: sessionmaker[Session]) -> None:

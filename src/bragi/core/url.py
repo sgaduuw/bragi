@@ -324,6 +324,11 @@ def tag_segment_for(site: Site) -> str:
         return DEFAULT_TAG_SEGMENT
     if not _TAG_SEGMENT_RE.match(raw):
         return DEFAULT_TAG_SEGMENT
+    # An all-digit segment (e.g. "2026") would collide with a `year`-style
+    # dated post URL (both are `<index>/<n>/<slug>/`), shadowing the post;
+    # reject it defensively, same posture as the other fallbacks here.
+    if raw.isascii() and raw.isdigit():
+        return DEFAULT_TAG_SEGMENT
     return raw
 
 
