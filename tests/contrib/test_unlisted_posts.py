@@ -222,3 +222,23 @@ def test_unlisted_does_not_fire_on_post_published(
         assert calls == ["published"]
     finally:
         pm.unregister(rec)
+
+
+def test_delist_published_to_unlisted_does_not_refire_published(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """published -> unlisted (delist) must NOT fire on_post_published: it
+    is not a first-publish, so no re-federation / re-ping on delist."""
+    pid = _wip_id(db_session_factory)
+    rec, calls = _published_recorder()
+    pm = admin_app.extensions["plugin_manager"]
+    pm.register(rec)
+    try:
+        client = admin_app.test_client()
+        _login(client)
+        _patch_status(client, pid, "published")
+        assert calls == ["published"]
+        _patch_status(client, pid, "unlisted")
+        assert calls == ["published"]  # delist did not re-fire
+    finally:
+        pm.unregister(rec)
