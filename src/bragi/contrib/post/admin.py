@@ -76,6 +76,20 @@ bp = Blueprint(
 )
 
 
+def _stamp_public_url_date(post: Post, new_status: str) -> None:
+    """Stamp `published_at` the first time a post acquires a public URL.
+
+    Both PUBLISHED and UNLISTED are reachable and need a date for their
+    permalink, so both stamp; the `is None` guard preserves the original
+    across a republish or a published<->unlisted flip. This is separate
+    from firing `on_post_published` (federation / ping), which stays
+    gated to PUBLISHED so an unlisted post never federates. Every publish
+    path funnels through here so the rule can't drift across them.
+    """
+    if new_status in (PostStatus.PUBLISHED, PostStatus.UNLISTED) and post.published_at is None:
+        post.published_at = naive_utcnow()
+
+
 def _form_from_request() -> dict[str, str]:
     """Pull the post-edit form fields off the current request."""
     return {
@@ -592,15 +606,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         was_unpublished = post.status != PostStatus.PUBLISHED
         becoming_published = form["status"] == PostStatus.PUBLISHED
         is_first_publish = was_unpublished and becoming_published
-        # Stamp published_at the first time a post acquires a public URL:
-        # PUBLISHED *or* UNLISTED (both are reachable and need a permalink
-        # date). on_post_published (federation / ping) stays gated to
-        # PUBLISHED below, so unlisted posts don't federate.
-        if (
-            form["status"] in (PostStatus.PUBLISHED, PostStatus.UNLISTED)
-            and post.published_at is None
-        ):
-            post.published_at = naive_utcnow()
+        _stamp_public_url_date(post, form["status"])
         post.status = form["status"]
 
         _sync_post_tags(db, post, form["tags"], post.site_id)
@@ -1362,10 +1368,7 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         is_first_publish = was_unpublished and becoming_published
 
         before = _post_snapshot(post)
-        # Stamp on first public URL (published or unlisted); federation
-        # still fires only for published (is_first_publish, below).
-        if raw in (PostStatus.PUBLISHED, PostStatus.UNLISTED) and post.published_at is None:
-            post.published_at = naive_utcnow()
+        _stamp_public_url_date(post, raw)
         post.status = raw
         after = _post_snapshot(post)
 
@@ -1616,10 +1619,7 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         # transition. Without this, a restored draft that becomes
         # published silently misses federation fan-out.
         is_first_publish = was_unpublished and post.status == PostStatus.PUBLISHED
-        # Stamp on first public URL (a restored revision may be unlisted);
-        # on_post_published still fires only for published.
-        if post.status in (PostStatus.PUBLISHED, PostStatus.UNLISTED) and post.published_at is None:
-            post.published_at = naive_utcnow()
+        _stamp_public_url_date(post, post.status)
         restored_id = post.id
         site_id_for_audit = post.site_id
         after = _post_snapshot(post)
