@@ -183,7 +183,7 @@ def _post_absolute_url(site: Site, post: Post) -> str | None:
         return None
     from bragi.core.url import post_url_for
 
-    path: Any = post_url_for(site, post.slug)
+    path: Any = post_url_for(site, post.slug, published_at=post.published_at)
     if not path:
         return None
     return f"{canonical}{path}"

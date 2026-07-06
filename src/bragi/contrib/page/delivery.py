@@ -62,7 +62,15 @@ from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
 from bragi.core.seo import featured_image_url_for
 from bragi.core.time import naive_utcnow
-from bragi.core.url import page_url_for, post_index_page_for, tag_segment_for, tag_url_for
+from bragi.core.url import (
+    page_url_for,
+    permalink_depth,
+    permalink_style_for,
+    post_index_page_for,
+    tag_segment_for,
+    tag_url_for,
+    valid_permalink_date_segments,
+)
 
 DEFAULT_POSTS_PER_PAGE = 10
 
@@ -646,9 +654,17 @@ def show_page(slug_path: str) -> ResponseReturnValue:
             return render_archive_month(site, year, month)
         abort(404)
 
-    # 5. Single-segment post: `<index>/<post-slug>/`.
-    if len(remainder) == 1:
-        response = render_post(site, remainder[0])
+    # 5. Post permalink: `<index>/[<Y>[/<M>[/<D>]]/]<post-slug>/`. The
+    #    number of leading date segments is set by the blog index's
+    #    `permalink_style` (flat = none, the historical shape). The slug
+    #    is always the last segment and is unique per site, so the date
+    #    parts are validated for shape but not matched against the post
+    #    (the on-page canonical link dedupes an off-date URL). A flat URL
+    #    under a dated style does not resolve: a 404 is the accepted
+    #    fallout when the operator switches structure.
+    depth = permalink_depth(permalink_style_for(site))
+    if len(remainder) == depth + 1 and valid_permalink_date_segments(remainder[:depth]):
+        response = render_post(site, remainder[-1])
         if response is None:
             abort(404)
         return response

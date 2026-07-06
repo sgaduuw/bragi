@@ -145,6 +145,28 @@
     {% include "admin/_resume_fieldset.html" %}
   {% endif %}
 
+  {# Blog-index settings: only meaningful once the page IS a post_index,
+     so this renders on the persisted/submitted kind (same server-side
+     gating as the resume fieldset above). #}
+  {% if current_kind == 'post_index' %}
+  <fieldset>
+    <legend>Post permalinks</legend>
+    <label for="permalink_style">URL structure for posts under this blog</label>
+    {% set current_permalink = form.get('permalink_style', 'flat') %}
+    <select name="permalink_style" id="permalink_style">
+      <option value="flat" {% if current_permalink == 'flat' %}selected{% endif %}>/slug/ (no date)</option>
+      <option value="year" {% if current_permalink == 'year' %}selected{% endif %}>/YYYY/slug/</option>
+      <option value="year_month" {% if current_permalink == 'year_month' %}selected{% endif %}>/YYYY/MM/slug/</option>
+      <option value="year_month_day" {% if current_permalink == 'year_month_day' %}selected{% endif %}>/YYYY/MM/DD/slug/</option>
+    </select>
+    <small>
+      Date segments come from each post's publish date (UTC). Changing
+      this does not redirect existing post URLs: old links 404 until
+      relinked.
+    </small>
+  </fieldset>
+  {% endif %}
+
   {# A working copy carries no status: the live row keeps its PUBLISHED
      status through promote. Hide the control entirely in WC mode so the
      save can't accidentally carry a status field. #}

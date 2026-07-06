@@ -93,6 +93,9 @@ def _form_from_request() -> dict[str, str]:
         "parent_id": (request.form.get("parent_id") or "").strip(),
         "featured_image_id": (request.form.get("featured_image_id") or "").strip(),
         "resume_data": request.form.get("resume_data") or "",
+        # Dated-permalink structure for a POST_INDEX (blog) page. Ignored
+        # for other kinds; coerced to a known style at persist time.
+        "permalink_style": (request.form.get("permalink_style") or "flat").strip(),
         # Nav controls. show_in_nav: HTML checkbox sends "1" when
         # checked and is absent when unchecked, so we coerce on
         # write only (a string "1" in the form dict means "checked").
@@ -794,6 +797,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
                 "parent_id": str(page.parent_id) if page.parent_id else "",
                 "featured_image_id": str(page.featured_image_id) if page.featured_image_id else "",
                 "resume_data": "",
+                # Seed the blog-index permalink style from the persisted
+                # bag so the select reflects the saved choice on GET-edit.
+                "permalink_style": page.extra_settings.get("permalink_style", "flat"),
                 # Pre-populate the nav fields from the persisted page. Without
                 # these keys the template renders the checkbox as checked and
                 # the order as 0 regardless of stored state, so any save (even
@@ -925,6 +931,18 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             new_kind=new_kind,
         )
         page.status = str(form["status"])
+
+        # Persist the blog-index permalink structure on a POST_INDEX page;
+        # clear it on any other kind so a demoted page carries no stale
+        # style. Coerced to a known value (unknown -> flat).
+        from bragi.core.url import normalize_permalink_style
+
+        if new_kind == PageKind.POST_INDEX:
+            page.extra_settings["permalink_style"] = normalize_permalink_style(
+                form.get("permalink_style")
+            )
+        else:
+            page.extra_settings.pop("permalink_style", None)
 
         # `after` reads the just-mutated in-session attributes (no
         # commit needed for plain ORM reads).

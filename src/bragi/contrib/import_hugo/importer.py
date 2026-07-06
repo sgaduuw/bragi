@@ -248,7 +248,7 @@ def apply(path: Any, site: Any, options: dict[str, Any]) -> ImportResult:
             # yet (post URLs are unreachable until one exists, so
             # an alias target wouldn't resolve either).
             aliases = meta.get("aliases") or []
-            target = post_url_for(site, slug, db=db)
+            target = post_url_for(site, slug, published_at=post.published_at, db=db)
             if isinstance(aliases, list) and target is not None:
                 for alias in aliases:
                     if not isinstance(alias, str):

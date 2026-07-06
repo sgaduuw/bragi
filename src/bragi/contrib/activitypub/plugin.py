@@ -66,7 +66,7 @@ def on_post_published(item: Any, session: Any) -> None:
         # opens a fresh SessionLocal on a separate connection that can't
         # see the uncommitted row, so the URL would resolve wrong (or to
         # None) and the fanout would be skipped or misaddressed.
-        path = post_url_for(site, item.slug, db=session)
+        path = post_url_for(site, item.slug, published_at=item.published_at, db=session)
         if path is None:
             return
         fanout_for_post(session, item, post_path=path)
