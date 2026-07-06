@@ -23,6 +23,16 @@ def test_hl_lines_expand_ranges() -> None:
     assert hl == [1, 3, 4, 5, 8]
 
 
+def test_huge_range_is_ignored_not_expanded() -> None:
+    """An absurd author-supplied range must not expand to billions of
+    ints and hang the save (DoS guard)."""
+    _, _, hl, _ = parse_fence_meta("python {1-2000000000}")
+    assert hl == []
+    # A sane range still works.
+    _, _, hl2, _ = parse_fence_meta("python {5-8}")
+    assert hl2 == [5, 6, 7, 8]
+
+
 def test_linenos_flag() -> None:
     _, _, _, linenos = parse_fence_meta("python linenos")
     assert linenos is True

@@ -33,7 +33,13 @@ def _expand_ranges(spec: str) -> list[int]:
         if "-" in part:
             lo, _, hi = part.partition("-")
             if lo.strip().isdigit() and hi.strip().isdigit():
-                out.update(range(int(lo), int(hi) + 1))
+                a, b = int(lo), int(hi)
+                # Cap the span: a fence info string is author-controlled, so
+                # a huge range (`{1-2000000000}`) would expand to billions
+                # of ints and hang the save. No real block highlights >1000
+                # lines; an out-of-range or backwards span is ignored.
+                if 0 <= b - a <= 1000:
+                    out.update(range(a, b + 1))
         elif part.isdigit():
             out.add(int(part))
     return sorted(out)
@@ -71,13 +77,11 @@ def configure_code_meta(md: MarkdownIt) -> None:
     def render_fence(tokens: list[Any], idx: int, options: object, env: object) -> str:
         token = tokens[idx]
         language, filename, hl_lines, linenos = parse_fence_meta(token.info)
-        code = escapeHtml(token.content)
-        if not (filename or hl_lines or linenos):
-            # No affordance metadata: defer to the existing chain.
-            if previous is not None:
-                return cast(str, previous(tokens, idx, options, env))
-            lang_class = f' class="language-{escapeHtml(language)}"' if language else ""
-            return f"<pre><code{lang_class}>{code}</code></pre>\n"
+        # No affordance metadata: defer to the existing chain (mermaid,
+        # then the default). Only fall through to build the plain fence
+        # ourselves when there is no prior rule to delegate to.
+        if not (filename or hl_lines or linenos) and previous is not None:
+            return cast(str, previous(tokens, idx, options, env))
         attrs = ""
         if filename:
             attrs += f' data-filename="{escapeHtml(filename)}"'
@@ -86,6 +90,6 @@ def configure_code_meta(md: MarkdownIt) -> None:
         if linenos:
             attrs += ' data-linenos="1"'
         lang_class = f' class="language-{escapeHtml(language)}"' if language else ""
-        return f"<pre{attrs}><code{lang_class}>{code}</code></pre>\n"
+        return f"<pre{attrs}><code{lang_class}>{escapeHtml(token.content)}</code></pre>\n"
 
     md.renderer.rules["fence"] = render_fence  # type: ignore[attr-defined]
