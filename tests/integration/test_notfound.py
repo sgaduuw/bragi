@@ -236,6 +236,159 @@ def test_admin_list_is_site_scoped(
     assert b"/a-only/" not in on_b.data
 
 
+def _record_two(delivery_app: Flask, factory: sessionmaker[Session]) -> list[int]:
+    _seed(factory)
+    _record_404(delivery_app, "/bulk-a/", HOST_A)
+    _record_404(delivery_app, "/bulk-b/", HOST_A)
+    with factory() as db:
+        return [r.id for r in db.execute(select(NotFound)).scalars().all()]
+
+
+def test_bulk_dismiss_selected(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    ids = _record_two(delivery_app_file_db, file_db_session_factory)
+    client = admin_app_file_db.test_client()
+    _login(client)
+    resp = client.post(
+        "/admin/sites/blog/not-found/bulk/dismiss",
+        data={"_csrf_token": _csrf_token(client), "ids": [str(i) for i in ids]},
+        headers={"Host": HOST_A},
+    )
+    assert resp.status_code == 302
+    with file_db_session_factory() as db:
+        for i in ids:
+            assert db.get(NotFound, i).status == NotFoundStatus.DISMISSED  # type: ignore[union-attr]
+
+
+def test_bulk_ignore_selected(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    ids = _record_two(delivery_app_file_db, file_db_session_factory)
+    client = admin_app_file_db.test_client()
+    _login(client)
+    client.post(
+        "/admin/sites/blog/not-found/bulk/ignore",
+        data={"_csrf_token": _csrf_token(client), "ids": [str(i) for i in ids]},
+        headers={"Host": HOST_A},
+    )
+    with file_db_session_factory() as db:
+        for i in ids:
+            assert db.get(NotFound, i).status == NotFoundStatus.IGNORED  # type: ignore[union-attr]
+
+
+def test_bulk_gone_creates_410_redirects_and_hides_rows(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    ids = _record_two(delivery_app_file_db, file_db_session_factory)
+    client = admin_app_file_db.test_client()
+    _login(client)
+    client.post(
+        "/admin/sites/blog/not-found/bulk/gone",
+        data={"_csrf_token": _csrf_token(client), "ids": [str(i) for i in ids]},
+        headers={"Host": HOST_A},
+    )
+    with file_db_session_factory() as db:
+        reds = db.execute(select(Redirect).where(Redirect.status_code == 410)).scalars().all()
+        paths = {r.source_path for r in reds}
+        assert paths == {"/bulk-a/", "/bulk-b/"}
+        assert all(r.match_type == MatchType.EXACT and r.active for r in reds)
+    # The rows auto-hide (an active exact redirect now covers each path).
+    body = client.get("/admin/sites/blog/not-found/", headers={"Host": HOST_A}).data
+    assert b"<code>/bulk-a/</code>" not in body
+    assert b"<code>/bulk-b/</code>" not in body
+
+
+def test_bulk_gone_is_idempotent(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    """A second bulk-gone over an already-covered path does not duplicate
+    or error (ON CONFLICT DO NOTHING on the redirects unique key)."""
+    ids = _record_two(delivery_app_file_db, file_db_session_factory)
+    client = admin_app_file_db.test_client()
+    _login(client)
+    for _ in range(2):
+        client.post(
+            "/admin/sites/blog/not-found/bulk/gone",
+            data={"_csrf_token": _csrf_token(client), "ids": [str(i) for i in ids]},
+            headers={"Host": HOST_A},
+        )
+    with file_db_session_factory() as db:
+        reds = db.execute(select(Redirect).where(Redirect.status_code == 410)).scalars().all()
+        assert len(reds) == 2  # not 4
+
+
+def test_bulk_empty_selection_is_a_noop(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    ids = _record_two(delivery_app_file_db, file_db_session_factory)
+    client = admin_app_file_db.test_client()
+    _login(client)
+    client.post(
+        "/admin/sites/blog/not-found/bulk/dismiss",
+        data={"_csrf_token": _csrf_token(client)},  # no ids
+        headers={"Host": HOST_A},
+    )
+    with file_db_session_factory() as db:
+        for i in ids:
+            assert db.get(NotFound, i).status == NotFoundStatus.OPEN  # type: ignore[union-attr]
+
+
+def test_bulk_is_site_scoped(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    """Site A's ids posted under site B's URL touch nothing (the site_id
+    predicate filters them out)."""
+    ids = _record_two(delivery_app_file_db, file_db_session_factory)
+    client = admin_app_file_db.test_client()
+    _login(client)
+    client.post(
+        "/admin/sites/other/not-found/bulk/ignore",
+        data={"_csrf_token": _csrf_token(client), "ids": [str(i) for i in ids]},
+        headers={"Host": HOST_A},
+    )
+    with file_db_session_factory() as db:
+        for i in ids:
+            assert db.get(NotFound, i).status == NotFoundStatus.OPEN  # type: ignore[union-attr]
+
+
+def test_row_actions_render_as_dropdown_plus_standalone_ignore(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    """The resolving actions collapse into a `row-actions` dropdown; the
+    permanent Ignore stays a standalone button. Guards the markup so the
+    dismiss/ignore/redirect endpoints stay wired after the UI tidy-up."""
+    _seed(file_db_session_factory)
+    _record_404(delivery_app_file_db, "/tidy/", HOST_A)
+
+    client = admin_app_file_db.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/not-found/", headers={"Host": HOST_A}).data.decode()
+    assert 'class="row-actions"' in body
+    assert "Actions" in body
+    # The five folded actions + the standalone Ignore are all present.
+    assert "notfound_admin.dismiss" not in body  # url_for resolved to a path
+    assert "/dismiss" in body
+    assert "/ignore" in body
+    assert "New page" in body and "New post" in body
+    assert "Create redirect" in body and "Mark Gone" in body
+    assert ">Ignore</button>" in body
+
+
 def test_open_row_hidden_when_exact_redirect_covers_it(
     admin_app_file_db: Flask,
     delivery_app_file_db: Flask,

@@ -3,6 +3,7 @@
 <table>
   <thead>
     <tr>
+      <th><input type="checkbox" class="nf-select-all" title="Select all"></th>
       <th>Path</th>
       <th>Hits</th>
       <th>Last seen</th>
@@ -15,6 +16,7 @@
     {% for e in entries %}
     {% set nf = e.nf %}
     <tr>
+      <td><input type="checkbox" class="nf-check" value="{{ nf.id }}"></td>
       <td><code>{{ nf.path }}</code></td>
       <td>{{ nf.count }}</td>
       <td>{{ nf.last_seen.strftime('%Y-%m-%d') }}</td>
@@ -32,24 +34,30 @@
         {% endif %}
       </td>
       <td>
-        {# Create redirect: pre-fills source_path and (when we have a
-           confident target) the suggested URL, via the redirects form. #}
-        <a class="btn secondary"
-           href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=(e.suggestion.candidate.url if e.suggestion and e.suggestion.kind == 'redirect' else ''), status_code=301) }}">Redirect</a>
-        {# Mark Gone: 410 ignores the target, but the form validates a
-           relative one, so pass the dead path itself. #}
-        <a class="btn secondary"
-           href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=nf.path, status_code=410) }}">Gone</a>
-        <a class="btn secondary" href="{{ url_for('page_admin.new_page', slug=e.leaf) }}">New page</a>
-        <a class="btn secondary" href="{{ url_for('post_admin.new_post', slug=e.leaf) }}">New post</a>
-        {# Dismiss = soft: clears it now, but it returns if the path 404s
-           again. Ignore = permanent: never show this path again. #}
-        <form method="post"
-              action="{{ url_for('notfound_admin.dismiss', nf_id=nf.id) }}"
-              style="display: inline; margin: 0;">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="secondary" title="Clear it now; it returns if this path 404s again">Dismiss</button>
-        </form>
+        {# The resolving actions collapse into one dropdown so the row
+           isn't a wall of buttons; the permanent Ignore stays standalone
+           (destructive, one click). Panel items are plain menu rows (no
+           `btn` class) so `.dropdown-panel` styles them. #}
+        <details class="row-actions">
+          <summary class="btn secondary">Actions &#9662;</summary>
+          <div class="dropdown-panel">
+            {# Create redirect: pre-fills source_path and (when we have a
+               confident target) the suggested URL, via the redirects form. #}
+            <a href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=(e.suggestion.candidate.url if e.suggestion and e.suggestion.kind == 'redirect' else ''), status_code=301) }}">Create redirect</a>
+            {# Mark Gone: 410 ignores the target, but the form validates a
+               relative one, so pass the dead path itself. #}
+            <a href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=nf.path, status_code=410) }}">Mark Gone (410)</a>
+            <a href="{{ url_for('page_admin.new_page', slug=e.leaf) }}">New page</a>
+            <a href="{{ url_for('post_admin.new_post', slug=e.leaf) }}">New post</a>
+            {# Dismiss = soft: clears it now, but it returns if the path
+               404s again. #}
+            <form method="post" action="{{ url_for('notfound_admin.dismiss', nf_id=nf.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" title="Clear it now; it returns if this path 404s again">Dismiss</button>
+            </form>
+          </div>
+        </details>
+        {# Ignore = permanent: never show this path again. #}
         <form method="post"
               action="{{ url_for('notfound_admin.ignore', nf_id=nf.id) }}"
               style="display: inline; margin: 0;">
@@ -61,6 +69,25 @@
     {% endfor %}
   </tbody>
 </table>
+
+{# Bulk actions. Buttons gather the checked row ids into the hidden form
+   (below) and POST it -- the table can't be wrapped in a <form> because
+   the per-row action dropdown already contains forms (no nested forms).
+   Wiring lives in the delegated script in notfound_list.html. #}
+<div class="notfound-bulk" style="margin-top: 0.75rem; display: flex; gap: 0.4rem; align-items: center;">
+  <span><span class="nf-selected-count">0</span> selected</span>
+  <button type="button" class="btn secondary nf-bulk"
+          data-nf-action="{{ url_for('notfound_admin.bulk_dismiss') }}">Dismiss selected</button>
+  <button type="button" class="btn secondary nf-bulk"
+          data-nf-action="{{ url_for('notfound_admin.bulk_gone') }}"
+          data-nf-confirm="Mark the selected paths Gone (410)? This creates redirect rows.">Mark Gone selected</button>
+  <button type="button" class="btn danger nf-bulk"
+          data-nf-action="{{ url_for('notfound_admin.bulk_ignore') }}"
+          data-nf-confirm="Permanently ignore the selected 404s? They will never be re-recorded.">Ignore selected</button>
+</div>
+<form method="post" class="nf-bulk-form" hidden>
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+</form>
 
 <nav style="margin-top: 1rem;">
   {% if page > 1 %}
