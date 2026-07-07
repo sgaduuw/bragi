@@ -62,7 +62,15 @@ from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
 from bragi.core.seo import featured_image_url_for
 from bragi.core.time import naive_utcnow
-from bragi.core.url import page_url_for, post_index_page_for, tag_segment_for, tag_url_for
+from bragi.core.url import (
+    page_url_for,
+    permalink_depth,
+    permalink_style_for,
+    post_index_page_for,
+    tag_segment_for,
+    tag_url_for,
+    valid_permalink_date_segments,
+)
 
 DEFAULT_POSTS_PER_PAGE = 10
 
@@ -276,22 +284,35 @@ def render_post_index_page(site: Site, page: Page) -> Response:
         return response
 
 
-def render_post(site: Site, post_slug: str) -> Response | None:
+def render_post(site: Site, post_slug: str, *, require_dateless: bool = False) -> Response | None:
     """Look up `post_slug` under `site` and render it via Post Spec.
 
     Returns None when the post isn't reachable (missing, draft,
     scheduled, archived). The dispatcher treats None as "defer"
     and falls through to 404.
+
+    `require_dateless` serves the flat-URL fallback for a published post
+    that has no `published_at`: such a post has no date to build a dated
+    permalink from, so `post_url_for` emits its flat URL even under a
+    dated style, and this lets that flat URL resolve. A post that DOES
+    have a date returns None here (its real URL is the dated one, so its
+    flat URL is the accepted 404 fallout).
     """
     with SessionLocal() as db:
         post = db.execute(
             select(Post).where(
                 Post.site_id == site.id,
                 Post.slug == post_slug,
-                Post.status == PostStatus.PUBLISHED,
+                # UNLISTED posts resolve by direct URL (this is the only
+                # public read path that includes them); every listing /
+                # feed / sitemap / search / federation surface stays on
+                # `== PUBLISHED` and excludes them.
+                Post.status.in_((PostStatus.PUBLISHED, PostStatus.UNLISTED)),
             )
         ).scalar_one_or_none()
         if post is None:
+            return None
+        if require_dateless and post.published_at is not None:
             return None
         etag = etag_for("post", post.id, post.updated_at)
         not_modified = maybe_304(request, etag=etag, last_modified=post.updated_at)
@@ -646,11 +667,29 @@ def show_page(slug_path: str) -> ResponseReturnValue:
             return render_archive_month(site, year, month)
         abort(404)
 
-    # 5. Single-segment post: `<index>/<post-slug>/`.
-    if len(remainder) == 1:
-        response = render_post(site, remainder[0])
+    # 5. Post permalink: `<index>/[<Y>[/<M>[/<D>]]/]<post-slug>/`. The
+    #    number of leading date segments is set by the blog index's
+    #    `permalink_style` (flat = none, the historical shape). The slug
+    #    is always the last segment and is unique per site, so the date
+    #    parts are validated for shape but not matched against the post
+    #    (the on-page canonical link dedupes an off-date URL). A flat URL
+    #    under a dated style does not resolve: a 404 is the accepted
+    #    fallout when the operator switches structure.
+    depth = permalink_depth(permalink_style_for(site))
+    if len(remainder) == depth + 1 and valid_permalink_date_segments(remainder[:depth]):
+        response = render_post(site, remainder[-1])
         if response is None:
             abort(404)
         return response
+
+    # Flat-URL fallback for a published post with no publish date: it has
+    # no dated URL to advertise, so `post_url_for` emits its flat
+    # `<index>/<slug>/` even under a dated style. Resolve that here (only
+    # when the post is genuinely dateless) so a post's advertised URL
+    # always works. A dated post's own flat URL still 404s (the fallout).
+    if depth > 0 and len(remainder) == 1:
+        response = render_post(site, remainder[0], require_dateless=True)
+        if response is not None:
+            return response
 
     abort(404)

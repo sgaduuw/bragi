@@ -393,8 +393,10 @@ def on_post_updated(item: Any, before: dict[str, Any], after: dict[str, Any], se
     if isinstance(item, Post):
         if not slug_changed:
             return
-        old_path = post_url_for(site, str(old_slug))
-        new_path = post_url_for(site, str(new_slug))
+        # The publish date doesn't change on a slug edit, so both the old
+        # and new dated paths share `item.published_at`.
+        old_path = post_url_for(site, str(old_slug), published_at=item.published_at)
+        new_path = post_url_for(site, str(new_slug), published_at=item.published_at)
         if old_path is None or new_path is None or old_path == new_path:
             # No post_index page on this site (no public URL
             # exists), or the URL didn't actually change.

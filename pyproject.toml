@@ -3,7 +3,7 @@
 # is held by The Managarm Project's IDL. Import path stays `import bragi`.
 # See _claude/CONTEXT.md "PyPI publication as bragi-cms" for the rationale.
 name = "bragi-cms"
-version = "1.41.0"
+version = "1.42.0"
 description = "Multisite CMS with htmx, plugins, and SEO baked in."
 authors = [{name = "Eelco Wesemann", email = "6771014+sgaduuw@users.noreply.github.com"}]
 license = "MIT"
@@ -73,6 +73,7 @@ theme_minimal = "bragi.contrib.theme_minimal.plugin"
 theme_serif = "bragi.contrib.theme_serif.plugin"
 theme_terminal = "bragi.contrib.theme_terminal.plugin"
 embeds = "bragi.contrib.embeds.plugin"
+callouts = "bragi.contrib.callouts.plugin"
 datasets = "bragi.contrib.datasets.plugin"
 internal_links = "bragi.contrib.internal_links.plugin"
 markdown_extras = "bragi.contrib.markdown_extras.plugin"

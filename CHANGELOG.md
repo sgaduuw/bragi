@@ -4,6 +4,44 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.42.0] - 2026-07-07
+
+### Added
+- Callouts / admonitions: `::: note` / `tip` / `info` / `warning` / `danger`
+  markdown blocks with parsed inner content and an optional custom title
+  (`::: warning Heads up`), rendered as a themeable
+  `<aside class="callout callout--<type>">` and styled by all four built-in
+  themes. Authorable in the TipTap editor via a Callout toolbar dropdown.
+- Unlisted posts: a new **Unlisted** status (alongside draft / published /
+  archived). An unlisted post is reachable at its direct URL but excluded
+  from every listing, feed, sitemap, tag page, archive, search result, and
+  federation fanout (no ActivityPub / webmention / IndexNow ping). Publish
+  by link, not by discovery. Set it on the post edit form or the inline
+  status cell. (Not auto-`noindex`: the per-post noindex toggle still
+  governs indexing.)
+- Code-block affordances: a copy-to-clipboard button on every highlighted
+  block, plus opt-in fenced-code metadata for a filename label
+  (`title="app.py"`), highlighted lines (`{1,3-5}`), and a line-number
+  gutter (`linenos`), e.g. ```` ```python title="app.py" {2,4} linenos ````.
+  Pygments server-side highlighting is unchanged for plain fences.
+- Configurable dated post permalinks. The blog-index (post index) page's
+  edit form gains a **Post permalinks** setting (shown only when the page
+  kind is "post index") choosing the URL structure for its posts: flat
+  `/<slug>/` (default, unchanged), `/YYYY/<slug>/`, `/YYYY/MM/<slug>/`, or
+  `/YYYY/MM/DD/<slug>/`. Date segments come from each post's publish date
+  in UTC. The setting persists in a new per-page `extra_settings` bag
+  (`pages.extra_settings`), mirroring `sites.extra_settings`.
+
+### Changed
+- Switching a blog to a dated permalink structure does not redirect the
+  old flat URLs: they return 404 until relinked. (Deliberate: no bulk
+  re-redirect on structure change.)
+
+### Fixed
+- Post/page excerpts (and OG descriptions) no longer leak footnote
+  definition text or the inline `[^1]` markers: `make_excerpt` now skips
+  the trailing footnotes section and the footnote-ref markers.
+
 ## [1.41.0] - 2026-07-06
 
 ### Added

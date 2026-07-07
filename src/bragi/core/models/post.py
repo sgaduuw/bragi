@@ -33,6 +33,12 @@ class PostStatus:
     DRAFT = "draft"
     SCHEDULED = "scheduled"
     PUBLISHED = "published"
+    # Reachable by its direct URL, but excluded from every listing, feed,
+    # sitemap, tag page, archive, search result, and federation fanout.
+    # "Publish by link, not by discovery." Every public surface gates on
+    # `== PUBLISHED`, so UNLISTED is excluded from all of them for free;
+    # only the direct-URL `render_post` widens to include it.
+    UNLISTED = "unlisted"
     ARCHIVED = "archived"
 
 
