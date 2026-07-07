@@ -75,3 +75,16 @@ class Site(IdMixin, TimestampsMixin, Base):
         nullable=True,
         default=None,
     )
+
+    @property
+    def base_url(self) -> str:
+        """`canonical_url` without a trailing slash, for URL joins.
+
+        Every absolute-URL builder concatenates `base + "/path"`, so a
+        stored value that carries a trailing slash (operators type
+        "https://host/" freely) would otherwise yield "https://host//path".
+        Stripping here makes the stored slash harmless at every call site,
+        so existing rows are correct without a re-save. Empty stays empty
+        (falsy), so `if site.base_url` guards behave like `canonical_url`.
+        """
+        return (self.canonical_url or "").rstrip("/")

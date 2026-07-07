@@ -75,7 +75,7 @@ def _push_url_for_item(item: Any, session: Any) -> None:
         # has no POST_INDEX page). Nothing to enqueue.
         return
 
-    canonical = site.canonical_url.rstrip("/")
+    canonical = site.base_url
     url = f"{canonical}{path}"
 
     # Enqueue a debounced ping on the SUPPLIED session (#430): no

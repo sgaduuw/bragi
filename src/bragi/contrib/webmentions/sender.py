@@ -178,7 +178,7 @@ def _post_absolute_url(site: Site, post: Post) -> str | None:
     public URL and the function returns None (FAILED is the
     right outcome: there's nothing for the receiver to fetch).
     """
-    canonical = (site.canonical_url or "").rstrip("/")
+    canonical = site.base_url
     if not canonical:
         return None
     from bragi.core.url import post_url_for

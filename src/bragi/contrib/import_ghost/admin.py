@@ -39,6 +39,7 @@ from flask import (
 )
 from flask.typing import ResponseReturnValue
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.contrib.import_ghost.importer import detect, plan
 from bragi.core.db import SessionLocal
 from bragi.core.permissions import require_role, resolve_site_or_abort
@@ -90,6 +91,7 @@ def _resolve_stash(token: str) -> Path | None:
 @bp.route("/upload", methods=["GET", "POST"])
 def upload(site_slug: str) -> ResponseReturnValue:
     if request.method == "GET":
+        set_breadcrumbs(Crumb("Import", "admin_imports.index"), Crumb("Ghost", None))
         return render_template(
             "admin/import_ghost_upload.html",
             site_slug=site_slug,
@@ -216,6 +218,7 @@ def review(site_slug: str, token: str) -> ResponseReturnValue:
         flash("Import plan unreadable.", "error")
         return redirect(url_for("ghost_admin.upload", site_slug=site_slug))
 
+    set_breadcrumbs(Crumb("Import", "admin_imports.index"), Crumb("Ghost", None))
     return render_template(
         "admin/import_ghost_review.html",
         site_slug=site_slug,

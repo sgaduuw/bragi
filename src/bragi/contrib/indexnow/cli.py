@@ -72,7 +72,7 @@ def setup(site_slug: str, key: str | None) -> None:
             sys.exit(1)
         site.extra_settings["indexnow_key"] = fresh_key
         db.commit()
-        canonical = (site.canonical_url or "").rstrip("/")
+        canonical = site.base_url
     click.echo(f"IndexNow key written for site {site_slug}.")
     if canonical:
         click.echo(f"Verification URL: {canonical}/{fresh_key}.txt")

@@ -31,6 +31,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import wants_partial
 from bragi.core.models.analytics_event import AnalyticsEvent as AnalyticsEventRow
@@ -162,7 +163,7 @@ def list_analytics(site_slug: str) -> ResponseReturnValue:
         # comes from"; drop them. `canonical_url` is the site's base URL
         # ("https://host"), so an internal referrer starts with it. When
         # canonical_url is unset (dev / tests) the filter is skipped.
-        base = (site.canonical_url or "").rstrip("/")
+        base = site.base_url
         ref_where = [
             AnalyticsEventRow.site_id == site.id,
             AnalyticsEventRow.event_type == "pageview",
@@ -217,6 +218,7 @@ def list_analytics(site_slug: str) -> ResponseReturnValue:
         for ref, count in top_referrers_rows
     ]
 
+    set_breadcrumbs(Crumb("Analytics", None))
     return render_template(
         "admin/analytics_dashboard.html",
         site_slug=site_slug,
@@ -266,11 +268,15 @@ def page_detail(site_slug: str) -> ResponseReturnValue:
         # Don't resolve a title for an empty path: `_norm("")` is "/", which
         # would mislabel a missing-arg drill-down with the home page's title.
         title = _title_map(db, site).get(_norm(path)) if path else None
-        base = (site.canonical_url or "").rstrip("/")
+        base = site.base_url
 
     trend = [{"day": str(day), "count": int(count)} for day, count in rows]
     total = sum(int(count) for _, count in rows)
 
+    set_breadcrumbs(
+        Crumb("Analytics", "analytics_admin.list_analytics"),
+        Crumb(title or path, None),
+    )
     template = (
         "admin/_analytics_page_trend.html"
         if wants_partial()

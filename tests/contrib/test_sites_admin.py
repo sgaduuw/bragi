@@ -130,6 +130,32 @@ def test_new_post_creates_row(admin_app: Flask, db_session_factory: sessionmaker
     assert created.active is True
 
 
+def test_new_strips_trailing_slash_from_canonical(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A stored canonical origin never keeps a trailing slash (it would
+    stack into "//path" at every URL-build site)."""
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/new")
+    client.post(
+        "/admin/sites/new",
+        data={
+            "slug": "trailing",
+            "hostname": "trailing.example.com",
+            "title": "Trailing",
+            "locale": "en",
+            "timezone": "UTC",
+            "canonical_url": "https://trailing.example.com/",
+            "_csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    with db_session_factory() as db:
+        created = db.execute(select(Site).where(Site.slug == "trailing")).scalar_one()
+    assert created.canonical_url == "https://trailing.example.com"
+
+
 def test_new_normalises_case(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     """The hostname must end up lower-case so the site_resolver
     (which lower-cases Host) actually finds the row."""

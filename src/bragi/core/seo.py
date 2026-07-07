@@ -64,7 +64,7 @@ def featured_image_url_for(
         # pipeline).
         social_key = social_card_storage_key(session, attachment)
         bytes_key = social_key or attachment.storage_key
-        return f"{site.canonical_url}/attachments/{bytes_key}"
+        return f"{site.base_url}/attachments/{bytes_key}"
 
     if db is not None:
         return _resolve(db)

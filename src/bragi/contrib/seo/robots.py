@@ -22,7 +22,7 @@ def robots_txt() -> ResponseReturnValue:
     site = g.get("site")
     if site is None:
         abort(404)
-    canonical = (site.canonical_url or "").rstrip("/")
+    canonical = site.base_url
     sitemap_line = f"Sitemap: {canonical}/sitemap.xml" if canonical else ""
     body = "User-agent: *\nAllow: /\n"
     if sitemap_line:

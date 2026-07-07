@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 import click
 import jinja2
-from flask import Blueprint, has_request_context, request
+from flask import Blueprint, g, has_request_context, request
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -90,7 +90,7 @@ def _queue_outbox_for_post(post: Post, session: Any, *, reconcile: bool = False)
     if site is None:
         return
     body_html = post.body_html or ""
-    canonical = (site.canonical_url or "").rstrip("/")
+    canonical = site.base_url
     base = canonical or f"https://{site.hostname}"
     # `urlparse(...).hostname` (not `.netloc`): `netloc` includes
     # port + userinfo, but `is_external` (and the consuming side
@@ -141,13 +141,24 @@ def _queue_outbox_for_post(post: Post, session: Any, *, reconcile: bool = False)
 
 
 def _webmention_endpoint_url() -> str | None:
-    """Absolute URL of this site's inbox, for the discovery `<link>`."""
+    """Absolute URL of this site's inbox, for the discovery `<link>`.
+
+    Prefer the resolved site's declared `canonical_url` origin so the
+    discovery link matches the canonical scheme/host. Behind a reverse
+    proxy `request.scheme` is the plain-HTTP proxy->app hop (unless
+    X-Forwarded-Proto is honoured), which would advertise an http://
+    inbox on an https:// site. Fall back to the request origin only when
+    no site is resolved or none has a canonical URL configured.
+    """
     if not has_request_context():
         return None
-    scheme = request.scheme or "https"
+    site = g.get("site")
+    if site is not None and site.base_url:
+        return f"{site.base_url}/webmentions"
     host = request.host or ""
     if not host:
         return None
+    scheme = request.scheme or "https"
     return f"{scheme}://{host}/webmentions"
 
 

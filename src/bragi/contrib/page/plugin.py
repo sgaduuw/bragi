@@ -110,7 +110,7 @@ def _render_page(page: Any, _request: Any) -> str:
         resume = ResumeData.model_validate(page.resume_data or {})
         path = _effective_url_for_page(page)
         canonical = page.canonical_url or (
-            f"{site.canonical_url}{path}" if site and site.canonical_url else None
+            f"{site.base_url}{path}" if site and site.canonical_url else None
         )
         author_name: str | None = None
         if page.author_id:
@@ -138,7 +138,7 @@ def _render_page(page: Any, _request: Any) -> str:
         return response.get_data(as_text=True)
     path = _effective_url_for_page(page)
     canonical = page.canonical_url or (
-        f"{site.canonical_url}{path}" if site and site.canonical_url else None
+        f"{site.base_url}{path}" if site and site.canonical_url else None
     )
     author_name = None
     if page.author_id:

@@ -262,6 +262,12 @@ def render_post_index_page(site: Site, page: Page) -> Response:
         if not_modified is not None:
             return not_modified
 
+        # The post-index page is served at "/" when it's the home (its
+        # slug-derived URL 301s to root), so canonicalise to the root there
+        # rather than page_url_for's "//" (an empty slug chain joins to a
+        # bare "//"). base_url drops the stored trailing slash so we don't
+        # stack a third.
+        index_path = "/" if site.home_page_id == page.id else page_url_for(page, db=db)
         body = render_template(
             "delivery/post_index.html",
             site=site,
@@ -274,9 +280,7 @@ def render_post_index_page(site: Site, page: Page) -> Response:
             has_prev=page_n > 1,
             has_next=page_n < total_pages,
             meta_description=page.meta_description or page.body_excerpt or None,
-            canonical_url=(
-                f"{site.canonical_url}{page_url_for(page, db=db)}" if site.canonical_url else None
-            ),
+            canonical_url=(f"{site.base_url}{index_path}" if site.canonical_url else None),
             og_image_url=featured_image_url_for(item=page, site=site, db=db),
         )
         response = make_response(body)
@@ -370,7 +374,7 @@ def render_tag_feed(site: Site, tag_slug: str) -> Response | None:
     filtered by tag. Returns None when no Tag with `tag_slug`
     exists; the dispatcher converts that to a 404.
     """
-    base = (site.canonical_url or "").rstrip("/")
+    base = site.base_url
     with SessionLocal() as db:
         tag = db.execute(
             select(Tag).where(Tag.site_id == site.id, Tag.slug == tag_slug)

@@ -32,6 +32,7 @@ from sqlalchemy import select
 from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
+from bragi.core.pagination import page_arg
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.safe_urls import safe_relative_path
 
@@ -126,10 +127,7 @@ def _validate(form: dict[str, object]) -> list[str]:
 
 @bp.route("/", methods=["GET"])
 def list_redirects(site_slug: str) -> ResponseReturnValue:
-    try:
-        page = max(1, int(request.args.get("page", "1")))
-    except ValueError:
-        page = 1
+    page = page_arg()
 
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)

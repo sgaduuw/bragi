@@ -59,6 +59,7 @@ from bragi.core.htmx import is_htmx, wants_partial
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.site import Site
+from bragi.core.pagination import page_arg
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.storage import resolve as resolve_storage
 from bragi.settings import settings
@@ -113,10 +114,7 @@ PAGE_SIZE = 50
 
 @bp.route("/", methods=["GET"])
 def list_attachments(site_slug: str) -> ResponseReturnValue:
-    try:
-        page = max(1, int(request.args.get("page", "1")))
-    except ValueError:
-        page = 1
+    page = page_arg()
     missing_alt = request.args.get("missing_alt") == "1"
 
     with SessionLocal() as db:
@@ -337,10 +335,7 @@ def picker(site_slug: str) -> ResponseReturnValue:
     Auth piggybacks on the admin login_required guard installed
     on this Blueprint at app boot.
     """
-    try:
-        page = max(1, int(request.args.get("page", "1")))
-    except ValueError:
-        page = 1
+    page = page_arg()
 
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)

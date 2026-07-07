@@ -38,6 +38,7 @@ from bragi.core.models.not_found import NotFound, NotFoundStatus
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
+from bragi.core.pagination import page_arg
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.url import page_url_for, post_url_for
 
@@ -125,10 +126,7 @@ def _gather_candidates(db: Any, site: Any) -> list[Candidate]:
 
 @bp.route("/", methods=["GET"])
 def list_notfound(site_slug: str) -> ResponseReturnValue:
-    try:
-        page = max(1, int(request.args.get("page", "1")))
-    except ValueError:
-        page = 1
+    page = page_arg()
 
     set_breadcrumbs(Crumb("404s", None))
 

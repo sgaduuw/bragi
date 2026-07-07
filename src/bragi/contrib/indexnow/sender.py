@@ -50,7 +50,7 @@ def send_one(db: Session, ping: IndexNowPing) -> str:
     key wins), matching the hook's URL/host/key logic.
     """
     site = db.get(Site, ping.site_id)
-    canonical = (site.canonical_url or "").rstrip("/") if site is not None else ""
+    canonical = site.base_url if site is not None else ""
     key = (site.extra_settings or {}).get("indexnow_key") if site is not None else None
     if not canonical or not key:
         # The site was deleted, lost its canonical URL, or had its
