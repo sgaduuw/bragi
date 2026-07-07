@@ -13,6 +13,7 @@ from flask import Blueprint, abort, render_template, request
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.user import User
@@ -68,6 +69,7 @@ def list_audit() -> ResponseReturnValue:
         else:
             users_by_id = {}
 
+    set_breadcrumbs(Crumb("Audit log", None))
     return render_template(
         "admin/audit_list.html",
         rows=rows,

@@ -31,6 +31,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import wants_partial
 from bragi.core.models.analytics_event import AnalyticsEvent as AnalyticsEventRow
@@ -217,6 +218,7 @@ def list_analytics(site_slug: str) -> ResponseReturnValue:
         for ref, count in top_referrers_rows
     ]
 
+    set_breadcrumbs(Crumb("Analytics", None))
     return render_template(
         "admin/analytics_dashboard.html",
         site_slug=site_slug,
@@ -271,6 +273,10 @@ def page_detail(site_slug: str) -> ResponseReturnValue:
     trend = [{"day": str(day), "count": int(count)} for day, count in rows]
     total = sum(int(count) for _, count in rows)
 
+    set_breadcrumbs(
+        Crumb("Analytics", "analytics_admin.list_analytics"),
+        Crumb(title or path, None),
+    )
     template = (
         "admin/_analytics_page_trend.html"
         if wants_partial()

@@ -4,6 +4,15 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Admin breadcrumbs are now consistent: the section pages that were
+  missing them (Analytics, Team, Webmentions, Audit log, My/All sessions,
+  API tokens, Import) now show a breadcrumb bar, and the Ghost/LinkedIn
+  import sub-flows and the per-page analytics drill-down show a two-level
+  trail. Dialog pickers and the admin home stay bar-less by design.
+
 ## [1.44.0] - 2026-07-07
 
 ### Added

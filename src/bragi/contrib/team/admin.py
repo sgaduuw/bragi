@@ -28,6 +28,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.site import Site
@@ -84,6 +85,7 @@ def list_team(site_slug: str) -> ResponseReturnValue:
         # "Owner" + role row stacked in the same table.
         collaborators = [(r, u) for r, u in roles if u.id != site.owner_user_id]
 
+    set_breadcrumbs(Crumb("Team", None))
     return render_template(
         "admin/team_list.html",
         site=site,

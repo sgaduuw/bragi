@@ -26,6 +26,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.session import Session as SessionRow
 from bragi.core.models.user import User
@@ -61,6 +62,7 @@ def list_self_sessions() -> ResponseReturnValue:
             .all()
         )
 
+    set_breadcrumbs(Crumb("My sessions", None))
     return render_template(
         "admin/sessions_self_list.html",
         sessions=rows,
@@ -132,6 +134,7 @@ def list_all_sessions() -> ResponseReturnValue:
         ).all()
 
     pairs = [(row, user) for row, user in rows]
+    set_breadcrumbs(Crumb("All sessions", None))
     return render_template(
         "admin/sessions_all_list.html",
         pairs=pairs,
