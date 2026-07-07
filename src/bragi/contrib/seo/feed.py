@@ -34,7 +34,7 @@ def feed_xml() -> ResponseReturnValue:
     if site is None:
         abort(404)
 
-    base = (site.canonical_url or "").rstrip("/")
+    base = site.base_url
 
     with SessionLocal() as db:
         posts = (

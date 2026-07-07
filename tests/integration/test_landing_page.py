@@ -143,6 +143,11 @@ def test_root_renders_post_index_listing_when_home_set_to_blog_index(
     assert "An excerpt." in body
     # POST_INDEX home: posts now live at `/<slug>/`, not `/posts/<slug>/`
     assert 'href="/first/"' in body
+    # Home-mapped post index canonicalises to the site root, not "//"
+    # (page_url_for's empty slug chain) or "///" (a stored trailing
+    # slash stacked on top).
+    assert 'href="https://blog.example.com/"' in body
+    assert "https://blog.example.com//" not in body
 
 
 def test_root_renders_pinned_carousel_above_recency(

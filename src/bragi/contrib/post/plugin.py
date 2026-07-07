@@ -132,7 +132,7 @@ def _render_post(post: Any, _request: Any) -> str:
         post_url_for(site, post.slug, published_at=post.published_at) if site is not None else None
     )
     canonical = post.canonical_url or (
-        f"{site.canonical_url}{post_path}" if site and site.canonical_url and post_path else None
+        f"{site.base_url}{post_path}" if site and site.canonical_url and post_path else None
     )
     author_name: str | None = None
     author_bio: str | None = None

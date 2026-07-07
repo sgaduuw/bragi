@@ -85,7 +85,9 @@ def _form_from_request() -> dict[str, str]:
         "title": (request.form.get("title") or "").strip(),
         "locale": (request.form.get("locale") or "en").strip(),
         "timezone": (request.form.get("timezone") or "UTC").strip(),
-        "canonical_url": (request.form.get("canonical_url") or "").strip(),
+        # Strip a trailing slash so the stored origin joins cleanly with
+        # "/path" everywhere (base_url also strips defensively at read).
+        "canonical_url": (request.form.get("canonical_url") or "").strip().rstrip("/"),
         "theme": (request.form.get("theme") or "").strip(),
         "home_page_id": (request.form.get("home_page_id") or "").strip(),
         "default_featured_image_id": (request.form.get("default_featured_image_id") or "").strip(),

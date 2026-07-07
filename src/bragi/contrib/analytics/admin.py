@@ -163,7 +163,7 @@ def list_analytics(site_slug: str) -> ResponseReturnValue:
         # comes from"; drop them. `canonical_url` is the site's base URL
         # ("https://host"), so an internal referrer starts with it. When
         # canonical_url is unset (dev / tests) the filter is skipped.
-        base = (site.canonical_url or "").rstrip("/")
+        base = site.base_url
         ref_where = [
             AnalyticsEventRow.site_id == site.id,
             AnalyticsEventRow.event_type == "pageview",
@@ -268,7 +268,7 @@ def page_detail(site_slug: str) -> ResponseReturnValue:
         # Don't resolve a title for an empty path: `_norm("")` is "/", which
         # would mislabel a missing-arg drill-down with the home page's title.
         title = _title_map(db, site).get(_norm(path)) if path else None
-        base = (site.canonical_url or "").rstrip("/")
+        base = site.base_url
 
     trend = [{"day": str(day), "count": int(count)} for day, count in rows]
     total = sum(int(count) for _, count in rows)

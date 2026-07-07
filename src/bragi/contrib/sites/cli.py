@@ -58,7 +58,9 @@ def create_site(
     """
     slug_normalized = slug.strip().lower()
     hostname_normalized = hostname.strip().lower()
-    canonical = canonical_url or f"https://{hostname_normalized}"
+    # Strip a trailing slash so the stored origin joins cleanly with
+    # "/path" (mirrors the admin form; base_url also strips at read).
+    canonical = (canonical_url or f"https://{hostname_normalized}").rstrip("/")
 
     with SessionLocal() as db:
         for column, value in (("slug", slug_normalized), ("hostname", hostname_normalized)):

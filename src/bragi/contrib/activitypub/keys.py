@@ -83,7 +83,7 @@ def _actor_url_for(site: Site) -> str:
     `key_id` can be filled at generation time without a request
     context.
     """
-    canonical = (site.canonical_url or "").rstrip("/")
+    canonical = site.base_url
     if not canonical:
         canonical = f"https://{site.hostname or ''}".rstrip("/")
     return f"{canonical}/actor"
