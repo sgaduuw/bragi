@@ -176,6 +176,33 @@ body.admin {
   border-top: 1px solid #eee;
   margin: 0.3rem 0;
 }
+
+/* Row action menu (404-triage: collapse a wall of per-row buttons into
+   one <details> dropdown). Reuses .dropdown-panel visuals but overlays
+   (absolute) instead of accordion so an open menu doesn't reflow the
+   table row. The permanent "Ignore" button sits outside, standalone. */
+.row-actions {
+  position: relative;
+  display: inline-block;
+}
+.row-actions > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.row-actions > summary::-webkit-details-marker {
+  display: none;
+}
+.row-actions .dropdown-panel {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  min-width: 11rem;
+  /* Panel items are plain menu rows, not .btn buttons; the panel's own
+     `.dropdown-panel a/button` rules style them (left-aligned, full width). */
+}
+.row-actions .dropdown-panel form {
+  margin: 0;
+}
 .user-avatar {
   display: inline-block;
   width: 1.5em;

@@ -236,6 +236,31 @@ def test_admin_list_is_site_scoped(
     assert b"/a-only/" not in on_b.data
 
 
+def test_row_actions_render_as_dropdown_plus_standalone_ignore(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    """The resolving actions collapse into a `row-actions` dropdown; the
+    permanent Ignore stays a standalone button. Guards the markup so the
+    dismiss/ignore/redirect endpoints stay wired after the UI tidy-up."""
+    _seed(file_db_session_factory)
+    _record_404(delivery_app_file_db, "/tidy/", HOST_A)
+
+    client = admin_app_file_db.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/not-found/", headers={"Host": HOST_A}).data.decode()
+    assert 'class="row-actions"' in body
+    assert "Actions" in body
+    # The five folded actions + the standalone Ignore are all present.
+    assert "notfound_admin.dismiss" not in body  # url_for resolved to a path
+    assert "/dismiss" in body
+    assert "/ignore" in body
+    assert "New page" in body and "New post" in body
+    assert "Create redirect" in body and "Mark Gone" in body
+    assert ">Ignore</button>" in body
+
+
 def test_open_row_hidden_when_exact_redirect_covers_it(
     admin_app_file_db: Flask,
     delivery_app_file_db: Flask,
