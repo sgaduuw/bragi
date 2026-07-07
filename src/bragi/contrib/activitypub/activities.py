@@ -26,13 +26,13 @@ PUBLIC_AUDIENCE = "https://www.w3.org/ns/activitystreams#Public"
 
 def actor_url(site: Site) -> str:
     """Canonical absolute URL of the site's actor."""
-    canonical = (site.canonical_url or "").rstrip("/")
+    canonical = site.base_url
     return f"{canonical}/actor"
 
 
 def post_canonical_url(site: Site, path: str) -> str:
     """Combine the site canonical with a relative post path."""
-    return f"{(site.canonical_url or '').rstrip('/')}{path}"
+    return f"{site.base_url}{path}"
 
 
 def note_for_post(site: Site, post: Post, post_path: str) -> dict[str, Any]:
@@ -104,7 +104,7 @@ def actor_document(site: Site, public_key_pem: str, key_id: str) -> dict[str, An
     automated publisher, not a real Person; some receivers render
     a different badge for Service actors.
     """
-    canonical = (site.canonical_url or "").rstrip("/")
+    canonical = site.base_url
     handle = _sanitise_handle(site.slug)
     return {
         "@context": [

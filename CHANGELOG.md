@@ -4,6 +4,21 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Delivery canonical / `og:url` on the home-mapped blog index no longer
+  renders a malformed `https://host///` (the empty home slug chain joined
+  to `//` and the stored canonical's trailing slash added a third). The
+  home post index now canonicalises to the site root. A new `Site.base_url`
+  strips the stored trailing slash at every URL-build site, so og:image and
+  internal-link canonicals lose their stray `//` too, and the canonical URL
+  is normalised (trailing slash stripped) when a site is saved.
+- The `<link rel="webmention">` discovery URL now follows the site's declared
+  (https) canonical origin instead of `request.scheme`, which is the
+  plain-http proxy hop behind a reverse proxy and advertised an `http://`
+  inbox on an `https://` site.
+
 ## [1.44.0] - 2026-07-07
 
 ### Added

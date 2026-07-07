@@ -91,6 +91,41 @@ def test_find_endpoint_falls_back_to_link_in_head() -> None:
     assert endpoint == "https://target.example/wm"
 
 
+def test_discovery_link_uses_site_canonical_origin_not_request_scheme() -> None:
+    """The advertised inbox follows the site's declared https origin.
+
+    Behind a reverse proxy the request hop is plain http; deriving the
+    link from `request.scheme` would advertise an http:// inbox on an
+    https:// site. The resolved site's `base_url` wins (and its trailing
+    slash is stripped, so no "//webmentions").
+    """
+    from flask import Flask, g
+
+    from bragi.contrib.webmentions.plugin import _webmention_endpoint_url
+    from bragi.core.models.site import Site
+
+    app = Flask(__name__)
+    with app.test_request_context("/", base_url="http://blog.example.com"):
+        g.site = Site(
+            slug="b",
+            hostname="blog.example.com",
+            title="B",
+            canonical_url="https://blog.example.com/",
+            owner_user_id=1,
+        )
+        assert _webmention_endpoint_url() == "https://blog.example.com/webmentions"
+
+
+def test_discovery_link_falls_back_to_request_origin_without_site() -> None:
+    from flask import Flask
+
+    from bragi.contrib.webmentions.plugin import _webmention_endpoint_url
+
+    app = Flask(__name__)
+    with app.test_request_context("/", base_url="https://x.example.com"):
+        assert _webmention_endpoint_url() == "https://x.example.com/webmentions"
+
+
 def test_source_links_to_target_matches_after_redirect() -> None:
     html = '<a href="https://blog.example/post/x/">link</a>'
     assert source_links_to_target(html, "https://other.example/", "https://blog.example/post/x/")

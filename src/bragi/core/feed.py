@@ -73,7 +73,7 @@ def build_atom_feed(
     "Unknown" rather than failing the render. `feed_id` is the
     `<id>` for the feed itself (typically the alternate URL).
     """
-    site_canonical = (getattr(site, "canonical_url", "") or "").rstrip("/")
+    site_canonical = getattr(site, "base_url", "")
     feed_updated = _iso(posts[0].updated_at) if posts else _iso(None)
 
     parts: list[str] = [

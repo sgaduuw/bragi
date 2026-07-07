@@ -52,7 +52,7 @@ def sitemap_xml() -> ResponseReturnValue:
         else []
     )
 
-    canonical = (site.canonical_url or "").rstrip("/")
+    canonical = site.base_url
     entries: list[tuple[Any, str, Any]] = []
     with SessionLocal() as db:
         # Bulk-load the site's pages so every per-row `url_for`'s
