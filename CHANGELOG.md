@@ -7,12 +7,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Callouts / admonitions: `::: note` / `tip` / `info` / `warning` / `danger`
+  markdown blocks with parsed inner content and an optional custom title
+  (`::: warning Heads up`), rendered as a themeable
+  `<aside class="callout callout--<type>">` and styled by all four built-in
+  themes. Authorable in the TipTap editor via a Callout toolbar dropdown.
 - Unlisted posts: a new **Unlisted** status (alongside draft / published /
   archived). An unlisted post is reachable at its direct URL but excluded
   from every listing, feed, sitemap, tag page, archive, search result, and
   federation fanout (no ActivityPub / webmention / IndexNow ping). Publish
   by link, not by discovery. Set it on the post edit form or the inline
-  status cell. (Not auto-`noindex` — the per-post noindex toggle still
+  status cell. (Not auto-`noindex`: the per-post noindex toggle still
   governs indexing.)
 - Code-block affordances: a copy-to-clipboard button on every highlighted
   block, plus opt-in fenced-code metadata for a filename label
