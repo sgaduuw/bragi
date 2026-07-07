@@ -31,6 +31,7 @@ from bragi.contrib.attachments.service import create_attachment_from_bytes
 from bragi.contrib.unsplash.client import UnsplashClient
 from bragi.core.db import SessionLocal
 from bragi.core.models.attachment import Attachment
+from bragi.core.pagination import page_arg
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.settings import settings
 
@@ -86,10 +87,7 @@ def search(site_slug: str) -> ResponseReturnValue:
     if len(query) < 2:
         abort(400, description="query must be at least 2 characters")
 
-    try:
-        page = max(1, int(request.args.get("page") or 1))
-    except ValueError:
-        page = 1
+    page = page_arg()
 
     client = _build_client(settings)
     results = client.search_photos(query=query, page=page)

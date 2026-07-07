@@ -21,6 +21,7 @@ from flask.typing import ResponseReturnValue
 from bragi.api import SearchResults
 from bragi.core.cache import apply_cache_policy
 from bragi.core.htmx import is_htmx
+from bragi.core.pagination import page_arg
 
 bp = Blueprint("search", __name__, template_folder="templates")
 
@@ -32,10 +33,7 @@ def search() -> ResponseReturnValue:
         abort(404)
 
     query = (request.args.get("q") or "").strip()
-    try:
-        page = max(1, int(request.args.get("page", "1")))
-    except ValueError:
-        page = 1
+    page = page_arg()
 
     registry = current_app.extensions.get("registry")
     backend = registry.search_backend() if registry is not None else None

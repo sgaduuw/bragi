@@ -17,6 +17,7 @@ from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.audit_log import AuditLog
 from bragi.core.models.user import User
+from bragi.core.pagination import page_arg
 from bragi.core.security import is_superuser
 
 bp = Blueprint(
@@ -34,10 +35,7 @@ def list_audit() -> ResponseReturnValue:
     if not is_superuser():
         abort(403)
 
-    try:
-        page = max(1, int(request.args.get("page", "1")))
-    except ValueError:
-        page = 1
+    page = page_arg()
     action_filter = (request.args.get("action") or "").strip()
     actor_filter = (request.args.get("actor") or "").strip()
 
