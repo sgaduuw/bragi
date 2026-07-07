@@ -3,6 +3,7 @@
 <table>
   <thead>
     <tr>
+      <th><input type="checkbox" class="nf-select-all" title="Select all"></th>
       <th>Path</th>
       <th>Hits</th>
       <th>Last seen</th>
@@ -15,6 +16,7 @@
     {% for e in entries %}
     {% set nf = e.nf %}
     <tr>
+      <td><input type="checkbox" class="nf-check" value="{{ nf.id }}"></td>
       <td><code>{{ nf.path }}</code></td>
       <td>{{ nf.count }}</td>
       <td>{{ nf.last_seen.strftime('%Y-%m-%d') }}</td>
@@ -67,6 +69,25 @@
     {% endfor %}
   </tbody>
 </table>
+
+{# Bulk actions. Buttons gather the checked row ids into the hidden form
+   (below) and POST it -- the table can't be wrapped in a <form> because
+   the per-row action dropdown already contains forms (no nested forms).
+   Wiring lives in the delegated script in notfound_list.html. #}
+<div class="notfound-bulk" style="margin-top: 0.75rem; display: flex; gap: 0.4rem; align-items: center;">
+  <span><span class="nf-selected-count">0</span> selected</span>
+  <button type="button" class="btn secondary nf-bulk"
+          data-nf-action="{{ url_for('notfound_admin.bulk_dismiss') }}">Dismiss selected</button>
+  <button type="button" class="btn secondary nf-bulk"
+          data-nf-action="{{ url_for('notfound_admin.bulk_gone') }}"
+          data-nf-confirm="Mark the selected paths Gone (410)? This creates redirect rows.">Mark Gone selected</button>
+  <button type="button" class="btn danger nf-bulk"
+          data-nf-action="{{ url_for('notfound_admin.bulk_ignore') }}"
+          data-nf-confirm="Permanently ignore the selected 404s? They will never be re-recorded.">Ignore selected</button>
+</div>
+<form method="post" class="nf-bulk-form" hidden>
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+</form>
 
 <nav style="margin-top: 1rem;">
   {% if page > 1 %}

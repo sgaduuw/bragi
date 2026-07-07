@@ -14,4 +14,48 @@
    out before recording.</small></p>
 
 {% include "admin/_notfound_list_table.html" %}
+
+{# Bulk-select wiring. Delegated + in the full page (not the swapped
+   partial), so it survives the htmx Refresh / pagination swaps. The
+   checkboxes live outside any form; a bulk button gathers the checked
+   ids into the hidden .nf-bulk-form and posts it to the button's
+   endpoint (confirming first for the permanent Ignore / Gone). #}
+<script>
+(function () {
+  function refreshCount() {
+    var n = document.querySelectorAll('.nf-check:checked').length;
+    document.querySelectorAll('.nf-selected-count').forEach(function (el) { el.textContent = n; });
+  }
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.classList && t.classList.contains('nf-select-all')) {
+      var table = t.closest('table');
+      if (table) {
+        table.querySelectorAll('.nf-check').forEach(function (c) { c.checked = t.checked; });
+      }
+    }
+    if (t.classList && (t.classList.contains('nf-check') || t.classList.contains('nf-select-all'))) {
+      refreshCount();
+    }
+  });
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.nf-bulk');
+    if (!btn) return;
+    var checked = Array.prototype.slice.call(document.querySelectorAll('.nf-check:checked'));
+    if (!checked.length) { window.alert('Select at least one 404 first.'); return; }
+    var msg = btn.getAttribute('data-nf-confirm');
+    if (msg && !window.confirm(msg)) return;
+    var form = document.querySelector('.nf-bulk-form');
+    if (!form) return;
+    form.querySelectorAll('input[name="ids"]').forEach(function (i) { i.remove(); });
+    checked.forEach(function (c) {
+      var i = document.createElement('input');
+      i.type = 'hidden'; i.name = 'ids'; i.value = c.value;
+      form.appendChild(i);
+    });
+    form.action = btn.getAttribute('data-nf-action');
+    form.submit();
+  });
+})();
+</script>
 {% endblock %}

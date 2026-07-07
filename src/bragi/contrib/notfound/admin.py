@@ -28,6 +28,7 @@ from flask import (
 )
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bragi.api import Crumb, set_breadcrumbs
 from bragi.contrib.notfound.suggestions import Candidate, suggest
@@ -36,7 +37,7 @@ from bragi.core.htmx import wants_partial
 from bragi.core.models.not_found import NotFound, NotFoundStatus
 from bragi.core.models.page import Page, PageStatus
 from bragi.core.models.post import Post, PostStatus
-from bragi.core.models.redirect import MatchType, Redirect
+from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.url import page_url_for, post_url_for
 
@@ -208,4 +209,89 @@ def ignore(site_slug: str, nf_id: int) -> ResponseReturnValue:
     re-recorded (the recorder skips IGNORED rows). For scanner noise or a
     dead URL you never want to see again."""
     _set_status_or_abort(site_slug, nf_id, NotFoundStatus.IGNORED, "Ignored")
+    return redirect(url_for("notfound_admin.list_notfound"))
+
+
+# --- Bulk actions -------------------------------------------------------
+#
+# The list page renders per-row checkboxes; a small delegated script
+# gathers the checked ids into a hidden form and POSTs to one of these.
+# Cross-site ids are filtered out by the site_id predicate, so a crafted
+# id list can only ever touch the resolved site's rows.
+
+
+def _bulk_rows(db: object, site_id: int, ids: list[int]) -> list[NotFound]:
+    if not ids:
+        return []
+    return list(
+        db.execute(  # type: ignore[attr-defined]
+            select(NotFound).where(NotFound.site_id == site_id, NotFound.id.in_(ids))
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _bulk_set_status(site_slug: str, status: str, verb: str) -> ResponseReturnValue:
+    ids = request.form.getlist("ids", type=int)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        rows = _bulk_rows(db, site.id, ids)
+        for row in rows:
+            row.status = status
+        db.commit()
+    if rows:
+        flash(f"{verb} {len(rows)} 404s.", "success")
+    else:
+        flash("No 404s selected.", "warning")
+    return redirect(url_for("notfound_admin.list_notfound"))
+
+
+@bp.route("/bulk/dismiss", methods=["POST"])
+def bulk_dismiss(site_slug: str) -> ResponseReturnValue:
+    """Soft-dismiss the selected 404s (each reopens if its path 404s again)."""
+    return _bulk_set_status(site_slug, NotFoundStatus.DISMISSED, "Dismissed")
+
+
+@bp.route("/bulk/ignore", methods=["POST"])
+def bulk_ignore(site_slug: str) -> ResponseReturnValue:
+    """Permanently ignore the selected 404s (never re-recorded)."""
+    return _bulk_set_status(site_slug, NotFoundStatus.IGNORED, "Ignored")
+
+
+@bp.route("/bulk/gone", methods=["POST"])
+def bulk_gone(site_slug: str) -> ResponseReturnValue:
+    """Mark the selected paths Gone: create a 410 EXACT redirect per path.
+
+    Idempotent via ON CONFLICT DO NOTHING on the redirects unique key
+    `(site_id, source_path, match_type)`; a path already covered by an
+    exact redirect is skipped. The rows then drop off the list on their
+    own (the overview auto-hides open rows an active exact redirect
+    covers), so no NotFound status change is needed.
+    """
+    ids = request.form.getlist("ids", type=int)
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        rows = _bulk_rows(db, site.id, ids)
+        for row in rows:
+            db.execute(
+                sqlite_insert(Redirect)
+                .values(
+                    site_id=site.id,
+                    source_path=row.path,
+                    target=row.path,  # 410 ignores the target; a valid one satisfies the check
+                    status_code=410,
+                    match_type=MatchType.EXACT,
+                    source=RedirectSource.MANUAL,
+                    active=True,
+                )
+                .on_conflict_do_nothing(index_elements=["site_id", "source_path", "match_type"])
+            )
+        db.commit()
+    if rows:
+        flash(f"Marked {len(rows)} path(s) Gone (410).", "success")
+    else:
+        flash("No 404s selected.", "warning")
     return redirect(url_for("notfound_admin.list_notfound"))
