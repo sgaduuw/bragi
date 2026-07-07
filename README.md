@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.44.0 (2026-07-07).
+**Latest release:** 1.45.0 (2026-07-08).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -422,7 +422,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.44.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.45.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -586,13 +586,16 @@ bragi/
 │   │   ├── bulk_action.py      # bulk-action helpers (shared by post / page / attachments)
 │   │   ├── cache.py            # Cache-Control / ETag / 304 helpers
 │   │   ├── db.py               # SessionLocal
+│   │   ├── errors.py           # branded error-page renderer (render_error)
 │   │   ├── export.py           # corpus export writer (bragi export)
 │   │   ├── feed.py             # Atom feed builder
 │   │   ├── healthz.py          # /healthz handler
 │   │   ├── htmx.py             # HX-Request dispatch helpers
 │   │   ├── http.py             # hardened outbound fetcher (safe_get / safe_post)
 │   │   ├── image_processor.py  # image transform helpers
+│   │   ├── pagination.py       # page_arg() query-arg helper for list views
 │   │   ├── permissions.py      # per-site role enforcement
+│   │   ├── preview_token.py    # signed preview-token mint/verify (working-copy preview)
 │   │   ├── registry.py         # in-process Registry (content types, importers, nav, ...)
 │   │   ├── renditions.py       # attachment rendition pipeline
 │   │   ├── safe_urls.py        # safe_external_url + IDN gate
@@ -827,7 +830,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.44.0
+pip install bragi-cms==1.45.0
 ```
 
 The import path stays `import bragi`. Container images remain the
