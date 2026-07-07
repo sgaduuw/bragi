@@ -73,10 +73,12 @@ def _record(site_id: int, path: str, referrer: str | None) -> None:
     """Upsert one 404 row, coalesced by (site_id, path).
 
     Atomic ON CONFLICT DO UPDATE: a first sighting inserts count=1; a
-    re-hit bumps count / last_seen / last_referrer. `ignored` rows are
-    excluded from the bump (`WHERE status != ignored`) so a dismissed
-    path neither churns writes nor resurfaces. One statement, so there
-    is no read-then-write race across workers.
+    re-hit bumps count / last_seen / last_referrer and reopens the row
+    (status -> OPEN), so a soft-DISMISSED path resurfaces when it 404s
+    again. `ignored` rows are excluded from the bump entirely
+    (`WHERE status != ignored`), so a permanently-ignored path neither
+    churns writes nor resurfaces. One statement, so there is no
+    read-then-write race across workers.
 
     ponytail: synchronous best-effort read-path write. Post-blocklist
     404 volume is low and coalesced to one row per path; if 404-write
@@ -110,6 +112,10 @@ def _record(site_id: int, path: str, referrer: str | None) -> None:
                         "count": NotFound.count + 1,
                         "last_seen": now,
                         "last_referrer": ref,
+                        # Reopen a soft-DISMISSED path when it 404s again
+                        # (no-op for an already-OPEN row). IGNORED rows are
+                        # excluded by the WHERE below, so they never reopen.
+                        "status": NotFoundStatus.OPEN,
                     },
                     where=NotFound.status != NotFoundStatus.IGNORED,
                 )

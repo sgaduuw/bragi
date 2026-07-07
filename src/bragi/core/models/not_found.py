@@ -31,6 +31,12 @@ class NotFoundStatus:
     """String constants for `NotFound.status` (mirrors PageStatus)."""
 
     OPEN = "open"
+    # Soft-cleared: hidden from the triage list, but a re-hit reopens it
+    # (the recorder bumps DISMISSED rows back to OPEN). "I handled it; tell
+    # me if it recurs."
+    DISMISSED = "dismissed"
+    # Permanently suppressed: hidden, and the recorder never reopens it
+    # (its ON CONFLICT bump excludes IGNORED rows). "This path is noise."
     IGNORED = "ignored"
 
 

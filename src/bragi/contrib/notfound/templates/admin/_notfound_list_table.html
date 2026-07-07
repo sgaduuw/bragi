@@ -42,11 +42,19 @@
            href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=nf.path, status_code=410) }}">Gone</a>
         <a class="btn secondary" href="{{ url_for('page_admin.new_page', slug=e.leaf) }}">New page</a>
         <a class="btn secondary" href="{{ url_for('post_admin.new_post', slug=e.leaf) }}">New post</a>
+        {# Dismiss = soft: clears it now, but it returns if the path 404s
+           again. Ignore = permanent: never show this path again. #}
         <form method="post"
               action="{{ url_for('notfound_admin.dismiss', nf_id=nf.id) }}"
               style="display: inline; margin: 0;">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="danger">Dismiss</button>
+          <button type="submit" class="secondary" title="Clear it now; it returns if this path 404s again">Dismiss</button>
+        </form>
+        <form method="post"
+              action="{{ url_for('notfound_admin.ignore', nf_id=nf.id) }}"
+              style="display: inline; margin: 0;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger" title="Permanently suppress; never re-recorded">Ignore</button>
         </form>
       </td>
     </tr>
