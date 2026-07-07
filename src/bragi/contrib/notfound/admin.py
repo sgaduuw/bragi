@@ -178,11 +178,9 @@ def list_notfound(site_slug: str) -> ResponseReturnValue:
     return render_template(template, entries=entries, page=page, has_more=has_more)
 
 
-@bp.route("/<int:nf_id>/dismiss", methods=["POST"])
-def dismiss(site_slug: str, nf_id: int) -> ResponseReturnValue:
-    """Mark a 404 `ignored` so it drops off the overview and is not
-    re-recorded on future hits. Plain POST + redirect (a full reload);
-    dismissing is infrequent, so no htmx swap is warranted."""
+def _set_status_or_abort(site_slug: str, nf_id: int, status: str, verb: str) -> None:
+    """Shared body for the dismiss/ignore actions: authz + cross-site
+    probe + status write + flash."""
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
@@ -190,7 +188,24 @@ def dismiss(site_slug: str, nf_id: int) -> ResponseReturnValue:
         # Cross-site row probe -> 404 (not 403), matching the redirects admin.
         if row is None or row.site_id != site.id:
             abort(404)
-        row.status = NotFoundStatus.IGNORED
+        row.status = status
         db.commit()
-        flash(f"Dismissed {row.path}.", "success")
+        flash(f"{verb} {row.path}.", "success")
+
+
+@bp.route("/<int:nf_id>/dismiss", methods=["POST"])
+def dismiss(site_slug: str, nf_id: int) -> ResponseReturnValue:
+    """Soft-clear a 404: it drops off the overview but RESURFACES if the
+    path 404s again (the recorder reopens DISMISSED rows). For "I've
+    handled this, but tell me if it recurs." Plain POST + redirect."""
+    _set_status_or_abort(site_slug, nf_id, NotFoundStatus.DISMISSED, "Dismissed")
+    return redirect(url_for("notfound_admin.list_notfound"))
+
+
+@bp.route("/<int:nf_id>/ignore", methods=["POST"])
+def ignore(site_slug: str, nf_id: int) -> ResponseReturnValue:
+    """Permanently suppress a 404: it drops off the overview and is never
+    re-recorded (the recorder skips IGNORED rows). For scanner noise or a
+    dead URL you never want to see again."""
+    _set_status_or_abort(site_slug, nf_id, NotFoundStatus.IGNORED, "Ignored")
     return redirect(url_for("notfound_admin.list_notfound"))
