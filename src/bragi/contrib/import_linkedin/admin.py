@@ -34,6 +34,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 from sqlalchemy.orm import Session
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.contrib.import_linkedin.importer import apply as run_apply
 from bragi.contrib.import_linkedin.importer import detect
 from bragi.contrib.import_linkedin.importer import plan as run_plan
@@ -132,6 +133,7 @@ def upload_and_plan(site_slug: str, page_id: int) -> ResponseReturnValue:
     for p in result.proposals:
         by_section.setdefault(p.section, []).append(p)
 
+    set_breadcrumbs(Crumb("Import", "admin_imports.index"), Crumb("LinkedIn", None))
     return render_template(
         "admin/linkedin_review.html",
         site_slug=site_slug,

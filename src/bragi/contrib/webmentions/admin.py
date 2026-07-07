@@ -6,6 +6,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, url_for
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
 from bragi.core.models.user_site_role import Role
@@ -38,6 +39,7 @@ def list_webmentions(site_slug: str) -> ResponseReturnValue:
             for p in db.execute(select(Post).where(Post.id.in_(post_ids))).scalars():
                 post_titles[p.id] = p.title
 
+    set_breadcrumbs(Crumb("Webmentions", None))
     return render_template(
         "admin/webmentions/list.html",
         site=site,

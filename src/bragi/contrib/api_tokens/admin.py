@@ -21,6 +21,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.contrib.api_tokens.tokens import mint_token
 from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
@@ -64,6 +65,7 @@ def list_tokens() -> ResponseReturnValue:
             ).scalars()
         )
         tokens = [r.to_safe_dict() for r in rows]
+    set_breadcrumbs(Crumb("API tokens", None))
     return render_template("admin/api_tokens/list.html", tokens=tokens, scopes=SUPPORTED_SCOPES)
 
 

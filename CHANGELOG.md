@@ -6,6 +6,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Admin breadcrumbs are now consistent: the section pages that were
+  missing them (Analytics, Team, Webmentions, Audit log, My/All sessions,
+  API tokens, Import) now show a breadcrumb bar, and the Ghost/LinkedIn
+  import sub-flows and the per-page analytics drill-down show a two-level
+  trail. Dialog pickers and the admin home stay bar-less by design.
+
 ### Fixed
 - Delivery canonical / `og:url` on the home-mapped blog index no longer
   renders a malformed `https://host///` (the empty home slug chain joined
