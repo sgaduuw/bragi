@@ -6,6 +6,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- 404 triage bulk actions: per-row checkboxes + select-all, with **Dismiss
+  selected**, **Ignore selected**, and **Mark Gone selected** (creates a
+  410 redirect per path, idempotent). Ignore and Mark Gone confirm first;
+  Dismiss applies immediately.
+
 ### Changed
 - 404 triage: the per-row resolving actions (create redirect, mark Gone,
   new page, new post, dismiss) are collapsed into a single **Actions**
