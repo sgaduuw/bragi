@@ -12,6 +12,7 @@ from __future__ import annotations
 from flask import Blueprint, render_template
 from flask.typing import ResponseReturnValue
 
+from bragi.api import Crumb, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.permissions import require_role, resolve_site_or_abort
 
@@ -34,4 +35,5 @@ def index(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
+    set_breadcrumbs(Crumb("Import", None))
     return render_template("admin/import_index.html", site_slug=site_slug)
