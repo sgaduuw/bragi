@@ -266,7 +266,7 @@ def test_open_row_hidden_when_exact_redirect_covers_it(
     assert b"/still-open/" in resp.data
 
 
-def test_dismiss_marks_ignored_and_drops_from_list(
+def test_dismiss_marks_dismissed_and_drops_from_list(
     admin_app_file_db: Flask,
     delivery_app_file_db: Flask,
     file_db_session_factory: sessionmaker[Session],
@@ -287,11 +287,73 @@ def test_dismiss_marks_ignored_and_drops_from_list(
     assert resp.status_code == 302
 
     with file_db_session_factory() as db:
-        assert db.get(NotFound, nf_id).status == NotFoundStatus.IGNORED  # type: ignore[union-attr]
+        assert db.get(NotFound, nf_id).status == NotFoundStatus.DISMISSED  # type: ignore[union-attr]
     listing = client.get("/admin/sites/blog/not-found/", headers={"Host": HOST_A})
     # Assert against the table cell, not the whole page: the "Dismissed
     # /spam/." flash banner also renders the path as plain text.
     assert b"<code>/spam/</code>" not in listing.data
+
+
+def test_dismissed_row_reopens_on_rehit(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    """A soft-dismissed 404 comes back (status -> OPEN, count bumped) when
+    the path 404s again, and reappears in the list."""
+    _seed(file_db_session_factory)
+    _record_404(delivery_app_file_db, "/recurring/", HOST_A)
+    with file_db_session_factory() as db:
+        nf_id = db.execute(select(NotFound.id)).scalar_one()
+
+    client = admin_app_file_db.test_client()
+    _login(client)
+    client.post(
+        f"/admin/sites/blog/not-found/{nf_id}/dismiss",
+        data={"_csrf_token": _csrf_token(client)},
+        headers={"Host": HOST_A},
+    )
+    with file_db_session_factory() as db:
+        assert db.get(NotFound, nf_id).status == NotFoundStatus.DISMISSED  # type: ignore[union-attr]
+
+    # Hit the path again -> it should reopen.
+    _record_404(delivery_app_file_db, "/recurring/", HOST_A)
+    with file_db_session_factory() as db:
+        row = db.get(NotFound, nf_id)
+        assert row.status == NotFoundStatus.OPEN  # type: ignore[union-attr]
+        assert row.count == 2  # type: ignore[union-attr]
+    listing = client.get("/admin/sites/blog/not-found/", headers={"Host": HOST_A})
+    assert b"<code>/recurring/</code>" in listing.data
+
+
+def test_ignore_is_permanent_and_never_reopens(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    """Ignore permanently suppresses: a re-hit does NOT reopen or bump."""
+    _seed(file_db_session_factory)
+    _record_404(delivery_app_file_db, "/noise/", HOST_A)
+    with file_db_session_factory() as db:
+        nf_id = db.execute(select(NotFound.id)).scalar_one()
+
+    client = admin_app_file_db.test_client()
+    _login(client)
+    resp = client.post(
+        f"/admin/sites/blog/not-found/{nf_id}/ignore",
+        data={"_csrf_token": _csrf_token(client)},
+        headers={"Host": HOST_A},
+    )
+    assert resp.status_code == 302
+    with file_db_session_factory() as db:
+        assert db.get(NotFound, nf_id).status == NotFoundStatus.IGNORED  # type: ignore[union-attr]
+
+    # Re-hit -> stays ignored, count NOT bumped.
+    _record_404(delivery_app_file_db, "/noise/", HOST_A)
+    with file_db_session_factory() as db:
+        row = db.get(NotFound, nf_id)
+        assert row.status == NotFoundStatus.IGNORED  # type: ignore[union-attr]
+        assert row.count == 1  # type: ignore[union-attr]
 
 
 def test_dismiss_rejects_cross_site_row(

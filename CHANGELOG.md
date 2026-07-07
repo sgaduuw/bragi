@@ -4,6 +4,15 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- 404 triage: **Dismiss** is now a soft clear: the row drops off the list
+  but reappears (reopened, count bumped) if the path 404s again. A new
+  **Ignore** button is the permanent suppress (the previous Dismiss
+  behavior): the row is hidden and never re-recorded. "Handled, but tell
+  me if it recurs" vs "this path is noise."
+
 ## [1.42.0] - 2026-07-07
 
 ### Added
