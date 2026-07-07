@@ -32,24 +32,30 @@
         {% endif %}
       </td>
       <td>
-        {# Create redirect: pre-fills source_path and (when we have a
-           confident target) the suggested URL, via the redirects form. #}
-        <a class="btn secondary"
-           href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=(e.suggestion.candidate.url if e.suggestion and e.suggestion.kind == 'redirect' else ''), status_code=301) }}">Redirect</a>
-        {# Mark Gone: 410 ignores the target, but the form validates a
-           relative one, so pass the dead path itself. #}
-        <a class="btn secondary"
-           href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=nf.path, status_code=410) }}">Gone</a>
-        <a class="btn secondary" href="{{ url_for('page_admin.new_page', slug=e.leaf) }}">New page</a>
-        <a class="btn secondary" href="{{ url_for('post_admin.new_post', slug=e.leaf) }}">New post</a>
-        {# Dismiss = soft: clears it now, but it returns if the path 404s
-           again. Ignore = permanent: never show this path again. #}
-        <form method="post"
-              action="{{ url_for('notfound_admin.dismiss', nf_id=nf.id) }}"
-              style="display: inline; margin: 0;">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="secondary" title="Clear it now; it returns if this path 404s again">Dismiss</button>
-        </form>
+        {# The resolving actions collapse into one dropdown so the row
+           isn't a wall of buttons; the permanent Ignore stays standalone
+           (destructive, one click). Panel items are plain menu rows (no
+           `btn` class) so `.dropdown-panel` styles them. #}
+        <details class="row-actions">
+          <summary class="btn secondary">Actions &#9662;</summary>
+          <div class="dropdown-panel">
+            {# Create redirect: pre-fills source_path and (when we have a
+               confident target) the suggested URL, via the redirects form. #}
+            <a href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=(e.suggestion.candidate.url if e.suggestion and e.suggestion.kind == 'redirect' else ''), status_code=301) }}">Create redirect</a>
+            {# Mark Gone: 410 ignores the target, but the form validates a
+               relative one, so pass the dead path itself. #}
+            <a href="{{ url_for('redirect_admin.new_redirect', source_path=nf.path, target=nf.path, status_code=410) }}">Mark Gone (410)</a>
+            <a href="{{ url_for('page_admin.new_page', slug=e.leaf) }}">New page</a>
+            <a href="{{ url_for('post_admin.new_post', slug=e.leaf) }}">New post</a>
+            {# Dismiss = soft: clears it now, but it returns if the path
+               404s again. #}
+            <form method="post" action="{{ url_for('notfound_admin.dismiss', nf_id=nf.id) }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" title="Clear it now; it returns if this path 404s again">Dismiss</button>
+            </form>
+          </div>
+        </details>
+        {# Ignore = permanent: never show this path again. #}
         <form method="post"
               action="{{ url_for('notfound_admin.ignore', nf_id=nf.id) }}"
               style="display: inline; margin: 0;">
