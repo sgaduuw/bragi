@@ -9,7 +9,7 @@ content URLs except plugin-specific paths (`/feed.xml`, etc.).
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 import jinja2
 from flask import Blueprint, current_app, g, make_response, render_template, request
@@ -188,6 +188,37 @@ def register_delivery_blueprint() -> Blueprint:
     return page_delivery_bp
 
 
+class ParentPrefix(NamedTuple):
+    """Parent context for a nested page's slug field."""
+
+    path: str  # the parent's public path, e.g. "/about/"
+    title: str  # the parent page's title, e.g. "About"
+
+
+def _page_parent_prefix(parent_id: Any, site_id: int) -> ParentPrefix | None:
+    """Parent path + title for a nested page's slug field, or None at root.
+
+    Powers the "embedded under <parent>" prefix + note on the slug field so
+    a child page's bare leaf slug (`team`) reads with its context (`/about/`
+    + "Embedded under About"), which is otherwise easy to misread. Scoped to
+    `site_id`: a parent on another site (only reachable via a tampered form
+    `parent_id`, since the parent dropdown lists this site only) is treated
+    as root rather than leaking a cross-tenant title. Accepts the raw form
+    value (str / int / None) and coerces defensively.
+    """
+    if not parent_id:
+        return None
+    try:
+        pid = int(parent_id)
+    except TypeError, ValueError:
+        return None
+    with SessionLocal() as db:
+        parent = db.get(Page, pid)
+        if parent is None or parent.site_id != site_id:
+            return None
+        return ParentPrefix(path=page_url_for(parent, db=db), title=parent.title)
+
+
 @hookimpl
 def register_template_globals(env: jinja2.Environment) -> None:
     """Expose `url_for_page(page)` and resume-related helpers to templates.
@@ -195,6 +226,8 @@ def register_template_globals(env: jinja2.Environment) -> None:
     Globals registered here:
     - `url_for_page(page)`: resolve a Page to its canonical public URL,
       accounting for home-page promotion.
+    - `page_parent_prefix(parent_id, site_id)`: parent path + title for a
+      nested page's slug field ("embedded under <parent>"), or None at root.
     - `build_resume_jsonld(page_title, resume)`: build the schema.org
       Person JSON-LD dict for a resume page.
     - `active_theme_slug()`: return the active site's theme slug
@@ -208,6 +241,7 @@ def register_template_globals(env: jinja2.Environment) -> None:
       in the resume template for per-entry description fields.
     """
     env.globals["url_for_page"] = _effective_url_for_page
+    env.globals["page_parent_prefix"] = _page_parent_prefix
 
     from bragi.contrib.page.resume_jsonld import build_jsonld
     from bragi.core.render.markdown import render_markdown

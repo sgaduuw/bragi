@@ -17,14 +17,20 @@
           hx-swap="outerHTML"
           style="margin: 0;">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <input type="text" name="slug" value="{{ value if value is not none else page.slug }}"
-             autofocus required maxlength="255"
-             hx-get="{{ url_for('page_admin.slug_cell', site_slug=site.slug, page_id=page.id, mode='view') }}"
-             hx-target="closest td"
-             hx-swap="outerHTML"
-             hx-trigger="keyup[key=='Escape']">
+      {% set parent = page_parent_prefix(page.parent_id, page.site_id) %}
+      {# Nested page: show the parent path as a read-only prefix so the
+         leaf slug reads in context (/about/ + team). #}
+      <div class="slug-input-row">
+        {% if parent %}<span class="slug-prefix" aria-hidden="true"><code>{{ parent.path }}</code></span>{% endif %}
+        <input type="text" name="slug" value="{{ value if value is not none else page.slug }}"
+               autofocus required maxlength="255"
+               hx-get="{{ url_for('page_admin.slug_cell', site_slug=site.slug, page_id=page.id, mode='view') }}"
+               hx-target="closest td"
+               hx-swap="outerHTML"
+               hx-trigger="keyup[key=='Escape']">
+      </div>
       {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
-      <div class="inline-edit-hint">&#9166; save &middot; esc cancel</div>
+      <div class="inline-edit-hint">{% if parent %}embedded under &ldquo;{{ parent.title }}&rdquo; &middot; {% endif %}&#9166; save &middot; esc cancel</div>
       <button type="button" class="btn secondary"
               hx-post="{{ url_for('page_admin.recompute_slug', site_slug=site.slug, page_id=page.id) }}"
               hx-target="#page-slug-cell-{{ page.id }}"

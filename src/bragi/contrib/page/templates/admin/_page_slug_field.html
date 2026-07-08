@@ -11,19 +11,27 @@
      site_slug  : the site slug (for the button's hx-post URL)
 #}
 <div id="page-slug-field">
+  {% set parent = page_parent_prefix(parent_id, site_id) %}
   <label for="slug">Slug</label>
-  <input type="text" name="slug" id="slug" required pattern="[a-z0-9-]+"
-         value="{{ slug }}">
-  {% if is_edit %}
-  <button type="button" class="btn secondary"
-          hx-post="{{ url_for('page_admin.recompute_slug_preview', site_slug=site_slug, page_id=page_id) }}"
-          hx-include="closest form"
-          hx-target="#page-slug-field"
-          hx-swap="outerHTML"
-          hx-on:htmx:after-request="if(event.detail.successful){document.getElementById('skip_redirect').checked = true}">
-    Recompute from title
-  </button>
-  {% endif %}
+  {# When the page is nested, show the parent path as a read-only prefix so
+     the bare leaf slug reads in context (/about/ + team), not as a
+     standalone /team/. #}
+  <div class="slug-input-row">
+    {% if parent %}<span class="slug-prefix" aria-hidden="true"><code>{{ parent.path }}</code></span>{% endif %}
+    <input type="text" name="slug" id="slug" required pattern="[a-z0-9-]+"
+           value="{{ slug }}">
+    {% if is_edit %}
+    <button type="button" class="btn secondary"
+            hx-post="{{ url_for('page_admin.recompute_slug_preview', site_slug=site_slug, page_id=page_id) }}"
+            hx-include="closest form"
+            hx-target="#page-slug-field"
+            hx-swap="outerHTML"
+            hx-on:htmx:after-request="if(event.detail.successful){document.getElementById('skip_redirect').checked = true}">
+      Recompute from title
+    </button>
+    {% endif %}
+  </div>
+  {% if parent %}<p class="slug-embed-note"><small>Embedded under &ldquo;{{ parent.title }}&rdquo;</small></p>{% endif %}
   {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
   {% if full_path %}<p class="slug-cell-path"><small>Will live at: <code>{{ full_path }}</code></small></p>{% endif %}
 </div>

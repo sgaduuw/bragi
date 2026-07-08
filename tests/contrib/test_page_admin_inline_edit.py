@@ -630,3 +630,77 @@ def test_inline_cell_edit_mode_drops_enter_reedit_trigger(
         f"{field} edit-mode cell must not re-fire an edit GET on Enter "
         "(double-fire races the save and reverts the value)"
     )
+
+
+# ============================================================
+# Nested-page slug context: parent prefix + "embedded under X"
+# ============================================================
+
+
+def _add_child(db: Session, *, slug: str, title: str) -> int:
+    """Add a page nested under the fixture's root 'about' page; return its id."""
+    parent = db.get(Page, _page_id(db))
+    child = Page(
+        site_id=parent.site_id,
+        author_id=parent.author_id,
+        title=title,
+        slug=slug,
+        parent_id=parent.id,
+        body_markdown=f"# {title}",
+        body_html=f"<h1>{title}</h1>",
+        kind=PageKind.STATIC,
+        status=PageStatus.PUBLISHED,
+    )
+    db.add(child)
+    db.commit()
+    return child.id
+
+
+def test_slug_cell_edit_shows_parent_prefix_for_nested_page(
+    admin_app: Flask, db_session: Session
+) -> None:
+    """A nested page's slug edit cell shows the parent path prefix and an
+    'embedded under <parent>' note so the leaf slug reads in context."""
+    child_id = _add_child(db_session, slug="team", title="Team")
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/pages/{child_id}/cell/slug?mode=edit")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert 'class="slug-prefix"' in body
+    assert "/about/" in body
+    assert "embedded under" in body.lower()
+    assert "About" in body
+
+
+def test_slug_cell_edit_has_no_parent_prefix_for_root_page(
+    admin_app: Flask, db_session: Session
+) -> None:
+    """A root page's slug edit cell carries no parent prefix / embed note."""
+    pid = _page_id(db_session)  # 'about' is a root page
+    client = admin_app.test_client()
+    _login(client)
+    resp = client.get(f"/admin/sites/blog/pages/{pid}/cell/slug?mode=edit")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert 'class="slug-prefix"' not in body
+    assert "embedded under" not in body.lower()
+
+
+def test_page_parent_prefix_helper_scopes_to_site(admin_app: Flask, db_session: Session) -> None:
+    """The `page_parent_prefix` global returns (path, title) for a same-site
+    parent, and None for root / a cross-site parent / garbage input."""
+    from bragi.contrib.page.plugin import _page_parent_prefix
+
+    parent = db_session.get(Page, _page_id(db_session))
+    pp = _page_parent_prefix(parent.id, parent.site_id)
+    assert pp is not None
+    assert pp.path == "/about/"
+    assert pp.title == "About"
+    # root (no parent) and empty coerce to None
+    assert _page_parent_prefix(None, parent.site_id) is None
+    assert _page_parent_prefix("", parent.site_id) is None
+    # cross-site parent id -> None (no cross-tenant title leak)
+    assert _page_parent_prefix(parent.id, parent.site_id + 999) is None
+    # non-numeric junk -> None, not a 500
+    assert _page_parent_prefix("not-an-int", parent.site_id) is None
