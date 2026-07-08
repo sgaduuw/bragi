@@ -116,6 +116,8 @@
             error=none,
             is_edit=is_edit,
             page_id=(working_copy_page_id if is_wc else (page.id if page else none)),
+            parent_id=form.get('parent_id'),
+            site_id=site.id,
             site_slug=request.view_args['site_slug'] %}
       {% include "admin/_page_slug_field.html" %}
     {% endwith %}
