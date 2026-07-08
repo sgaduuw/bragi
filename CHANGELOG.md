@@ -4,7 +4,7 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.46.0] - 2026-07-08
 
 ### Changed
 - Page admin: a nested page's slug field now shows the parent path as a
