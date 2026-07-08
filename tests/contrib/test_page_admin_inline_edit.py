@@ -633,7 +633,7 @@ def test_inline_cell_edit_mode_drops_enter_reedit_trigger(
 
 
 # ============================================================
-# Nested-page slug context: parent prefix + "embedded under X"
+# Nested-page slug context: parent path prefix
 # ============================================================
 
 
@@ -659,8 +659,8 @@ def _add_child(db: Session, *, slug: str, title: str) -> int:
 def test_slug_cell_edit_shows_parent_prefix_for_nested_page(
     admin_app: Flask, db_session: Session
 ) -> None:
-    """A nested page's slug edit cell shows the parent path prefix and an
-    'embedded under <parent>' note so the leaf slug reads in context."""
+    """A nested page's slug edit cell shows the parent path prefix so the
+    leaf slug reads in context."""
     child_id = _add_child(db_session, slug="team", title="Team")
     client = admin_app.test_client()
     _login(client)
@@ -669,38 +669,31 @@ def test_slug_cell_edit_shows_parent_prefix_for_nested_page(
     body = resp.data.decode()
     assert 'class="slug-prefix"' in body
     assert "/about/" in body
-    assert "embedded under" in body.lower()
-    assert "About" in body
 
 
 def test_slug_cell_edit_has_no_parent_prefix_for_root_page(
     admin_app: Flask, db_session: Session
 ) -> None:
-    """A root page's slug edit cell carries no parent prefix / embed note."""
+    """A root page's slug edit cell carries no parent prefix."""
     pid = _page_id(db_session)  # 'about' is a root page
     client = admin_app.test_client()
     _login(client)
     resp = client.get(f"/admin/sites/blog/pages/{pid}/cell/slug?mode=edit")
     assert resp.status_code == 200
-    body = resp.data.decode()
-    assert 'class="slug-prefix"' not in body
-    assert "embedded under" not in body.lower()
+    assert 'class="slug-prefix"' not in resp.data.decode()
 
 
 def test_page_parent_prefix_helper_scopes_to_site(admin_app: Flask, db_session: Session) -> None:
-    """The `page_parent_prefix` global returns (path, title) for a same-site
-    parent, and None for root / a cross-site parent / garbage input."""
+    """The `page_parent_prefix` global returns the parent path for a
+    same-site parent, and None for root / a cross-site parent / garbage."""
     from bragi.contrib.page.plugin import _page_parent_prefix
 
     parent = db_session.get(Page, _page_id(db_session))
-    pp = _page_parent_prefix(parent.id, parent.site_id)
-    assert pp is not None
-    assert pp.path == "/about/"
-    assert pp.title == "About"
+    assert _page_parent_prefix(parent.id, parent.site_id) == "/about/"
     # root (no parent) and empty coerce to None
     assert _page_parent_prefix(None, parent.site_id) is None
     assert _page_parent_prefix("", parent.site_id) is None
-    # cross-site parent id -> None (no cross-tenant title leak)
+    # cross-site parent id -> None (no cross-tenant path leak)
     assert _page_parent_prefix(parent.id, parent.site_id + 999) is None
     # non-numeric junk -> None, not a 500
     assert _page_parent_prefix("not-an-int", parent.site_id) is None

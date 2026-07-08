@@ -380,10 +380,8 @@ td.is-editing .inline-edit-error { font-size: 0.75em; color: #b22; margin-top: 0
 .slug-input-row { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
 .slug-input-row .slug-prefix { color: #666; white-space: nowrap; user-select: none; }
 .slug-input-row input[name="slug"] { flex: 1 1 8rem; min-width: 6rem; }
-.slug-embed-note { margin: 0.2rem 0 0; color: #666; }
 @media (prefers-color-scheme: dark) {
   .slug-input-row .slug-prefix { color: #aaa; }
-  .slug-embed-note { color: #aaa; }
 }
 
 /* Site settings page: help and default-hint typography. */

@@ -11,13 +11,13 @@
      site_slug  : the site slug (for the button's hx-post URL)
 #}
 <div id="page-slug-field">
-  {% set parent = page_parent_prefix(parent_id, site_id) %}
+  {% set parent_path = page_parent_prefix(parent_id, site_id) %}
   <label for="slug">Slug</label>
   {# When the page is nested, show the parent path as a read-only prefix so
      the bare leaf slug reads in context (/about/ + team), not as a
      standalone /team/. #}
   <div class="slug-input-row">
-    {% if parent %}<span class="slug-prefix" aria-hidden="true"><code>{{ parent.path }}</code></span>{% endif %}
+    {% if parent_path %}<span class="slug-prefix" aria-hidden="true"><code>{{ parent_path }}</code></span>{% endif %}
     <input type="text" name="slug" id="slug" required pattern="[a-z0-9-]+"
            value="{{ slug }}">
     {% if is_edit %}
@@ -31,7 +31,6 @@
     </button>
     {% endif %}
   </div>
-  {% if parent %}<p class="slug-embed-note"><small>Embedded under &ldquo;{{ parent.title }}&rdquo;</small></p>{% endif %}
   {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
   {% if full_path %}<p class="slug-cell-path"><small>Will live at: <code>{{ full_path }}</code></small></p>{% endif %}
 </div>

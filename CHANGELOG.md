@@ -8,10 +8,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - Page admin: a nested page's slug field now shows the parent path as a
-  read-only prefix (`/about/` before the input) plus an "embedded under
-  <parent>" note, in both the edit form and the inline list edit cell, so
-  a child page's bare leaf slug reads in context instead of looking like a
-  root-level slug. Root pages are unchanged.
+  read-only prefix (`/about/` before the input), in both the edit form and
+  the inline list edit cell, so a child page's bare leaf slug reads in
+  context instead of looking like a root-level slug. Root pages are
+  unchanged.
 
 ## [1.45.0] - 2026-07-08
 
