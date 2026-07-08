@@ -2133,6 +2133,8 @@ def recompute_slug_preview(site_slug: str, page_id: int) -> ResponseReturnValue:
             error=error,
             is_edit=True,
             page_id=page.id,
+            parent_id=parent_id,
+            site_id=site.id,
             site_slug=site_slug,
         )
 
