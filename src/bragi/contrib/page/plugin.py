@@ -203,7 +203,7 @@ def _page_parent_prefix(parent_id: Any, site_id: int) -> str | None:
         return None
     try:
         pid = int(parent_id)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     with SessionLocal() as db:
         parent = db.get(Page, pid)
