@@ -40,6 +40,7 @@ class RedirectSource:
     SLUG_CHANGE = "slug-change"
     KIND_CHANGE = "kind-change"
     PARENT_MOVE = "parent-move"
+    TAG_CHANGE = "tag-change"
     HOME_PAGE_CHANGE = "home-change"
     IMPORT_HUGO = "import:hugo"
     IMPORT_GHOST = "import:ghost"
