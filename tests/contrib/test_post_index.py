@@ -21,8 +21,10 @@ import pytest
 from flask import Flask
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from werkzeug.test import TestResponse
 
 from bragi.apps.delivery import create_delivery_app
+from bragi.core.models.page import Page, PageKind
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
@@ -149,6 +151,15 @@ def delivery_app(
 # "posts", so the listing URL is `/posts/`.
 
 
+def client_get(app: Flask, path: str, host: str) -> TestResponse:
+    """GET `path` for `host` without following redirects."""
+    return app.test_client().get(path, headers={"Host": host}, follow_redirects=False)
+
+
+def client_get_body(app: Flask, path: str, host: str) -> str:
+    return app.test_client().get(path, headers={"Host": host}).data.decode()
+
+
 def test_index_lists_published_posts_recency_desc(delivery_app: Flask) -> None:
     """`/posts/` returns published posts, newest first, up to per_page."""
     client = delivery_app.test_client()
@@ -167,7 +178,8 @@ def test_index_excludes_non_published(delivery_app: Flask) -> None:
     """Drafts, scheduled, archived posts never appear on the index."""
     client = delivery_app.test_client()
     for page in (1, 2, 3):
-        resp = client.get(f"/posts/?page={page}", headers={"Host": "blog.example.com"})
+        url = "/posts/" if page == 1 else f"/posts/page/{page}/"
+        resp = client.get(url, headers={"Host": "blog.example.com"})
         body = resp.data.decode()
         assert "Drafted" not in body
         assert "Archived" not in body
@@ -186,39 +198,107 @@ def test_index_multisite_isolation(delivery_app: Flask) -> None:
     assert "Published 11" not in body
 
 
-def test_index_pagination_links(delivery_app: Flask) -> None:
-    """First page has Next only; middle has both; last has Prev only."""
+def test_index_pagination_uses_path_urls(delivery_app: Flask) -> None:
+    """Pages 2+ live at `/posts/page/N/`; page 1 has Next only, middle both,
+    last Prev only, and the nav links use the path form (not `?page=`)."""
     client = delivery_app.test_client()
+    h = {"Host": "blog.example.com"}
 
-    p1 = client.get("/posts/", headers={"Host": "blog.example.com"}).data.decode()
-    assert "Older" in p1
-    assert "Newer" not in p1
+    p1 = client.get("/posts/", headers=h).data.decode()
+    assert "Older" in p1 and "Newer" not in p1
+    assert 'href="/posts/page/2/"' in p1
+    assert "?page=" not in p1
 
-    p2 = client.get("/posts/?page=2", headers={"Host": "blog.example.com"}).data.decode()
-    assert "Newer" in p2
-    assert "Older" in p2
+    p2 = client.get("/posts/page/2/", headers=h)
+    assert p2.status_code == 200
+    b2 = p2.data.decode()
+    assert "Newer" in b2 and "Older" in b2
+    assert 'href="/posts/"' in b2  # Newer -> bare page 1
+    assert 'href="/posts/page/3/"' in b2  # Older -> page 3
 
-    p3 = client.get("/posts/?page=3", headers={"Host": "blog.example.com"}).data.decode()
-    assert "Newer" in p3
-    assert "Older" not in p3
-
-
-def test_index_page_beyond_last_404s(delivery_app: Flask) -> None:
-    client = delivery_app.test_client()
-    resp = client.get("/posts/?page=99", headers={"Host": "blog.example.com"})
-    assert resp.status_code == 404
-
-
-def test_index_non_positive_page_404s(delivery_app: Flask) -> None:
-    client = delivery_app.test_client()
-    assert client.get("/posts/?page=0", headers={"Host": "blog.example.com"}).status_code == 404
-    assert client.get("/posts/?page=-1", headers={"Host": "blog.example.com"}).status_code == 404
+    p3 = client.get("/posts/page/3/", headers=h).data.decode()
+    assert "Newer" in p3 and "Older" not in p3
+    assert 'href="/posts/page/2/"' in p3
 
 
-def test_index_non_integer_page_404s(delivery_app: Flask) -> None:
-    client = delivery_app.test_client()
-    resp = client.get("/posts/?page=abc", headers={"Host": "blog.example.com"})
-    assert resp.status_code == 404
+def test_index_page_self_canonicalises(delivery_app: Flask) -> None:
+    """Page 2 canonicalises to its own /page/2/ URL, not the index root."""
+    body = client_get_body(delivery_app, "/posts/page/2/", "blog.example.com")
+    assert '<link rel="canonical" href="https://blog.example.com/posts/page/2/">' in body
+
+
+def test_index_page_one_redirects_to_bare(delivery_app: Flask) -> None:
+    """`/posts/page/1/` 301s to the bare index URL (one canonical page 1)."""
+    resp = client_get(delivery_app, "/posts/page/1/", "blog.example.com")
+    assert resp.status_code == 301
+    assert resp.headers["Location"].endswith("/posts/")
+
+
+def test_index_legacy_query_param_redirects_to_path(delivery_app: Flask) -> None:
+    """Legacy `?page=N` 301s to `/posts/page/N/`; `?page=1` to the bare URL."""
+    r2 = client_get(delivery_app, "/posts/?page=2", "blog.example.com")
+    assert r2.status_code == 301
+    assert r2.headers["Location"].endswith("/posts/page/2/")
+
+    r1 = client_get(delivery_app, "/posts/?page=1", "blog.example.com")
+    assert r1.status_code == 301
+    assert r1.headers["Location"].endswith("/posts/")
+
+
+def test_index_beyond_last_page_404s(delivery_app: Flask) -> None:
+    """A path page beyond the last 404s; the legacy query 301s (to a 404)."""
+    assert client_get(delivery_app, "/posts/page/99/", "blog.example.com").status_code == 404
+    # ?page=99 first 301s to /posts/page/99/, which then 404s.
+    hop = client_get(delivery_app, "/posts/?page=99", "blog.example.com")
+    assert hop.status_code == 301
+    assert hop.headers["Location"].endswith("/posts/page/99/")
+
+
+def test_index_non_positive_and_non_integer_page(delivery_app: Flask) -> None:
+    """`/posts/page/0/` 404s; a non-int / non-positive `?page=` collapses to
+    page 1 (301 to the bare URL)."""
+    assert client_get(delivery_app, "/posts/page/0/", "blog.example.com").status_code == 404
+    for q in ("?page=0", "?page=-1", "?page=abc"):
+        r = client_get(delivery_app, f"/posts/{q}", "blog.example.com")
+        assert r.status_code == 301
+        assert r.headers["Location"].endswith("/posts/")
+
+
+def _promote_index_to_home(db_factory: sessionmaker[Session]) -> None:
+    """Make blog.example.com's POST_INDEX its home page (served at `/`)."""
+    with db_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        idx = db.execute(
+            select(Page).where(Page.site_id == site.id, Page.kind == PageKind.POST_INDEX)
+        ).scalar_one()
+        site.home_page_id = idx.id
+        db.commit()
+
+
+def test_home_index_pagination_lives_at_root_page_n(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """When the blog index is the home page, pagination is `/page/N/` off the
+    root; `/page/1/` and the index's own slug URL 301 to `/`."""
+    _promote_index_to_home(db_session_factory)
+
+    r2 = client_get(delivery_app, "/page/2/", "blog.example.com")
+    assert r2.status_code == 200
+    b2 = r2.data.decode()
+    assert 'href="/"' in b2  # Newer -> root
+    assert 'href="/page/3/"' in b2  # Older -> page 3
+    assert '<link rel="canonical" href="https://blog.example.com/page/2/">' in b2
+
+    # /page/1/ -> 301 to root; legacy /?page=2 -> 301 to /page/2/.
+    r1 = client_get(delivery_app, "/page/1/", "blog.example.com")
+    assert r1.status_code == 301 and r1.headers["Location"].endswith("/")
+    rq = client_get(delivery_app, "/?page=2", "blog.example.com")
+    assert rq.status_code == 301 and rq.headers["Location"].endswith("/page/2/")
+
+    # The index's own slug URL (/posts/) still 301s to root (home shadowing),
+    # and /posts/page/2/ 404s (the index no longer lives under /posts/).
+    assert client_get(delivery_app, "/posts/", "blog.example.com").status_code == 301
+    assert client_get(delivery_app, "/posts/page/2/", "blog.example.com").status_code == 404
 
 
 def test_index_empty_site_renders_empty_state(delivery_app: Flask) -> None:
@@ -233,7 +313,7 @@ def test_index_empty_site_renders_empty_state(delivery_app: Flask) -> None:
 
 def test_index_empty_site_page_2_404s(delivery_app: Flask) -> None:
     client = delivery_app.test_client()
-    resp = client.get("/posts/?page=2", headers={"Host": "empty.example.com"})
+    resp = client.get("/posts/page/2/", headers={"Host": "empty.example.com"})
     assert resp.status_code == 404
 
 
@@ -319,7 +399,7 @@ def test_post_index_page2_reinstates_pinned_in_recency(
         db.commit()
 
     client = delivery_app.test_client()
-    resp = client.get("/posts/?page=2", headers={"Host": "blog.example.com"})
+    resp = client.get("/posts/page/2/", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
     body = resp.data.decode()
     assert 'aria-label="Pinned posts"' not in body  # only on page 1

@@ -42,15 +42,11 @@
 {% if total_pages > 1 %}
 <nav class="pagination" aria-label="Pagination">
   {% if has_prev %}
-    {% if page_n == 2 %}
-      <a rel="prev" href="{{ url_for_page(page) }}">&larr; Newer</a>
-    {% else %}
-      <a rel="prev" href="{{ url_for_page(page) }}?page={{ page_n - 1 }}">&larr; Newer</a>
-    {% endif %}
+    <a rel="prev" href="{{ prev_url }}">&larr; Newer</a>
   {% endif %}
   <span class="page-of">Page {{ page_n }} of {{ total_pages }}</span>
   {% if has_next %}
-    <a rel="next" href="{{ url_for_page(page) }}?page={{ page_n + 1 }}">Older &rarr;</a>
+    <a rel="next" href="{{ next_url }}">Older &rarr;</a>
   {% endif %}
 </nav>
 {% endif %}
