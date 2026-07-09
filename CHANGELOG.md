@@ -4,7 +4,7 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.47.0] - 2026-07-09
 
 ### Changed
 - 404 triage: when a recorded 404's referrer is a local published page or
