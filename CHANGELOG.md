@@ -7,6 +7,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- 404 triage: when a recorded 404's referrer is a local published page or
+  post, the referrer column now links to that page's admin editor, so the
+  operator can jump straight to the referring page and fix the dead link at
+  its source. External referrers stay plain text.
 - Blog pagination now uses Ghost-style path URLs (`/page/2/`) instead of the
   `?page=2` query string. Page 1 stays the bare index URL; pages 2+ are
   `/page/N/` when the blog is the home page, or `/<index>/page/N/` otherwise.

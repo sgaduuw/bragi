@@ -16,6 +16,7 @@ sibling plugins.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from flask import (
     Blueprint,
@@ -62,6 +63,38 @@ _CANDIDATE_CAP = 2000
 def _leaf(path: str) -> str:
     """Last non-empty path segment; the slug to seed new-page/post with."""
     return path.strip("/").split("/")[-1] if path.strip("/") else ""
+
+
+def _referrer_edit_url(
+    site: Any, referrer: str | None, edit_url_by_path: dict[str, str]
+) -> str | None:
+    """Admin edit URL of the local page/post a 404's referrer points to.
+
+    Only same-site referrers resolve; an external (or empty) referrer returns
+    None and renders as plain text. The referrer's full normalised path is
+    matched against `edit_url_by_path` (published content gathered for the
+    suggestions), so the operator can jump straight to the referring page and
+    fix the dead link at its source. `edit_url_by_path` holds only our own
+    `url_for`-built admin URLs, so the linked href is never attacker-controlled
+    (the raw referrer is still shown only as escaped text).
+    """
+    if not referrer:
+        return None
+    parsed = urlparse(referrer)
+    host = (parsed.hostname or "").lower()
+    if host:
+        # Absolute referrer: its host must be this site's (a relative
+        # referrer carries no host and is same-site by construction).
+        local_hosts = {site.hostname.lower()}
+        canonical_host = urlparse(site.canonical_url or "").hostname
+        if canonical_host:
+            local_hosts.add(canonical_host.lower())
+        if host not in local_hosts:
+            return None
+    path = parsed.path or "/"
+    if not path.endswith("/"):
+        path += "/"
+    return edit_url_by_path.get(path)
 
 
 def _gather_candidates(db: Any, site: Any) -> list[Candidate]:
@@ -168,8 +201,17 @@ def list_notfound(site_slug: str) -> ResponseReturnValue:
         # Skip the content scan entirely on an empty page (the common
         # steady state): no rows means nothing to suggest against.
         candidates = _gather_candidates(db, site) if rows else []
+        # Reuse the gathered candidates to map each published content URL to
+        # its admin edit link, so a same-site referrer can deep-link to the
+        # referring page's editor (fix the dead link at its source).
+        edit_url_by_path = {c.url: c.edit_url for c in candidates if c.url and c.edit_url}
         entries = [
-            {"nf": nf, "leaf": _leaf(nf.path), "suggestion": suggest(nf.path, candidates)}
+            {
+                "nf": nf,
+                "leaf": _leaf(nf.path),
+                "suggestion": suggest(nf.path, candidates),
+                "referrer_edit_url": _referrer_edit_url(site, nf.last_referrer, edit_url_by_path),
+            }
             for nf in rows
         ]
 
