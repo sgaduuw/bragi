@@ -4,6 +4,22 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.47.0] - 2026-07-09
+
+### Changed
+- 404 triage: when a recorded 404's referrer is a local published page or
+  post, the referrer column now links to that page's admin editor, so the
+  operator can jump straight to the referring page and fix the dead link at
+  its source. External referrers stay plain text.
+- Blog pagination now uses Ghost-style path URLs (`/page/2/`) instead of the
+  `?page=2` query string. Page 1 stays the bare index URL; pages 2+ are
+  `/page/N/` when the blog is the home page, or `/<index>/page/N/` otherwise.
+  Each paginated page self-canonicalises to its own URL (page 2+ previously
+  canonicalised to the index root). Old `?page=N` URLs 301 to the new path
+  form, and `/page/1/` 301s to the bare index URL, so existing links and
+  indexed pages are preserved. (Admin list pagination and site search keep
+  their `?page=` query string.)
+
 ## [1.46.0] - 2026-07-08
 
 ### Changed
