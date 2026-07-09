@@ -236,6 +236,49 @@ def test_admin_list_is_site_scoped(
     assert b"/a-only/" not in on_b.data
 
 
+def test_admin_list_links_local_referrer_to_editor(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    """A 404 whose referrer is a local published page links that referrer to
+    the page's admin editor, so the operator can fix the dead link at source."""
+    _seed(file_db_session_factory)
+    # /introduction/ is the seeded published page; make it the referrer.
+    delivery_app_file_db.test_client().get(
+        "/broken-link/",
+        headers={"Host": HOST_A, "Referer": f"https://{HOST_A}/introduction/"},
+    )
+    with file_db_session_factory() as db:
+        page_id = db.execute(select(Page.id).where(Page.slug == "introduction")).scalar_one()
+
+    client = admin_app_file_db.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/not-found/", headers={"Host": HOST_A}).data.decode()
+    assert f'href="/admin/sites/blog/pages/{page_id}/edit"' in body
+
+
+def test_admin_list_does_not_link_external_referrer(
+    admin_app_file_db: Flask,
+    delivery_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+) -> None:
+    """An external referrer stays plain text; no editor link is emitted."""
+    _seed(file_db_session_factory)
+    delivery_app_file_db.test_client().get(
+        "/zzz-nomatch/",
+        headers={"Host": HOST_A, "Referer": "https://external.example/somewhere/"},
+    )
+    with file_db_session_factory() as db:
+        page_id = db.execute(select(Page.id).where(Page.slug == "introduction")).scalar_one()
+
+    client = admin_app_file_db.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/not-found/", headers={"Host": HOST_A}).data.decode()
+    assert "https://external.example/somewhere/" in body  # shown, as escaped text
+    assert f"/admin/sites/blog/pages/{page_id}/edit" not in body  # never linked
+
+
 def _record_two(delivery_app: Flask, factory: sessionmaker[Session]) -> list[int]:
     _seed(factory)
     _record_404(delivery_app, "/bulk-a/", HOST_A)

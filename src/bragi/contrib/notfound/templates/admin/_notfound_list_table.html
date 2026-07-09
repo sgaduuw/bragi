@@ -21,7 +21,12 @@
       <td>{{ nf.count }}</td>
       <td>{{ nf.last_seen.strftime('%Y-%m-%d') }}</td>
       <td>
-        {% if nf.last_referrer %}<small>{{ nf.last_referrer }}</small>
+        {% if nf.last_referrer %}
+          {% if e.referrer_edit_url %}
+            <small><a href="{{ e.referrer_edit_url }}" title="Edit the referring page">{{ nf.last_referrer }}</a></small>
+          {% else %}
+            <small>{{ nf.last_referrer }}</small>
+          {% endif %}
         {% else %}<small>(none)</small>{% endif %}
       </td>
       <td>
