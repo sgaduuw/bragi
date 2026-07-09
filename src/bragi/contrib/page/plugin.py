@@ -27,7 +27,7 @@ from bragi.api import (
 )
 from bragi.contrib.page.admin import bp as page_admin_bp
 from bragi.contrib.page.delivery import bp as page_delivery_bp
-from bragi.contrib.page.delivery import render_post_index_page
+from bragi.contrib.page.delivery import render_or_redirect_post_index, render_post_index_page
 from bragi.core.cache import attach_validators, etag_for, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.models.page import Page, PageKind, PageStatus
@@ -330,7 +330,7 @@ def resolve_home(site: Any) -> Response | None:
         # symmetry with the dispatcher.
         if page.kind == PageKind.POST_INDEX:
             db.expunge(page)
-            return render_post_index_page(site, page)
+            return render_or_redirect_post_index(site, page)
         etag = etag_for("page", page.id, page.updated_at)
         not_modified = maybe_304(request, etag=etag, last_modified=page.updated_at)
         if not_modified is not None:

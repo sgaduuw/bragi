@@ -174,18 +174,26 @@ def _render_static_page(page: Page) -> Response:
     return response
 
 
-def render_post_index_page(site: Site, page: Page) -> Response:
+def _paginated_index_url(index_base: str, page_n: int) -> str:
+    """Page-N URL for a post index whose page-1 URL is `index_base`.
+
+    Page 1 lives at the bare index URL (`/` or `/blog/`); pages 2+ take the
+    Ghost-style `<base>page/<n>/` suffix.
+    """
+    return index_base if page_n <= 1 else f"{index_base}page/{page_n}/"
+
+
+def render_post_index_page(site: Site, page: Page, page_n: int = 1) -> Response:
     """Render a POST_INDEX page: the page's chrome + paginated posts.
 
     `page` provides title, intro (`body_html`), and meta-tag data;
     the listing below it is computed from PUBLISHED Post rows for
-    `site`, sorted by `published_at DESC`. Pagination uses
-    `?page=N` query string; out-of-range values 404.
+    `site`, sorted by `published_at DESC`. `page_n` is the 1-based page
+    number, supplied by the router (`/` and `/<index>/` are page 1;
+    `/page/<n>/` and `/<index>/page/<n>/` carry N). Out-of-range values
+    404. Legacy `?page=N` is 301'd to the path form upstream, in
+    `render_or_redirect_post_index`.
     """
-    try:
-        page_n = int(request.args.get("page", "1"))
-    except ValueError:
-        abort(404)
     if page_n < 1:
         abort(404)
 
@@ -263,11 +271,13 @@ def render_post_index_page(site: Site, page: Page) -> Response:
             return not_modified
 
         # The post-index page is served at "/" when it's the home (its
-        # slug-derived URL 301s to root), so canonicalise to the root there
-        # rather than page_url_for's "//" (an empty slug chain joins to a
-        # bare "//"). base_url drops the stored trailing slash so we don't
-        # stack a third.
-        index_path = "/" if site.home_page_id == page.id else page_url_for(page, db=db)
+        # slug-derived URL 301s to root), so its page-1 base is the root
+        # there rather than page_url_for's "//" (an empty slug chain joins
+        # to a bare "//"). base_url drops the stored trailing slash so we
+        # don't stack a third. Each paginated page self-canonicalises to its
+        # own /page/N/ URL, and prev/next carry the same path form.
+        index_base = "/" if site.home_page_id == page.id else page_url_for(page, db=db)
+        index_path = _paginated_index_url(index_base, page_n)
         body = render_template(
             "delivery/post_index.html",
             site=site,
@@ -279,6 +289,8 @@ def render_post_index_page(site: Site, page: Page) -> Response:
             total_pages=total_pages,
             has_prev=page_n > 1,
             has_next=page_n < total_pages,
+            prev_url=_paginated_index_url(index_base, page_n - 1),
+            next_url=_paginated_index_url(index_base, page_n + 1),
             meta_description=page.meta_description or page.body_excerpt or None,
             canonical_url=(f"{site.base_url}{index_path}" if site.canonical_url else None),
             og_image_url=featured_image_url_for(item=page, site=site, db=db),
@@ -286,6 +298,56 @@ def render_post_index_page(site: Site, page: Page) -> Response:
         response = make_response(body)
         attach_validators(response, etag=etag, last_modified=last_modified)
         return response
+
+
+def _redirect_legacy_page_param(site: Site, index_page: Page, raw: str) -> Response:
+    """301 a legacy `?page=N` index URL to the canonical `/page/N/` form.
+
+    A non-integer or `<1` value collapses to page 1 (the bare index URL).
+    """
+    try:
+        n = max(1, int(raw))
+    except TypeError, ValueError:
+        n = 1
+    base = "/" if site.home_page_id == index_page.id else page_url_for(index_page)
+    return redirect(_paginated_index_url(base, n), code=301)
+
+
+def render_or_redirect_post_index(site: Site, index_page: Page) -> Response:
+    """Render a POST_INDEX at page 1, or 301 a legacy `?page=N` to `/page/N/`.
+
+    The shared entry point for the two page-1 routes (`/` via
+    `resolve_home` and `/<index>/` via the dispatcher); the `/page/<n>/`
+    routes go through `_render_index_pagination` instead.
+    """
+    raw = request.args.get("page")
+    if raw is not None:
+        return _redirect_legacy_page_param(site, index_page, raw)
+    return render_post_index_page(site, index_page, 1)
+
+
+def _render_index_pagination(site: Site, prefix: list[str], page_n: int) -> Response:
+    """Render `<index>/page/<n>/` (or `/page/<n>/` at home).
+
+    `prefix` is the path ahead of the `page/<n>` suffix; it must equal the
+    post index's own URL segments (empty when the index is the home page).
+    Page 1 has no `/page/1/` form, so it 301s to the bare index URL.
+    """
+    if page_n < 1:
+        abort(404)
+    index_page = post_index_page_for(site)
+    if index_page is None:
+        abort(404)
+    if site.home_page_id == index_page.id:
+        base, index_segments = "/", []
+    else:
+        base = page_url_for(index_page)
+        index_segments = [s for s in base.split("/") if s]
+    if prefix != index_segments:
+        abort(404)
+    if page_n == 1:
+        return redirect(base, code=301)
+    return render_post_index_page(site, index_page, page_n)
 
 
 def render_post(site: Site, post_slug: str, *, require_dateless: bool = False) -> Response | None:
@@ -586,6 +648,12 @@ def show_page(slug_path: str) -> ResponseReturnValue:
     if not slugs:
         abort(404)
 
+    # Ghost-style pagination: `<index>/page/<n>/` renders page N of the post
+    # index. Detected before content resolution so `page/<int>` is reserved
+    # for pagination (Ghost does the same); `/page/1/` 301s to the bare URL.
+    if len(slugs) >= 2 and slugs[-2] == "page" and slugs[-1].isascii() and slugs[-1].isdigit():
+        return _render_index_pagination(site, slugs[:-2], int(slugs[-1]))
+
     with SessionLocal() as db:
         # 1. Exact page-chain match wins.
         page = _resolve_page_chain(db, site.id, slugs)
@@ -603,7 +671,7 @@ def show_page(slug_path: str) -> ResponseReturnValue:
     if page is not None and kind in (PageKind.STATIC, PageKind.RESUME):
         return _render_static_page(page)
     if page is not None and kind == PageKind.POST_INDEX:
-        return render_post_index_page(site, page)
+        return render_or_redirect_post_index(site, page)
 
     # 3. No exact page match. Try interpreting the path as a post
     #    or tag URL under a POST_INDEX page.
