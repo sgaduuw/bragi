@@ -4,6 +4,16 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Tags admin: a per-site **Tags** management page (under "manage") to list all
+  tags with post counts, **rename** (label and/or slug), **merge** one tag
+  into another, and **delete**. A slug rename or a merge inserts an auto-301
+  from the old `/tag/<slug>/` URL to the new one so existing links keep
+  working; a delete leaves no redirect (the URL 404s). Tags are still created
+  by adding them to a post; this surface manages the resulting tags.
+
 ## [1.47.0] - 2026-07-09
 
 ### Changed

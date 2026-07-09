@@ -596,6 +596,7 @@ bragi/
 │   │   ├── pagination.py       # page_arg() query-arg helper for list views
 │   │   ├── permissions.py      # per-site role enforcement
 │   │   ├── preview_token.py    # signed preview-token mint/verify (working-copy preview)
+│   │   ├── redirects.py        # shared redirect-upsert primitive (slug/tag renames)
 │   │   ├── registry.py         # in-process Registry (content types, importers, nav, ...)
 │   │   ├── renditions.py       # attachment rendition pipeline
 │   │   ├── safe_urls.py        # safe_external_url + IDN gate
@@ -639,6 +640,7 @@ bragi/
 │       ├── seo/                # sitemap, robots.txt, security.txt, feed.xml
 │       ├── sessions/           # session admin (list / revoke)
 │       ├── sites/              # Site CRUD admin + alias subcommands
+│       ├── tags_admin/         # per-site tag management (list / rename / merge / delete)
 │       ├── team/               # per-site team management (list / grant / revoke)
 │       ├── theme_default/      # in-tree default theme (registers slug "default")
 │       ├── theme_minimal/      # lean, content-first theme (slug "minimal")
