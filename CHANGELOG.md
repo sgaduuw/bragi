@@ -8,10 +8,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - A **Profile** page is now a pure surface of its author's account Profile:
-  the page-edit body editor is replaced with a notice pointing to the account
+  the page-edit body editor gives way to a notice pointing to the account
   Profile (the single source of the name, photo, bio, pronouns, location, and
-  links), and the rendered page no longer shows a separate page body. Editing
-  a profile happens in one place.
+  links) the moment you choose the Profile kind, and the rendered page no
+  longer shows a separate page body. Editing a profile happens in one place.
 - The account Profile **bio** now uses the same rich editor as posts and pages
   (with the image-library and internal-link pickers omitted, since a bio is
   global and has no single site to scope them to) and is authored as markdown.

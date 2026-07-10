@@ -98,12 +98,19 @@ def _form_from_request() -> dict[str, str]:
     `resume_data` is kept as a raw JSON string; parsing and Pydantic
     validation happen later in `_validate_resume_data`.
     """
+    kind = (request.form.get("kind") or PageKind.STATIC).strip()
+    # A PROFILE page has no body of its own (it surfaces the author's account
+    # Profile), so its body is always empty regardless of what the form
+    # submits. The editor is hidden client-side when Profile is selected, but
+    # blanking here is the robust guard: it holds for a stale/JS-off submit or
+    # a direct POST, keeping profile rows body-free.
+    body_markdown = "" if kind == PageKind.PROFILE else (request.form.get("body_markdown") or "")
     return {
         "title": (request.form.get("title") or "").strip(),
         "slug": (request.form.get("slug") or "").strip(),
-        "body_markdown": request.form.get("body_markdown") or "",
+        "body_markdown": body_markdown,
         "status": request.form.get("status") or PageStatus.DRAFT,
-        "kind": (request.form.get("kind") or PageKind.STATIC).strip(),
+        "kind": kind,
         "parent_id": (request.form.get("parent_id") or "").strip(),
         "featured_image_id": (request.form.get("featured_image_id") or "").strip(),
         "resume_data": request.form.get("resume_data") or "",
