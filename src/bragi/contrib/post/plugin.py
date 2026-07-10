@@ -41,6 +41,7 @@ from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
+from bragi.core.profiles import ProfileView, profile_jsonld, profile_view
 from bragi.core.render.reading_time import reading_time_minutes
 from bragi.core.render.toc import build_toc_html
 from bragi.core.seo import featured_image_url_for
@@ -135,14 +136,14 @@ def _render_post(post: Any, _request: Any) -> str:
         f"{site.base_url}{post_path}" if site and site.canonical_url and post_path else None
     )
     author_name: str | None = None
-    author_bio: str | None = None
+    author_profile: ProfileView | None = None
     related: list[Post] = []
     with SessionLocal() as db:
         if post.author_id:
             author = db.get(User, post.author_id)
             if author is not None:
                 author_name = author.display_name
-                author_bio = author.bio
+                author_profile = profile_view(author)
         if site is not None:
             related = related_posts_for(db, post, limit=related_posts_count_for(site))
             # Expunge so the template can read attributes after the
@@ -162,7 +163,8 @@ def _render_post(post: Any, _request: Any) -> str:
         post=post,
         site=site,
         author_name=author_name,
-        author_bio=author_bio,
+        author_profile=author_profile,
+        author_jsonld=profile_jsonld(author_profile, None) if author_profile else None,
         reading_time=reading_time_minutes(post.body_markdown or ""),
         updated_visible=updated_visible,
         meta_description=post.meta_description or post.body_excerpt or None,

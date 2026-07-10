@@ -766,6 +766,78 @@ def new_page(site_slug: str) -> ResponseReturnValue:
     return redirect(url_for("page_admin.list_pages"))
 
 
+@bp.route("/<int:page_id>/create-resume", methods=["POST"])
+def create_resume_from_profile(site_slug: str, page_id: int) -> ResponseReturnValue:
+    """Create a DRAFT resume page seeded from a profile page's author.
+
+    The convenience path from the lightweight Profile page to a full CV:
+    copies the author's location + rel="me" links into the resume header and
+    opens the new draft in the editor. The operator fills in the structured
+    sections and publishes from there.
+    """
+    from bragi.api import ProfileLink
+    from bragi.contrib.page.resume import ResumeData
+    from bragi.core.models.user import User
+    from bragi.core.text import unique_slug_for_page
+
+    with SessionLocal() as db:
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("author", site.id)
+        profile_page = db.get(Page, page_id)
+        if (
+            profile_page is None
+            or profile_page.site_id != site.id
+            or profile_page.kind != PageKind.PROFILE
+        ):
+            abort(404)
+
+        author = db.get(User, profile_page.author_id)
+        resume = ResumeData()
+        if author is not None:
+            resume.header.location = author.location or None
+            resume.header.profile_links = [
+                ProfileLink.model_validate(link)
+                for link in (author.profile_links or [])
+                if isinstance(link, dict)
+            ]
+        title = (author.display_name if author is not None else None) or "Resume"
+        # A display name that is non-empty but slugifies to empty
+        # (all-CJK/Cyrillic/emoji/punctuation, realistic on a non-English
+        # site) makes unique_slug_for_page raise; fall back to a safe base
+        # rather than 500 on the one-click action.
+        try:
+            slug = unique_slug_for_page(db, site_id=site.id, parent_id=None, title=title)
+        except ValueError:
+            slug = unique_slug_for_page(db, site_id=site.id, parent_id=None, title="Resume")
+
+        resume_page = Page(
+            site_id=site.id,
+            slug=slug,
+            title=title,
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+            author_id=profile_page.author_id,
+            status=PageStatus.DRAFT,
+            kind=PageKind.RESUME,
+            resume_data=resume.model_dump(mode="json"),
+        )
+        db.add(resume_page)
+        db.commit()
+        new_id = resume_page.id
+        site_id = site.id
+
+    audit(
+        AuditAction.POST_CREATED,
+        target_type="page",
+        target_id=new_id,
+        site_id=site_id,
+        extra={"slug": slug, "status": PageStatus.DRAFT, "kind": PageKind.RESUME},
+    )
+    flash("Draft resume created from your profile. Fill it in and publish.", "success")
+    return redirect(url_for("page_admin.edit_page", site_slug=site_slug, page_id=new_id))
+
+
 @bp.route("/<int:page_id>/edit", methods=["GET", "POST"])
 def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:

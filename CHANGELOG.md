@@ -7,6 +7,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Post author bylines now render as an IndieWeb **h-card** and the
+  BlogPosting JSON-LD `author` is enriched from the author's profile (avatar
+  as `image`, rel="me" links as `sameAs`). The "About the author" aside shows
+  the avatar, pronouns, bio, and links when the author has filled them in.
+- Profile pages gain a one-click **"Create a resume from this profile"**
+  shortcut: it seeds a draft Resume/CV page with the author's name, location,
+  and profile links, and opens it in the editor to fill in the structured
+  sections.
 - Profile page kind: a new **Profile** page (choose "Profile" as the page
   kind) renders its author's profile as a public "about me" — avatar, name,
   pronouns, location, bio, narrative body, and rel="me" links — marked up as
