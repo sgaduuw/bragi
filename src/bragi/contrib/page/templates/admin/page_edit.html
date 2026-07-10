@@ -137,11 +137,28 @@
     <small>Leave at "(root)" for a top-level page.</small>
   </fieldset>
 
+  {# A PROFILE page has no body of its own: it publishes the author's
+     account Profile (h-card + JSON-LD Person). Hide the body editor and
+     point the operator at the single source, rather than offering a
+     competing content surface that never renders. Server-side gating on
+     the persisted/submitted kind, same shape as the resume fieldset. #}
+  {% if current_kind == 'profile' %}
+  <fieldset class="profile-kind-notice">
+    <label>Body</label>
+    <p class="help">
+      A Profile page publishes {% if is_edit %}its author's{% else %}your{% endif %}
+      account Profile: name, photo, bio, pronouns, location, and rel="me" links.
+      Edit those on the <a href="{{ url_for('account_profile.edit') }}">Profile page</a>.
+      This page controls only its URL, title, and where it appears.
+    </p>
+  </fieldset>
+  {% else %}
   <fieldset>
     <label for="body_markdown">Body (markdown)</label>
     {% include "admin/_tiptap_editor.html" %}
     <textarea name="body_markdown" id="body_markdown" rows="15">{{ form.get('body_markdown', '') }}</textarea>
   </fieldset>
+  {% endif %}
 
   {% if current_kind == 'resume' %}
     {% include "admin/_resume_fieldset.html" %}

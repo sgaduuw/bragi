@@ -18,7 +18,19 @@
 
   <fieldset>
     <label for="bio">Bio</label>
-    <textarea name="bio" id="bio" rows="4">{{ values.bio }}</textarea>
+    {# Same rich editor as posts/pages, but with the image-library and
+       internal-link pickers off: the bio is global (it renders on every
+       site you publish), so there is no single site to scope those to.
+       Bio is markdown; it is your public "about me" narrative. #}
+    {% set editor_textarea_id = 'bio' %}
+    {% set editor_enable_media = false %}
+    {% set editor_enable_internal_links = false %}
+    {% include "admin/_tiptap_editor.html" %}
+    <textarea name="bio" id="bio" rows="8">{{ values.bio }}</textarea>
+    <p class="help">
+      Markdown. This is your public "about me" — it appears on your Profile
+      page and under your posts.
+    </p>
   </fieldset>
 
   <fieldset>
