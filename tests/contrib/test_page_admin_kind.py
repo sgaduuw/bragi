@@ -464,6 +464,98 @@ def test_edit_rejects_cross_site_parent_id(
         assert row.parent_id is None  # untouched
 
 
+# ============================================================
+# Profile -> resume shortcut
+# ============================================================
+
+
+def _make_profile_page(db_factory: sessionmaker[Session]) -> int:
+    """Seed a PROFILE page whose author carries location + links."""
+    with db_factory() as db:
+        user = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        user.location = "London"
+        user.profile_links = [{"label": "GitHub", "url": "https://github.com/ada"}]
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        page = Page(
+            site_id=site.id,
+            slug="about",
+            title="About Ada",
+            author_id=user.id,
+            status=PageStatus.PUBLISHED,
+            kind=PageKind.PROFILE,
+            body_markdown="",
+            body_html="",
+            body_excerpt="",
+        )
+        db.add(page)
+        db.commit()
+        return page.id
+
+
+def test_create_resume_from_profile_seeds_draft(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """POST create-resume makes a DRAFT resume seeded from the author."""
+    profile_id = _make_profile_page(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{profile_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{profile_id}/create-resume",
+        data={"_csrf_token": token},
+    )
+    assert resp.status_code == 302
+
+    with db_session_factory() as db:
+        resume = db.execute(select(Page).where(Page.kind == PageKind.RESUME)).scalar_one()
+    assert resume.status == PageStatus.DRAFT
+    assert resume.title == "Ada"
+    header = resume.resume_data["header"]
+    assert header["location"] == "London"
+    assert header["profile_links"] == [{"label": "GitHub", "url": "https://github.com/ada"}]
+    # Redirect lands on the new resume's editor.
+    assert f"/pages/{resume.id}/edit" in resp.headers["Location"]
+
+
+def test_create_resume_with_non_sluggable_name_falls_back(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A display name that slugifies to empty (all-CJK/punctuation) must
+    not 500 the one-click action; the slug falls back to a safe base."""
+    profile_id = _make_profile_page(db_session_factory)
+    with db_session_factory() as db:
+        user = db.execute(select(User).where(User.email == EMAIL)).scalar_one()
+        user.display_name = "日本語"  # slugifies to ""
+        db.commit()
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{profile_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{profile_id}/create-resume",
+        data={"_csrf_token": token},
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        resume = db.execute(select(Page).where(Page.kind == PageKind.RESUME)).scalar_one()
+    assert resume.slug  # non-empty safe fallback
+    assert resume.title == "日本語"  # title keeps the real name
+
+
+def test_create_resume_rejects_non_profile_page(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The shortcut only applies to PROFILE pages; a STATIC page 404s."""
+    news_id = _page_id(db_session_factory, "news")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{news_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{news_id}/create-resume",
+        data={"_csrf_token": token},
+    )
+    assert resp.status_code == 404
+
+
 def test_demotion_alone_does_not_insert_redirect(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:

@@ -1,10 +1,9 @@
-"""End-to-end: profile links set in admin appear in the delivery footer.
+"""End-to-end: the site owner's profile links appear in the delivery footer.
 
-The contrib tests prove the admin POST persists and the partial
-renders in isolation; this closes the loop that the *default theme*
-footer actually includes the partial and the delivery app wires the
-global + partial template folder together on a real Host-routed
-request.
+The contrib tests prove the partial renders the owner's links in
+isolation; this closes the loop that the *default theme* footer
+actually includes the partial and the delivery app wires the global
++ partial template folder together on a real Host-routed request.
 """
 
 from __future__ import annotations
@@ -26,7 +25,15 @@ def delivery_app(
     patched_session_locals: sessionmaker[Session],
     db_session: Session,
 ) -> Iterator[Flask]:
-    user = User(email="pl-rt@example.com", display_name="Ada", is_active=True)
+    user = User(
+        email="pl-rt@example.com",
+        display_name="Ada",
+        is_active=True,
+        profile_links=[
+            {"label": "GitHub", "url": "https://github.com/you"},
+            {"label": "Mastodon", "url": "https://hachyderm.io/@you"},
+        ],
+    )
     db_session.add(user)
     db_session.flush()
     site = Site(
@@ -35,12 +42,6 @@ def delivery_app(
         title="Blog",
         canonical_url="https://blog.example.com",
         owner_user_id=user.id,
-        extra_settings={
-            "profile_links": [
-                {"label": "GitHub", "url": "https://github.com/you"},
-                {"label": "Mastodon", "url": "https://hachyderm.io/@you"},
-            ]
-        },
     )
     db_session.add(site)
     db_session.flush()

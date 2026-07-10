@@ -4,6 +4,57 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.48.0] - 2026-07-10
+
+Author profiles: a self-service account **Profile**, public profile
+surfaces (a Profile page, author h-cards), and external identity wiring
+(ActivityPub actor + footer rel="me") all sourced from one per-user place.
+
+### Added
+- Account profile page: a self-service **Profile** editor in the admin's
+  account menu, where the logged-in user edits their own display name, bio,
+  pronouns, location, avatar URL, and rel="me" links. These land on the
+  `User` row (new columns). The avatar can be filled in one click from
+  **Gravatar** (derived from your email) or your **linked GitHub** avatar,
+  and the URL is validated through the external-URL scheme allowlist before
+  it is stored.
+- Profile page kind: a new **Profile** page (choose "Profile" as the page
+  kind) renders its author's profile as a public "about me" (avatar, name,
+  pronouns, location, bio, narrative body, and rel="me" links), marked up as
+  an IndieWeb **h-card** plus a **JSON-LD Person** block. The structured
+  fields come from the author's account profile; the cache validator is
+  author-aware so a profile edit busts the page cache.
+- Post author bylines now render as an IndieWeb **h-card** and the
+  BlogPosting JSON-LD `author` is enriched from the author's profile (avatar
+  as `image`, rel="me" links as `sameAs`). The "About the author" aside shows
+  the avatar, pronouns, bio, and links when the author has filled them in.
+- Profile pages gain a one-click **"Create a resume from this profile"**
+  shortcut: it seeds a draft Resume/CV page with the author's name, location,
+  and profile links, and opens it in the editor to fill in the structured
+  sections.
+- Tags admin: a per-site **Tags** management page (under "manage") to list all
+  tags with post counts, **rename** (label and/or slug), **merge** one tag
+  into another, and **delete**. A slug rename or a merge inserts an auto-301
+  from the old `/tag/<slug>/` URL to the new one so existing links keep
+  working; a delete leaves no redirect (the URL 404s). Tags are still created
+  by adding them to a post; this surface manages the resulting tags.
+
+### Changed
+- The **ActivityPub actor** now advertises the site owner's account profile:
+  `summary` comes from the owner's bio and an `icon` from their avatar
+  (previously the summary was always empty and no avatar was published). The
+  actor's `name` still shows the site title. A site whose owner has no profile
+  set degrades to the previous behaviour.
+- The public footer's **rel="me" links** now come from the site owner's
+  account profile (managed on the account **Profile** page), consolidating the
+  rel=me identity onto one per-user surface. The separate per-site "Profile
+  links" admin editor has been removed; links previously stored per-site must
+  be re-entered on the owner's profile.
+- Admin breadcrumbs now also render on the main list views (Posts, Pages,
+  Media, Redirects, Sites), which were the gap left by the earlier
+  breadcrumb-consistency pass (their edit pages already linked back to a
+  list crumb that the list itself didn't show).
+
 ## [1.47.0] - 2026-07-09
 
 ### Changed

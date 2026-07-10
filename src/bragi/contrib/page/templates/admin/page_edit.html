@@ -190,6 +190,7 @@
       <option value="static" {% if current_kind == 'static' %}selected{% endif %}>Static page</option>
       <option value="post_index" {% if current_kind == 'post_index' %}selected{% endif %}>Post index (hosts blog listing)</option>
       <option value="resume" {% if current_kind == 'resume' %}selected{% endif %}>Resume / CV (structured content)</option>
+      <option value="profile" {% if current_kind == 'profile' %}selected{% endif %}>Profile (h-card / about the author)</option>
     </select>
     <small>
       A site can have at most one post_index page. Promoting another
@@ -277,6 +278,20 @@
     <a href="{{ url_for('page_admin.list_pages') }}" class="btn secondary">Cancel</a>
   </div>
 </form>
+
+{# Profile -> resume shortcut. A separate form (outside the main edit
+   form, per the nested-form note below) that seeds a DRAFT resume from
+   this profile's author and opens it in the editor. Live edit only:
+   a working copy has no persisted page to derive the author from. #}
+{% if is_edit and not is_wc and current_kind == 'profile' %}
+<form method="post"
+      action="{{ url_for('page_admin.create_resume_from_profile', page_id=page.id) }}"
+      class="profile-resume-shortcut">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button type="submit">Create a resume from this profile</button>
+  <small>Seeds a draft CV with your name, location, and profile links.</small>
+</form>
+{% endif %}
 
 {% if not is_edit %}
 <script>

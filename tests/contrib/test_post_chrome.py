@@ -140,6 +140,40 @@ def test_post_renders_author_bio_block_when_set(delivery_app: Flask) -> None:
     assert "Author and mathematician." in body
 
 
+def test_post_author_bio_is_h_card_with_enriched_jsonld(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A richer author profile renders the byline aside as an h-card and
+    enriches the BlogPosting's JSON-LD author with image + sameAs."""
+    import json
+    import re
+
+    with db_session_factory() as db:
+        user = db.execute(select(User).where(User.email == "ada@example.com")).scalar_one()
+        user.avatar_url = "https://example.com/ada.jpg"
+        user.pronouns = "she/her"
+        user.profile_links = [{"label": "GitHub", "url": "https://github.com/ada"}]
+        db.commit()
+
+    body = (
+        delivery_app.test_client()
+        .get("/posts/fresh/", headers={"Host": "blog.example.com"})
+        .data.decode()
+    )
+    assert 'class="author-bio h-card"' in body
+    assert 'class="u-photo"' in body and "https://example.com/ada.jpg" in body
+    assert "she/her" in body
+    assert 'rel="me" href="https://github.com/ada"' in body
+
+    m = re.search(r'<script type="application/ld\+json">(.*?)</script>', body, re.DOTALL)
+    assert m is not None
+    author = json.loads(m.group(1))["author"]
+    assert author["@type"] == "Person"
+    assert author["name"] == "Ada Lovelace"
+    assert author["image"] == "https://example.com/ada.jpg"
+    assert author["sameAs"] == ["https://github.com/ada"]
+
+
 def test_post_omits_author_bio_block_when_unset(
     delivery_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:

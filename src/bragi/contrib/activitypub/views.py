@@ -34,6 +34,8 @@ from bragi.core.models.activitypub import (
 )
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
+from bragi.core.models.user import User
+from bragi.core.profiles import profile_view
 from bragi.core.time import naive_utcnow
 
 LOG = logging.getLogger(__name__)
@@ -108,7 +110,17 @@ def actor() -> ResponseReturnValue:
         db.commit()
         public_pem = keypair.public_key_pem
         key_id = keypair.key_id
-    doc = actor_document(site, public_pem, key_id)
+        # Feed the actor's summary + icon from the site owner's account
+        # profile (bio + avatar). Degrades to empty/absent when unset.
+        owner = db.get(User, site.owner_user_id)
+        owner_profile = profile_view(owner)
+    doc = actor_document(
+        site,
+        public_pem,
+        key_id,
+        summary=(owner_profile.bio or "") if owner_profile else "",
+        icon_url=owner_profile.avatar_url if owner_profile else None,
+    )
     resp = jsonify(doc)
     resp.mimetype = "application/activity+json"
     return resp

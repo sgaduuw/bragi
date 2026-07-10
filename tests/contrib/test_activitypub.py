@@ -48,6 +48,7 @@ from bragi.core.models.activitypub import (
 )
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
+from bragi.core.models.user import User
 from tests.conftest import make_test_user, seed_blog_index
 
 # --------------------------- keypair ---------------------------
@@ -313,6 +314,32 @@ def test_actor_document_includes_public_key(db_session: Session) -> None:
     assert doc["outbox"].endswith("/actor/outbox")
 
 
+def test_actor_document_carries_owner_summary_and_icon(db_session: Session) -> None:
+    """summary + icon come from the owner profile params; name stays site.title."""
+    site, _ = _make_site(db_session)
+    keypair = get_or_create_keypair(db_session, site)
+    db_session.commit()
+    doc = actor_document(
+        site,
+        keypair.public_key_pem,
+        keypair.key_id,
+        summary="Mathematician and first programmer.",
+        icon_url="https://example.com/ada.jpg",
+    )
+    assert doc["name"] == "Blog"  # site.title, not the owner name
+    assert doc["summary"] == "Mathematician and first programmer."
+    assert doc["icon"] == {"type": "Image", "url": "https://example.com/ada.jpg"}
+
+
+def test_actor_document_omits_icon_when_owner_has_no_avatar(db_session: Session) -> None:
+    site, _ = _make_site(db_session)
+    keypair = get_or_create_keypair(db_session, site)
+    db_session.commit()
+    doc = actor_document(site, keypair.public_key_pem, keypair.key_id)
+    assert doc["summary"] == ""
+    assert "icon" not in doc
+
+
 def test_webfinger_document_subject_matches_handle(db_session: Session) -> None:
     site, _ = _make_site(db_session)
     doc = webfinger_document(site)
@@ -413,6 +440,36 @@ def test_actor_serves_document_with_public_key(client: FlaskClient) -> None:
     assert resp.mimetype == "application/activity+json"
     doc = resp.get_json()
     assert doc["publicKey"]["publicKeyPem"].startswith("-----BEGIN PUBLIC KEY-----")
+
+
+def test_actor_document_reflects_owner_profile_end_to_end(
+    patched_session_locals: sessionmaker[Session], db_session: Session
+) -> None:
+    """A GET /actor surfaces the owner's bio (summary) + avatar (icon)."""
+    owner = User(
+        email="ap-owner@example.com",
+        display_name="Ada",
+        is_active=True,
+        bio="Mathematician and first programmer.",
+        avatar_url="https://example.com/ada.jpg",
+    )
+    db_session.add(owner)
+    db_session.flush()
+    site = Site(
+        slug="owned",
+        hostname="owned.example.com",
+        title="Owned",
+        canonical_url="https://owned.example.com",
+        owner_user_id=owner.id,
+    )
+    db_session.add(site)
+    db_session.commit()
+    resp = create_delivery_app().test_client().get("/actor", headers={"Host": "owned.example.com"})
+    assert resp.status_code == 200
+    doc = resp.get_json()
+    assert doc["name"] == "Owned"
+    assert doc["summary"] == "Mathematician and first programmer."
+    assert doc["icon"] == {"type": "Image", "url": "https://example.com/ada.jpg"}
 
 
 def test_outbox_lists_published_posts(client: FlaskClient) -> None:

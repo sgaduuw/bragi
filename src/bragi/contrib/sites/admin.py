@@ -370,6 +370,7 @@ def list_sites() -> ResponseReturnValue:
     sites = accessible_sites_for(current_user())
     if not is_superuser() and len(sites) == 1:
         return redirect(url_for("site_admin.site_dashboard", site_slug=sites[0].slug))
+    set_breadcrumbs(Crumb("Sites", None))
     return render_template("admin/sites_list.html", sites=sites, is_superuser=is_superuser())
 
 

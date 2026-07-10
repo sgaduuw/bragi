@@ -53,7 +53,6 @@ class AuditAction:
     IDENTITY_LINK_FAILURE = "identity.link_failure"
 
     SITE_OWNER_TRANSFERRED = "site.owner.transferred"
-    SITE_PROFILE_LINKS_UPDATED = "site.profile_links.updated"
 
     TEAM_GRANTED = "team.granted"
     TEAM_ROLE_CHANGED = "team.role_changed"
