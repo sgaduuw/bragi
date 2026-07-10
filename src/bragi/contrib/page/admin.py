@@ -74,6 +74,20 @@ bp = Blueprint(
     url_prefix="/admin/sites/<site_slug>/pages",
 )
 
+# Page kinds an author may pick in the create/edit/working-copy forms.
+# Kept as ONE list (rather than an inline set per handler) so adding a
+# kind to PageKind + the template can't silently leave a handler's
+# validation rejecting it: the PROFILE kind shipped in 1.48.0 was
+# unselectable because three of the four handlers still whitelisted only
+# static/post_index/resume.
+_SELECTABLE_PAGE_KINDS = (
+    PageKind.STATIC,
+    PageKind.POST_INDEX,
+    PageKind.RESUME,
+    PageKind.PROFILE,
+)
+_KIND_ERROR = "Kind must be one of: " + ", ".join(f"'{k}'" for k in _SELECTABLE_PAGE_KINDS) + "."
+
 
 def _form_from_request() -> dict[str, str]:
     """Pull the page-edit form fields off the current request.
@@ -644,8 +658,8 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             return _render_page_form(db, site, None, form, parents)
 
         new_kind = str(form["kind"])
-        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
-            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
+        if new_kind not in _SELECTABLE_PAGE_KINDS:
+            flash(_KIND_ERROR, "error")
             return _render_page_form(db, site, None, form, parents)
 
         parent_id = _normalized_parent_id(form["parent_id"])
@@ -898,8 +912,8 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             flash("Title and slug are required.", "error")
             return _render_page_form(db, site, page, form, parents)
         new_kind = str(form["kind"])
-        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
-            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
+        if new_kind not in _SELECTABLE_PAGE_KINDS:
+            flash(_KIND_ERROR, "error")
             return _render_page_form(db, site, page, form, parents)
         parent_id = _normalized_parent_id(form["parent_id"])
         parent_id, parent_err = _validated_parent_id_or_error(
@@ -1161,8 +1175,8 @@ def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             flash("Title and slug are required.", "error")
             return _render_page_form(db, site, page, form, parents)
         new_kind = str(form["kind"])
-        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
-            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
+        if new_kind not in _SELECTABLE_PAGE_KINDS:
+            flash(_KIND_ERROR, "error")
             return _render_page_form(db, site, page, form, parents)
         parent_id = _normalized_parent_id(form["parent_id"])
         parent_id, parent_err = _validated_parent_id_or_error(
@@ -1317,8 +1331,8 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
             flash("Title and slug are required.", "error")
             return _rerender(form)
         new_kind = str(form["kind"])
-        if new_kind not in {PageKind.STATIC, PageKind.POST_INDEX, PageKind.RESUME}:
-            flash("Kind must be 'static', 'post_index', or 'resume'.", "error")
+        if new_kind not in _SELECTABLE_PAGE_KINDS:
+            flash(_KIND_ERROR, "error")
             return _rerender(form)
         parent_id = _normalized_parent_id(form["parent_id"])
         parent_id, parent_err = _validated_parent_id_or_error(
