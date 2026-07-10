@@ -4,6 +4,15 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.48.1] - 2026-07-10
+
+### Fixed
+- Profile pages could not be created or switched to in the admin: the page
+  create / edit / working-copy handlers still whitelisted only
+  `static` / `post_index` / `resume`, so choosing "Profile" as the kind was
+  rejected with "Kind must be ...". The four handlers now share one kind
+  list (so a new kind can't miss a handler again) and accept `profile`.
+
 ## [1.48.0] - 2026-07-10
 
 Author profiles: a self-service account **Profile**, public profile
