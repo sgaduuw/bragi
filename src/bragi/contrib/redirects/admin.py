@@ -128,6 +128,7 @@ def _validate(form: dict[str, object]) -> list[str]:
 @bp.route("/", methods=["GET"])
 def list_redirects(site_slug: str) -> ResponseReturnValue:
     page = page_arg()
+    set_breadcrumbs(Crumb("Redirects", None))
 
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)

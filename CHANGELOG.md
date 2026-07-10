@@ -6,6 +6,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Admin breadcrumbs now also render on the main list views (Posts, Pages,
+  Media, Redirects, Sites), which were the gap left by the earlier
+  breadcrumb-consistency pass (their edit pages already linked back to a
+  list crumb that the list itself didn't show).
+
 ### Added
 - Tags admin: a per-site **Tags** management page (under "manage") to list all
   tags with post counts, **rename** (label and/or slug), **merge** one tag

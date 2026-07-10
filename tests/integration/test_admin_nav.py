@@ -188,13 +188,14 @@ def test_mobile_toggle_scaffold_present(admin_app: Flask) -> None:
     assert 'class="admin-rail"' in body
 
 
-def test_breadcrumbs_absent_on_list_view(admin_app: Flask) -> None:
-    """List views don't set breadcrumbs; the rail is the locator."""
+def test_breadcrumbs_present_as_section_crumb_on_list_view(admin_app: Flask) -> None:
+    """A list view sets a single terminal breadcrumb: the section name."""
     client = admin_app.test_client()
     _login(client)
     resp = client.get("/admin/sites/blog/posts/")
     body = resp.data.decode()
-    assert 'aria-label="Breadcrumb"' not in body
+    assert 'aria-label="Breadcrumb"' in body
+    assert '<span class="crumb-current">Posts</span>' in body
 
 
 def test_breadcrumbs_present_with_chain_on_edit_view(
