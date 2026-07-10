@@ -546,6 +546,34 @@ def _make_profile_page(db_factory: sessionmaker[Session]) -> int:
         return page.id
 
 
+def test_profile_kind_page_editor_hides_body_shows_notice(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A profile-kind page editor shows a notice pointing at the account
+    Profile instead of the body editor (the account profile is the source)."""
+    profile_id = _make_profile_page(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get(f"/admin/sites/blog/pages/{profile_id}/edit").data.decode()
+    assert 'href="/admin/account/profile"' in body
+    assert "account Profile" in body
+    # No body editor for a profile page.
+    assert 'id="body_markdown"' not in body
+    assert 'id="tiptap-editor"' not in body
+
+
+def test_static_kind_page_editor_still_has_body(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A regular page keeps the body editor (guard against over-hiding)."""
+    news_id = _page_id(db_session_factory, "news")
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get(f"/admin/sites/blog/pages/{news_id}/edit").data.decode()
+    assert 'id="body_markdown"' in body
+    assert 'id="tiptap-editor"' in body
+
+
 def test_create_resume_from_profile_seeds_draft(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:

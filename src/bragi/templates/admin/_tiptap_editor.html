@@ -1,13 +1,26 @@
-{# Shared TipTap-on-textarea editor. Included by post/edit.html and
-   page/page_edit.html. The host template owns the surrounding
-   <fieldset>, the <label>, and the <textarea name="body_markdown"
-   id="body_markdown">; this partial layers toolbar / image picker
-   / mount / styles / wiring on top so non-JS clients keep getting
-   a working plain textarea fallback.
+{# Shared TipTap-on-textarea editor. Included by post/edit.html,
+   page/page_edit.html, and the account-profile bio field. The host
+   template owns the surrounding <fieldset>, the <label>, and the
+   <textarea>; this partial layers toolbar / image picker / mount /
+   styles / wiring on top so non-JS clients keep getting a working
+   plain textarea fallback.
 
-   Lives in `bragi/templates/admin/` (not `contrib/`) because both
-   post and page consume it and the contrib boundary forbids
-   sibling-plugin includes. #}
+   Include-time params (all optional; defaults preserve the post/page
+   behaviour byte-for-byte):
+   - editor_textarea_id: id of the caller's <textarea> the editor
+     binds to (default "body_markdown").
+   - editor_enable_media: render the image-library picker + renditions
+     (default true). Turn OFF where there is no site context to scope
+     the library to (e.g. the global account bio).
+   - editor_enable_internal_links: render the post/page link picker
+     (default true). Same site-scoping caveat.
+
+   Lives in `bragi/templates/admin/` (not `contrib/`) because post,
+   page, and account-profile all consume it and the contrib boundary
+   forbids sibling-plugin includes. #}
+{% set _ed_textarea_id = editor_textarea_id | default('body_markdown') %}
+{% set _ed_media = editor_enable_media | default(true) %}
+{% set _ed_internal = editor_enable_internal_links | default(true) %}
 <div id="tiptap-editor-toolbar" class="editor-toolbar" role="toolbar" hidden>
   <button type="button" data-action="bold" title="Bold"><strong>B</strong></button>
   <button type="button" data-action="italic" title="Italic"><em>I</em></button>
@@ -23,11 +36,15 @@
   <button type="button" data-action="code-block" title="Code block">{ }</button>
   <span class="sep">|</span>
   <button type="button" data-action="link" title="External link">Link</button>
+  {% if _ed_internal %}
   <button type="button" data-action="internal-link" title="Internal link to a post or page">Internal link</button>
+  {% endif %}
   <button type="button" data-action="unlink" title="Remove link">Unlink</button>
   <span class="sep">|</span>
+  {% if _ed_media %}
   <button type="button" data-action="image" title="Insert image">&#128247; Image</button>
   <span class="sep">|</span>
+  {% endif %}
   <details class="toolbar-menu">
     <summary title="Table">Table &#9662;</summary>
     <div class="toolbar-menu__panel">
@@ -54,6 +71,7 @@
   </details>
 </div>
 
+{% if _ed_media %}
 <dialog id="image-picker-dialog"
         style="max-width: 800px; width: 90vw; padding: 0;
                border: 1px solid #bbb; border-radius: 4px;">
@@ -70,6 +88,8 @@
     <p style="padding: 1rem; color: #888;">Loading...</p>
   </div>
 </dialog>
+{% endif %}
+{% if _ed_internal %}
 <dialog id="internal-link-picker-dialog"
         style="max-width: 640px; width: 90vw; padding: 0;
                border: 1px solid #bbb; border-radius: 4px;">
@@ -86,6 +106,7 @@
     <p style="padding: 1rem; color: #888;">Loading...</p>
   </div>
 </dialog>
+{% endif %}
 <div id="tiptap-editor" class="editor-mount" hidden></div>
 
 {# Rendition lookup for the in-editor image preview. Registered by
@@ -96,6 +117,7 @@
    class survives the save→reload round-trip; renditions are
    computed server-side per request and re-applied to the editor
    nodes during initial parse via ClassedImage.parseHTML. #}
+{% if _ed_media %}
 <script id="image-renditions" type="application/json">
 {%- if editor_image_renditions is defined -%}
 {{ editor_image_renditions(
@@ -120,6 +142,7 @@
     <button type="button" data-align="align-right"  title="Float right">&rarr;</button>
   </div>
 </div>
+{% endif %}
 
 <style>
   .editor-toolbar {
@@ -196,9 +219,9 @@
     background: rgba(34, 34, 34, 0.08); pointer-events: none;
   }
   .editor-mount .ProseMirror td, .editor-mount .ProseMirror th { position: relative; }
-  /* Hide the textarea once JS has wired the editor; the body
-     attribute is set by the module script. */
-  body.has-tiptap-editor textarea#body_markdown { display: none; }
+  /* The source textarea is hidden by the module script directly
+     (textarea.style.display = 'none') once the editor is wired, so
+     the hide is id-agnostic and works for any caller textarea id. */
   /* Bubble menu that floats above a focused Image node. The
      `tippy-box` class is what @tiptap/extension-bubble-menu wraps
      the element in; we style the inner element directly. */
@@ -521,11 +544,17 @@
   // route resolves the site from the Host header, which doesn't
   // match on the admin host, so the editor can't fetch them
   // unrewritten.
-  const ADMIN_ATTACHMENT_PREFIX = {{ url_for(
+  // With media enabled the prefix is the site-scoped admin attachment
+  // URL (needs a `site_slug` from the route). With media OFF (e.g. the
+  // global account bio, no site in the route) there is no site to scope
+  // to and no image picker, so use a non-empty sentinel: it must stay
+  // non-empty so ADMIN_ATTACHMENT_MARKER ("](" + prefix) can't collapse
+  // to "](" and match every link in adminToPublic.
+  const ADMIN_ATTACHMENT_PREFIX = {% if _ed_media %}{{ url_for(
       "attachment_admin.serve_attachment_bytes",
       site_slug=request.view_args["site_slug"],
       storage_key="__STORAGE_KEY__",
-  ) | tojson }}.replace("__STORAGE_KEY__", "");
+  ) | tojson }}.replace("__STORAGE_KEY__", ""){% else %}'/admin/__no-attachments__/'{% endif %};
   const PUBLIC_ATTACHMENT_MARKER = "](/attachments/";
   const ADMIN_ATTACHMENT_MARKER = "](" + ADMIN_ATTACHMENT_PREFIX;
 
@@ -623,7 +652,7 @@
     },
   });
 
-  const textarea = document.getElementById('body_markdown');
+  const textarea = document.getElementById({{ _ed_textarea_id | tojson }});
   const mount = document.getElementById('tiptap-editor');
   const toolbar = document.getElementById('tiptap-editor-toolbar');
   if (!textarea || !mount || !toolbar) {
@@ -667,6 +696,9 @@
     });
 
     document.body.classList.add('has-tiptap-editor');
+    // Hide the source textarea directly (id-agnostic, since the editor
+    // can bind to any caller-provided textarea id).
+    textarea.style.display = 'none';
     mount.hidden = false;
     toolbar.hidden = false;
     // Image bubble menu: we manage visibility + positioning
@@ -790,7 +822,7 @@
     // link at the cursor and closes the dialog.
     const pickerDialog = document.getElementById('image-picker-dialog');
     const pickerTarget = document.getElementById('image-picker-target');
-    const pickerUrl = '{{ url_for("attachment_admin.picker") }}';
+    const pickerUrl = {% if _ed_media %}'{{ url_for("attachment_admin.picker") }}'{% else %}''{% endif %};
 
     function openImagePicker() {
       if (!pickerDialog || !pickerTarget) return;
@@ -870,7 +902,7 @@
     // `[text](post:<id>)`.
     const internalDialog = document.getElementById('internal-link-picker-dialog');
     const internalTarget = document.getElementById('internal-link-picker-target');
-    const internalPickerUrl = '{{ url_for("internal_links_admin.picker") }}';
+    const internalPickerUrl = {% if _ed_internal %}'{{ url_for("internal_links_admin.picker") }}'{% else %}''{% endif %};
 
     function openInternalLinkPicker(currentMarker) {
       if (!internalDialog || !internalTarget) return;

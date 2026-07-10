@@ -118,7 +118,7 @@ def actor() -> ResponseReturnValue:
         site,
         public_pem,
         key_id,
-        summary=(owner_profile.bio or "") if owner_profile else "",
+        summary=(owner_profile.bio_text or "") if owner_profile else "",
         icon_url=owner_profile.avatar_url if owner_profile else None,
     )
     resp = jsonify(doc)

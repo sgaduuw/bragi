@@ -17,11 +17,20 @@ from __future__ import annotations
 from typing import Any, NamedTuple
 
 from bragi.core.models.user import User
+from bragi.core.render.markdown import make_excerpt, render_markdown
+
+# Plain-text bio cap for the structured surfaces (JSON-LD `description`,
+# ActivityPub `summary`). The bio is authored as markdown (it is the profile
+# narrative), but those two fields want a short, tag-free summary, so a long
+# narrative is stripped + trimmed rather than dumped in full.
+_BIO_TEXT_MAX = 500
 
 
 class ProfileView(NamedTuple):
     display_name: str
-    bio: str | None
+    bio: str | None  # raw markdown source (truthiness / editing)
+    bio_html: str | None  # rendered markdown, for the h-card `p-note`
+    bio_text: str | None  # plain-text excerpt, for JSON-LD / AP summary
     pronouns: str | None
     location: str | None
     avatar_url: str | None
@@ -33,9 +42,12 @@ def profile_view(user: User | None) -> ProfileView | None:
     if user is None:
         return None
     links = user.profile_links if isinstance(user.profile_links, list) else []
+    bio = user.bio
     return ProfileView(
         display_name=user.display_name,
-        bio=user.bio,
+        bio=bio,
+        bio_html=render_markdown(bio) if bio else None,
+        bio_text=make_excerpt(bio, max_chars=_BIO_TEXT_MAX) if bio else None,
         pronouns=user.pronouns,
         location=user.location,
         avatar_url=user.avatar_url,
@@ -50,8 +62,8 @@ def profile_jsonld(profile: ProfileView, url: str | None) -> dict[str, Any]:
         "@type": "Person",
         "name": profile.display_name,
     }
-    if profile.bio:
-        doc["description"] = profile.bio
+    if profile.bio_text:
+        doc["description"] = profile.bio_text
     if profile.avatar_url:
         doc["image"] = profile.avatar_url
     if url:

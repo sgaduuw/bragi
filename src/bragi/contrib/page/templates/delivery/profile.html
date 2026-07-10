@@ -44,10 +44,8 @@
     </div>
   </header>
 
-  {% if profile.bio %}<p class="p-note profile__bio">{{ profile.bio }}</p>{% endif %}
-
-  {% if page.body_html %}
-    <div class="profile__body">{{ page.body_html | safe }}</div>
+  {% if profile.bio_html %}
+    <div class="p-note profile__bio">{{ profile.bio_html | safe }}</div>
   {% endif %}
 
   {% if profile.links %}
@@ -60,10 +58,10 @@
 </article>
 {% else %}
 {# No resolvable author profile (e.g. author removed): fall back to the
-   page's own title + body so the URL never 500s or renders empty. #}
+   page's own title so the URL never 500s or renders empty. A profile page
+   surfaces its author's account Profile, so there is no page body to show. #}
 <article class="profile">
   <h1>{{ page.title }}</h1>
-  {% if page.body_html %}<div class="profile__body">{{ page.body_html | safe }}</div>{% endif %}
 </article>
 {% endif %}
 {% endblock %}
