@@ -4,6 +4,17 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.49.1] - 2026-07-11
+
+### Fixed
+- The Profile-kind page toggle (and any `hidden`-attribute element in the
+  admin) did not actually hide: `form fieldset { display: flex }` in the admin
+  stylesheet is an author-origin rule that overrides the browser's
+  `[hidden] { display: none }` (author declarations beat user-agent ones in
+  the cascade). The body editor stayed visible on Profile pages and the
+  "profile leads" notice showed on non-profile pages. Fixed with an
+  author-origin `[hidden] { display: none !important; }` reset.
+
 ## [1.49.0] - 2026-07-10
 
 Author profiles become single-source: the account Profile is the one place

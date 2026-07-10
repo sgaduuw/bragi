@@ -18,6 +18,17 @@
  * checkbox + sibling-combinator CSS.
  */
 
+/* The `hidden` attribute must actually hide, even on elements an author
+ * `display` rule targets (e.g. `form fieldset { display: flex }` below).
+ * Author-origin `display` beats the UA `[hidden]{display:none}` regardless of
+ * specificity, so a plain `hidden` attribute does NOT hide such an element.
+ * Restore it here (author origin, `!important` to survive any future
+ * higher-specificity display rule). Without this the profile-kind body/notice
+ * toggle stays visible. */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   --rail-w: 240px;
   --rail-bg: #1b1d22;
