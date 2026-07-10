@@ -6,6 +6,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- The **ActivityPub actor** now advertises the site owner's account profile:
+  `summary` comes from the owner's bio and an `icon` from their avatar
+  (previously the summary was always empty and no avatar was published). The
+  actor's `name` still shows the site title. A site whose owner has no profile
+  set degrades to the previous behaviour.
+- The public footer's **rel="me" links** now come from the site owner's
+  account profile (managed on the account **Profile** page), consolidating the
+  rel=me identity onto one per-user surface. The separate per-site "Profile
+  links" admin editor has been removed; links previously stored per-site must
+  be re-entered on the owner's profile.
+
 ### Added
 - Post author bylines now render as an IndieWeb **h-card** and the
   BlogPosting JSON-LD `author` is enriched from the author's profile (avatar

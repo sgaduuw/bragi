@@ -95,7 +95,14 @@ def _escape_html(text: str) -> str:
     )
 
 
-def actor_document(site: Site, public_key_pem: str, key_id: str) -> dict[str, Any]:
+def actor_document(
+    site: Site,
+    public_key_pem: str,
+    key_id: str,
+    *,
+    summary: str = "",
+    icon_url: str | None = None,
+) -> dict[str, Any]:
     """The actor JSON-LD document published at `/actor`.
 
     `preferredUsername` is the slug-derived handle Mastodon shows
@@ -103,10 +110,17 @@ def actor_document(site: Site, public_key_pem: str, key_id: str) -> dict[str, An
     actor). The `Service` type is intentional: a Site is an
     automated publisher, not a real Person; some receivers render
     a different badge for Service actors.
+
+    `summary` and `icon_url` come from the site owner's account
+    profile (bio + avatar); the caller resolves them so this stays
+    a pure builder. Both degrade to an empty/absent field when the
+    owner has no profile set, matching the pre-profile behaviour.
+    `icon_url` is stored via the account-profile editor, which
+    validates the scheme (http/https) before persisting.
     """
     canonical = site.base_url
     handle = _sanitise_handle(site.slug)
-    return {
+    doc: dict[str, Any] = {
         "@context": [
             "https://www.w3.org/ns/activitystreams",
             "https://w3id.org/security/v1",
@@ -115,7 +129,7 @@ def actor_document(site: Site, public_key_pem: str, key_id: str) -> dict[str, An
         "type": "Service",
         "preferredUsername": handle,
         "name": site.title or handle,
-        "summary": (getattr(site, "tagline", "") or ""),
+        "summary": summary or "",
         "url": canonical or actor_url(site),
         "inbox": f"{actor_url(site)}/inbox",
         "outbox": f"{actor_url(site)}/outbox",
@@ -126,6 +140,9 @@ def actor_document(site: Site, public_key_pem: str, key_id: str) -> dict[str, An
             "publicKeyPem": public_key_pem,
         },
     }
+    if icon_url:
+        doc["icon"] = {"type": "Image", "url": icon_url}
+    return doc
 
 
 def webfinger_document(site: Site) -> dict[str, Any]:

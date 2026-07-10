@@ -636,7 +636,7 @@ bragi/
 │       ├── notfound/           # detected-404 triage: recorder + admin (redirect / create / dismiss)
 │       ├── page/               # nested page content type
 │       ├── post/               # post content type + tags + tiptap editor
-│       ├── profile_links/      # per-site rel="me" profile links (footer + admin)
+│       ├── profile_links/      # owner rel="me" profile links in the footer
 │       ├── redirects/          # resolve_redirect + admin + slug-change auto-301
 │       ├── search/             # SQLite FTS5 over post + page bodies
 │       ├── seo/                # sitemap, robots.txt, security.txt, feed.xml
