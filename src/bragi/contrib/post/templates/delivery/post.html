@@ -31,7 +31,7 @@
         "url": canonical_url,
         "datePublished": post.published_at.isoformat() if post.published_at else None,
         "dateModified": (post.updated_at or post.published_at).isoformat() if (post.updated_at or post.published_at) else None,
-        "author": {"@type": "Person", "name": author_name} if author_name else None,
+        "author": author_jsonld,
         "publisher": {"@type": "Organization", "name": site.title} if site else None,
         "description": post.meta_description or post.body_excerpt or None,
   } -%}
@@ -65,11 +65,25 @@
   <div class="body">
     {{ post.body_html | internal_link_rewrite | unsplash_credit_wrap | pictureify | safe }}
   </div>
-  {% if author_bio %}
-  <aside class="author-bio">
+  {% if author_profile and (author_profile.bio or author_profile.avatar_url or author_profile.links) %}
+  <aside class="author-bio h-card">
     <h2>About the author</h2>
-    <p><strong>{{ author_name }}</strong></p>
-    <p>{{ author_bio }}</p>
+    {% if author_profile.avatar_url %}
+      <img class="u-photo" src="{{ author_profile.avatar_url }}"
+           alt="{{ author_profile.display_name }}" width="64" height="64">
+    {% endif %}
+    <p>
+      <strong class="p-name">{{ author_profile.display_name }}</strong>
+      {% if author_profile.pronouns %}<span class="author-pronouns">({{ author_profile.pronouns }})</span>{% endif %}
+    </p>
+    {% if author_profile.bio %}<p class="p-note">{{ author_profile.bio }}</p>{% endif %}
+    {% if author_profile.links %}
+    <ul class="author-links">
+      {% for link in author_profile.links %}
+        <li><a class="u-url" rel="me" href="{{ link.url }}">{{ link.label }}</a></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
   </aside>
   {% endif %}
 </article>

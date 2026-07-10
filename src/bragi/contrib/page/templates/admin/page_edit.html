@@ -279,6 +279,20 @@
   </div>
 </form>
 
+{# Profile -> resume shortcut. A separate form (outside the main edit
+   form, per the nested-form note below) that seeds a DRAFT resume from
+   this profile's author and opens it in the editor. Live edit only:
+   a working copy has no persisted page to derive the author from. #}
+{% if is_edit and not is_wc and current_kind == 'profile' %}
+<form method="post"
+      action="{{ url_for('page_admin.create_resume_from_profile', page_id=page.id) }}"
+      class="profile-resume-shortcut">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button type="submit">Create a resume from this profile</button>
+  <small>Seeds a draft CV with your name, location, and profile links.</small>
+</form>
+{% endif %}
+
 {% if not is_edit %}
 <script>
   // Slug live-suggest: as the operator types the title, write a
