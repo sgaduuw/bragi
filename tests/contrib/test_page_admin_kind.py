@@ -308,6 +308,60 @@ def test_demotion_banner_includes_published_post_count(
     assert "3 published posts" in body
 
 
+def test_new_page_accepts_profile_kind(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """PROFILE is a selectable kind in the create form (1.48.0 regression:
+    the handler whitelisted only static/post_index/resume, so a Profile
+    page could not be created through the admin)."""
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path="/admin/sites/blog/pages/new")
+    resp = client.post(
+        "/admin/sites/blog/pages/new",
+        data={
+            "title": "About Me",
+            "slug": "about-me",
+            "parent_id": "",
+            "body_markdown": "Hi.",
+            "status": "draft",
+            "kind": "profile",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        page = db.execute(select(Page).where(Page.slug == "about-me")).scalar_one()
+    assert page.kind == PageKind.PROFILE
+
+
+def test_edit_page_can_switch_to_profile_kind(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """An existing STATIC page can be changed to PROFILE via the edit form."""
+    news_id = _page_id(db_session_factory, "news")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{news_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{news_id}/edit",
+        data={
+            "title": "News",
+            "slug": "news",
+            "parent_id": "",
+            "body_markdown": "",
+            "status": "published",
+            "kind": "profile",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        page = db.get(Page, news_id)
+        assert page is not None
+        assert page.kind == PageKind.PROFILE
+
+
 def test_invalid_kind_value_is_rejected(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
