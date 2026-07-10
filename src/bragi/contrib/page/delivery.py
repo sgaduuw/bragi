@@ -174,6 +174,32 @@ def _render_static_page(page: Page) -> Response:
     return response
 
 
+def _render_profile_page(page: Page) -> Response:
+    """Render a PROFILE page with an author-aware cache validator.
+
+    A profile page's content is the *author's* profile, which changes
+    independently of the page row, so the last-modified spans both: an
+    edit to the author's profile must bust the cache even when the page
+    itself is untouched.
+    """
+    last_modified = page.updated_at
+    with SessionLocal() as db:
+        if page.author_id:
+            author = db.get(User, page.author_id)
+            if author is not None and author.updated_at is not None:
+                last_modified = max(last_modified, author.updated_at)
+    etag = etag_for("profile", page.id, last_modified)
+    not_modified = maybe_304(request, etag=etag, last_modified=last_modified)
+    if not_modified is not None:
+        return not_modified
+    registry = current_app.extensions["registry"]
+    spec = registry.content_type("page")
+    body = cast(str, spec.render(page, request))
+    response = make_response(body)
+    attach_validators(response, etag=etag, last_modified=last_modified)
+    return response
+
+
 def _paginated_index_url(index_base: str, page_n: int) -> str:
     """Page-N URL for a post index whose page-1 URL is `index_base`.
 
@@ -670,6 +696,8 @@ def show_page(slug_path: str) -> ResponseReturnValue:
 
     if page is not None and kind in (PageKind.STATIC, PageKind.RESUME):
         return _render_static_page(page)
+    if page is not None and kind == PageKind.PROFILE:
+        return _render_profile_page(page)
     if page is not None and kind == PageKind.POST_INDEX:
         return render_or_redirect_post_index(site, page)
 

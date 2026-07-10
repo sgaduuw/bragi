@@ -7,6 +7,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Profile page kind: a new **Profile** page (choose "Profile" as the page
+  kind) renders its author's profile as a public "about me" — avatar, name,
+  pronouns, location, bio, narrative body, and rel="me" links — marked up as
+  an IndieWeb **h-card** plus a **JSON-LD Person** block. The structured
+  fields come from the author's account profile; the cache validator is
+  author-aware so a profile edit busts the page cache.
 - Account profile page: a self-service **Profile** editor in the admin's
   account menu, where the logged-in user edits their own display name, bio,
   pronouns, location, avatar URL, and rel="me" links. These land on the

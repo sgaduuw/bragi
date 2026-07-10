@@ -1,0 +1,69 @@
+{# Profile page delivery template.
+
+   Renders the page author's profile (passed as `profile`, a
+   `bragi.core.profiles.ProfileView`) as an IndieWeb h-card (mf2) plus a
+   JSON-LD Person block. The h-card lets webmention senders / IndieWeb tools
+   resolve the author identity; the JSON-LD feeds search engines. The stored
+   avatar URL and rel="me" link URLs were validated at save time.
+
+   Themes override by shipping their own `delivery/profile.html`. #}
+
+{% extends "delivery/base.html" %}
+
+{% block title %}{{ page.meta_title or page.title }} &middot; {{ site.title }}{% endblock %}
+{% block social_meta %}
+  {%- set _title = page.meta_title or page.title -%}
+  <meta property="og:title" content="{{ _title }}">
+  <meta property="og:type" content="profile">
+  {% if canonical_url %}<meta property="og:url" content="{{ canonical_url }}">{% endif %}
+  {% if meta_description %}<meta property="og:description" content="{{ meta_description }}">{% endif %}
+  {% if site %}<meta property="og:site_name" content="{{ site.title }}">{% endif %}
+  {% if og_image_url %}<meta property="og:image" content="{{ og_image_url }}">{% endif %}
+  <meta name="twitter:card" content="{{ 'summary_large_image' if og_image_url else 'summary' }}">
+  <meta name="twitter:title" content="{{ _title }}">
+  {% if meta_description %}<meta name="twitter:description" content="{{ meta_description }}">{% endif %}
+  {% if og_image_url %}<meta name="twitter:image" content="{{ og_image_url }}">{% endif %}
+{% endblock %}
+
+{% block jsonld %}
+  {% if profile_jsonld %}<script type="application/ld+json">{{ profile_jsonld | tojson }}</script>{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if profile %}
+<article class="h-card profile">
+  <header class="profile__header">
+    {% if profile.avatar_url %}
+      <img class="u-photo profile__avatar" src="{{ profile.avatar_url }}"
+           alt="{{ profile.display_name }}" width="128" height="128">
+    {% endif %}
+    <div class="profile__id">
+      <h1 class="p-name">{{ profile.display_name }}</h1>
+      {% if profile.pronouns %}<p class="profile__pronouns">{{ profile.pronouns }}</p>{% endif %}
+      {% if profile.location %}<p class="p-locality">{{ profile.location }}</p>{% endif %}
+    </div>
+  </header>
+
+  {% if profile.bio %}<p class="p-note profile__bio">{{ profile.bio }}</p>{% endif %}
+
+  {% if page.body_html %}
+    <div class="profile__body">{{ page.body_html | safe }}</div>
+  {% endif %}
+
+  {% if profile.links %}
+  <ul class="profile__links">
+    {% for link in profile.links %}
+      <li><a class="u-url" rel="me" href="{{ link.url }}">{{ link.label }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</article>
+{% else %}
+{# No resolvable author profile (e.g. author removed): fall back to the
+   page's own title + body so the URL never 500s or renders empty. #}
+<article class="profile">
+  <h1>{{ page.title }}</h1>
+  {% if page.body_html %}<div class="profile__body">{{ page.body_html | safe }}</div>{% endif %}
+</article>
+{% endif %}
+{% endblock %}
