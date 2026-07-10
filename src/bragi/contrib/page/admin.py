@@ -554,6 +554,7 @@ def _form_from_working_copy(wc: PageWorkingCopy) -> dict[str, str]:
 def list_pages(site_slug: str) -> ResponseReturnValue:
     from bragi.core.url import page_path_preview, prewarm_page_url_cache
 
+    set_breadcrumbs(Crumb("Pages", None))
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         pages = (

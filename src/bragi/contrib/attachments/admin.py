@@ -116,6 +116,7 @@ PAGE_SIZE = 50
 def list_attachments(site_slug: str) -> ResponseReturnValue:
     page = page_arg()
     missing_alt = request.args.get("missing_alt") == "1"
+    set_breadcrumbs(Crumb("Media", None))
 
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)

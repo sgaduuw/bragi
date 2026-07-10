@@ -386,6 +386,7 @@ def _form_from_working_copy(wc: PostWorkingCopy, tag_labels: str) -> dict[str, s
 
 @bp.route("/", methods=["GET"])
 def list_posts(site_slug: str) -> ResponseReturnValue:
+    set_breadcrumbs(Crumb("Posts", None))
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         # `COALESCE(published_at, updated_at) DESC` surfaces newest
