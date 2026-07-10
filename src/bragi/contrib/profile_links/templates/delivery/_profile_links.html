@@ -1,7 +1,8 @@
-{# Site-level profile links.
+{# Site owner's profile links (rel="me").
 
    Reads `profile_links()` from the Jinja env (registered by
-   `bragi.contrib.profile_links.plugin`). Renders nothing when the
+   `bragi.contrib.profile_links.plugin`), which resolves the site
+   owner's account-profile links. Renders nothing when the
    list is empty so sites with no links configured don't grow empty
    markup. Stable `.profile-links__*` hooks let each theme style
    without touching this markup.

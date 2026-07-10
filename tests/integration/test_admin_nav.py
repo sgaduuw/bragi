@@ -143,8 +143,6 @@ def test_site_settings_link_present_in_manage_group(admin_app: Flask) -> None:
     body = resp.data.decode()
     assert "Site settings" in body
     assert "/admin/sites/blog/current/edit" in body
-    # And the new Profile links sibling is there too.
-    assert "Profile links" in body
 
 
 def test_account_menu_contains_account_items(admin_app: Flask) -> None:
