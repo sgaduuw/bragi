@@ -76,7 +76,7 @@
       <strong class="p-name">{{ author_profile.display_name }}</strong>
       {% if author_profile.pronouns %}<span class="author-pronouns">({{ author_profile.pronouns }})</span>{% endif %}
     </p>
-    {% if author_profile.bio %}<p class="p-note">{{ author_profile.bio }}</p>{% endif %}
+    {% if author_profile.bio_html %}<div class="p-note">{{ author_profile.bio_html | safe }}</div>{% endif %}
     {% if author_profile.links %}
     <ul class="author-links">
       {% for link in author_profile.links %}

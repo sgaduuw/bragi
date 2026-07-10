@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.48.1 (2026-07-10).
+**Latest release:** 1.49.0 (2026-07-10).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -17,9 +17,11 @@ header row), structured CV / resume page kind
 schema.org microdata, print-friendly), author profiles (a
 self-service account **Profile** editor for display name / bio /
 pronouns / location / avatar / rel="me" links, with one-click
-Gravatar or linked-GitHub avatar fill; a public **Profile** page
-kind rendering an h-card + JSON-LD Person; author bylines rendered
-as h-cards with a "create resume from profile" shortcut), a
+Gravatar or linked-GitHub avatar fill and the same rich markdown
+editor as posts/pages for the bio; a public **Profile** page kind
+that is a pure surface of the account Profile, rendering an h-card +
+JSON-LD Person; author bylines rendered as h-cards with a "create
+resume from profile" shortcut), a
 per-site **Tags** management page (rename / merge / delete with
 auto-301s), auto-derived public
 navigation from the page tree (with per-page `show_in_nav` and
@@ -432,7 +434,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.48.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.49.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -844,7 +846,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.48.1
+pip install bragi-cms==1.49.0
 ```
 
 The import path stays `import bragi`. Container images remain the

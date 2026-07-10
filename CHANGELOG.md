@@ -4,6 +4,25 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.49.0] - 2026-07-10
+
+Author profiles become single-source: the account Profile is the one place
+identity lives, its bio gets the full editor, and a Profile page is a thin
+surface of it.
+
+### Changed
+- A **Profile** page is now a pure surface of its author's account Profile:
+  the page-edit body editor gives way to a notice pointing to the account
+  Profile (the single source of the name, photo, bio, pronouns, location, and
+  links) the moment you choose the Profile kind, and the rendered page no
+  longer shows a separate page body. Editing a profile happens in one place.
+- The account Profile **bio** now uses the same rich editor as posts and pages
+  (with the image-library and internal-link pickers omitted, since a bio is
+  global and has no single site to scope them to) and is authored as markdown.
+  It renders as formatted HTML in the profile h-card and the post-author
+  byline, and as plain text in the JSON-LD `description` and the ActivityPub
+  actor `summary`.
+
 ## [1.48.1] - 2026-07-10
 
 ### Fixed

@@ -56,6 +56,25 @@ def test_get_shows_profile_form(admin_app: Flask) -> None:
     assert 'value="Ada"' in body
 
 
+def test_bio_mounts_tiptap_editor_without_media_or_internal_link(admin_app: Flask) -> None:
+    """The bio field uses the shared TipTap editor bound to the `bio`
+    textarea, but with the site-scoped image + internal-link pickers OFF
+    (the bio is global, no site to scope them to)."""
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/account/profile").data.decode()
+    # Editor mount + toolbar present, bound to the bio textarea.
+    assert 'id="tiptap-editor"' in body
+    assert 'getElementById("bio")' in body
+    assert '<textarea name="bio" id="bio"' in body
+    # Formatting stays; the site-scoped pickers are gone.
+    assert 'data-action="bold"' in body
+    assert 'data-action="image"' not in body
+    assert 'data-action="internal-link"' not in body
+    assert 'id="image-picker-dialog"' not in body
+    assert 'id="internal-link-picker-dialog"' not in body
+
+
 def test_post_saves_all_fields(admin_app: Flask, db_session_factory: sessionmaker[Session]) -> None:
     client = admin_app.test_client()
     _login(client)

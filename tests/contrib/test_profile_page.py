@@ -78,10 +78,33 @@ def test_profile_renders_h_card(delivery_app: Flask) -> None:
     assert "she/her" in body
     assert "London" in body
     assert "Mathematician and first programmer." in body  # p-note bio
-    assert "<p>Hello there.</p>" in body  # narrative body
+    # A PROFILE page surfaces the account profile, not its own body: the
+    # page body_markdown ("Hello there.") is no longer rendered.
+    assert "Hello there." not in body
     # rel=me links
     assert 'rel="me" href="https://github.com/ada"' in body
     assert 'rel="me" href="https://fosstodon.org/@ada"' in body
+
+
+def test_profile_bio_renders_markdown(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The bio is authored as markdown; the p-note renders it as HTML, while
+    the JSON-LD description stays plain text (no markup)."""
+    with db_session_factory() as db:
+        author = db.execute(select(User).where(User.email == "ada@example.com")).scalar_one()
+        author.bio = "I am **bold** and [linked](https://example.com/me)."
+        db.commit()
+    body = delivery_app.test_client().get("/about/", headers={"Host": HOST}).data.decode()
+    # p-note: rendered HTML.
+    assert "<strong>bold</strong>" in body
+    assert 'href="https://example.com/me"' in body
+    # JSON-LD description: plain text, markdown stripped.
+    m = re.search(r'<script type="application/ld\+json">(.*?)</script>', body, re.DOTALL)
+    assert m is not None
+    desc = json.loads(m.group(1))["description"]
+    assert "**" not in desc and "<strong>" not in desc
+    assert "bold" in desc and "linked" in desc
 
 
 def test_profile_emits_jsonld_person(delivery_app: Flask) -> None:

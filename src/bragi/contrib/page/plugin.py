@@ -153,7 +153,7 @@ def _render_page(page: Any, _request: Any) -> str:
             profile_jsonld=profile_jsonld(profile, canonical) if profile else None,
             meta_description=(
                 page.meta_description
-                or (profile.bio if profile else None)
+                or (profile.bio_text if profile else None)
                 or page.body_excerpt
                 or None
             ),

@@ -546,6 +546,67 @@ def _make_profile_page(db_factory: sessionmaker[Session]) -> int:
         return page.id
 
 
+def test_profile_kind_page_editor_hides_body_shows_notice(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A profile-kind page editor shows the account-Profile notice and hides
+    the body editor. Both fieldsets render (the kind-toggle script swaps them
+    client-side); for a profile page the body fieldset carries `hidden` and
+    the notice does not."""
+    profile_id = _make_profile_page(db_session_factory)
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get(f"/admin/sites/blog/pages/{profile_id}/edit").data.decode()
+    assert 'href="/admin/account/profile"' in body
+    assert "account Profile" in body
+    # Body editor present-but-hidden; notice present-and-shown.
+    assert 'id="page-body-fieldset" hidden' in body
+    assert 'id="page-profile-notice" class="profile-kind-notice">' in body
+
+
+def test_static_kind_page_editor_shows_body_hides_notice(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A regular page shows the body editor and hides the notice."""
+    news_id = _page_id(db_session_factory, "news")
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get(f"/admin/sites/blog/pages/{news_id}/edit").data.decode()
+    assert 'id="page-body-fieldset">' in body  # body shown (no hidden attr)
+    assert 'id="page-profile-notice" class="profile-kind-notice" hidden' in body
+    assert 'id="body_markdown"' in body
+
+
+def test_saving_page_as_profile_blanks_the_body(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Even if a body is submitted, saving a page as PROFILE persists an empty
+    body (the page surfaces the account Profile, not its own content)."""
+    news_id = _page_id(db_session_factory, "news")
+    client = admin_app.test_client()
+    _login(client)
+    token = csrf_token(client, path=f"/admin/sites/blog/pages/{news_id}/edit")
+    resp = client.post(
+        f"/admin/sites/blog/pages/{news_id}/edit",
+        data={
+            "title": "News",
+            "slug": "news",
+            "parent_id": "",
+            "body_markdown": "This body should be dropped for a profile page.",
+            "status": "published",
+            "kind": "profile",
+            "_csrf_token": token,
+        },
+    )
+    assert resp.status_code == 302
+    with db_session_factory() as db:
+        page = db.get(Page, news_id)
+        assert page is not None
+        assert page.kind == PageKind.PROFILE
+        assert page.body_markdown == ""
+        assert page.body_html == ""
+
+
 def test_create_resume_from_profile_seeds_draft(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
