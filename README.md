@@ -596,6 +596,7 @@ bragi/
 │   │   ├── pagination.py       # page_arg() query-arg helper for list views
 │   │   ├── permissions.py      # per-site role enforcement
 │   │   ├── preview_token.py    # signed preview-token mint/verify (working-copy preview)
+│   │   ├── profiles.py         # author-profile view model + JSON-LD Person (h-card sources)
 │   │   ├── redirects.py        # shared redirect-upsert primitive (slug/tag renames)
 │   │   ├── registry.py         # in-process Registry (content types, importers, nav, ...)
 │   │   ├── renditions.py       # attachment rendition pipeline

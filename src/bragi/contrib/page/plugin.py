@@ -26,8 +26,12 @@ from bragi.api import (
     hookimpl,
 )
 from bragi.contrib.page.admin import bp as page_admin_bp
+from bragi.contrib.page.delivery import (
+    _render_profile_page,
+    render_or_redirect_post_index,
+    render_post_index_page,
+)
 from bragi.contrib.page.delivery import bp as page_delivery_bp
-from bragi.contrib.page.delivery import render_or_redirect_post_index, render_post_index_page
 from bragi.core.cache import attach_validators, etag_for, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.models.page import Page, PageKind, PageStatus
@@ -128,6 +132,38 @@ def _render_page(page: Any, _request: Any) -> str:
             canonical_url=canonical,
             noindex=page.noindex,
             og_image_url=featured_image_url_for(item=page, site=site),
+        )
+    if page.kind == PageKind.PROFILE:
+        from bragi.core.profiles import profile_jsonld, profile_view
+
+        path = _effective_url_for_page(page)
+        canonical = page.canonical_url or (
+            f"{site.base_url}{path}" if site and site.canonical_url else None
+        )
+        author = None
+        if page.author_id:
+            with SessionLocal() as db:
+                author = db.get(User, page.author_id)
+        profile = profile_view(author)
+        return render_template(
+            "delivery/profile.html",
+            page=page,
+            site=site,
+            profile=profile,
+            profile_jsonld=profile_jsonld(profile, canonical) if profile else None,
+            meta_description=(
+                page.meta_description
+                or (profile.bio if profile else None)
+                or page.body_excerpt
+                or None
+            ),
+            canonical_url=canonical,
+            noindex=page.noindex,
+            og_image_url=(
+                profile.avatar_url
+                if profile and profile.avatar_url
+                else featured_image_url_for(item=page, site=site)
+            ),
         )
     if page.kind == PageKind.POST_INDEX and site is not None:
         # The listing helper returns a full Response; the Spec
@@ -331,6 +367,12 @@ def resolve_home(site: Any) -> Response | None:
         if page.kind == PageKind.POST_INDEX:
             db.expunge(page)
             return render_or_redirect_post_index(site, page)
+        if page.kind == PageKind.PROFILE:
+            # Same author-aware validator as the slug-path dispatcher, so a
+            # profile edit busts the home cache too (a PROFILE page is a
+            # plausible personal-site home).
+            db.expunge(page)
+            return _render_profile_page(page)
         etag = etag_for("page", page.id, page.updated_at)
         not_modified = maybe_304(request, etag=etag, last_modified=page.updated_at)
         if not_modified is not None:

@@ -67,11 +67,17 @@ class PageKind:
         No uniqueness constraint: multiple resumes per site are
         allowed (e.g. consulting CV + speaking bio + tailored
         variants per role).
+    PROFILE: lightweight public "about me" page for the page's
+        author. The structured fields (name, avatar, pronouns,
+        location, bio, rel=me links) come from the author's `User`
+        profile; body_markdown is the narrative intro. Rendered as
+        an h-card + JSON-LD Person. No uniqueness constraint.
     """
 
     STATIC = "static"
     POST_INDEX = "post_index"
     RESUME = "resume"
+    PROFILE = "profile"
 
 
 class Page(IdMixin, TimestampsMixin, Base):
