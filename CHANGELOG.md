@@ -4,7 +4,11 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.49.0] - 2026-07-10
+
+Author profiles become single-source: the account Profile is the one place
+identity lives, its bio gets the full editor, and a Profile page is a thin
+surface of it.
 
 ### Changed
 - A **Profile** page is now a pure surface of its author's account Profile:
