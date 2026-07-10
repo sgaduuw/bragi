@@ -138,12 +138,19 @@
   </fieldset>
 
   {# A PROFILE page has no body of its own: it publishes the author's
-     account Profile (h-card + JSON-LD Person). Hide the body editor and
-     point the operator at the single source, rather than offering a
-     competing content surface that never renders. Server-side gating on
-     the persisted/submitted kind, same shape as the resume fieldset. #}
-  {% if current_kind == 'profile' %}
-  <fieldset class="profile-kind-notice">
+     account Profile (h-card + JSON-LD Person). Both the body editor and the
+     "profile leads" notice are always rendered; the kind-toggle script below
+     shows exactly one, switching instantly when the Kind select changes.
+     Initial visibility is server-set from the persisted/submitted kind (no
+     flash), and the body is blanked server-side for a profile page
+     regardless (see `_form_from_request`), so the always-present textarea
+     can't persist a body on a profile row. #}
+  <fieldset id="page-body-fieldset"{% if current_kind == 'profile' %} hidden{% endif %}>
+    <label for="body_markdown">Body (markdown)</label>
+    {% include "admin/_tiptap_editor.html" %}
+    <textarea name="body_markdown" id="body_markdown" rows="15">{{ form.get('body_markdown', '') }}</textarea>
+  </fieldset>
+  <fieldset id="page-profile-notice" class="profile-kind-notice"{% if current_kind != 'profile' %} hidden{% endif %}>
     <label>Body</label>
     <p class="help">
       A Profile page publishes {% if is_edit %}its author's{% else %}your{% endif %}
@@ -152,13 +159,6 @@
       This page controls only its URL, title, and where it appears.
     </p>
   </fieldset>
-  {% else %}
-  <fieldset>
-    <label for="body_markdown">Body (markdown)</label>
-    {% include "admin/_tiptap_editor.html" %}
-    <textarea name="body_markdown" id="body_markdown" rows="15">{{ form.get('body_markdown', '') }}</textarea>
-  </fieldset>
-  {% endif %}
 
   {% if current_kind == 'resume' %}
     {% include "admin/_resume_fieldset.html" %}
@@ -295,6 +295,27 @@
     <a href="{{ url_for('page_admin.list_pages') }}" class="btn secondary">Cancel</a>
   </div>
 </form>
+
+<script>
+  /* Kind toggle: show the body editor OR the "profile leads" notice
+     instantly when the Kind select changes, so switching to/from Profile
+     doesn't need a save+reload. Both fieldsets are always in the DOM;
+     initial visibility is server-set to match the persisted kind. The
+     server blanks a profile page's body regardless (see
+     `_form_from_request`), so the hidden textarea can't persist a body. */
+  (function () {
+    'use strict';
+    var kind = document.getElementById('kind');
+    var bodyFs = document.getElementById('page-body-fieldset');
+    var noticeFs = document.getElementById('page-profile-notice');
+    if (!kind || !bodyFs || !noticeFs) return;
+    kind.addEventListener('change', function () {
+      var isProfile = kind.value === 'profile';
+      bodyFs.hidden = isProfile;
+      noticeFs.hidden = !isProfile;
+    });
+  })();
+</script>
 
 {# Profile -> resume shortcut. A separate form (outside the main edit
    form, per the nested-form note below) that seeds a DRAFT resume from

@@ -68,10 +68,12 @@ class PageKind:
         allowed (e.g. consulting CV + speaking bio + tailored
         variants per role).
     PROFILE: lightweight public "about me" page for the page's
-        author. The structured fields (name, avatar, pronouns,
-        location, bio, rel=me links) come from the author's `User`
-        profile; body_markdown is the narrative intro. Rendered as
-        an h-card + JSON-LD Person. No uniqueness constraint.
+        author. It is a pure surface of the author's account profile:
+        every field (name, avatar, pronouns, location, bio narrative,
+        rel=me links) comes from the author's `User` profile, so the
+        page carries NO body of its own (body_markdown is forced empty
+        on save; see `_form_from_request`). Rendered as an h-card +
+        JSON-LD Person. No uniqueness constraint.
     """
 
     STATIC = "static"
