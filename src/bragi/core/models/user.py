@@ -10,8 +10,10 @@ auth plugins that own those tables.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import String, Text
+from sqlalchemy import JSON, String, Text
+from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bragi.core.models._base import Base
@@ -26,7 +28,15 @@ class User(IdMixin, TimestampsMixin, Base):
     is_superuser: Mapped[bool] = mapped_column(default=False)
     is_active: Mapped[bool] = mapped_column(default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(default=None)
-    # Optional "About the author" copy rendered below the post
-    # body. Plain text in v1; markdown-or-richer is a follow-up.
-    # No admin UI yet; operators set it via DB direct.
+    # Optional "About the author" copy rendered below the post body.
+    # Editable via the account profile page (bragi.contrib.account_profile).
     bio: Mapped[str | None] = mapped_column(Text, default=None)
+    # Profile fields, all self-service via the account profile page. The
+    # avatar is a URL (users are global; attachments are site-scoped), which
+    # can default from a linked OAuth identity's avatar. `profile_links` is
+    # the person's rel="me" links (validated through the shared ProfileLink
+    # model at the edges); MutableList tracks in-place edits.
+    pronouns: Mapped[str | None] = mapped_column(String(64), default=None)
+    location: Mapped[str | None] = mapped_column(String(255), default=None)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), default=None)
+    profile_links: Mapped[list[Any]] = mapped_column(MutableList.as_mutable(JSON), default=list)

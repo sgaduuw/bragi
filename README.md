@@ -610,6 +610,7 @@ bragi/
 │   │   └── useragent.py        # bot / browser / feed-reader classifier
 │   ├── alembic/                # migrations bundled in wheel (bragi:alembic)
 │   └── contrib/                # built-ins as plugins
+│       ├── account_profile/    # self-service profile editor (name / bio / avatar / rel=me links)
 │       ├── activitypub/        # one fediverse actor per site (follow / undo / outbox fanout)
 │       ├── admin_imports/      # site-scoped admin importer index (tile aggregator)
 │       ├── admin_notices/      # cross-plugin admin notice surface (toast / banner)
