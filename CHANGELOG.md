@@ -12,8 +12,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pronouns, location, avatar URL, and rel="me" links. These land on the
   `User` row (new columns); the public delivery surfaces that consume them
   (author h-card, a Profile page type, the ActivityPub actor) follow in later
-  phases. The avatar URL is validated through the external-URL scheme
-  allowlist before it is stored.
+  phases. The avatar can be filled in one click from **Gravatar** (derived
+  from your email) or your **linked GitHub** avatar, and the URL is validated
+  through the external-URL scheme allowlist before it is stored.
 
 ### Changed
 - Admin breadcrumbs now also render on the main list views (Posts, Pages,

@@ -117,3 +117,48 @@ def test_empty_display_name_rejected(
 def test_requires_login(admin_app: Flask) -> None:
     resp = admin_app.test_client().get("/admin/account/profile")
     assert resp.status_code in (302, 401)  # auth guard redirects / view aborts
+
+
+def test_editor_offers_gravatar(admin_app: Flask) -> None:
+    """The editor exposes the user's Gravatar URL + a 'Use Gravatar' button."""
+    from bragi.contrib.account_profile.admin import _gravatar_url
+
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/account/profile").data.decode()
+    # The `&` in the query is HTML-escaped in the attribute; match the
+    # stable path+hash prefix instead.
+    assert _gravatar_url(EMAIL).split("?")[0] in body
+    assert 'id="use-gravatar"' in body
+
+
+def test_editor_offers_github_avatar_when_linked(
+    admin_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A linked GitHub identity surfaces its avatar as a fill button."""
+    from bragi.core.models.user_identity import UserIdentity
+
+    with db_session_factory() as db:
+        uid = db.execute(select(User).where(User.email == EMAIL)).scalar_one().id
+        db.add(
+            UserIdentity(
+                user_id=uid,
+                provider="github",
+                provider_user_id="123",
+                raw={"avatar_url": "https://avatars.githubusercontent.com/u/123"},
+            )
+        )
+        db.commit()
+
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/account/profile").data.decode()
+    assert 'id="use-github"' in body  # the button element (the label is in a JS comment)
+    assert "https://avatars.githubusercontent.com/u/123" in body
+
+
+def test_editor_no_github_button_when_not_linked(admin_app: Flask) -> None:
+    client = admin_app.test_client()
+    _login(client)
+    body = client.get("/admin/account/profile").data.decode()
+    assert 'id="use-github"' not in body

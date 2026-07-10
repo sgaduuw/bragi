@@ -15,13 +15,18 @@ Plugin boundary (see `_claude/CLAUDE.md`): imports from `bragi.api`,
 
 from __future__ import annotations
 
+import hashlib
+
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
 from pydantic import TypeAdapter, ValidationError
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, ProfileLink, set_breadcrumbs
 from bragi.core.db import SessionLocal
 from bragi.core.models.user import User
+from bragi.core.models.user_identity import UserIdentity
 from bragi.core.safe_urls import safe_external_url
 from bragi.core.security import current_user
 
@@ -33,6 +38,33 @@ bp = Blueprint(
 )
 
 _LINKS_ADAPTER: TypeAdapter[list[ProfileLink]] = TypeAdapter(list[ProfileLink])
+
+
+def _gravatar_url(email: str) -> str:
+    """Gravatar URL for `email` (SHA-256 of the lowercased, trimmed address).
+
+    `d=identicon` returns a generated geometric avatar when the address has no
+    Gravatar, so the button always yields a usable image.
+    """
+    digest = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+    return f"https://www.gravatar.com/avatar/{digest}?s=200&d=identicon"
+
+
+def _github_avatar_url(db: Session, user_id: int) -> str | None:
+    """The linked GitHub identity's avatar URL, or None when not linked.
+
+    GitHub stores no dedicated avatar column; the URL lives in the identity's
+    `raw` profile payload.
+    """
+    identity = db.execute(
+        select(UserIdentity).where(
+            UserIdentity.user_id == user_id, UserIdentity.provider == "github"
+        )
+    ).scalar_one_or_none()
+    if identity is None:
+        return None
+    avatar = (identity.raw or {}).get("avatar_url")
+    return avatar if isinstance(avatar, str) and avatar else None
 
 
 def _rows_from_form() -> list[dict[str, str]]:
@@ -63,6 +95,8 @@ def _render(
     rows: list[dict[str, str]],
     errors: dict[int, str],
     *,
+    gravatar_url: str,
+    github_avatar_url: str | None,
     avatar_error: str | None = None,
 ) -> str:
     set_breadcrumbs(Crumb("Profile", None))
@@ -72,6 +106,8 @@ def _render(
         "admin/account_profile.html",
         values=values,
         rows=display_rows,
+        gravatar_url=gravatar_url,
+        github_avatar_url=github_avatar_url,
         avatar_error=avatar_error,
     )
 
@@ -98,6 +134,26 @@ def edit() -> ResponseReturnValue:
         if user is None:
             abort(401)
 
+        # Avatar-source suggestions, offered as one-click fills in the editor.
+        grav = _gravatar_url(user.email)
+        gh = _github_avatar_url(db, user.id)
+
+        def render(
+            values: dict[str, str],
+            rows: list[dict[str, str]],
+            errors: dict[int, str],
+            *,
+            avatar_error: str | None = None,
+        ) -> str:
+            return _render(
+                values,
+                rows,
+                errors,
+                gravatar_url=grav,
+                github_avatar_url=gh,
+                avatar_error=avatar_error,
+            )
+
         if request.method == "POST":
             values = {
                 "display_name": (request.form.get("display_name") or "").strip(),
@@ -110,7 +166,7 @@ def edit() -> ResponseReturnValue:
 
             if not values["display_name"] or len(values["display_name"]) > 255:
                 flash("A display name is required (max 255 characters).", "error")
-                return _render(values, rows, {})
+                return render(values, rows, {})
 
             # Avatar: gate the URL through the scheme allowlist (it becomes an
             # <img src> on the public profile). Empty clears it.
@@ -119,7 +175,7 @@ def edit() -> ResponseReturnValue:
                 avatar_url = safe_external_url(values["avatar_url"])
                 if avatar_url is None:
                     flash("The avatar URL must be a valid http(s) URL.", "error")
-                    return _render(values, rows, {}, avatar_error="Not a valid http(s) URL.")
+                    return render(values, rows, {}, avatar_error="Not a valid http(s) URL.")
 
             # rel=me links: both fields required per kept row, then validate
             # through the shared ProfileLink model (rejects non-http(s)).
@@ -130,12 +186,12 @@ def edit() -> ResponseReturnValue:
             }
             if half_filled:
                 flash("Some links are invalid; nothing was saved.", "error")
-                return _render(values, rows, half_filled)
+                return render(values, rows, half_filled)
             try:
                 links = _LINKS_ADAPTER.validate_python(rows)
             except ValidationError as exc:
                 flash("Some links are invalid; nothing was saved.", "error")
-                return _render(values, rows, _errors_by_row(exc))
+                return render(values, rows, _errors_by_row(exc))
 
             user.display_name = values["display_name"]
             user.bio = values["bio"] or None
@@ -150,4 +206,4 @@ def edit() -> ResponseReturnValue:
 
         existing = _LINKS_ADAPTER.validate_python(user.profile_links or [])
         rows = [{"label": link.label, "url": str(link.url)} for link in existing]
-        return _render(_values_from_user(user), rows, {})
+        return render(_values_from_user(user), rows, {})

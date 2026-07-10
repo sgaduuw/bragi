@@ -34,11 +34,30 @@
   </fieldset>
 
   <fieldset>
-    <label for="avatar_url">Avatar URL</label>
-    <input type="url" name="avatar_url" id="avatar_url" maxlength="1024"
-           placeholder="https://example.com/me.jpg" value="{{ values.avatar_url }}"
-           {% if avatar_error %}aria-invalid="true"{% endif %}>
+    <label for="avatar_url">Avatar</label>
+    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+      <img id="avatar-preview" alt="Avatar preview"
+           style="width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: rgba(127,127,127,0.15);"
+           src="{{ values.avatar_url }}"{% if not values.avatar_url %} hidden{% endif %}>
+      <div style="flex: 1 1 16rem; min-width: 12rem;">
+        <input type="url" name="avatar_url" id="avatar_url" maxlength="1024" style="width: 100%;"
+               placeholder="https://example.com/me.jpg" value="{{ values.avatar_url }}"
+               data-gravatar="{{ gravatar_url }}"
+               {% if github_avatar_url %}data-github="{{ github_avatar_url }}"{% endif %}
+               {% if avatar_error %}aria-invalid="true"{% endif %}>
+        <p style="margin: 0.35rem 0 0;">
+          <button type="button" id="use-gravatar" class="btn secondary">Use Gravatar</button>
+          {% if github_avatar_url %}
+          <button type="button" id="use-github" class="btn secondary">Use GitHub avatar</button>
+          {% endif %}
+        </p>
+      </div>
+    </div>
     {% if avatar_error %}<div class="inline-edit-error">{{ avatar_error }}</div>{% endif %}
+    <p class="help">
+      Paste an image URL, or use your Gravatar{% if github_avatar_url %} or GitHub avatar{% endif %}.
+      Leave blank for no avatar.
+    </p>
   </fieldset>
 
   <fieldset>
@@ -111,6 +130,30 @@
         ev.target.closest('.profile-links-edit__row').remove();
       }
     });
+  })();
+
+  /* Avatar: keep the preview in sync with the URL field, and let the
+     "Use Gravatar" / "Use GitHub avatar" buttons fill it in one click. */
+  (function () {
+    'use strict';
+    var input = document.getElementById('avatar_url');
+    var preview = document.getElementById('avatar-preview');
+
+    function sync() {
+      if (input.value) { preview.src = input.value; preview.hidden = false; }
+      else { preview.hidden = true; }
+    }
+    function useSource(url) {
+      if (!url) return;
+      input.value = url;
+      sync();
+    }
+
+    input.addEventListener('input', sync);
+    var grav = document.getElementById('use-gravatar');
+    if (grav) grav.addEventListener('click', function () { useSource(input.dataset.gravatar); });
+    var gh = document.getElementById('use-github');
+    if (gh) gh.addEventListener('click', function () { useSource(input.dataset.github); });
   })();
 </script>
 {% endblock %}
