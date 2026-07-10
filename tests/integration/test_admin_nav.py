@@ -66,6 +66,21 @@ def test_admin_chrome_css_served(admin_app: Flask) -> None:
     assert "#1b1d22" in body
 
 
+def test_admin_chrome_css_resets_hidden_attribute(admin_app: Flask) -> None:
+    """`admin-chrome.css` must force `[hidden]` to `display: none !important`.
+
+    `form fieldset { display: flex }` is an author-origin display rule, which
+    beats the UA `[hidden] { display: none }` regardless of specificity, so a
+    plain `hidden` attribute does NOT hide a fieldset (the profile-kind
+    body/notice toggle). The `!important` reset restores it. This is a
+    structural guard: pytest can't compute the CSS cascade, so assert the rule
+    ships. Without it the toggle regresses silently (the markup has `hidden`
+    but the element still renders)."""
+    css = admin_app.test_client().get("/admin/static/admin-chrome.css").data.decode()
+    normalized = " ".join(css.split())
+    assert "[hidden] { display: none !important; }" in normalized
+
+
 def test_bulk_select_assets_served(admin_app: Flask) -> None:
     # admin_static.static_folder is already src/bragi/static/admin/,
     # so the list templates must reference these as bare filenames.
