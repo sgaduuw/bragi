@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.47.0 (2026-07-09).
+**Latest release:** 1.48.0 (2026-07-10).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -14,7 +14,14 @@ a bubble menu for inline picks, and GFM pipe-table authoring with
 full structural editing: insert/delete rows and columns, toggle
 header row), structured CV / resume page kind
 (`PageKind.RESUME` with typed sections, Project↔Position linkage,
-schema.org microdata, print-friendly), auto-derived public
+schema.org microdata, print-friendly), author profiles (a
+self-service account **Profile** editor for display name / bio /
+pronouns / location / avatar / rel="me" links, with one-click
+Gravatar or linked-GitHub avatar fill; a public **Profile** page
+kind rendering an h-card + JSON-LD Person; author bylines rendered
+as h-cards with a "create resume from profile" shortcut), a
+per-site **Tags** management page (rename / merge / delete with
+auto-301s), auto-derived public
 navigation from the page tree (with per-page `show_in_nav` and
 `menu_order` controls), GitHub sign-in (a "Sign in with GitHub"
 button on the login page plus an account Connections page to
@@ -85,10 +92,11 @@ and ARM homelabs run natively rather than through QEMU emulation.
 - **Post-page chrome.** Each post renders with an author byline,
   reading-time estimate (220 WPM, rounded up), and an
   "Updated YYYY-MM-DD" line that only appears when the edit is
-  meaningfully after first publish. Optional `User.bio` text
-  surfaces as an "About the author" aside below the body. A
-  table of contents auto-renders for multi-section posts (h2 /
-  h3 headings).
+  meaningfully after first publish. Optional profile data (avatar,
+  pronouns, bio, rel="me" links) surfaces as an h-card "About the
+  author" aside below the body, and enriches the post's JSON-LD
+  author. A table of contents auto-renders for multi-section posts
+  (h2 / h3 headings).
 - **Related posts at end of article.** Tag-overlap ranks
   same-site published posts ("more shared tags wins, recency
   ties"); rendered as a "You may also like" aside under the body.
@@ -181,6 +189,8 @@ and ARM homelabs run natively rather than through QEMU emulation.
   to every follower; `bragi activitypub send-pending` ships
   the queued deliveries. Per-site keypair generated on first
   `/actor` hit or via `bragi activitypub keygen --site <slug>`.
+  The actor's `summary` and `icon` come from the site owner's
+  account-profile bio and avatar (empty when the owner has none set).
 
 ## What bragi is not
 
@@ -422,7 +432,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.47.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.48.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -834,7 +844,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.47.0
+pip install bragi-cms==1.48.0
 ```
 
 The import path stays `import bragi`. Container images remain the
