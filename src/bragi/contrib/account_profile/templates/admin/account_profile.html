@@ -1,0 +1,116 @@
+{% extends "admin/base.html" %}
+{% block title %}Profile &middot; bragi admin{% endblock %}
+{% block content %}
+<h1>Profile</h1>
+<p class="help">
+  Your public author profile. The name and bio already appear on your posts;
+  the rest feeds the h-card / structured data delivered with your content.
+</p>
+
+<form method="post" action="{{ url_for('account_profile.edit') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <fieldset>
+    <label for="display_name">Display name</label>
+    <input type="text" name="display_name" id="display_name" required
+           maxlength="255" value="{{ values.display_name }}">
+  </fieldset>
+
+  <fieldset>
+    <label for="bio">Bio</label>
+    <textarea name="bio" id="bio" rows="4">{{ values.bio }}</textarea>
+  </fieldset>
+
+  <fieldset>
+    <label for="pronouns">Pronouns</label>
+    <input type="text" name="pronouns" id="pronouns" maxlength="64"
+           placeholder="they/them" value="{{ values.pronouns }}">
+  </fieldset>
+
+  <fieldset>
+    <label for="location">Location</label>
+    <input type="text" name="location" id="location" maxlength="255"
+           placeholder="Amsterdam, NL" value="{{ values.location }}">
+  </fieldset>
+
+  <fieldset>
+    <label for="avatar_url">Avatar URL</label>
+    <input type="url" name="avatar_url" id="avatar_url" maxlength="1024"
+           placeholder="https://example.com/me.jpg" value="{{ values.avatar_url }}"
+           {% if avatar_error %}aria-invalid="true"{% endif %}>
+    {% if avatar_error %}<div class="inline-edit-error">{{ avatar_error }}</div>{% endif %}
+  </fieldset>
+
+  <fieldset>
+    <label>Profile links (rel="me")</label>
+    <p class="help">
+      Links to your own profiles (GitHub, Mastodon, LinkedIn, ...). Leave a
+      row blank to remove it.
+    </p>
+    <table class="profile-links-edit" id="profile-links-rows">
+      <thead>
+        <tr><th>Label</th><th>URL</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="profile-links-edit__row">
+          <td>
+            <input type="text" name="profile_label" value="{{ row.label }}"
+                   placeholder="GitHub" autocomplete="off">
+          </td>
+          <td>
+            <input type="url" name="profile_url" value="{{ row.url }}"
+                   placeholder="https://github.com/you" autocomplete="off"
+                   {% if row.error %}aria-invalid="true"{% endif %}>
+            {% if row.error %}<div class="inline-edit-error">{{ row.error }}</div>{% endif %}
+          </td>
+          <td>
+            <button type="button" class="profile-links-edit__remove"
+                    aria-label="Remove row">&times;</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p><button type="button" id="profile-links-add">+ Add link</button></p>
+  </fieldset>
+
+  <p><button type="submit">Save profile</button></p>
+</form>
+
+<script>
+  /* Admin is JS-required. "Add link" clones the last row blank; "Remove"
+     deletes its row, keeping at least one. Blank rows are dropped server-side. */
+  (function () {
+    'use strict';
+    var tbody = document.querySelector('#profile-links-rows tbody');
+    var addBtn = document.getElementById('profile-links-add');
+
+    function blankRow() {
+      var rows = tbody.querySelectorAll('.profile-links-edit__row');
+      var clone = rows[rows.length - 1].cloneNode(true);
+      clone.querySelectorAll('input').forEach(function (i) {
+        i.value = '';
+        i.removeAttribute('aria-invalid');
+      });
+      var err = clone.querySelector('.inline-edit-error');
+      if (err) err.remove();
+      return clone;
+    }
+
+    addBtn.addEventListener('click', function () {
+      tbody.appendChild(blankRow());
+    });
+
+    tbody.addEventListener('click', function (ev) {
+      if (!ev.target.classList.contains('profile-links-edit__remove')) return;
+      var rows = tbody.querySelectorAll('.profile-links-edit__row');
+      if (rows.length <= 1) {
+        rows[0].querySelectorAll('input').forEach(function (i) { i.value = ''; });
+      } else {
+        ev.target.closest('.profile-links-edit__row').remove();
+      }
+    });
+  })();
+</script>
+{% endblock %}

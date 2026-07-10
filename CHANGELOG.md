@@ -6,6 +6,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Account profile page: a self-service **Profile** editor in the admin's
+  account menu, where the logged-in user edits their own display name, bio,
+  pronouns, location, avatar URL, and rel="me" links. These land on the
+  `User` row (new columns); the public delivery surfaces that consume them
+  (author h-card, a Profile page type, the ActivityPub actor) follow in later
+  phases. The avatar URL is validated through the external-URL scheme
+  allowlist before it is stored.
+
 ### Changed
 - Admin breadcrumbs now also render on the main list views (Posts, Pages,
   Media, Redirects, Sites), which were the gap left by the earlier
