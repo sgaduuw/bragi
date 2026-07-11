@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.49.1 (2026-07-11).
+**Latest release:** 1.50.0 (2026-07-11).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -434,7 +434,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.49.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.50.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -846,7 +846,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.49.1
+pip install bragi-cms==1.50.0
 ```
 
 The import path stays `import bragi`. Container images remain the
