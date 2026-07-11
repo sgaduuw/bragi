@@ -35,20 +35,34 @@ from bragi.settings import assert_secret_key_safe, settings
 # admin response should never be cacheable, even on 3xx/4xx.
 CACHE_POLICIES_ADMIN = CACHE_POLICIES["admin"]
 
-# Admin Content-Security-Policy. The admin ships all CSS/JS as static files
-# (theme + editor CSS/JS, the enhancement scripts), so `script-src` is strict
-# with no `'unsafe-inline'`. `esm.sh` is the one non-self script source: the
-# TipTap editor module imports from it. The editor's per-page config rides a
-# non-executable `application/json` island (not restricted by script-src). We
-# keep `'unsafe-inline'` for STYLE only, because some admin templates still use
-# inline `style="..."` attributes (migrating those to classes is a separate,
-# lower-value effort); the XSS-relevant lever is script-src, which is tight.
+# Admin Content-Security-Policy. The admin ships all CSS/JS as static files, so
+# `script-src` carries no `'unsafe-inline'` -- an injected inline `<script>` is
+# blocked, which is the primary XSS lever. What it must still allow, and why:
+#
+# - `https://esm.sh`: the TipTap editor module imports from it. (Its per-page
+#   config rides a non-executable `application/json` island, not restricted by
+#   script-src.)
+# - `'unsafe-eval'`: htmx evaluates `hx-trigger` filter expressions (e.g.
+#   `keyup[key=='Enter']`, which the inline-edit cells use) via `Function()`.
+#   There is no htmx 1.x config to avoid this without dropping those features;
+#   the eval sinks are author-controlled `hx-*` attribute values, not
+#   user-injected, so the residual risk is low.
+# - `script-src-attr 'unsafe-inline'`: the admin uses inline
+#   `onsubmit="return confirm(...)"` handlers for destructive-action
+#   confirmations. This directive scopes the allowance to event-handler
+#   ATTRIBUTES only; inline `<script>` ELEMENTS stay blocked by the strict
+#   `script-src` above. (Converting them to `data-confirm` + a delegated
+#   handler would let this drop too; deferred as lower-value.)
+# - `style-src 'unsafe-inline'`: some templates still use inline `style="..."`
+#   attributes (a separate, lower-value migration).
+#
 # Delivery is deliberately excluded (operator content pulls arbitrary external
 # images/embeds and needs its own, looser policy).
 _ADMIN_CSP = "; ".join(
     (
         "default-src 'self'",
-        "script-src 'self' https://esm.sh",
+        "script-src 'self' https://esm.sh 'unsafe-eval'",
+        "script-src-attr 'unsafe-inline'",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: https:",
         "connect-src 'self' https://esm.sh",
