@@ -6,6 +6,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- The admin host now sends a **Content-Security-Policy** with a strict
+  `script-src 'self' https://esm.sh` (no `'unsafe-inline'`; `esm.sh` is where
+  the editor imports TipTap), made possible by moving the admin's CSS/JS to
+  static files. It ships **report-only by default** (`BRAGI_ADMIN_CSP`;
+  `report-only` | `enforce` | `off`) so an operator can confirm nothing breaks
+  in the browser console before switching to `enforce`. The delivery host is
+  deliberately not covered (operator content pulls arbitrary external
+  images/embeds and needs its own policy).
+
 ### Changed
 - Inline CSS/JS is being moved to cacheable static files (rendering unchanged),
   en route to a strict Content-Security-Policy on the admin host: the in-tree
