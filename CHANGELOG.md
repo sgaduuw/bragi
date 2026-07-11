@@ -4,7 +4,12 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.51.0] - 2026-07-11
+
+The admin gets a Content-Security-Policy: all of its CSS/JS moved to cacheable
+static files, htmx / flatpickr / Vega are self-hosted (esm.sh is the only
+external script source left, for the editor's ES modules), and the policy drops
+`'unsafe-inline'` from `script-src`.
 
 ### Added
 - The admin host now sends a **Content-Security-Policy**, made possible by
@@ -22,12 +27,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   images/embeds and needs its own policy).
 
 ### Changed
-- Inline CSS/JS is being moved to cacheable static files (rendering unchanged),
-  en route to a strict Content-Security-Policy on the admin host: the in-tree
-  theme CSS now serves as a per-theme static `theme.css`, and the TipTap editor
-  styles + script as `/admin/static/tiptap-editor.{css,js}` (the editor's
-  per-page config is passed through a non-executable JSON island), instead of
-  inline `<style>`/`<script>` blocks re-sent on every page.
+- All admin inline CSS/JS moved to cacheable static files (rendering
+  unchanged), which is what makes the CSP above possible: the in-tree theme CSS
+  serves as a per-theme static `theme.css`, and the TipTap editor styles +
+  script as `/admin/static/tiptap-editor.{css,js}` (the editor's per-page config
+  passed through a non-executable JSON island), instead of inline
+  `<style>`/`<script>` blocks re-sent on every page.
 - The admin's small enhancement scripts (rail active-state, slug-suggest, the
   page-kind toggle, the 404-list select, and the account-profile form) moved
   from inline `<script>` blocks into cacheable `/admin/static/*.js` files, and
