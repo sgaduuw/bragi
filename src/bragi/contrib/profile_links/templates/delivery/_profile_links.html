@@ -15,7 +15,8 @@
    `rel == "me"`. #}
 {% set links = profile_links() %}
 {% if links %}
-<nav class="profile-links" aria-label="Profile links">
+<nav class="profile-links" aria-labelledby="profile-links-heading">
+  <h2 id="profile-links-heading" class="profile-links__heading">Links</h2>
   <ul class="profile-links__list">
     {% for link in links %}
       <li class="profile-links__item">

@@ -81,6 +81,9 @@ def test_profile_renders_h_card(delivery_app: Flask) -> None:
     # A PROFILE page surfaces the account profile, not its own body: the
     # page body_markdown ("Hello there.") is no longer rendered.
     assert "Hello there." not in body
+    # Links section with a heading.
+    assert 'class="profile__links-heading"' in body
+    assert ">Links</h2>" in body
     # rel=me links
     assert 'rel="me" href="https://github.com/ada"' in body
     assert 'rel="me" href="https://fosstodon.org/@ada"' in body

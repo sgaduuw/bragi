@@ -49,6 +49,7 @@
   {% endif %}
 
   {% if profile.links %}
+  <h2 class="profile__links-heading">Links</h2>
   <ul class="profile__links">
     {% for link in profile.links %}
       <li><a class="u-url" rel="me" href="{{ link.url }}">{{ link.label }}</a></li>
