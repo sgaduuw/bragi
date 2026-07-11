@@ -179,4 +179,17 @@
   }
 
   window.bragiBulkSelect = { init: init };
+
+  // Auto-init: each bulk-actions bar declares its wrapper via
+  // `data-wrapper`, so wire every bar found on the page instead of
+  // requiring a per-page inline `init()` call (which a strict CSP would
+  // forbid). This script is included after the table markup on each list
+  // page, so the elements exist by the time this runs.
+  document.querySelectorAll(".bulk-actions-bar[data-wrapper]").forEach(function (bar) {
+    var wrapperSel = bar.getAttribute("data-wrapper");
+    init({
+      wrapperSelector: wrapperSel,
+      barSelector: '.bulk-actions-bar[data-wrapper="' + wrapperSel + '"]',
+    });
+  });
 })();

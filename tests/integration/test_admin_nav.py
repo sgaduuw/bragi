@@ -95,6 +95,77 @@ def test_bulk_select_assets_served(admin_app: Flask) -> None:
     assert js.headers["Content-Type"].startswith(("application/javascript", "text/javascript"))
 
 
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "admin-rail-highlight.js",
+        "slug-suggest.js",
+        "page-kind-toggle.js",
+        "notfound-select.js",
+        "account-profile.js",
+    ],
+)
+def test_externalized_admin_scripts_served(admin_app: Flask, filename: str) -> None:
+    """The admin enhancement scripts moved out of inline <script> blocks into
+    cacheable static files (so a strict admin CSP can drop script-src
+    'unsafe-inline'). Each must serve with a JS content type."""
+    resp = admin_app.test_client().get(f"/admin/static/{filename}")
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"].startswith(("application/javascript", "text/javascript"))
+
+
+def test_bulk_select_auto_inits_from_data_attribute() -> None:
+    """bulk_select.js auto-inits from `.bulk-actions-bar[data-wrapper]`, so the
+    list templates no longer carry an inline `window.bragiBulkSelect.init(...)`
+    call (which a strict CSP would forbid)."""
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[2] / "src/bragi/static/admin/bulk_select.js").read_text()
+    assert ".bulk-actions-bar[data-wrapper]" in js
+    src = Path(__file__).resolve().parents[2] / "src" / "bragi"
+    for tmpl in (
+        src / "contrib/post/templates/admin/list.html",
+        src / "contrib/page/templates/admin/page_list.html",
+        src / "contrib/attachments/templates/admin/attachments_list.html",
+    ):
+        assert "bragiBulkSelect.init" not in tmpl.read_text(), f"{tmpl}: inline init remains"
+
+
+def test_admin_csp_report_only_by_default(admin_app: Flask) -> None:
+    """By default the admin sends a Content-Security-Policy-Report-Only header
+    with a strict, no-'unsafe-inline' script-src (esm.sh allowed for the editor
+    module), and no enforcing header."""
+    resp = admin_app.test_client().get("/admin/static/admin-chrome.css")
+    csp = resp.headers.get("Content-Security-Policy-Report-Only", "")
+    assert "Content-Security-Policy" not in resp.headers  # not enforcing yet
+    assert "script-src 'self' https://esm.sh" in csp
+    # The XSS-relevant lever: no 'unsafe-inline' in script-src.
+    script_src = next(d for d in csp.split(";") if d.strip().startswith("script-src"))
+    assert "'unsafe-inline'" not in script_src
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+
+
+def test_admin_csp_enforce_mode(admin_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`admin_csp='enforce'` sends the blocking header instead of report-only."""
+    import bragi.settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "admin_csp", "enforce")
+    resp = admin_app.test_client().get("/admin/static/admin-chrome.css")
+    assert "script-src 'self' https://esm.sh" in resp.headers.get("Content-Security-Policy", "")
+    assert "Content-Security-Policy-Report-Only" not in resp.headers
+
+
+def test_admin_csp_off(admin_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`admin_csp='off'` omits both CSP headers."""
+    import bragi.settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "admin_csp", "off")
+    resp = admin_app.test_client().get("/admin/static/admin-chrome.css")
+    assert "Content-Security-Policy" not in resp.headers
+    assert "Content-Security-Policy-Report-Only" not in resp.headers
+
+
 def test_bulk_select_list_templates_use_bare_filenames() -> None:
     # Direct structural guard against the double-prefix bug. The
     # asset-serving test above only catches blueprint/file regressions;
