@@ -62,6 +62,9 @@ def test_partial_renders_owner_links_in_order(delivery_app: Flask, db_session: S
     site = db_session.execute(select(Site).where(Site.hostname == "t.example")).scalar_one()
     html = _render(delivery_app, site)
     assert '<nav class="profile-links"' in html
+    # Section heading above the rel="me" list.
+    assert 'class="profile-links__heading"' in html
+    assert ">Links</h2>" in html
     assert 'rel="me"' in html
     assert 'itemprop="sameAs"' in html
     assert "https://github.com/you" in html
