@@ -130,13 +130,11 @@ def test_theme_default_ships_resume_css() -> None:
 
 def test_theme_default_ships_image_size_classes() -> None:
     """The picker / bubble menu writes size-* and align-* classes
-    that the theme CSS must style. theme_default ships the baseline;
-    the other in-tree themes (terminal / minimal / serif) inherit
-    by copy-paste in this PR.
-    """
+    that the theme CSS must style. These live in the theme's static
+    `theme.css` (externalized from an inline <style> block)."""
     from importlib.resources import files
 
-    css = files("bragi.contrib.theme_default.templates.delivery").joinpath("base.html").read_text()
+    css = files("bragi.contrib.theme_default").joinpath("static/theme.css").read_text()
     for cls in (
         "img.size-small",
         "img.size-medium",
@@ -146,6 +144,27 @@ def test_theme_default_ships_image_size_classes() -> None:
         "img.align-center",
     ):
         assert cls in css, f"theme_default missing rule for {cls}"
+
+
+@pytest.mark.parametrize(
+    "theme_slug",
+    ["theme_default", "theme_minimal", "theme_serif", "theme_terminal"],
+)
+def test_each_in_tree_theme_externalizes_base_css(theme_slug: str) -> None:
+    """Each in-tree theme ships its chrome CSS as `static/theme.css` and links
+    it from `base.html` (no inline <style> block). Externalized in this PR so
+    the CSS is cacheable and a strict CSP can drop style-src 'unsafe-inline'."""
+    from importlib.resources import files
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / f"src/bragi/contrib/{theme_slug}"
+    css_path = root / "static/theme.css"
+    assert css_path.is_file(), f"theme.css missing for {theme_slug}"
+    assert "footer.site" in css_path.read_text()
+
+    base = files(f"bragi.contrib.{theme_slug}.templates.delivery").joinpath("base.html").read_text()
+    assert "static/theme.css" in base, f"{theme_slug} base.html does not link theme.css"
+    assert "<style>" not in base, f"{theme_slug} base.html still has an inline <style> block"
 
 
 @pytest.mark.parametrize(
