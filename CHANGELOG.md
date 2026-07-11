@@ -4,6 +4,14 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- In-tree theme CSS is now served as a cacheable static `theme.css` per theme
+  (previously an inline `<style>` block in each theme's page shell). Rendering
+  is unchanged; the CSS is now cached across page loads. First step toward a
+  strict Content-Security-Policy on the admin host.
+
 ## [1.50.0] - 2026-07-11
 
 ### Added
