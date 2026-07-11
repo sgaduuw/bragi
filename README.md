@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.50.0 (2026-07-11).
+**Latest release:** 1.51.0 (2026-07-11).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -364,7 +364,7 @@ The closing `:::` must sit on its own line. `format` is `table`,
 `chart`, or `scalar`. For a saved query (`q=<name>`) `format`
 defaults to `table`; inline SQL (`sql="..."`) must name an explicit
 `format=` and cannot use `format=chart`. Chart output renders
-client-side via CDN-loaded `vega-embed`; a `<noscript>` block
+client-side via a self-hosted `vega-embed` bundle; a `<noscript>` block
 with the same data as an HTML table is baked alongside so
 JS-disabled browsers and crawlers see the data.
 
@@ -434,7 +434,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.50.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.51.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -510,6 +510,17 @@ with hops unset every client would share the proxy's address and one
 attacker could lock everyone out, so the gate stays inactive there
 (the admin app logs a warning in production). Set
 `BRAGI_LOGIN_THROTTLE_ENABLED=false` to turn it off entirely.
+
+The admin app ships all of its CSS/JS as static files (htmx,
+flatpickr, and the TipTap editor are self-hosted; `esm.sh` is the only
+external script source, for the editor's ES modules), which lets it
+send a **Content-Security-Policy** with a strict `script-src` that
+carries no `'unsafe-inline'`. `BRAGI_ADMIN_CSP` controls it:
+`report-only` (default) sends `Content-Security-Policy-Report-Only`
+(violations logged to the browser console, nothing blocked) so you can
+confirm the admin works before switching to `enforce`; `off` omits the
+header. The delivery host is not covered (operator content pulls
+arbitrary external images/embeds).
 
 Both apps run under gunicorn inside the container (sync worker
 class; `--access-logfile -` to stdout). Worker counts default to
@@ -622,6 +633,8 @@ bragi/
 │   │   ├── url.py              # URL helpers
 │   │   └── useragent.py        # bot / browser / feed-reader classifier
 │   ├── alembic/                # migrations bundled in wheel (bragi:alembic)
+│   ├── static/admin/           # self-hosted admin static assets (htmx, TipTap editor JS/CSS, flatpickr, enhancement scripts)
+│   ├── templates/admin/        # shared admin templates (the TipTap editor partial, image-picker field, chrome)
 │   └── contrib/                # built-ins as plugins
 │       ├── account_profile/    # self-service profile editor (name / bio / avatar / rel=me links)
 │       ├── activitypub/        # one fediverse actor per site (follow / undo / outbox fanout)
@@ -846,7 +859,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.50.0
+pip install bragi-cms==1.51.0
 ```
 
 The import path stays `import bragi`. Container images remain the
