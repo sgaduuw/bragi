@@ -63,11 +63,15 @@ def test_bio_mounts_tiptap_editor_without_media_or_internal_link(admin_app: Flas
     client = admin_app.test_client()
     _login(client)
     body = client.get("/admin/account/profile").data.decode()
-    # Editor mount + toolbar present, bound to the bio textarea.
+    # Editor mount + toolbar present; config island binds it to the bio
+    # textarea with the site-scoped pickers disabled (empty URLs).
     assert 'id="tiptap-editor"' in body
-    assert 'getElementById("bio")' in body
+    assert 'id="tiptap-editor-config"' in body
+    assert '"textareaId": "bio"' in body
+    assert '"pickerUrl": ""' in body
+    assert '"internalPickerUrl": ""' in body
     assert '<textarea name="bio" id="bio"' in body
-    # Formatting stays; the site-scoped pickers are gone.
+    # Formatting stays; the site-scoped picker buttons/dialogs are gone.
     assert 'data-action="bold"' in body
     assert 'data-action="image"' not in body
     assert 'data-action="internal-link"' not in body

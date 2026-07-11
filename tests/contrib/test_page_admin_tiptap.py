@@ -99,12 +99,15 @@ def test_page_edit_loads_tiptap_modules_from_esm_cdn(
     with db_session_factory() as db:
         page_id = db.execute(select(Page).where(Page.slug == "about")).scalar_one().id
 
-    resp = client.get(f"/admin/sites/blog/pages/{page_id}/edit")
-    body = resp.data.decode()
-    assert "esm.sh/@tiptap/core" in body
-    assert "esm.sh/@tiptap/starter-kit" in body
-    assert "esm.sh/@tiptap/extension-link" in body
-    assert "esm.sh/tiptap-markdown" in body
+    body = client.get(f"/admin/sites/blog/pages/{page_id}/edit").data.decode()
+    # The page wires the external module + config island; imports live in the file.
+    assert 'src="/admin/static/tiptap-editor.js"' in body
+    assert 'id="tiptap-editor-config"' in body
+    src = client.get("/admin/static/tiptap-editor.js").data.decode()
+    assert "esm.sh/@tiptap/core" in src
+    assert "esm.sh/@tiptap/starter-kit" in src
+    assert "esm.sh/@tiptap/extension-link" in src
+    assert "esm.sh/tiptap-markdown" in src
 
 
 def test_page_new_form_has_empty_editor_content(admin_app: Flask) -> None:

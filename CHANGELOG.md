@@ -20,8 +20,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Inline CSS/JS is being moved to cacheable static files (rendering unchanged),
   en route to a strict Content-Security-Policy on the admin host: the in-tree
   theme CSS now serves as a per-theme static `theme.css`, and the TipTap editor
-  styles as `/admin/static/tiptap-editor.css`, instead of inline `<style>`
-  blocks re-sent on every page.
+  styles + script as `/admin/static/tiptap-editor.{css,js}` (the editor's
+  per-page config is passed through a non-executable JSON island), instead of
+  inline `<style>`/`<script>` blocks re-sent on every page.
 - The admin's small enhancement scripts (rail active-state, slug-suggest, the
   page-kind toggle, the 404-list select, and the account-profile form) moved
   from inline `<script>` blocks into cacheable `/admin/static/*.js` files, and
