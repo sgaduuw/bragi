@@ -58,11 +58,11 @@
     </main>
   </div>
 
-  {# htmx, CDN-hosted for v1. Self-hosted bundle (and a
-     Subresource Integrity hash) is a follow-up; the admin is
-     gated behind auth so the surface is the operator's own
-     browser, not the public. #}
-  <script src="https://unpkg.com/htmx.org@1.9.10" crossorigin="anonymous"></script>
+  {# htmx, self-hosted (was unpkg.com CDN) so the admin CSP can keep
+     script-src to 'self' + esm.sh with no third-party CDN, and the admin
+     loads with no external fetch. Update the vendored file and this
+     version comment together. Version: 1.9.10. #}
+  <script src="{{ url_for('admin_static.static', filename='htmx.min.js') }}"></script>
   <script src="{{ url_for('admin_static.static', filename='inline-edit.js') }}"></script>
   {# Boosted rail nav swaps only `.admin-content`, so the persisted rail
      keeps its server-rendered `is-current` from the previous page. Move
@@ -73,15 +73,6 @@
      (exact path match), so a boosted nav and a cold load of the same
      page highlight identically. Inline (a dozen lines) to avoid a served
      static asset; the rail still works without it (full nav on no-JS). #}
-  <script>
-    function syncRailHighlight() {
-      var here = window.location.pathname;
-      document.querySelectorAll(".rail-link").forEach(function (a) {
-        a.classList.toggle("is-current", a.getAttribute("href") === here);
-      });
-    }
-    document.body.addEventListener("htmx:pushedIntoHistory", syncRailHighlight);
-    document.body.addEventListener("htmx:historyRestore", syncRailHighlight);
-  </script>
+  <script src="{{ url_for('admin_static.static', filename='admin-rail-highlight.js') }}"></script>
 </body>
 </html>

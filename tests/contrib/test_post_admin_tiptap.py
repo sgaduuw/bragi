@@ -95,21 +95,33 @@ def test_edit_page_renders_editor_mount(
     assert "**hi**" in body
 
 
-def test_edit_page_loads_tiptap_modules_from_esm_cdn(
+def test_edit_page_wires_external_editor_module_and_config(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
-    """The module script imports TipTap + Markdown extension from esm.sh."""
+    """The editor JS is served as a static module (not inline), configured
+    via a non-executable JSON island; the module imports TipTap from esm.sh."""
     client = admin_app.test_client()
     _login(client)
     with db_session_factory() as db:
         post_id = db.execute(select(Post).where(Post.slug == "hello")).scalar_one().id
 
-    resp = client.get(f"/admin/sites/blog/posts/{post_id}/edit")
-    body = resp.data.decode()
-    assert "esm.sh/@tiptap/core" in body
-    assert "esm.sh/@tiptap/starter-kit" in body
-    assert "esm.sh/@tiptap/extension-link" in body
-    assert "esm.sh/tiptap-markdown" in body
+    body = client.get(f"/admin/sites/blog/posts/{post_id}/edit").data.decode()
+    # External module + JSON config island on the page; no inline module.
+    assert 'src="/admin/static/tiptap-editor.js"' in body
+    assert 'id="tiptap-editor-config"' in body
+    assert '"textareaId": "body_markdown"' in body
+    assert "import { Editor" not in body  # the module body is not inlined
+
+    js = client.get("/admin/static/tiptap-editor.js")
+    assert js.status_code == 200
+    assert "javascript" in js.headers["Content-Type"]
+    src = js.data.decode()
+    assert "esm.sh/@tiptap/core" in src
+    assert "esm.sh/@tiptap/starter-kit" in src
+    assert "esm.sh/@tiptap/extension-link" in src
+    assert "esm.sh/tiptap-markdown" in src
+    # Config is read from the island, not interpolated.
+    assert "JSON.parse(document.getElementById('tiptap-editor-config')" in src
 
 
 def test_toolbar_includes_required_actions(admin_app: Flask) -> None:
@@ -141,17 +153,17 @@ def test_edit_page_loads_table_extensions(admin_app: Flask) -> None:
     for the parse path."""
     client = admin_app.test_client()
     _login(client)
-    body = client.get("/admin/sites/blog/posts/new").data.decode()
-    assert "esm.sh/@tiptap/extension-table@2.6" in body
-    assert "esm.sh/@tiptap/extension-table-row@2.6" in body
-    assert "esm.sh/@tiptap/extension-table-header@2.6" in body
-    assert "esm.sh/@tiptap/extension-table-cell@2.6" in body
+    src = client.get("/admin/static/tiptap-editor.js").data.decode()
+    assert "esm.sh/@tiptap/extension-table@2.6" in src
+    assert "esm.sh/@tiptap/extension-table-row@2.6" in src
+    assert "esm.sh/@tiptap/extension-table-header@2.6" in src
+    assert "esm.sh/@tiptap/extension-table-cell@2.6" in src
     # Parse path: markdown-it's table rule enabled inside the editor's
     # own parser so a loaded body's pipe table becomes editor nodes.
-    assert "md.enable('table')" in body
+    assert "md.enable('table')" in src
     # Cells constrained to inline so the editor cannot author block
     # content GFM cannot represent.
-    assert "content: 'inline*'" in body
+    assert "content: 'inline*'" in src
 
 
 def test_new_post_page_has_empty_editor_content(admin_app: Flask) -> None:
@@ -209,16 +221,26 @@ def test_toolbar_includes_callout_actions(admin_app: Flask) -> None:
         assert f'data-action="callout-{callout_type}"' in body, (
             f"missing callout action: {callout_type}"
         )
-    assert "esm.sh/markdown-it-container" in body
+    src = client.get("/admin/static/tiptap-editor.js").data.decode()
+    assert "esm.sh/markdown-it-container" in src
 
 
-def test_editor_includes_table_styles(admin_app: Flask) -> None:
-    """Editor mount has table CSS and the dropdown panel is styled."""
+def test_editor_styles_served_from_static_css(admin_app: Flask) -> None:
+    """Editor styles are served as a cacheable static file (externalized from
+    the partial's inline <style>); the edit page links it and no longer inlines
+    it, and the CSS carries the table + toolbar-menu rules."""
     client = admin_app.test_client()
     _login(client)
     body = client.get("/admin/sites/blog/posts/new").data.decode()
-    assert ".editor-mount .ProseMirror table" in body
-    assert ".toolbar-menu" in body
+    assert 'href="/admin/static/tiptap-editor.css"' in body
+    # The editor CSS is no longer inlined on the page (it's in the file now).
+    assert ".editor-mount .ProseMirror table" not in body
+    css = client.get("/admin/static/tiptap-editor.css")
+    assert css.status_code == 200
+    assert css.headers["Content-Type"].startswith("text/css")
+    text = css.data.decode()
+    assert ".editor-mount .ProseMirror table" in text
+    assert ".toolbar-menu" in text
 
 
 def test_post_create_still_works_via_textarea_submission(

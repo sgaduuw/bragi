@@ -35,6 +35,43 @@ from bragi.settings import assert_secret_key_safe, settings
 # admin response should never be cacheable, even on 3xx/4xx.
 CACHE_POLICIES_ADMIN = CACHE_POLICIES["admin"]
 
+# Admin Content-Security-Policy. The admin ships all CSS/JS as static files, so
+# `script-src` carries no `'unsafe-inline'` -- an injected inline `<script>` is
+# blocked, which is the primary XSS lever. What it must still allow, and why:
+#
+# - `https://esm.sh`: the TipTap editor module imports from it. (Its per-page
+#   config rides a non-executable `application/json` island, not restricted by
+#   script-src.)
+# - `'unsafe-eval'`: htmx evaluates `hx-trigger` filter expressions (e.g.
+#   `keyup[key=='Enter']`, which the inline-edit cells use) via `Function()`.
+#   There is no htmx 1.x config to avoid this without dropping those features;
+#   the eval sinks are author-controlled `hx-*` attribute values, not
+#   user-injected, so the residual risk is low.
+# - `script-src-attr 'unsafe-inline'`: the admin uses inline
+#   `onsubmit="return confirm(...)"` handlers for destructive-action
+#   confirmations. This directive scopes the allowance to event-handler
+#   ATTRIBUTES only; inline `<script>` ELEMENTS stay blocked by the strict
+#   `script-src` above. (Converting them to `data-confirm` + a delegated
+#   handler would let this drop too; deferred as lower-value.)
+# - `style-src 'unsafe-inline'`: some templates still use inline `style="..."`
+#   attributes (a separate, lower-value migration).
+#
+# Delivery is deliberately excluded (operator content pulls arbitrary external
+# images/embeds and needs its own, looser policy).
+_ADMIN_CSP = "; ".join(
+    (
+        "default-src 'self'",
+        "script-src 'self' https://esm.sh 'unsafe-eval'",
+        "script-src-attr 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: https:",
+        "connect-src 'self' https://esm.sh",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "object-src 'none'",
+    )
+)
+
 # Section ordering rule: site groups render write -> reach -> manage
 # (the day's work first, site administration last); the lone global
 # group is `platform`. The pins exist so an arbitrary contrib adding
@@ -219,8 +256,15 @@ def create_admin_app() -> Flask:
     # every status code so no intermediary or browser caches a
     # page that includes session state.
     @app.after_request
-    def _force_admin_no_store(response):  # type: ignore[no-untyped-def]
+    def _admin_security_headers(response):  # type: ignore[no-untyped-def]
         response.headers["Cache-Control"] = CACHE_POLICIES_ADMIN
+        # CSP: report-only (default) surfaces violations without blocking so
+        # the operator can confirm the admin still works before enforcing;
+        # enforce sends the blocking header; off omits it. See Settings.admin_csp.
+        if settings.admin_csp == "enforce":
+            response.headers["Content-Security-Policy"] = _ADMIN_CSP
+        elif settings.admin_csp == "report-only":
+            response.headers["Content-Security-Policy-Report-Only"] = _ADMIN_CSP
         return response
 
     # No app.cli.add_command here: the FlaskGroup (`bragi`) picks up

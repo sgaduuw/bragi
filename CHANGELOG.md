@@ -4,6 +4,45 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.51.0] - 2026-07-11
+
+The admin gets a Content-Security-Policy: all of its CSS/JS moved to cacheable
+static files, htmx / flatpickr / Vega are self-hosted (esm.sh is the only
+external script source left, for the editor's ES modules), and the policy drops
+`'unsafe-inline'` from `script-src`.
+
+### Added
+- The admin host now sends a **Content-Security-Policy**, made possible by
+  moving the admin's CSS/JS to static files (and self-hosting htmx and the
+  resume date-picker's flatpickr CSS, previously loaded from CDNs; the only
+  remaining external script source is `esm.sh`, for the editor and flatpickr
+  ES modules). The `script-src` carries **no `'unsafe-inline'`**, so
+  an injected inline `<script>` is blocked; `esm.sh` is allowed for the editor
+  module, `'unsafe-eval'` is allowed because htmx evaluates `hx-trigger` filter
+  expressions, and inline `onsubmit="confirm(...)"` handlers are scoped to a
+  `script-src-attr`. It ships **report-only by default** (`BRAGI_ADMIN_CSP`;
+  `report-only` | `enforce` | `off`) so an operator can confirm nothing breaks
+  in the browser console before switching to `enforce`. The delivery host is
+  deliberately not covered (operator content pulls arbitrary external
+  images/embeds and needs its own policy).
+
+### Changed
+- All admin inline CSS/JS moved to cacheable static files (rendering
+  unchanged), which is what makes the CSP above possible: the in-tree theme CSS
+  serves as a per-theme static `theme.css`, and the TipTap editor styles +
+  script as `/admin/static/tiptap-editor.{css,js}` (the editor's per-page config
+  passed through a non-executable JSON island), instead of inline
+  `<style>`/`<script>` blocks re-sent on every page.
+- The admin's small enhancement scripts (rail active-state, slug-suggest, the
+  page-kind toggle, the 404-list select, and the account-profile form) moved
+  from inline `<script>` blocks into cacheable `/admin/static/*.js` files, and
+  the bulk-select helper now auto-initialises from the DOM (no per-page inline
+  `init()` call). Same behaviour; part of the same CSP-readiness work.
+- Dataset charts (`::: dataset format=chart :::`) now load a **self-hosted**
+  Vega / Vega-Lite / Vega-Embed (was jsdelivr), so a public chart page no
+  longer leaks each visitor's IP to a CDN and works offline. Still lazy-loaded
+  only when a chart is present, with the no-JS table fallback unchanged.
+
 ## [1.50.0] - 2026-07-11
 
 ### Added

@@ -105,8 +105,12 @@ def test_in_tree_theme_ships_dark_mode_css(delivery_app: Flask, slug: str, _labe
     source, _filename, _uptodate = spec.template_loader.get_source(
         delivery_app.jinja_env, "delivery/base.html"
     )
-    assert "prefers-color-scheme: dark" in source, (
-        f"theme {slug!r}'s delivery/base.html is missing a `prefers-color-scheme: dark` block"
+    # The dark-mode CSS now lives in the theme's externalized static
+    # `theme.css` (linked from base.html), not an inline <style> block.
+    assert spec.static_dir is not None
+    theme_css = (spec.static_dir / "theme.css").read_text()
+    assert "prefers-color-scheme: dark" in theme_css, (
+        f"theme {slug!r}'s theme.css is missing a `prefers-color-scheme: dark` block"
     )
     assert 'name="color-scheme"' in source, (
         f"theme {slug!r}'s delivery/base.html is missing the "

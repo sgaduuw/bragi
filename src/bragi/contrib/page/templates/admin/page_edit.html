@@ -296,26 +296,7 @@
   </div>
 </form>
 
-<script>
-  /* Kind toggle: show the body editor OR the "profile leads" notice
-     instantly when the Kind select changes, so switching to/from Profile
-     doesn't need a save+reload. Both fieldsets are always in the DOM;
-     initial visibility is server-set to match the persisted kind. The
-     server blanks a profile page's body regardless (see
-     `_form_from_request`), so the hidden textarea can't persist a body. */
-  (function () {
-    'use strict';
-    var kind = document.getElementById('kind');
-    var bodyFs = document.getElementById('page-body-fieldset');
-    var noticeFs = document.getElementById('page-profile-notice');
-    if (!kind || !bodyFs || !noticeFs) return;
-    kind.addEventListener('change', function () {
-      var isProfile = kind.value === 'profile';
-      bodyFs.hidden = isProfile;
-      noticeFs.hidden = !isProfile;
-    });
-  })();
-</script>
+<script src="{{ url_for('admin_static.static', filename='page-kind-toggle.js') }}"></script>
 
 {# Profile -> resume shortcut. A separate form (outside the main edit
    form, per the nested-form note below) that seeds a DRAFT resume from
@@ -332,31 +313,7 @@
 {% endif %}
 
 {% if not is_edit %}
-<script>
-  // Slug live-suggest: as the operator types the title, write a
-  // slugified version into the slug field, until they touch it.
-  // The server-side handler also fills empty slug at POST time;
-  // this script is the live-UX layer.
-  (function () {
-    const titleEl = document.getElementById('title');
-    const slugEl = document.getElementById('slug');
-    if (!titleEl || !slugEl) return;
-    let touched = slugEl.value.length > 0;
-    slugEl.addEventListener('input', function () { touched = true; });
-    titleEl.addEventListener('input', function () {
-      if (touched) return;
-      slugEl.value = slugify(titleEl.value);
-    });
-    function slugify(text) {
-      return text
-        .normalize('NFKD')
-        .replace(/\p{M}/gu, '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    }
-  })();
-</script>
+<script src="{{ url_for('admin_static.static', filename='slug-suggest.js') }}"></script>
 {% endif %}
 
 {# Resume-source plugin widgets (LinkedIn upload, etc.) live OUTSIDE the

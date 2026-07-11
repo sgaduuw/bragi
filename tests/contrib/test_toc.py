@@ -150,9 +150,9 @@ def test_multi_section_post_renders_toc_aside(delivery_app: Flask) -> None:
 def test_flat_post_omits_toc_aside(delivery_app: Flask) -> None:
     """No `<aside class="toc-wrapper">` element on a flat post.
 
-    The CSS class itself appears in the inline `<style>` in
-    base.html; assert against the element opening tag instead so
-    the CSS rule isn't a false positive.
+    The CSS class itself appears in the theme's `theme.css`; assert
+    against the element opening tag instead so the CSS rule isn't a
+    false positive.
     """
     resp = delivery_app.test_client().get("/posts/flat/", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
