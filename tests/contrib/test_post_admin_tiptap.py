@@ -212,13 +212,22 @@ def test_toolbar_includes_callout_actions(admin_app: Flask) -> None:
     assert "esm.sh/markdown-it-container" in body
 
 
-def test_editor_includes_table_styles(admin_app: Flask) -> None:
-    """Editor mount has table CSS and the dropdown panel is styled."""
+def test_editor_styles_served_from_static_css(admin_app: Flask) -> None:
+    """Editor styles are served as a cacheable static file (externalized from
+    the partial's inline <style>); the edit page links it and no longer inlines
+    it, and the CSS carries the table + toolbar-menu rules."""
     client = admin_app.test_client()
     _login(client)
     body = client.get("/admin/sites/blog/posts/new").data.decode()
-    assert ".editor-mount .ProseMirror table" in body
-    assert ".toolbar-menu" in body
+    assert 'href="/admin/static/tiptap-editor.css"' in body
+    # The editor CSS is no longer inlined on the page (it's in the file now).
+    assert ".editor-mount .ProseMirror table" not in body
+    css = client.get("/admin/static/tiptap-editor.css")
+    assert css.status_code == 200
+    assert css.headers["Content-Type"].startswith("text/css")
+    text = css.data.decode()
+    assert ".editor-mount .ProseMirror table" in text
+    assert ".toolbar-menu" in text
 
 
 def test_post_create_still_works_via_textarea_submission(
