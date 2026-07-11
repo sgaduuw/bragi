@@ -78,10 +78,4 @@
 {% include "admin/_attachments_list_table.html" %}
 
 <script src="{{ url_for('admin_static.static', filename='bulk_select.js') }}"></script>
-<script>
-  window.bragiBulkSelect.init({
-    wrapperSelector: "#attachments-list-table",
-    barSelector: ".bulk-actions-bar[data-wrapper='#attachments-list-table']",
-  });
-</script>
 {% endblock %}

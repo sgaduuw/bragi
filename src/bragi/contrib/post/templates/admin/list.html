@@ -23,10 +23,4 @@
 {% include "admin/_post_list_table.html" %}
 
 <script src="{{ url_for('admin_static.static', filename='bulk_select.js') }}"></script>
-<script>
-  window.bragiBulkSelect.init({
-    wrapperSelector: "#post-list-table",
-    barSelector: ".bulk-actions-bar[data-wrapper='#post-list-table']",
-  });
-</script>
 {% endblock %}

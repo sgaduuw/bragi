@@ -12,6 +12,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   theme CSS now serves as a per-theme static `theme.css`, and the TipTap editor
   styles as `/admin/static/tiptap-editor.css`, instead of inline `<style>`
   blocks re-sent on every page.
+- The admin's small enhancement scripts (rail active-state, slug-suggest, the
+  page-kind toggle, the 404-list select, and the account-profile form) moved
+  from inline `<script>` blocks into cacheable `/admin/static/*.js` files, and
+  the bulk-select helper now auto-initialises from the DOM (no per-page inline
+  `init()` call). Same behaviour; part of the same CSP-readiness work.
 
 ## [1.50.0] - 2026-07-11
 

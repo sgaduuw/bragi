@@ -95,6 +95,42 @@ def test_bulk_select_assets_served(admin_app: Flask) -> None:
     assert js.headers["Content-Type"].startswith(("application/javascript", "text/javascript"))
 
 
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "admin-rail-highlight.js",
+        "slug-suggest.js",
+        "page-kind-toggle.js",
+        "notfound-select.js",
+        "account-profile.js",
+    ],
+)
+def test_externalized_admin_scripts_served(admin_app: Flask, filename: str) -> None:
+    """The admin enhancement scripts moved out of inline <script> blocks into
+    cacheable static files (so a strict admin CSP can drop script-src
+    'unsafe-inline'). Each must serve with a JS content type."""
+    resp = admin_app.test_client().get(f"/admin/static/{filename}")
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"].startswith(("application/javascript", "text/javascript"))
+
+
+def test_bulk_select_auto_inits_from_data_attribute() -> None:
+    """bulk_select.js auto-inits from `.bulk-actions-bar[data-wrapper]`, so the
+    list templates no longer carry an inline `window.bragiBulkSelect.init(...)`
+    call (which a strict CSP would forbid)."""
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[2] / "src/bragi/static/admin/bulk_select.js").read_text()
+    assert ".bulk-actions-bar[data-wrapper]" in js
+    src = Path(__file__).resolve().parents[2] / "src" / "bragi"
+    for tmpl in (
+        src / "contrib/post/templates/admin/list.html",
+        src / "contrib/page/templates/admin/page_list.html",
+        src / "contrib/attachments/templates/admin/attachments_list.html",
+    ):
+        assert "bragiBulkSelect.init" not in tmpl.read_text(), f"{tmpl}: inline init remains"
+
+
 def test_bulk_select_list_templates_use_bare_filenames() -> None:
     # Direct structural guard against the double-prefix bug. The
     # asset-serving test above only catches blueprint/file regressions;
