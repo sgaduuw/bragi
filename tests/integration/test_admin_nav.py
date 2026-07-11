@@ -131,6 +131,41 @@ def test_bulk_select_auto_inits_from_data_attribute() -> None:
         assert "bragiBulkSelect.init" not in tmpl.read_text(), f"{tmpl}: inline init remains"
 
 
+def test_admin_csp_report_only_by_default(admin_app: Flask) -> None:
+    """By default the admin sends a Content-Security-Policy-Report-Only header
+    with a strict, no-'unsafe-inline' script-src (esm.sh allowed for the editor
+    module), and no enforcing header."""
+    resp = admin_app.test_client().get("/admin/static/admin-chrome.css")
+    csp = resp.headers.get("Content-Security-Policy-Report-Only", "")
+    assert "Content-Security-Policy" not in resp.headers  # not enforcing yet
+    assert "script-src 'self' https://esm.sh" in csp
+    # The XSS-relevant lever: no 'unsafe-inline' in script-src.
+    script_src = next(d for d in csp.split(";") if d.strip().startswith("script-src"))
+    assert "'unsafe-inline'" not in script_src
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+
+
+def test_admin_csp_enforce_mode(admin_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`admin_csp='enforce'` sends the blocking header instead of report-only."""
+    import bragi.settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "admin_csp", "enforce")
+    resp = admin_app.test_client().get("/admin/static/admin-chrome.css")
+    assert "script-src 'self' https://esm.sh" in resp.headers.get("Content-Security-Policy", "")
+    assert "Content-Security-Policy-Report-Only" not in resp.headers
+
+
+def test_admin_csp_off(admin_app: Flask, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`admin_csp='off'` omits both CSP headers."""
+    import bragi.settings as settings_module
+
+    monkeypatch.setattr(settings_module.settings, "admin_csp", "off")
+    resp = admin_app.test_client().get("/admin/static/admin-chrome.css")
+    assert "Content-Security-Policy" not in resp.headers
+    assert "Content-Security-Policy-Report-Only" not in resp.headers
+
+
 def test_bulk_select_list_templates_use_bare_filenames() -> None:
     # Direct structural guard against the double-prefix bug. The
     # asset-serving test above only catches blueprint/file regressions;

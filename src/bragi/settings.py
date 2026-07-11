@@ -9,7 +9,7 @@ settings here with a sensible default; the runtime asks
 from __future__ import annotations
 
 import logging
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import BeforeValidator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -196,6 +196,16 @@ class Settings(BaseSettings):
     # address the per-site canonical can't express -- notably dev, where
     # delivery listens on a port: `BRAGI_DELIVERY_BASE_URL=http://localhost:8002`.
     delivery_base_url: str = ""
+
+    # Admin Content-Security-Policy mode. The admin ships all CSS/JS as
+    # static files, so it can run a strict `script-src 'self' https://esm.sh`
+    # (the editor imports TipTap from esm.sh) with no `'unsafe-inline'`.
+    # `report-only` (default) sends `Content-Security-Policy-Report-Only`,
+    # which reports violations to the browser console without blocking, so an
+    # operator can confirm nothing breaks before switching to `enforce`.
+    # `off` omits the header entirely. Delivery is deliberately not covered
+    # (operator content pulls arbitrary external images/embeds).
+    admin_csp: Literal["report-only", "enforce", "off"] = "report-only"
 
     # SEO. `security_contact` is what the /.well-known/security.txt
     # endpoint advertises; unset -> 404 rather than emit a fake
