@@ -7,10 +7,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
-- In-tree theme CSS is now served as a cacheable static `theme.css` per theme
-  (previously an inline `<style>` block in each theme's page shell). Rendering
-  is unchanged; the CSS is now cached across page loads. First step toward a
-  strict Content-Security-Policy on the admin host.
+- Inline CSS/JS is being moved to cacheable static files (rendering unchanged),
+  en route to a strict Content-Security-Policy on the admin host: the in-tree
+  theme CSS now serves as a per-theme static `theme.css`, and the TipTap editor
+  styles as `/admin/static/tiptap-editor.css`, instead of inline `<style>`
+  blocks re-sent on every page.
 
 ## [1.50.0] - 2026-07-11
 

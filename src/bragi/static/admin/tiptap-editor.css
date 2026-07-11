@@ -1,0 +1,105 @@
+  .editor-toolbar {
+display: flex; gap: 0.25rem; flex-wrap: wrap;
+padding: 0.4rem; border: 1px solid #bbb; border-bottom: 0;
+border-radius: 4px 4px 0 0; background: #f7f7f7;
+/* Long bodies scroll the whole page, so the toolbar drifts
+   above the viewport once the operator is more than a screen
+   deep. Sticky pins it as the page scrolls past it; the solid
+   background keeps content from showing through. It must pin
+   at the top of the content column. The chrome is now a fixed
+   LEFT rail (no top bar), so the toolbar pins at top:0 and the
+   rail never overlaps it. --admin-nav-height is unset and falls
+   back to 0px, kept so a future top strip could reintroduce an
+   offset without touching this rule. */
+position: sticky; top: var(--admin-nav-height, 0px); z-index: 5;
+  }
+  .editor-toolbar button {
+background: white; color: #222; border: 1px solid #ccc;
+border-radius: 3px; padding: 0.2rem 0.5rem; font-size: 0.9em;
+cursor: pointer; line-height: 1.2;
+  }
+  .editor-toolbar button:hover { background: #eee; }
+  .editor-toolbar button.is-active {
+background: #222; color: #fff; border-color: #222;
+  }
+  .editor-toolbar .sep { color: #aaa; align-self: center; padding: 0 0.25rem; }
+  .toolbar-menu { position: relative; display: inline-block; }
+  .toolbar-menu > summary {
+list-style: none; cursor: pointer;
+background: white; color: #222; border: 1px solid #ccc;
+border-radius: 3px; padding: 0.2rem 0.5rem; font-size: 0.9em;
+line-height: 1.2;
+  }
+  .toolbar-menu > summary::-webkit-details-marker { display: none; }
+  .toolbar-menu > summary:hover { background: #eee; }
+  .toolbar-menu[open] > summary { background: #222; color: #fff; border-color: #222; }
+  .toolbar-menu__panel {
+position: absolute; top: 100%; left: 0; z-index: 10;
+display: flex; flex-direction: column; gap: 0.15rem;
+margin-top: 0.2rem; padding: 0.3rem;
+background: white; border: 1px solid #bbb; border-radius: 4px;
+box-shadow: 0 2px 6px rgba(0,0,0,0.1); min-width: 9rem;
+  }
+  .toolbar-menu__panel button { text-align: left; white-space: nowrap; }
+  .editor-mount { border: 1px solid #bbb; border-radius: 0 0 4px 4px;
+min-height: 14rem; padding: 0.75rem; background: white; }
+  .editor-mount .ProseMirror { outline: none; min-height: 12rem;
+font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .editor-mount .ProseMirror p { margin: 0.5rem 0; }
+  .editor-mount .ProseMirror h1 { font-size: 1.5em; margin: 1rem 0 0.5rem; }
+  .editor-mount .ProseMirror h2 { font-size: 1.3em; margin: 1rem 0 0.5rem; }
+  .editor-mount .ProseMirror h3 { font-size: 1.1em; margin: 1rem 0 0.5rem; }
+  .editor-mount .ProseMirror pre { background: #f0f0f0; padding: 0.5rem;
+border-radius: 3px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .editor-mount .ProseMirror blockquote { border-left: 3px solid #ccc;
+margin: 0.5rem 0; padding: 0 0.75rem; color: #555; }
+  .editor-mount .ProseMirror table {
+border-collapse: collapse; width: 100%; margin: 0.75rem 0;
+table-layout: fixed; overflow: hidden;
+  }
+  .editor-mount .ProseMirror th,
+  .editor-mount .ProseMirror td {
+border: 1px solid #ccc; padding: 0.3rem 0.5rem;
+vertical-align: top; text-align: left;
+  }
+  .editor-mount .ProseMirror th {
+background: #f0f0f0; font-weight: 600;
+  }
+  /* ProseMirror's cell-selection overlay so dragging across cells is
+ visible. */
+  .editor-mount .ProseMirror .selectedCell::after {
+content: ""; position: absolute; inset: 0;
+background: rgba(34, 34, 34, 0.08); pointer-events: none;
+  }
+  .editor-mount .ProseMirror td, .editor-mount .ProseMirror th { position: relative; }
+  /* The source textarea is hidden by the module script directly
+ (textarea.style.display = 'none') once the editor is wired, so
+ the hide is id-agnostic and works for any caller textarea id. */
+  /* Bubble menu that floats above a focused Image node. The
+ `tippy-box` class is what @tiptap/extension-bubble-menu wraps
+ the element in; we style the inner element directly. */
+  .tiptap-bubble-menu {
+display: flex; gap: 0.5rem; align-items: center;
+padding: 0.25rem 0.5rem; background: white;
+border: 1px solid #bbb; border-radius: 4px;
+box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  }
+  /* `.tiptap-bubble-menu` above sets `display: flex`, which beats
+ the UA default `[hidden] { display: none }`. Without this
+ override the menu shows at its natural-flow position (bottom-
+ left of <body> after the init reparent) whenever
+ `imageBubbleMenu.hidden = true` runs — i.e. on every page edit
+ view that doesn't have a focused image. Class+attribute
+ specificity (0,2,0) trumps the bare class (0,1,0). */
+  .tiptap-bubble-menu[hidden] { display: none; }
+  .tiptap-bubble-menu__group { display: flex; gap: 0.15rem; }
+  .tiptap-bubble-menu__group button {
+background: white; color: #222; border: 1px solid #ccc;
+border-radius: 3px; padding: 0.15rem 0.4rem; font-size: 0.85em;
+cursor: pointer; line-height: 1;
+  }
+  .tiptap-bubble-menu__group button:hover { background: #eee; }
+  .tiptap-bubble-menu__group button.is-active {
+background: #222; color: #fff; border-color: #222;
+  }
+  .tiptap-bubble-menu__sep { color: #aaa; }
