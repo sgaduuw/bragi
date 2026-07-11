@@ -39,6 +39,16 @@ def test_delivery_static_shim_served(delivery_app: Flask) -> None:
     resp = client.get("/static/datasets/dataset-charts.js")
     assert resp.status_code == 200
     assert b"bragi-dataset-chart" in resp.data
+    # Vega is self-hosted (no CDN): the loader points at /static/datasets/, and
+    # the three vendored UMD bundles serve. A chart page no longer leaks the
+    # visitor's IP to jsdelivr.
+    body = resp.data.decode()
+    assert "cdn.jsdelivr.net" not in body
+    assert "/static/datasets/vega.min.js" in body
+    for name in ("vega.min.js", "vega-lite.min.js", "vega-embed.min.js"):
+        v = client.get(f"/static/datasets/{name}")
+        assert v.status_code == 200, f"{name} not served"
+        assert v.headers["Content-Type"].startswith(("application/javascript", "text/javascript"))
 
 
 def test_chart_loader_injected_when_chart_present() -> None:

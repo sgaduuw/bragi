@@ -33,6 +33,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from inline `<script>` blocks into cacheable `/admin/static/*.js` files, and
   the bulk-select helper now auto-initialises from the DOM (no per-page inline
   `init()` call). Same behaviour; part of the same CSP-readiness work.
+- Dataset charts (`::: dataset format=chart :::`) now load a **self-hosted**
+  Vega / Vega-Lite / Vega-Embed (was jsdelivr), so a public chart page no
+  longer leaks each visitor's IP to a CDN and works offline. Still lazy-loaded
+  only when a chart is present, with the no-JS table fallback unchanged.
 
 ## [1.50.0] - 2026-07-11
 
