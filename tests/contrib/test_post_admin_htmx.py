@@ -119,11 +119,13 @@ def test_htmx_partial_carries_csrf_token_for_delete_form(admin_app: Flask) -> No
 
 
 def test_full_page_includes_htmx_script(admin_app: Flask) -> None:
-    """The admin base template loads htmx so partial swaps work."""
+    """The admin base template loads htmx (self-hosted, so the admin CSP can
+    keep script-src to 'self' + esm.sh) so partial swaps work."""
     client = admin_app.test_client()
     _login(client)
     resp = client.get("/admin/sites/blog/posts/")
-    assert b"htmx.org" in resp.data
+    assert b"/admin/static/htmx.min.js" in resp.data
+    assert b"unpkg.com" not in resp.data  # no longer CDN-loaded
 
 
 def test_boosted_get_returns_full_page_not_partial(admin_app: Flask) -> None:

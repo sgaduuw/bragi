@@ -101,38 +101,7 @@
       </div>
     {% endfor %}
 
-    <script>
-      (function () {
-        var picker = document.getElementById('attachment-picker');
-        if (!picker) return;
-
-        var tablist = picker.querySelector('[role="tablist"]');
-        if (!tablist) return;
-
-        tablist.addEventListener('click', function (e) {
-          var btn = e.target.closest('[role="tab"]');
-          if (!btn) return;
-
-          var targetId = btn.getAttribute('aria-controls');
-          if (!targetId) return;
-
-          // Deselect all tabs and hide all panes. CSS reacts to
-          // [aria-selected="true"] for the active-tab styling, so
-          // we only toggle the attribute here.
-          tablist.querySelectorAll('[role="tab"]').forEach(function (t) {
-            t.setAttribute('aria-selected', 'false');
-          });
-          picker.querySelectorAll('[role="tabpanel"]').forEach(function (p) {
-            p.hidden = true;
-          });
-
-          // Activate the clicked tab and its pane.
-          btn.setAttribute('aria-selected', 'true');
-          var pane = document.getElementById(targetId);
-          if (pane) pane.hidden = false;
-        });
-      })();
-    </script>
+<script src="{{ url_for('admin_static.static', filename='attachments-picker-tabs.js') }}"></script>
 
   {% else %}
     {# No plugin tabs: render the library grid directly, same shape

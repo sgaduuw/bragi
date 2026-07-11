@@ -7,10 +7,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- The admin host now sends a **Content-Security-Policy** with a strict
-  `script-src 'self' https://esm.sh` (no `'unsafe-inline'`; `esm.sh` is where
-  the editor imports TipTap), made possible by moving the admin's CSS/JS to
-  static files. It ships **report-only by default** (`BRAGI_ADMIN_CSP`;
+- The admin host now sends a **Content-Security-Policy**, made possible by
+  moving the admin's CSS/JS to static files (and self-hosting htmx and the
+  resume date-picker's flatpickr CSS, previously loaded from CDNs; the only
+  remaining external script source is `esm.sh`, for the editor and flatpickr
+  ES modules). The `script-src` carries **no `'unsafe-inline'`**, so
+  an injected inline `<script>` is blocked; `esm.sh` is allowed for the editor
+  module, `'unsafe-eval'` is allowed because htmx evaluates `hx-trigger` filter
+  expressions, and inline `onsubmit="confirm(...)"` handlers are scoped to a
+  `script-src-attr`. It ships **report-only by default** (`BRAGI_ADMIN_CSP`;
   `report-only` | `enforce` | `off`) so an operator can confirm nothing breaks
   in the browser console before switching to `enforce`. The delivery host is
   deliberately not covered (operator content pulls arbitrary external
