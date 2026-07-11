@@ -64,6 +64,11 @@
     pre { overflow-x: auto; padding: 0.75rem; background: var(--pre-bg); border-radius: 4px; }
     code { font-family: ui-monospace, Menlo, Consolas, monospace; }
     footer.site { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--footer-fg); font-size: 0.85em; }
+    /* Profile links: a small "Links" heading above the rel="me" list, on the
+       footer (.profile-links, every page) and the Profile page h-card
+       (.profile__links). Kept modest so it reads as a section label, not a
+       document heading; themes can restyle via the same hooks. */
+    .profile-links__heading, .profile__links-heading { font-size: 1rem; margin: 0 0 0.35rem; }
     /* Embeds plugin: responsive 16:9 wrapper + click-to-load thumbnail. */
     .bragi-embed { margin: 1.5rem 0; }
     .bragi-embed--youtube { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 4px; overflow: hidden; }
