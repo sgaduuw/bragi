@@ -24,7 +24,7 @@
     <tr>
       <td>{{ tag.label }}</td>
       <td>
-        {% if e.public_url %}<a href="{{ e.public_url }}"><code>{{ tag.slug }}</code></a>
+        {% if e.public_url %}<a href="{{ e.public_url }}" target="_blank" rel="noopener"><code>{{ tag.slug }}</code></a>
         {% else %}<code>{{ tag.slug }}</code>{% endif %}
       </td>
       <td>{{ e.count }}</td>
