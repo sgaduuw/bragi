@@ -32,6 +32,7 @@ from bragi.core.pagination import page_arg
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.redirects import upsert_redirect
 from bragi.core.url import tag_url_for
+from bragi.settings import settings
 
 bp = Blueprint(
     "tags_admin",
@@ -96,9 +97,21 @@ def list_tags(site_slug: str) -> ResponseReturnValue:
         peek = db.execute(query.limit(1).offset(offset + PAGE_SIZE)).first()
         has_more = peek is not None
 
+        # The public tag URL lives on the DELIVERY origin, which is a
+        # different host/port than the admin app. `tag_url_for` returns a
+        # bare path (e.g. `/posts/tag/python/`), so linking it as-is from
+        # the admin page resolves against the admin host and 404s. Prefix
+        # the delivery origin (dev: `delivery_base_url`; prod: the site's
+        # own `canonical_url`), matching the working-copy preview link.
+        # Empty origin -> no public link (same as no post_index).
+        delivery_origin = (settings.delivery_base_url or site.canonical_url or "").rstrip("/")
+
+        def _public_url(slug: str) -> str | None:
+            path = tag_url_for(site, slug)
+            return f"{delivery_origin}{path}" if delivery_origin and path else None
+
         entries = [
-            {"tag": tag, "count": count, "public_url": tag_url_for(site, tag.slug)}
-            for tag, count in rows
+            {"tag": tag, "count": count, "public_url": _public_url(tag.slug)} for tag, count in rows
         ]
         # Merge targets: every tag on the site (label + id), for the picker.
         all_tags = db.execute(

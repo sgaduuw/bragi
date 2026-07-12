@@ -143,6 +143,42 @@ def test_list_shows_tags_with_counts_and_is_site_scoped(
     assert "Python (B)" not in body
 
 
+def test_list_public_tag_link_targets_delivery_origin_not_admin_host(
+    admin_app_file_db: Flask, file_db_session_factory: sessionmaker[Session]
+) -> None:
+    """The tag's public-URL link must carry the delivery origin.
+
+    Admin and delivery run on different hosts; a bare delivery path
+    (`/posts/tag/python/`) linked from the admin page resolves against the
+    admin host and 404s. The link must be absolute to the site's public
+    origin (here `canonical_url`, since `delivery_base_url` is unset).
+    """
+    _seed(file_db_session_factory)
+    client = admin_app_file_db.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/tags/", headers={"Host": HOST_A}).data.decode()
+    assert f'href="https://{HOST_A}/posts/tag/python/"' in body
+    # A bare, admin-host-relative delivery path must NOT be present.
+    assert 'href="/posts/tag/python/"' not in body
+
+
+def test_list_public_tag_link_uses_delivery_base_url_in_dev(
+    admin_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In dev, one delivery process serves every site on a local port the
+    per-site `canonical_url` can't express, so `delivery_base_url` wins."""
+    from bragi.settings import settings
+
+    monkeypatch.setattr(settings, "delivery_base_url", "http://localhost:8002")
+    _seed(file_db_session_factory)
+    client = admin_app_file_db.test_client()
+    _login(client)
+    body = client.get("/admin/sites/blog/tags/", headers={"Host": HOST_A}).data.decode()
+    assert 'href="http://localhost:8002/posts/tag/python/"' in body
+
+
 # --------------------------------------------------------------------------
 # Rename
 # --------------------------------------------------------------------------
