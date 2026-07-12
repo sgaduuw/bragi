@@ -144,7 +144,9 @@ def test_list_shows_tags_with_counts_and_is_site_scoped(
 
 
 def test_list_public_tag_link_targets_delivery_origin_not_admin_host(
-    admin_app_file_db: Flask, file_db_session_factory: sessionmaker[Session]
+    admin_app_file_db: Flask,
+    file_db_session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The tag's public-URL link must carry the delivery origin.
 
@@ -153,6 +155,11 @@ def test_list_public_tag_link_targets_delivery_origin_not_admin_host(
     admin host and 404s. The link must be absolute to the site's public
     origin (here `canonical_url`, since `delivery_base_url` is unset).
     """
+    from bragi.settings import settings
+
+    # Pin the dev override off so this asserts the prod `canonical_url` path
+    # regardless of any ambient env override.
+    monkeypatch.setattr(settings, "delivery_base_url", "")
     _seed(file_db_session_factory)
     client = admin_app_file_db.test_client()
     _login(client)
