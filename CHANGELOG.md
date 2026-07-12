@@ -4,6 +4,15 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.51.1] - 2026-07-12
+
+### Fixed
+- The Tags admin linked each tag's public URL as a bare delivery path (e.g.
+  `/posts/tag/python/`), which resolved against the admin host (a different
+  origin than the delivery site) and 404'd. The link now carries the delivery
+  origin (`BRAGI_DELIVERY_BASE_URL` in dev, the site's `canonical_url` in prod)
+  and opens in a new tab.
+
 ## [1.51.0] - 2026-07-11
 
 The admin gets a Content-Security-Policy: all of its CSS/JS moved to cacheable
