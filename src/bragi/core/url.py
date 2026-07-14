@@ -112,6 +112,28 @@ def page_url_for(page: Page, *, db: Session | None = None) -> str:
     return "/" + "/".join(_resolve_segments(db, page)) + "/"
 
 
+def author_profile_url_for(db: Session, site: Site, author_id: int) -> str | None:
+    """Public URL of the author's profile page on `site`, or None.
+
+    An "author page" is a `Page` of kind PROFILE owned by the user. Returns
+    the URL of the published one (lowest id if somehow more than one exists),
+    or None when the author has no published profile page. Lives in core so
+    the post byline (contrib.post) can linkify without importing contrib.page.
+    """
+    page = db.execute(
+        select(Page)
+        .where(
+            Page.site_id == site.id,
+            Page.author_id == author_id,
+            Page.kind == PageKind.PROFILE,
+            Page.status == PageStatus.PUBLISHED,
+        )
+        .order_by(Page.id.asc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return page_url_for(page, db=db) if page is not None else None
+
+
 def page_path_preview(
     db: Session,
     *,
