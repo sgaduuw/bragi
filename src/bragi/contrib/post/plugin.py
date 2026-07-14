@@ -45,7 +45,7 @@ from bragi.core.profiles import ProfileView, profile_jsonld, profile_view
 from bragi.core.render.reading_time import reading_time_minutes
 from bragi.core.render.toc import build_toc_html
 from bragi.core.seo import featured_image_url_for
-from bragi.core.url import post_url_for
+from bragi.core.url import author_profile_url_for, post_url_for
 
 # Re-publishing within this window of the initial publish doesn't
 # count as a meaningful "updated" event; suppresses noisy "updated
@@ -137,6 +137,7 @@ def _render_post(post: Any, _request: Any) -> str:
     )
     author_name: str | None = None
     author_profile: ProfileView | None = None
+    author_url: str | None = None
     related: list[Post] = []
     with SessionLocal() as db:
         if post.author_id:
@@ -144,6 +145,10 @@ def _render_post(post: Any, _request: Any) -> str:
             if author is not None:
                 author_name = author.display_name
                 author_profile = profile_view(author)
+                # Link the byline to the author's profile page when they
+                # have a published one on this site.
+                if site is not None:
+                    author_url = author_profile_url_for(db, site, post.author_id)
         if site is not None:
             related = related_posts_for(db, post, limit=related_posts_count_for(site))
             # Expunge so the template can read attributes after the
@@ -163,6 +168,7 @@ def _render_post(post: Any, _request: Any) -> str:
         post=post,
         site=site,
         author_name=author_name,
+        author_url=author_url,
         author_profile=author_profile,
         author_jsonld=profile_jsonld(author_profile, None) if author_profile else None,
         reading_time=reading_time_minutes(post.body_markdown or ""),
