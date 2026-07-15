@@ -4,6 +4,13 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.52.0] - 2026-07-15
+
+### Changed
+- A blog post's author byline now links to the author's profile page
+  (`rel="author"`) when the author has a published profile page on the site.
+  With no such page the name renders as plain text, as before.
+
 ## [1.51.1] - 2026-07-12
 
 ### Fixed

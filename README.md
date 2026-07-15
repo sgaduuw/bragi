@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.51.1 (2026-07-12).
+**Latest release:** 1.52.0 (2026-07-15).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -91,7 +91,8 @@ and ARM homelabs run natively rather than through QEMU emulation.
   (`$x$` / `$$x$$`), and Mermaid code fences
   (` ```mermaid `). Plugins can register more extensions via
   the `register_markdown_extension` hookspec.
-- **Post-page chrome.** Each post renders with an author byline,
+- **Post-page chrome.** Each post renders with an author byline
+  (linked to the author's profile page when they have one),
   reading-time estimate (220 WPM, rounded up), and an
   "Updated YYYY-MM-DD" line that only appears when the edit is
   meaningfully after first publish. Optional profile data (avatar,
@@ -434,7 +435,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.51.1 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.52.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -859,7 +860,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.51.1
+pip install bragi-cms==1.52.0
 ```
 
 The import path stays `import bragi`. Container images remain the

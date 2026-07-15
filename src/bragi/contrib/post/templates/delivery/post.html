@@ -43,7 +43,7 @@
     <h1>{{ post.title }}</h1>
     {% if post.subtitle %}<p class="subtitle">{{ post.subtitle }}</p>{% endif %}
     <p class="meta">
-      {% if author_name %}<span class="byline">by {{ author_name }}</span>{% endif %}
+      {% if author_name %}<span class="byline">by {% if author_url %}<a href="{{ author_url }}" rel="author">{{ author_name }}</a>{% else %}{{ author_name }}{% endif %}</span>{% endif %}
       {% if post.published_at %}
         {% if author_name %} &middot; {% endif %}
         Published <time datetime="{{ post.published_at.isoformat() }}">{{ post.published_at.strftime('%Y-%m-%d') }}</time>

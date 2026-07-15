@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from bragi.apps.delivery import create_delivery_app
+from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
@@ -104,6 +105,124 @@ def test_post_renders_author_byline(delivery_app: Flask) -> None:
     resp = delivery_app.test_client().get("/posts/fresh/", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
     assert "by Ada Lovelace" in body
+    # No profile page for the author in this fixture, so the byline is
+    # plain text (not linked).
+    assert 'rel="author"' not in body
+
+
+def test_post_byline_links_to_author_profile_page(
+    patched_session_locals: sessionmaker[Session],
+    db_session: Session,
+) -> None:
+    """When the author has a published PROFILE page, the byline links to it."""
+    del patched_session_locals
+    user = User(email="ada@example.com", display_name="Ada Lovelace", is_active=True)
+    db_session.add(user)
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
+    )
+    db_session.add(site)
+    db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
+    db_session.add(
+        Page(
+            site_id=site.id,
+            slug="ada",
+            title="Ada Lovelace",
+            body_markdown="",
+            body_html="",
+            author_id=user.id,
+            kind=PageKind.PROFILE,
+            status=PageStatus.PUBLISHED,
+        )
+    )
+    published = datetime(2026, 5, 1, tzinfo=UTC)
+    db_session.add(
+        Post(
+            site_id=site.id,
+            slug="fresh",
+            title="Fresh",
+            body_markdown="body",
+            body_html="<p>body</p>",
+            body_excerpt="body",
+            author_id=user.id,
+            status=PostStatus.PUBLISHED,
+            published_at=published,
+            updated_at=published.replace(tzinfo=None),
+        )
+    )
+    db_session.commit()
+
+    body = (
+        create_delivery_app()
+        .test_client()
+        .get("/posts/fresh/", headers={"Host": "blog.example.com"})
+        .data.decode()
+    )
+    assert '<a href="/ada/" rel="author">Ada Lovelace</a>' in body
+
+
+def test_post_byline_unlinked_when_profile_page_is_draft(
+    patched_session_locals: sessionmaker[Session],
+    db_session: Session,
+) -> None:
+    """A draft (unpublished) profile page must not linkify the byline."""
+    del patched_session_locals
+    user = User(email="ada@example.com", display_name="Ada Lovelace", is_active=True)
+    db_session.add(user)
+    db_session.flush()
+    site = Site(
+        slug="blog",
+        hostname="blog.example.com",
+        title="Blog",
+        canonical_url="https://blog.example.com",
+        owner_user_id=user.id,
+    )
+    db_session.add(site)
+    db_session.flush()
+    seed_blog_index(db_session, site, commit=False)
+    db_session.add(
+        Page(
+            site_id=site.id,
+            slug="ada",
+            title="Ada Lovelace",
+            body_markdown="",
+            body_html="",
+            author_id=user.id,
+            kind=PageKind.PROFILE,
+            status=PageStatus.DRAFT,
+        )
+    )
+    published = datetime(2026, 5, 1, tzinfo=UTC)
+    db_session.add(
+        Post(
+            site_id=site.id,
+            slug="fresh",
+            title="Fresh",
+            body_markdown="body",
+            body_html="<p>body</p>",
+            body_excerpt="body",
+            author_id=user.id,
+            status=PostStatus.PUBLISHED,
+            published_at=published,
+            updated_at=published.replace(tzinfo=None),
+        )
+    )
+    db_session.commit()
+
+    body = (
+        create_delivery_app()
+        .test_client()
+        .get("/posts/fresh/", headers={"Host": "blog.example.com"})
+        .data.decode()
+    )
+    assert "by Ada Lovelace" in body
+    assert 'rel="author"' not in body
 
 
 def test_post_renders_reading_time(delivery_app: Flask) -> None:
