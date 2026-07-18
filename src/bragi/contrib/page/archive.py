@@ -24,7 +24,7 @@ from flask import abort, make_response, render_template, request
 from sqlalchemy import Select, extract, func, select
 from werkzeug.wrappers import Response
 
-from bragi.core.cache import attach_validators, etag_for, maybe_304
+from bragi.core.cache import attach_validators, etag_for, fold_site_mtime, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
@@ -66,9 +66,11 @@ def render_archive_index(site: Site) -> Response:
     # mypy types them as callables for some Row variants. The
     # int() cast is correct at runtime.
     years = [(int(r.year), int(r.count)) for r in rows]  # type: ignore[call-overload]
-    last_modified = max(
-        (r.last_modified for r in rows if r.last_modified is not None),
-        default=datetime(1970, 1, 1),
+    last_modified = fold_site_mtime(
+        max(
+            (r.last_modified for r in rows if r.last_modified is not None),
+            default=datetime(1970, 1, 1),
+        )
     )
     etag = etag_for("archive-years", f"{ARCHIVE_ETAG_VERSION}|{site.id}", last_modified)
     not_modified = maybe_304(request, etag=etag, last_modified=last_modified)
@@ -109,9 +111,11 @@ def render_archive_year(site: Site, year: int) -> Response:
         abort(404)
     # See comment in render_archive_index re: the int() cast.
     months = [(int(r.month), int(r.count)) for r in rows]  # type: ignore[call-overload]
-    last_modified = max(
-        (r.last_modified for r in rows if r.last_modified is not None),
-        default=datetime(1970, 1, 1),
+    last_modified = fold_site_mtime(
+        max(
+            (r.last_modified for r in rows if r.last_modified is not None),
+            default=datetime(1970, 1, 1),
+        )
     )
     etag = etag_for(
         "archive-year",
@@ -154,7 +158,7 @@ def render_archive_month(site: Site, year: int, month: int) -> Response:
         )
     if not posts:
         abort(404)
-    last_modified = max(p.updated_at for p in posts)
+    last_modified = fold_site_mtime(max(p.updated_at for p in posts))
     etag = etag_for(
         "archive-month",
         f"{ARCHIVE_ETAG_VERSION}|{site.id}|{year}|{month}",
