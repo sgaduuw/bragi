@@ -27,9 +27,32 @@ from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from typing import TYPE_CHECKING
 
+from flask import g
+
 if TYPE_CHECKING:
     from flask import Request
     from werkzeug.wrappers import Response
+
+
+def fold_site_mtime(last_modified: datetime | None) -> datetime | None:
+    """Fold the active site's ``updated_at`` into a content page's last-modified.
+
+    A delivery content page renders site-level state (site settings like
+    ``show_author_bio``, plus the title, theme, and nav), so a site edit must
+    bust the page's conditional-GET validator even when the content row itself
+    is untouched. Without this, a browser/proxy ``If-None-Match`` gets a 304 and
+    keeps the stale render until the content is next saved (the 1.53.0
+    show_author_bio toggle hit exactly this). Reads ``g.site`` (set by the
+    site-resolver middleware on every delivery request). Returns the later of
+    the content and site timestamps, or whichever is non-None.
+    """
+    site = g.get("site")
+    site_mtime: datetime | None = getattr(site, "updated_at", None) if site is not None else None
+    if site_mtime is None:
+        return last_modified
+    if last_modified is None:
+        return site_mtime
+    return max(last_modified, site_mtime)
 
 
 def _as_utc(dt: datetime) -> datetime:

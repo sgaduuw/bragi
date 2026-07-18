@@ -30,6 +30,7 @@ similarly invisible to the dispatcher.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, cast
 
 from flask import (
@@ -52,7 +53,7 @@ from bragi.contrib.page.archive import (
     render_archive_month,
     render_archive_year,
 )
-from bragi.core.cache import attach_validators, etag_for, maybe_304
+from bragi.core.cache import attach_validators, etag_for, fold_site_mtime, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.feed import build_atom_feed
 from bragi.core.models.page import Page, PageKind, PageStatus
@@ -162,15 +163,16 @@ def _posts_per_page(site: Site) -> int:
 
 def _render_static_page(page: Page) -> Response:
     """Render a STATIC page using the page content-type Spec."""
-    etag = etag_for("page", page.id, page.updated_at)
-    not_modified = maybe_304(request, etag=etag, last_modified=page.updated_at)
+    last_modified = fold_site_mtime(page.updated_at)
+    etag = etag_for("page", page.id, last_modified)
+    not_modified = maybe_304(request, etag=etag, last_modified=last_modified)
     if not_modified is not None:
         return not_modified
     registry = current_app.extensions["registry"]
     spec = registry.content_type("page")
     body = cast(str, spec.render(page, request))
     response = make_response(body)
-    attach_validators(response, etag=etag, last_modified=page.updated_at)
+    attach_validators(response, etag=etag, last_modified=last_modified)
     return response
 
 
@@ -182,12 +184,13 @@ def _render_profile_page(page: Page) -> Response:
     edit to the author's profile must bust the cache even when the page
     itself is untouched.
     """
-    last_modified = page.updated_at
+    last_modified: datetime | None = page.updated_at
     with SessionLocal() as db:
         if page.author_id:
             author = db.get(User, page.author_id)
             if author is not None and author.updated_at is not None:
-                last_modified = max(last_modified, author.updated_at)
+                last_modified = max(page.updated_at, author.updated_at)
+    last_modified = fold_site_mtime(last_modified)
     etag = etag_for("profile", page.id, last_modified)
     not_modified = maybe_304(request, etag=etag, last_modified=last_modified)
     if not_modified is not None:
@@ -279,7 +282,7 @@ def render_post_index_page(site: Site, page: Page, page_n: int = 1) -> Response:
         # cached response invalidates when an expiry passes.
         candidates = [p.updated_at for p in posts] + [page.updated_at]
         candidates.extend(p.updated_at for p in pinned_posts)
-        last_modified = max(candidates)
+        last_modified = fold_site_mtime(max(candidates))
 
         expiry_key = ""
         pinned_with_expiry = [p.pinned_until for p in pinned_posts if p.pinned_until]
@@ -406,15 +409,16 @@ def render_post(site: Site, post_slug: str, *, require_dateless: bool = False) -
             return None
         if require_dateless and post.published_at is not None:
             return None
-        etag = etag_for("post", post.id, post.updated_at)
-        not_modified = maybe_304(request, etag=etag, last_modified=post.updated_at)
+        last_modified = fold_site_mtime(post.updated_at)
+        etag = etag_for("post", post.id, last_modified)
+        not_modified = maybe_304(request, etag=etag, last_modified=last_modified)
         if not_modified is not None:
             return not_modified
         registry = current_app.extensions["registry"]
         spec = registry.content_type("post")
         body = cast(str, spec.render(post, request))
         response = make_response(body)
-        attach_validators(response, etag=etag, last_modified=post.updated_at)
+        attach_validators(response, etag=etag, last_modified=last_modified)
         return response
 
 

@@ -124,6 +124,105 @@ def test_page_revalidation_returns_304(delivery_app: Flask) -> None:
     assert second.status_code == 304
 
 
+def test_site_change_busts_post_conditional_get(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """A site edit must change the post's ETag so a stale conditional GET no
+    longer 304s. Regression for 1.53.0: a site setting (show_author_bio)
+    changed the rendered body but not the post validator (which folded in only
+    the post's own updated_at), so browsers/proxies kept a stale render behind
+    If-None-Match until the post itself was re-saved."""
+    from sqlalchemy import select
+
+    client = delivery_app.test_client()
+    old_etag = client.get("/posts/hello/", headers={"Host": "blog.example.com"}).headers["ETag"]
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        # Explicit set (wins over the onupdate) so the bump is unambiguously
+        # newer than the post's own updated_at, exercising the max() fold.
+        site.updated_at = datetime(2027, 1, 1)
+        db.commit()
+
+    revalidate = client.get(
+        "/posts/hello/",
+        headers={"Host": "blog.example.com", "If-None-Match": old_etag},
+    )
+    assert revalidate.status_code == 200, "stale ETag must not 304 after a site change"
+    assert revalidate.headers["ETag"] != old_etag
+
+
+def test_site_change_busts_page_conditional_get(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Same fold on the static-page validator (a second wiring site)."""
+    from sqlalchemy import select
+
+    client = delivery_app.test_client()
+    old_etag = client.get("/about/", headers={"Host": "blog.example.com"}).headers["ETag"]
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.updated_at = datetime(2027, 1, 1)
+        db.commit()
+
+    revalidate = client.get(
+        "/about/",
+        headers={"Host": "blog.example.com", "If-None-Match": old_etag},
+    )
+    assert revalidate.status_code == 200
+    assert revalidate.headers["ETag"] != old_etag
+
+
+def test_site_change_busts_static_home_conditional_get(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The STATIC home page (`/`) renders via a separate path (resolve_home)
+    that also folds the site mtime. Home is the most-visited URL, so a site
+    change must not pin it behind a 304."""
+    from sqlalchemy import select
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        about = db.execute(select(Page).where(Page.slug == "about")).scalar_one()
+        site.home_page_id = about.id
+        db.commit()
+
+    client = delivery_app.test_client()
+    old_etag = client.get("/", headers={"Host": "blog.example.com"}).headers["ETag"]
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.updated_at = datetime(2027, 1, 1)
+        db.commit()
+
+    revalidate = client.get("/", headers={"Host": "blog.example.com", "If-None-Match": old_etag})
+    assert revalidate.status_code == 200
+    assert revalidate.headers["ETag"] != old_etag
+
+
+def test_site_change_busts_archive_conditional_get(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """Archive pages render site chrome and now fold the site mtime too."""
+    from sqlalchemy import select
+
+    client = delivery_app.test_client()
+    old_etag = client.get("/posts/archive/", headers={"Host": "blog.example.com"}).headers["ETag"]
+
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.updated_at = datetime(2027, 1, 1)
+        db.commit()
+
+    revalidate = client.get(
+        "/posts/archive/",
+        headers={"Host": "blog.example.com", "If-None-Match": old_etag},
+    )
+    assert revalidate.status_code == 200
+    assert revalidate.headers["ETag"] != old_etag
+
+
 def test_feed_uses_feed_cache_policy(delivery_app: Flask) -> None:
     resp = delivery_app.test_client().get("/feed.xml", headers={"Host": "blog.example.com"})
     assert resp.status_code == 200
