@@ -6,7 +6,7 @@ citizen.
 
 ## Status
 
-**Latest release:** 1.52.0 (2026-07-15).
+**Latest release:** 1.53.0 (2026-07-18).
 
 **Functional surface today:** multisite CMS with markdown source-
 of-truth, TipTap editor (with image size / alignment classes,
@@ -97,8 +97,8 @@ and ARM homelabs run natively rather than through QEMU emulation.
   "Updated YYYY-MM-DD" line that only appears when the edit is
   meaningfully after first publish. Optional profile data (avatar,
   pronouns, bio, rel="me" links) surfaces as an h-card "About the
-  author" aside below the body, and enriches the post's JSON-LD
-  author. A table of contents auto-renders for multi-section posts
+  author" aside below the body (per-site optional), and enriches the
+  post's JSON-LD author. A table of contents auto-renders for multi-section posts
   (h2 / h3 headings).
 - **Related posts at end of article.** Tag-overlap ranks
   same-site published posts ("more shared tags wins, recency
@@ -435,7 +435,7 @@ the published images from GHCR. The tag is parameterised via
 production:
 
 ```sh
-BRAGI_TAG=v1.52.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
+BRAGI_TAG=v1.53.0 BRAGI_SECRET_KEY="$(openssl rand -hex 32)" docker compose up -d
 ```
 
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
@@ -860,7 +860,7 @@ From v1.27.0, bragi is also published to PyPI as `bragi-cms` (the
 `bragi` name is held by The Managarm Project's IDL):
 
 ```sh
-pip install bragi-cms==1.52.0
+pip install bragi-cms==1.53.0
 ```
 
 The import path stays `import bragi`. Container images remain the
