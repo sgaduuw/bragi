@@ -32,7 +32,7 @@ from bragi.contrib.page.delivery import (
     render_post_index_page,
 )
 from bragi.contrib.page.delivery import bp as page_delivery_bp
-from bragi.core.cache import attach_validators, etag_for, maybe_304
+from bragi.core.cache import attach_validators, etag_for, fold_site_mtime, maybe_304
 from bragi.core.db import SessionLocal
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.user import User
@@ -373,15 +373,19 @@ def resolve_home(site: Any) -> Response | None:
             # plausible personal-site home).
             db.expunge(page)
             return _render_profile_page(page)
-        etag = etag_for("page", page.id, page.updated_at)
-        not_modified = maybe_304(request, etag=etag, last_modified=page.updated_at)
+        # Fold the site mtime like the slug-path static renderer, so a site
+        # settings / title / theme / nav change busts the home cache too (the
+        # home page is the most-visited URL). See core.cache.fold_site_mtime.
+        last_modified = fold_site_mtime(page.updated_at)
+        etag = etag_for("page", page.id, last_modified)
+        not_modified = maybe_304(request, etag=etag, last_modified=last_modified)
         if not_modified is not None:
             return not_modified
         registry = current_app.extensions["registry"]
         spec = registry.content_type("page")
         body = spec.render(page, request)
         response = make_response(body)
-        attach_validators(response, etag=etag, last_modified=page.updated_at)
+        attach_validators(response, etag=etag, last_modified=last_modified)
         return response
 
 

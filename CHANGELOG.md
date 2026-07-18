@@ -4,6 +4,16 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.53.1] - 2026-07-18
+
+### Fixed
+- A content page's cache validator (`ETag` / `Last-Modified`) now folds in the
+  site's `updated_at`, so changing a site setting (e.g. the 1.53.0
+  "Show 'About the author'" toggle), title, theme, or nav takes effect on a
+  normal reload instead of being pinned behind a conditional-GET `304` until
+  the post/page is next saved. Posts, static pages, the post index, and profile
+  pages are all covered (the profile page already folded in the author).
+
 ## [1.53.0] - 2026-07-18
 
 ### Added
