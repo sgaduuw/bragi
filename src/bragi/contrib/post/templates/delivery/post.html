@@ -65,7 +65,7 @@
   <div class="body">
     {{ post.body_html | internal_link_rewrite | unsplash_credit_wrap | pictureify | safe }}
   </div>
-  {% if author_profile and (author_profile.bio or author_profile.avatar_url or author_profile.links) %}
+  {% if show_author_bio and author_profile and (author_profile.bio or author_profile.avatar_url or author_profile.links) %}
   <aside class="author-bio h-card">
     <h2>About the author</h2>
     {% if author_profile.avatar_url %}

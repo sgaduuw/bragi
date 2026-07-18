@@ -4,6 +4,14 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- A per-site **"Show 'About the author' on posts"** setting (on by default).
+  Turn it off to drop the author-bio card at the foot of each post; the byline
+  at the top still links to the author's profile page. Set under a site's
+  settings (`show_author_bio` in `extra_settings`).
+
 ## [1.52.0] - 2026-07-15
 
 ### Changed
