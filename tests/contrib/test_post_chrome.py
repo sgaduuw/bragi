@@ -323,5 +323,6 @@ def test_post_omits_author_bio_block_when_site_setting_off(
     # structured data is a separate surface from the visible card.)
     assert "About the author" not in body
     assert 'class="author-bio' not in body
-    # The byline (with its profile link) is untouched by the setting.
+    # The byline is untouched by the setting (plain here: this fixture's
+    # author has no profile page, so the name is unlinked).
     assert '<span class="byline">by Ada Lovelace</span>' in body
