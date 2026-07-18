@@ -304,3 +304,25 @@ def test_post_omits_author_bio_block_when_unset(
     resp = delivery_app.test_client().get("/posts/fresh/", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
     assert "About the author" not in body
+
+
+def test_post_omits_author_bio_block_when_site_setting_off(
+    delivery_app: Flask, db_session_factory: sessionmaker[Session]
+) -> None:
+    """The `show_author_bio` site setting hides the aside even with a bio set;
+    the top byline link is left as the only author surface."""
+    with db_session_factory() as db:
+        site = db.execute(select(Site).where(Site.slug == "blog")).scalar_one()
+        site.extra_settings = {**(site.extra_settings or {}), "show_author_bio": False}
+        db.commit()
+    resp = delivery_app.test_client().get("/posts/fresh/", headers={"Host": "blog.example.com"})
+    body = resp.data.decode()
+    # The fixture user has a bio, so the aside would render by default; the
+    # site setting is the only thing suppressing it here. (The bio still
+    # appears in the JSON-LD author description in <head> -- that SEO
+    # structured data is a separate surface from the visible card.)
+    assert "About the author" not in body
+    assert 'class="author-bio' not in body
+    # The byline is untouched by the setting (plain here: this fixture's
+    # author has no profile page, so the name is unlinked).
+    assert '<span class="byline">by Ada Lovelace</span>' in body

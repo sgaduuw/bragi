@@ -163,6 +163,9 @@ def _render_post(post: Any, _request: Any) -> str:
         and post.updated_at
         and post.updated_at - post.published_at >= UPDATED_MIN_DELTA
     )
+    # Per-site opt-out for the author-bio card (the top byline link is enough
+    # for some operators). Defaults on; absent/None extra_settings -> True.
+    show_author_bio = site is None or (site.extra_settings or {}).get("show_author_bio", True)
     return render_template(
         "delivery/post.html",
         post=post,
@@ -170,6 +173,7 @@ def _render_post(post: Any, _request: Any) -> str:
         author_name=author_name,
         author_url=author_url,
         author_profile=author_profile,
+        show_author_bio=show_author_bio,
         author_jsonld=profile_jsonld(author_profile, None) if author_profile else None,
         reading_time=reading_time_minutes(post.body_markdown or ""),
         updated_visible=updated_visible,
@@ -279,5 +283,19 @@ def _register_tag_segment() -> SiteSetting:
         help_text=(
             "URL segment for tag listings (/blog/<segment>/python/). "
             "Lowercase letters, digits, hyphens."
+        ),
+    )
+
+
+@hookimpl(specname="register_site_setting")
+def _register_show_author_bio() -> SiteSetting:
+    return SiteSetting(
+        key="show_author_bio",
+        type=bool,
+        default=True,
+        label='Show "About the author" on posts',
+        help_text=(
+            "Render the author-bio card at the foot of each post. The byline at "
+            "the top still links to the author's profile page when they have one."
         ),
     )
