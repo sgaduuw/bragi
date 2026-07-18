@@ -11,8 +11,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   site's `updated_at`, so changing a site setting (e.g. the 1.53.0
   "Show 'About the author'" toggle), title, theme, or nav takes effect on a
   normal reload instead of being pinned behind a conditional-GET `304` until
-  the post/page is next saved. Posts, static pages, the post index, and profile
-  pages are all covered (the profile page already folded in the author).
+  the content is next saved. Covers posts, static pages, the post index,
+  profile pages, the static/post-index home render, and the archive
+  (index / year / month) pages. Tag listings were already unaffected (no
+  conditional-GET validator); the profile page already folded in the author.
 
 ## [1.53.0] - 2026-07-18
 
