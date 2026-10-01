@@ -52,6 +52,14 @@ Before pushing, prefer **applying** over checking:
 paths. A local `--check` has repeatedly reported clean while CI's
 identically-pinned ruff disagreed; applying removes the question.
 
+The raw commands above are deliberate: they are exactly what CI
+runs, so they are the contract. For the comfortable local path
+(the `make` targets, what `make dev` does for you, how the pieces
+fit together) see **[docs/development.md](docs/development.md)**.
+That file is the human-facing orientation and this one is the
+agent-facing contract; where they cover the same ground they must
+agree, and neither should grow a copy of the other.
+
 ## Architecture rules that are load-bearing
 
 Violating any of these produces a bug, not a style complaint.
