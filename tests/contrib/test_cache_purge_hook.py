@@ -33,6 +33,9 @@ class _PurgeRecorder:
         self.calls.append((scope, key))
 
 
+pytestmark = pytest.mark.usefixtures("editor_client")
+
+
 @pytest.fixture
 def admin_app(
     db_session: Session,

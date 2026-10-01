@@ -7,6 +7,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Browser-local recovery for unfinished post and page edits, including structured
+  resumes, with separate copies per tab and a seven-day retention period (#515).
+- Stale-save protection for post and page editors and working copies. Promotion
+  checks both the working copy and its live baseline; stale discards are rejected.
 - Public pages in all four built-in themes identify Bragi with a name-only generator meta tag.
 
 ## [1.53.1] - 2026-07-18

@@ -38,6 +38,7 @@
         onsubmit="return confirm('Promote this working copy? The staged content becomes the live post.');"
         style="display: inline; margin: 0;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="_edit_token" value="{{ edit_token }}">
     <label style="margin-right: 0.5em;">
       <input type="checkbox" name="skip_redirect" value="1">
       Skip 301 redirect on a slug change
@@ -51,14 +52,21 @@
         onsubmit="return confirm('Discard this working copy? The live post is unaffected.');"
         style="display: inline; margin: 0;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="_edit_token" value="{{ edit_token }}">
     <button type="submit" class="danger">Discard working copy</button>
   </form>
 </div>
 {% endif %}
 
-<form method="post"
+<form method="post" data-editor-recovery hx-history="false"
+      data-recovery-user="{{ session['user_id'] }}"
+      data-recovery-site="{{ recovery_site_id }}"
+      data-recovery-entity="post:{{ working_copy_post_id if is_wc else (post.id if is_edit else 'new') }}"
+      data-recovery-context="{{ 'working-copy' if is_wc else 'live' }}"
+      data-recovery-conflict="{{ 'true' if g.editor_conflict else 'false' }}"
       action="{% if is_wc %}{{ url_for('post_admin.save_post_working_copy', post_id=working_copy_post_id) }}{% elif is_edit %}{{ url_for('post_admin.edit_post', post_id=post.id) }}{% else %}{{ url_for('post_admin.new_post') }}{% endif %}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="_edit_token" value="{{ edit_token }}">
   <fieldset>
     <label for="title">Title</label>
     <input type="text" name="title" id="title" required

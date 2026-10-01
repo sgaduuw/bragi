@@ -42,6 +42,7 @@
         onsubmit="return confirm('Promote this working copy? The staged content becomes the live page.');"
         style="display: inline; margin: 0;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="_edit_token" value="{{ edit_token }}">
     <label style="margin-right: 0.5em;">
       <input type="checkbox" name="skip_redirect" value="1">
       Skip 301 redirect on a slug change
@@ -53,6 +54,7 @@
         onsubmit="return confirm('Discard this working copy? The live page is unaffected.');"
         style="display: inline; margin: 0;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="_edit_token" value="{{ edit_token }}">
     <button type="submit" class="danger">Discard working copy</button>
   </form>
 </div>
@@ -95,9 +97,15 @@
 </div>
 {% endif %}
 
-<form method="post"
+<form method="post" data-editor-recovery hx-history="false"
+      data-recovery-user="{{ session['user_id'] }}"
+      data-recovery-site="{{ recovery_site_id }}"
+      data-recovery-entity="page:{{ working_copy_page_id if is_wc else (page.id if is_edit else 'new') }}"
+      data-recovery-context="{{ 'working-copy' if is_wc else 'live' }}"
+      data-recovery-conflict="{{ 'true' if g.editor_conflict else 'false' }}"
       action="{% if is_wc %}{{ url_for('page_admin.save_page_working_copy', page_id=working_copy_page_id) }}{% elif is_edit %}{{ url_for('page_admin.edit_page', page_id=page.id) }}{% else %}{{ url_for('page_admin.new_page') }}{% endif %}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="_edit_token" value="{{ edit_token }}">
   {% if swap_pending %}<input type="hidden" name="acknowledge_swap" value="1">{% endif %}
   {% if demotion_pending %}<input type="hidden" name="acknowledge_demotion" value="1">{% endif %}
   {# Hoist current_kind before the resume-fieldset guard below so the comparison
@@ -160,15 +168,12 @@
     </p>
   </fieldset>
 
-  {% if current_kind == 'resume' %}
+  <div id="page-resume-fieldset"{% if current_kind != 'resume' %} hidden{% endif %}>
     {% include "admin/_resume_fieldset.html" %}
-  {% endif %}
+  </div>
 
-  {# Blog-index settings: only meaningful once the page IS a post_index,
-     so this renders on the persisted/submitted kind (same server-side
-     gating as the resume fieldset above). #}
-  {% if current_kind == 'post_index' %}
-  <fieldset>
+  {# Keep controls available for local recovery when the saved kind changed. #}
+  <fieldset id="page-permalink-fieldset"{% if current_kind != 'post_index' %} hidden disabled{% endif %}>
     <legend>Post permalinks</legend>
     <label for="permalink_style">URL structure for posts under this blog</label>
     {% set current_permalink = form.get('permalink_style', 'flat') %}
@@ -184,7 +189,6 @@
       relinked.
     </small>
   </fieldset>
-  {% endif %}
 
   {# A working copy carries no status: the live row keeps its PUBLISHED
      status through promote. Hide the control entirely in WC mode so the
