@@ -218,6 +218,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Claude tooling (rsync'd between workspaces, not committed):
+# The repo-facing conventions live in the TRACKED AGENTS.md at the
+# root, shared with every agent and tool that works this repo.
+# Gitignored here is the rest:
 # - the CLAUDE.md / CONTEXT.md / MEMORY.md trio inside _claude/
 # - specs / plans / brainstorm session state for AI-assisted work
 # - the root-level CLAUDE.md stub that points into _claude/
