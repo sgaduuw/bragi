@@ -1,5 +1,5 @@
 {# Resume content fieldset. Included by post/page edit.html only
-   when kind=resume. Each section is a collapsible <details>; the
+   with controls disabled when kind is not resume. Each section is a collapsible <details>; the
    repeating sections use the _repeating_field macro for drag /
    add / remove chrome. Client-side JS at the bottom of this file:
      - Generates stable IDs on new rows (crypto.randomUUID).
@@ -27,7 +27,7 @@
 <link rel="stylesheet" href="{{ url_for('admin_static.static', filename='flatpickr.min.css') }}">
 <link rel="stylesheet" href="{{ url_for('admin_static.static', filename='flatpickr-monthselect.css') }}">
 
-<fieldset id="resume-fieldset">
+<fieldset id="resume-fieldset"{% if current_kind is defined and current_kind != "resume" %} disabled{% endif %}>
   <legend>Resume content</legend>
   <input type="hidden" name="resume_data" id="resume-data-hidden" value="">
 

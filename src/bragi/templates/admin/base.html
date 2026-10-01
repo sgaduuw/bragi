@@ -44,7 +44,11 @@
     <main>
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% for category, msg in messages %}
-          <div class="flash {{ category }}">{{ msg }}</div>
+          {% if category == 'editor-saved' %}
+            <span hidden data-editor-saved="{{ msg }}"></span>
+          {% else %}
+            <div class="flash {{ category }}">{{ msg }}</div>
+          {% endif %}
         {% endfor %}
       {% endwith %}
       {# Sticky notice rail: shown on per-site pages (g.current_site is
@@ -53,6 +57,16 @@
          admin_notices plugin is disabled and the template is absent. #}
       {% if g.current_site %}
         {% include "admin/_notice_rail.html" ignore missing %}
+      {% endif %}
+      {% if session.get('user_id') and g.current_site %}
+        <details data-recovery-library hx-history="false"
+                 data-recovery-user="{{ session['user_id'] }}"
+                 data-recovery-site="{{ g.current_site.id }}">
+          <summary>Browser recovery</summary>
+          <p>Open a copy below to select and copy its text. Copies remain available here
+             if a post, page or working copy is removed. Reopen this list to refresh it.</p>
+          <div data-recovery-list></div>
+        </details>
       {% endif %}
       {% block content %}{% endblock %}
     </main>
@@ -74,5 +88,6 @@
      page highlight identically. Inline (a dozen lines) to avoid a served
      static asset; the rail still works without it (full nav on no-JS). #}
   <script src="{{ url_for('admin_static.static', filename='admin-rail-highlight.js') }}"></script>
+  <script src="{{ url_for('admin_static.static', filename='editor-recovery.js') }}"></script>
 </body>
 </html>

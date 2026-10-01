@@ -65,6 +65,9 @@ PASSWORD = "correct-horse-battery-staple"
 HOST = "blog.example.com"
 
 
+pytestmark = pytest.mark.usefixtures("editor_client")
+
+
 @pytest.fixture
 def site_with_two_pages(
     admin_app_file_db: Flask,

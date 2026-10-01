@@ -104,6 +104,9 @@ def test_tag_segment_rejects_numeric() -> None:
 # ============================================================
 
 
+pytestmark = pytest.mark.usefixtures("editor_client")
+
+
 @pytest.fixture
 def delivery_app(
     patched_session_locals: sessionmaker[Session],
@@ -344,7 +347,7 @@ def _page_id(factory: sessionmaker[Session], slug: str) -> int:
         return db.execute(select(Page).where(Page.slug == slug)).scalar_one().id
 
 
-def test_permalink_select_only_on_post_index(
+def test_permalink_select_only_enabled_on_post_index(
     admin_app: Flask, db_session_factory: sessionmaker[Session]
 ) -> None:
     client = admin_app.test_client()
@@ -356,7 +359,12 @@ def test_permalink_select_only_on_post_index(
     assert 'name="permalink_style"' in post_index_form
 
     static_form = client.get(f"/admin/sites/blog/pages/{about_id}/edit").data.decode()
-    assert 'name="permalink_style"' not in static_form
+    from bs4 import BeautifulSoup
+
+    active = BeautifulSoup(post_index_form, "html.parser").select_one("#page-permalink-fieldset")
+    inactive = BeautifulSoup(static_form, "html.parser").select_one("#page-permalink-fieldset")
+    assert active is not None and not active.has_attr("hidden") and not active.has_attr("disabled")
+    assert inactive is not None and inactive.has_attr("hidden") and inactive.has_attr("disabled")
 
 
 def test_saving_permalink_style_persists(

@@ -44,6 +44,9 @@ class PageWorkingCopy(IdMixin, TimestampsMixin, Base):
         UniqueConstraint("site_id", "page_id", name="uq_page_working_copies_site_page"),
     )
 
+    # Null legacy rows fail closed at promotion; their live baseline is unknown.
+    base_fingerprint: Mapped[str | None] = mapped_column(String(64), default=None)
+
     # Multitenancy: every query MUST filter on site_id, same
     # discipline as the live pages table.
     site_id: Mapped[int] = mapped_column(

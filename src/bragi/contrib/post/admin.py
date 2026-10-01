@@ -43,6 +43,14 @@ from bragi.core.bulk_action import (
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
+from bragi.core.editor_state import (
+    editor_conflict,
+    editor_matches,
+    editor_saved,
+    editor_token,
+    fingerprint,
+    lock_editor_write,
+)
 from bragi.core.htmx import is_htmx, wants_partial
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
@@ -243,6 +251,10 @@ def _render_post_form(
         "admin/edit.html",
         post=post,
         form=form,
+        recovery_site_id=site_id,
+        edit_token=editor_token(
+            post, None if is_working_copy or post is None else _wc_for_post(db, site_id, post.id)
+        ),
         featured_image=_load_featured_image(db, fid, site_id),
         featured_image_thumb_key=_featured_image_thumb_key(db, fid, site_id),
         is_working_copy=is_working_copy,
@@ -323,6 +335,7 @@ def fork_post_working_copy(post: Post, *, editor_user_id: int | None) -> PostWor
     # Snapshot the live tag set as ids; the WC stores ids, not junction
     # rows (promote, Task 5c, writes the real post_tags). Empty -> None.
     wc.tag_ids = [t.id for t in post.tags] or None
+    wc.base_fingerprint = fingerprint(post)
     return wc
 
 
@@ -330,14 +343,16 @@ def _apply_post_form_fields(
     target: Post | PostWorkingCopy,
     form: dict[str, str],
     *,
+    body_html: str,
+    body_excerpt: str,
     featured_image_id: int | None,
     pinned_until: datetime | None,
 ) -> None:
     """Assign the post-edit form fields onto `target` (live Post or WC).
 
     The single source of truth for the title/subtitle/slug/body/
-    featured-image/pin assignments plus the body_html render and excerpt
-    derivation, shared by `edit_post` (live) and `save_post_working_copy`
+    featured-image/pin assignments including pre-rendered HTML and excerpt,
+    shared by `edit_post` (live) and `save_post_working_copy`
     (working copy). `status` and tags are deliberately NOT set here:
     `status` is live-only (the live-edit path sets it separately; a
     working copy has no status column), and tags differ by target
@@ -355,8 +370,8 @@ def _apply_post_form_fields(
     target.title = form["title"]
     target.slug = form["slug"]
     target.body_markdown = body_markdown
-    target.body_html = render_markdown(body_markdown)
-    target.body_excerpt = make_excerpt(body_markdown)
+    target.body_html = body_html
+    target.body_excerpt = body_excerpt
     target.featured_image_id = featured_image_id
     target.is_pinned = form["is_pinned"] == "1"
     target.pinned_until = pinned_until
@@ -502,6 +517,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         # and any publish-time index/edge writes land atomically
         # (issue #430). Unconditional: a draft create must persist too.
         db.commit()
+        editor_saved()
         if published:
             pm.hook.on_cache_purge(scope="post", key=str(new_id))
 
@@ -535,6 +551,18 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         if not ((is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)):
             abort(403)
 
+        if request.method == "POST":
+            body_markdown = _form_from_request()["body_markdown"]
+            body_html = render_markdown(body_markdown)
+            body_excerpt = make_excerpt(body_markdown)
+            lock_editor_write(db)
+            site = resolve_site_or_abort(db, site_slug)
+            post = db.get(Post, post_id)
+            if post is None or post.site_id != site.id:
+                abort(404)
+            if not _can_view_post(post):
+                abort(403)
+
         set_breadcrumbs(
             Crumb("Posts", "post_admin.list_posts"),
             Crumb(post.title or "Untitled", None),
@@ -560,6 +588,9 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             return _render_post_form(db, post.site_id, post, form)
 
         form = _form_from_request()
+        if not editor_matches(post, _wc_for_post(db, site.id, post.id)):
+            editor_conflict()
+            return _render_post_form(db, post.site_id, post, form), 409
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_post_form(db, post.site_id, post, form)
@@ -591,6 +622,8 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         _apply_post_form_fields(
             post,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             featured_image_id=featured_image_id,
             pinned_until=pinned_until,
         )
@@ -633,6 +666,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         # one atomic transaction (issue #430). Unconditional: the save
         # must persist even when skip_redirect fired no on_post_updated.
         db.commit()
+        editor_saved()
         # Any save invalidates the post's cached page. A slug
         # change also invalidates the old slug, but that one's
         # routed via the slug-change Redirect row and the redirect
@@ -768,10 +802,23 @@ def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         if post is None or post.site_id != site.id:
             abort(404)
 
+        body_markdown = _form_from_request()["body_markdown"]
+        body_html = render_markdown(body_markdown)
+        body_excerpt = make_excerpt(body_markdown)
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
         # Same validation as the live edit / WC save paths; on error
         # re-render the LIVE edit form (the operator is on it) with input
         # preserved, not the WC editor.
         form = _form_from_request()
+        if not editor_matches(post, _wc_for_post(db, site.id, post.id)):
+            editor_conflict()
+            return _render_post_form(db, post.site_id, post, form), 409
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_post_form(db, post.site_id, post, form)
@@ -795,9 +842,14 @@ def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             db.add(wc)
         else:
             wc.editor_user_id = int(session["user_id"])
+            for field in _EDITABLE_POST_FIELDS:
+                setattr(wc, field, getattr(post, field))
+            wc.base_fingerprint = fingerprint(post)
         _apply_post_form_fields(
             wc,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             featured_image_id=featured_image_id,
             pinned_until=pinned_until,
         )
@@ -805,6 +857,7 @@ def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         wc.tag_ids = _capture_tag_ids(db, form["tags"], site.id)
         # No lifecycle hooks: nothing is live. Single commit.
         db.commit()
+        editor_saved()
 
     return redirect(url_for("post_admin.post_working_copy_editor", post_id=post_id))
 
@@ -875,9 +928,27 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404)
+
+        body_markdown = _form_from_request()["body_markdown"]
+        body_html = render_markdown(body_markdown)
+        body_excerpt = make_excerpt(body_markdown)
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
         wc = _wc_for_post(db, site.id, post.id)
         if wc is None:
-            abort(404)
+            editor_conflict(missing_copy=True)
+            return _render_post_form(
+                db,
+                site.id,
+                post,
+                _form_from_request(),
+                is_working_copy=True,
+                working_copy_post_id=post.id,
+            ), 409
 
         def _rerender(form: dict[str, str]) -> str:
             # The token previews the WC's last-saved state; on a validation
@@ -895,6 +966,9 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
             )
 
         form = _form_from_request()
+        if not editor_matches(wc):
+            editor_conflict()
+            return _rerender(form), 409
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _rerender(form)
@@ -916,12 +990,15 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
         _apply_post_form_fields(
             wc,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             featured_image_id=featured_image_id,
             pinned_until=pinned_until,
         )
         # Capture the selected tags as ids; still no junction write.
         wc.tag_ids = _capture_tag_ids(db, form["tags"], site.id)
         db.commit()
+        editor_saved()
         flash("Working copy saved. The live post is unchanged.", "success")
 
     return redirect(url_for("post_admin.post_working_copy_editor", post_id=post_id))
@@ -936,15 +1013,27 @@ def discard_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
     (the operator likely discarded it in another tab).
     """
     with SessionLocal() as db:
+        lock_editor_write(db)
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404)
         wc = _wc_for_post(db, site.id, post.id)
+        if wc is not None and not editor_matches(wc):
+            editor_conflict(saved_copy="title" not in request.form)
+            form = (
+                _form_from_request()
+                if "title" in request.form
+                else _form_from_working_copy(wc, _tag_labels_for_ids(db, site.id, wc.tag_ids))
+            )
+            return _render_post_form(
+                db, site.id, wc, form, is_working_copy=True, working_copy_post_id=post.id
+            ), 409
         if wc is not None:
             db.delete(wc)
             db.commit()
+            editor_saved()
             flash("Working copy discarded.", "success")
         else:
             flash("No working copy to discard.", "warning")
@@ -1011,9 +1100,37 @@ def promote_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404)
+
+        rendering_copy = _wc_for_post(db, site.id, post.id)
+        body_html = render_markdown(rendering_copy.body_markdown) if rendering_copy else ""
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
         wc = _wc_for_post(db, site.id, post.id)
         if wc is None:
-            abort(404)
+            editor_conflict(missing_copy=True)
+            return _render_post_form(
+                db,
+                site.id,
+                post,
+                _form_from_request(),
+                is_working_copy=True,
+                working_copy_post_id=post.id,
+            ), 409
+
+        if not editor_matches(wc) or wc.base_fingerprint != fingerprint(post):
+            editor_conflict(saved_copy="title" not in request.form)
+            form = (
+                _form_from_request()
+                if "title" in request.form
+                else _form_from_working_copy(wc, _tag_labels_for_ids(db, site.id, wc.tag_ids))
+            )
+            return _render_post_form(
+                db, site.id, wc, form, is_working_copy=True, working_copy_post_id=post.id
+            ), 409
 
         before = _post_snapshot(post)
         was_published = post.status == PostStatus.PUBLISHED
@@ -1031,7 +1148,7 @@ def promote_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
             setattr(post, field, getattr(wc, field))
         # Re-render body_html from the staged markdown so the live cache
         # can't drift from its source, regardless of what the WC stored.
-        post.body_html = render_markdown(post.body_markdown)
+        post.body_html = body_html
         # Tags reconcile: make the live junction EXACTLY the staged set,
         # in this same transaction (atomic with the content copy).
         post.tags = _resolve_tags_from_ids(db, site.id, wc.tag_ids)
@@ -1063,6 +1180,7 @@ def promote_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
         # Unconditional: a skip_redirect promote (which fired no hook) must
         # still persist the content copy, the tags, and the WC delete.
         db.commit()
+        editor_saved()
         pm.hook.on_cache_purge(scope="post", key=str(post.id))
         flash(f"Working copy promoted; '{post.title}' is now live.", "success")
 

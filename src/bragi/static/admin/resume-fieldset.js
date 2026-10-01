@@ -11,8 +11,10 @@ import monthSelectPlugin from 'https://esm.sh/flatpickr@4/dist/plugins/monthSele
 // bragi.contrib.page.resume._new_id() on the server side.
 const newId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 
+function initResume() {
 const fieldset = document.getElementById('resume-fieldset');
-if (fieldset) {
+if (fieldset && !fieldset.dataset.resumeWired) {
+  fieldset.dataset.resumeWired = '1';
   const hiddenInput = document.getElementById('resume-data-hidden');
 
   // Wire flatpickr month picker on any <input type="month"> inside
@@ -105,15 +107,8 @@ if (fieldset) {
     });
     fieldset.querySelectorAll('select.js-linked-position').forEach((sel) => {
       const current = sel.value || sel.dataset.current || '';
-      sel.innerHTML =
-        '<option value="">— Not linked / personal project —</option>' +
-        options
-          .map(
-            (o) =>
-              `<option value="${o.id}"${o.id === current ? ' selected' : ''}>` +
-              `${o.label}</option>`
-          )
-          .join('');
+      sel.replaceChildren(new Option('Not linked / personal project', ''));
+      options.forEach(o => sel.add(new Option(o.label, o.id, false, o.id === current)));
     });
   }
   fieldset.addEventListener('input', (e) => {
@@ -121,6 +116,12 @@ if (fieldset) {
     if (inExperience) syncLinkedPositionOptions();
   });
   syncLinkedPositionOptions();
+
+  fieldset.addEventListener('editor:restore', () => {
+    wireMonthPickers(fieldset);
+    syncLinkedPositionOptions();
+    hiddenInput.value = JSON.stringify(serializeResumeData());
+  });
 
   // ---- Form submit: serialise sections to JSON, set hidden input ----
   const form = fieldset.closest('form');
@@ -235,3 +236,8 @@ if (fieldset) {
     return data;
   }
 }
+
+}
+initResume();
+document.addEventListener("htmx:afterSwap", initResume);
+document.addEventListener("htmx:historyRestore", initResume);

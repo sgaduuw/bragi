@@ -10,9 +10,21 @@
   var bodyFs = document.getElementById('page-body-fieldset');
   var noticeFs = document.getElementById('page-profile-notice');
   if (!kind || !bodyFs || !noticeFs) return;
-  kind.addEventListener('change', function () {
+  function updateKind() {
+    var resume = document.getElementById('page-resume-fieldset');
+    if (resume) {
+      resume.hidden = kind.value !== 'resume';
+      resume.querySelector('fieldset').disabled = resume.hidden;
+    }
+    var permalinks = document.getElementById('page-permalink-fieldset');
+    if (permalinks) {
+      permalinks.hidden = kind.value !== 'post_index';
+      permalinks.disabled = permalinks.hidden;
+    }
     var isProfile = kind.value === 'profile';
     bodyFs.hidden = isProfile;
     noticeFs.hidden = !isProfile;
-  });
+  }
+  kind.addEventListener('change', updateKind);
+  updateKind();
 })();

@@ -69,3 +69,14 @@ GitHub Releases publish the `bragi-cms` package to PyPI, then build the
 `bragi-admin` and `bragi-delivery` images from that wheel. Images are published
 to GHCR for `linux/amd64` and `linux/arm64` with `vX.Y.Z` tags.
 The Python import remains `import bragi`.
+
+### Browser recovery check
+
+After changes to the post/page editing flow, run the browser check alongside the
+normal test suite. It uses a local HTTP fixture and the real editor assets;
+TipTap and the resume date picker require access to their existing esm.sh imports.
+
+```sh
+uv run --with playwright playwright install chromium
+uv run --with playwright python tests/browser/check_editor_recovery.py
+```

@@ -121,7 +121,8 @@ def test_edit_page_wires_external_editor_module_and_config(
     assert "esm.sh/@tiptap/extension-link" in src
     assert "esm.sh/tiptap-markdown" in src
     # Config is read from the island, not interpolated.
-    assert "JSON.parse(document.getElementById('tiptap-editor-config')" in src
+    assert "document.getElementById('tiptap-editor-config')" in src
+    assert "JSON.parse(config.textContent)" in src
 
 
 def test_toolbar_includes_required_actions(admin_app: Flask) -> None:

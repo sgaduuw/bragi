@@ -46,6 +46,14 @@ from bragi.core.bulk_action import (
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
+from bragi.core.editor_state import (
+    editor_conflict,
+    editor_matches,
+    editor_saved,
+    editor_token,
+    fingerprint,
+    lock_editor_write,
+)
 from bragi.core.htmx import is_htmx, wants_partial
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.page_revision import PageRevision
@@ -432,6 +440,10 @@ def _render_page_form(
         "admin/page_edit.html",
         page=page,
         form=form,
+        recovery_site_id=site.id,
+        edit_token=editor_token(
+            page, None if is_working_copy or page is None else _wc_for_page(db, site.id, page.id)
+        ),
         parents=parents,
         site=site,
         slug_full_path=slug_full_path,
@@ -513,6 +525,7 @@ def fork_page_working_copy(page: Page, *, editor_user_id: int | None) -> PageWor
     )
     for field in _EDITABLE_PAGE_FIELDS:
         setattr(wc, field, getattr(page, field))
+    wc.base_fingerprint = fingerprint(page)
     return wc
 
 
@@ -520,6 +533,8 @@ def _apply_page_form_fields(
     target: Page | PageWorkingCopy,
     form: dict[str, str],
     *,
+    body_html: str,
+    body_excerpt: str,
     parent_id: int | None,
     featured_image_id: int | None,
     resume_data_dict: dict[str, object] | None,
@@ -528,8 +543,8 @@ def _apply_page_form_fields(
     """Assign the page-edit form fields onto `target` (live Page or WC).
 
     The single source of truth for the title/slug/parent/body/kind/
-    featured-image/resume/nav assignments plus the body_html render and
-    excerpt derivation, shared by `edit_page` (live) and
+    featured-image/resume/nav assignments including pre-rendered HTML and
+    excerpt, shared by `edit_page` (live) and
     `save_page_working_copy` (working copy). `status` is deliberately
     NOT set here: the live-edit path sets it separately (it's a live
     field), and a working copy has no status column.
@@ -539,8 +554,8 @@ def _apply_page_form_fields(
     target.slug = str(form["slug"])
     target.parent_id = parent_id
     target.body_markdown = body_markdown
-    target.body_html = render_markdown(body_markdown)
-    target.body_excerpt = make_excerpt(body_markdown)
+    target.body_html = body_html
+    target.body_excerpt = body_excerpt
     target.kind = new_kind
     target.featured_image_id = featured_image_id
     target.resume_data = resume_data_dict
@@ -773,6 +788,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
         # land atomically (issue #430). Unconditional: a draft create
         # must persist too.
         db.commit()
+        editor_saved()
         if published:
             pm.hook.on_cache_purge(scope="page", key=str(new_id))
         flash(f"Page '{form['title']}' created.", "success")
@@ -868,6 +884,17 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
+        if request.method == "POST":
+            body_markdown = _form_from_request()["body_markdown"]
+            body_html = render_markdown(body_markdown)
+            body_excerpt = make_excerpt(body_markdown)
+            lock_editor_write(db)
+            site = resolve_site_or_abort(db, site_slug)
+            require_role("editor", site.id)
+            page = db.get(Page, page_id)
+            if page is None or page.site_id != site.id:
+                abort(404)
+
         set_breadcrumbs(
             Crumb("Pages", "page_admin.list_pages"),
             Crumb(page.title or "Untitled", None),
@@ -915,6 +942,9 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             )
 
         form = _form_from_request()
+        if not editor_matches(page, _wc_for_page(db, site.id, page.id)):
+            editor_conflict()
+            return _render_page_form(db, site, page, form, parents), 409
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_page_form(db, site, page, form, parents)
@@ -1019,6 +1049,8 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         _apply_page_form_fields(
             page,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             parent_id=parent_id,
             featured_image_id=featured_image_id,
             resume_data_dict=resume_data_dict,
@@ -1094,6 +1126,7 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         # atomic transaction (issue #430). Unconditional: the content
         # save must persist even when skip_redirect fired no hook.
         db.commit()
+        editor_saved()
         pm.hook.on_cache_purge(scope="page", key=str(updated_id))
         flash(f"Page '{form['title']}' updated.", "success")
 
@@ -1170,6 +1203,16 @@ def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
+        body_markdown = _form_from_request()["body_markdown"]
+        body_html = render_markdown(body_markdown)
+        body_excerpt = make_excerpt(body_markdown)
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
+
         all_parents = _all_pages_for_picker(db, page.site_id)
         descendants = _descendant_ids(all_parents, page.id)
         parents = [p for p in all_parents if p.id != page.id and p.id not in descendants]
@@ -1178,6 +1221,9 @@ def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         # re-render the LIVE edit form (the operator is on it) with input
         # preserved, not the WC editor.
         form = _form_from_request()
+        if not editor_matches(page, _wc_for_page(db, site.id, page.id)):
+            editor_conflict()
+            return _render_page_form(db, site, page, form, parents), 409
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_page_form(db, site, page, form, parents)
@@ -1212,9 +1258,14 @@ def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
             db.add(wc)
         else:
             wc.editor_user_id = int(session["user_id"])
+            for field in _EDITABLE_PAGE_FIELDS:
+                setattr(wc, field, getattr(page, field))
+            wc.base_fingerprint = fingerprint(page)
         _apply_page_form_fields(
             wc,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             parent_id=parent_id,
             featured_image_id=featured_image_id,
             resume_data_dict=resume_data_dict,
@@ -1222,6 +1273,7 @@ def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         )
         # No lifecycle hooks: nothing is live. Single commit.
         db.commit()
+        editor_saved()
 
     return redirect(url_for("page_admin.working_copy_editor", page_id=page_id))
 
@@ -1304,9 +1356,28 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
+
+        body_markdown = _form_from_request()["body_markdown"]
+        body_html = render_markdown(body_markdown)
+        body_excerpt = make_excerpt(body_markdown)
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
         wc = _wc_for_page(db, site.id, page.id)
         if wc is None:
-            abort(404)
+            editor_conflict(missing_copy=True)
+            return _render_page_form(
+                db,
+                site,
+                page,
+                _form_from_request(),
+                _all_pages_for_picker(db, site.id),
+                is_working_copy=True,
+                working_copy_page_id=page.id,
+            ), 409
 
         all_parents = _all_pages_for_picker(db, page.site_id)
         descendants = _descendant_ids(all_parents, page.id)
@@ -1334,6 +1405,9 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
             )
 
         form = _form_from_request()
+        if not editor_matches(wc):
+            editor_conflict()
+            return _rerender(form), 409
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _rerender(form)
@@ -1366,12 +1440,15 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
         _apply_page_form_fields(
             wc,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             parent_id=parent_id,
             featured_image_id=featured_image_id,
             resume_data_dict=resume_data_dict,
             new_kind=new_kind,
         )
         db.commit()
+        editor_saved()
         flash("Working copy saved. The live page is unchanged.", "success")
 
     return redirect(url_for("page_admin.working_copy_editor", page_id=page_id))
@@ -1386,15 +1463,29 @@ def discard_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnVal
     (the operator likely discarded it in another tab).
     """
     with SessionLocal() as db:
+        lock_editor_write(db)
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
         wc = _wc_for_page(db, site.id, page.id)
+        if wc is not None and not editor_matches(wc):
+            editor_conflict(saved_copy="title" not in request.form)
+            form = _form_from_request() if "title" in request.form else _form_from_working_copy(wc)
+            return _render_page_form(
+                db,
+                site,
+                wc,
+                form,
+                _all_pages_for_picker(db, site.id),
+                is_working_copy=True,
+                working_copy_page_id=page.id,
+            ), 409
         if wc is not None:
             db.delete(wc)
             db.commit()
+            editor_saved()
             flash("Working copy discarded.", "success")
         else:
             flash("No working copy to discard.", "warning")
@@ -1473,9 +1564,40 @@ def promote_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnVal
         page = db.get(Page, page_id)
         if page is None or page.site_id != site.id:
             abort(404)
+
+        rendering_copy = _wc_for_page(db, site.id, page.id)
+        body_html = render_markdown(rendering_copy.body_markdown) if rendering_copy else ""
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        page = db.get(Page, page_id)
+        if page is None or page.site_id != site.id:
+            abort(404)
         wc = _wc_for_page(db, site.id, page.id)
         if wc is None:
-            abort(404)
+            editor_conflict(missing_copy=True)
+            return _render_page_form(
+                db,
+                site,
+                page,
+                _form_from_request(),
+                _all_pages_for_picker(db, site.id),
+                is_working_copy=True,
+                working_copy_page_id=page.id,
+            ), 409
+
+        if not editor_matches(wc) or wc.base_fingerprint != fingerprint(page):
+            editor_conflict(saved_copy="title" not in request.form)
+            form = _form_from_request() if "title" in request.form else _form_from_working_copy(wc)
+            return _render_page_form(
+                db,
+                site,
+                wc,
+                form,
+                _all_pages_for_picker(db, site.id),
+                is_working_copy=True,
+                working_copy_page_id=page.id,
+            ), 409
 
         # Snapshot the LIVE row BEFORE mutating so promote is undoable
         # (mirrors edit_page / the revision-restore path).
@@ -1493,7 +1615,7 @@ def promote_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnVal
             setattr(page, field, getattr(wc, field))
         # Re-render body_html from the staged markdown so the live cache
         # can't drift from its source, regardless of what the WC stored.
-        page.body_html = render_markdown(page.body_markdown)
+        page.body_html = body_html
 
         after = _page_promote_snapshot(page)
 
@@ -1522,6 +1644,7 @@ def promote_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnVal
         # Unconditional: a skip_redirect promote (which fired no hook)
         # must still persist the content copy and the WC delete.
         db.commit()
+        editor_saved()
         pm.hook.on_cache_purge(scope="page", key=str(page.id))
         flash(f"Working copy promoted; '{page.title}' is now live.", "success")
 

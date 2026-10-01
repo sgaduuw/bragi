@@ -5,6 +5,30 @@
 [Publishing](#publishing-and-site-management) · [Importers](#importers) ·
 [Export](#export-portability) · [Datasets](#datasets)
 
+## Protecting unfinished writing
+
+Post and page editors keep unsaved form content in this browser for seven days,
+including resume sections. When you reopen the same editor, choose **Restore** to
+recover a copy or **Discard** to remove it. Copies belong to your account, site and
+editor; each tab keeps its own copy. Live editors and working copies are separate.
+If the original post, page or working copy no longer exists, open **Browser recovery**
+on the site's dashboard or another site admin page. The read-only copies let you
+select and copy your writing, including resume fields, without publishing anything.
+A stale Discard action refuses to remove a copy changed in another tab.
+
+Recovery never publishes or saves content to the server. A successful save clears
+its recovery copy; failed saves and conflicts keep it. Browser storage can be
+cleared or unavailable, so this is not a backup or cross-device sync. The editor
+warns when it cannot store your changes. Copies remain on this device after logout
+until discarded or expired; use a private browser profile on shared computers.
+
+If someone changes content after you open it, Bragi rejects your stale save and
+keeps your submitted text visible. Open the latest version in another tab, compare
+and copy your changes there, then save. Recovering an older browser copy retains
+its original version check. Working-copy promotion also checks whether the live
+content changed since staging. Restage from the latest live editor after comparing
+your changes; working copies created before this protection need restaging too.
+
 ## Publishing and site management
 
 - **Multisite by design.** One database serves many sites; the Host

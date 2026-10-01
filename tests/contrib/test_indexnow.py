@@ -38,6 +38,9 @@ KEY = "abcdef0123456789abcdef0123456789"
 # ============================================================
 
 
+pytestmark = pytest.mark.usefixtures("editor_client")
+
+
 @pytest.fixture
 def delivery_app(
     db_session: Session,
