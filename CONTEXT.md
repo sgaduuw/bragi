@@ -683,49 +683,50 @@ triaging 404s is a distinct concern from the redirect subsystem
 redirects and content and *creates* redirects/content by
 deep-linking into their existing admin forms (by `url_for` endpoint
 name), so it never imports a sibling contrib plugin and the
-contrib boundary holds. Keeping it separate also means disabling 404
-recording is one commented entry-point line, independent of
-redirects.
+contrib boundary holds. Set `BRAGI_NOTFOUND_RECORDS_PER_MINUTE=0` to
+disable 404 recording independently of redirects.
 
-**Why synchronous best-effort recording, not the debounce queue.**
-The recorder is a delivery `after_request` that upserts one row per
-404 (coalesced by `(site_id, path)` via SQLite `ON CONFLICT DO
-UPDATE`). CONTEXT's "Database write concurrency" tier 2 says push
-read-path writes to the `bragi-tasks` worker, and that remains the
-escape hatch. But after the scanner blocklist drops the probe noise,
-surviving 404 volume is low and every re-hit of a path is a single
-in-place UPDATE, not a new insert. Delivery already writes on the
-read path (the redirect hit-bump), so a best-effort UPSERT with
-`run_with_write_retry` matches existing precedent for far less code
-than standing up a `not_before` queue + a CLI drain. The recorder is
-marked with a `ponytail:` comment naming the offload as the upgrade
-path if 404-write contention ever shows. A DB failure logs and the
-404 is served regardless. Known ceiling: the blocklist only catches
-*known* scanner patterns, so a crawler probing many *distinct* novel
-paths still inserts one row (and one write) each, unbounded. That is
-acceptable at bragi's personal scale (the intended use); a busy public
-deploy would want a per-site open-row cap or a stronger blocklist. Not
-built now (a cap would cost a COUNT on the write path); the trigger to
-build it is a real deploy seeing 404-row floods.
+**Why bounded best-effort recording, not a queue.** The delivery
+`after_request` records eligible GET 404s using one conditional SQLite
+upsert. New paths are admitted only below `notfound_max_rows` (default
+1000 total rows/site). Checking capacity inside the write prevents
+cross-worker admission races. The indexed capacity probe stops at the
+configured limit, even when pre-existing data exceeds it. Existing paths
+can update at capacity; no data is evicted automatically.
 
-**Why the scanner blocklist filters before the write.** Public 404
-traffic is dominated by vulnerability scanners hitting random paths.
-Recording all of them would flood the table and bury the real dead
-links. `Settings.notfound_blocklist` (fnmatch globs, case-folded,
-env-overridable as JSON) drops those paths before the recorder
-writes, so cost and cardinality stay bounded. `.well-known/*` is
-never blocked (security.txt, webfinger live there).
+A thread-safe in-memory budget admits at most
+`notfound_records_per_minute` attempts (default 60) per site per delivery
+worker in each fixed 60-second window. It runs before opening the recorder
+connection. Keys are resolved site IDs, so arbitrary paths and Host headers
+cannot grow the budget map. Worker count multiplies the rate; restarts reset
+budgets, and fixed-window boundaries permit bursts. This is deliberately
+not a deployment-wide limiter. A shared limiter is the upgrade path if that
+becomes necessary. The recorder uses one 50 ms SQLite lock attempt and
+restores the connection's original timeout before returning it to the pool.
+A recording failure does not change the 404 response. Suppression/failure
+warnings occur at most once per site/worker/window. Counts and timestamps
+represent recorded hits, not a complete access log.
 
-**Why "handled" is computed, not a stored status.** A row's
-lifecycle is only `open` -> `ignored` (dismiss). There is no
-`resolved` state: the admin list hides any open row whose path an
-active *exact* redirect now covers (a correlated `NOT EXISTS`,
-pagination-correct). That is how a row disappears after you
-deep-link-create its redirect, without threading state back through
-the deep-link, and it keeps the redirects table the single source of
-truth for what has been redirected. Prefix/regex redirects are
-deliberately not consulted here (exact membership only); the
-create-content case is handled by explicit dismiss.
+**Why the scanner blocklist still filters before recording.**
+`Settings.notfound_blocklist` (case-insensitive fnmatch globs, JSON
+environment override) suppresses known scanner noise. It is not an
+availability boundary: novel paths are subject to the same row and rate
+limits. `.well-known/*` is absent from the default list so security.txt
+and webfinger misses remain visible, but operators can block it.
+
+**Why "handled" is computed, not a stored status.** Open rows can be
+soft-dismissed (a later recorded hit reopens them) or permanently ignored.
+The admin list also hides open rows covered by active exact redirects,
+using a correlated `NOT EXISTS` to preserve pagination. Prefix/regex
+redirects are not consulted. All retained statuses count toward capacity,
+and the admin shows a count and a cached capacity warning.
+
+`bragi notfound prune --site <slug>` explicitly deletes dismissed records
+or records currently covered by active exact redirects. `--dry-run` counts
+candidates. The delete rechecks those predicates itself, preserving a
+concurrent Ignore and never touching another site. Ignored records are
+always retained; there is no automatic retention or eviction policy.
+See [operations](docs/operations.md#404-recording-limits-and-cleanup).
 
 **Why suggestions are leaf-slug matches only.** Per detected 404,
 the view proposes at most one fix: an exact published-slug match at a

@@ -6,7 +6,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- Bound 404 triage storage per site and recording attempts per delivery worker;
+  skip busy SQLite writes promptly and show capacity warnings (#519).
+
 ### Added
+- Explicit `bragi notfound prune --site <slug>` cleanup with `--dry-run`,
+  preserving ignored records and unresolved open paths (#519).
 - Media deletion previews with known content usage and explicit confirmation for single and bulk deletion (#524).
 - Read-only `bragi media check --site <slug>` and verified accidental-deletion recovery guidance (#524).
 - Tested SQLite/media recovery procedure and a repeatable failed-upgrade rehearsal (#523).
