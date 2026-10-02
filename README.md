@@ -78,6 +78,7 @@ for published versions and [the changelog](CHANGELOG.md) for changes.
 | --- | --- |
 | Learn about publishing, imports, exports, or datasets | [Features and content tools](docs/content.md) |
 | Configure deployment, integrations, limits, or backups | [Deployment and operations](docs/operations.md) |
+| Recover a site after a failed upgrade | [Backup and recovery](docs/recovery.md) |
 | Build or install a theme | [Building a theme](docs/themes.md) |
 | Work on Bragi or run its checks | [Development](docs/development.md) |
 | Look up a configuration field or default | [Settings reference](src/bragi/settings.py) |

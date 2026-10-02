@@ -39,9 +39,10 @@ and the `/data/.migrated` sentinel; back it up. Ports bind to
 
 ## Upgrades
 
-Back up the deployment before changing the pinned image release. Stop the
-web services and background tasks, then run migrations with the new admin
-image before starting the services again. Verify that `bragi db upgrade`
+Follow the [upgrade recovery procedure](recovery.md) before changing the
+pinned image release. Stop all writers before taking the database/media
+backup, then run migrations with the new admin image before starting services.
+Verify that `bragi db upgrade`
 exits successfully and review its output. If it fails, keep the services
 stopped while you investigate.
 
@@ -224,11 +225,14 @@ files) plus the contents of `Settings.attachments_root` as
 `attachments/`. Default output: `bragi-backup-YYYYMMDD-HHMMSS.tar.gz`
 in the current working directory.
 
-To restore: extract the tarball, drop `bragi.db` and
-`attachments/` into a fresh deployment (matching paths), and
-restart the admin + delivery processes. There is no `restore`
-subcommand by design; a tool that overwrites a live deployment
-is a big risk for not much help.
+The database snapshot and media copy are separate steps. Stop all writers
+for a consistent pair, including delivery and background jobs. A missing
+attachments directory is silently omitted. Configuration, secrets, application
+versions and external storage must be retained separately.
+
+Follow [Recovering from a failed upgrade](recovery.md) for backup preparation,
+restoration into fresh storage, acceptance checks and a runnable rehearsal.
+There is no `restore` subcommand; restoration does not overwrite a live deployment.
 
 `bragi backup` is SQLite-only and exits 2 with a clear message
 under a non-SQLite `BRAGI_DATABASE_URL` (its `VACUUM INTO` is
