@@ -4,13 +4,13 @@
    id swaps just this fragment. The full page template includes
    this partial; the view returns it directly when HX-Request is set.
 #}
-<div id="attachments-list-table">
+<div id="attachments-list-table" class="select-mode">
 {% if rows %}
 <table>
   <thead>
     <tr>
       <th class="bulk-col">
-        <input type="checkbox" class="bulk-select-all-header" aria-label="Select all visible attachments">
+        <input type="checkbox" id="media-select-all" aria-label="Select all visible attachments">
       </th>
       <th></th>{# thumbnail column #}
       <th>Filename</th>

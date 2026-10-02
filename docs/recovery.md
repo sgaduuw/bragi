@@ -1,4 +1,4 @@
-# Recovering from a failed upgrade
+# Recovering a site or deleted media
 
 [Back to operations](operations.md)
 
@@ -206,3 +206,81 @@ development environment includes it. No production backup is loaded.
 - Limits: synthetic single-site content, local storage and built-in plugins.
   This does not establish completeness of an operator's backup or test their
   OAuth provider, third-party plugins, host permissions or network routing.
+
+
+## Recover accidentally deleted media
+
+Deletion removes the attachment record and its rendition records. Unshared
+files are removed too. Markdown references remain, while featured-image and
+site-default selections are cleared. A surviving attachment record can keep
+shared bytes alive; that alone does not preserve a deleted featured-image
+selection.
+
+Before confirming deletion, review the listed published content, drafts,
+working copies, saved revisions and site defaults. Published featured images
+can also supply social cards. Confirmation is checked again when submitted;
+changed usage requires another review. The list reports known usage, not a
+promise that an image is unused. External sites, third-party plugins,
+structured resume data, custom theme/settings fields and browser-only drafts
+are outside this check.
+
+### Full recovery from backup
+
+Use the recovery procedure above with a backup made before deletion. Restore
+both the database and media into an empty destination with the matching
+application version. This preserves original and rendition URLs, attachment
+metadata, and featured-image associations. **It also rolls back content and
+settings changed after that backup.** Inspect the recovered site privately
+before deciding to replace the current deployment.
+
+### Recover one original without rolling back the site
+
+1. Extract a trusted pre-deletion backup into a separate directory using the
+   safe extraction procedure above. Keep it separate from the running site.
+2. Locate the exact original file under
+   `attachments/<site>/<first-two-hash-characters>/<hash>/original.<extension>`.
+   Older backups can use a flat hash file. Check its SHA-256 against the hash
+   in the broken `/attachments/<hash>` URL (`shasum -a 256 <file>`).
+3. Upload those exact bytes to the same site's Media library. Bragi derives
+   the original public URL from those bytes, so the original URL returns
+   without editing Markdown. Re-saving or re-encoding an image changes its
+   hash and does not repair the old URL.
+4. Restore alt text, credits and featured-image/site-default selections from
+   the backup as needed. Uploading the bytes does not restore this metadata
+   or the cleared selections automatically.
+5. Process the queued renditions with `bragi media process-renditions`.
+   Current theme widths determine which renditions are recreated. Historical
+   rendition URLs for other widths or formats may still be missing; use full
+   backup recovery when those exact URLs must be preserved. Copying files
+   alone is insufficient because delivery also needs their database records.
+6. Run the check below and inspect the affected public pages and social cards.
+
+### Check references after recovery or import
+
+```sh
+bragi media check --site blog
+```
+
+Run this with the restored/imported site's configuration and media storage.
+It is read-only and does not fetch external URLs. It checks known local media
+references against both database records and stored bytes, reports affected
+content, and exits nonzero when media are missing. For referenced originals,
+it also checks every completed rendition, including variants chosen for
+social cards and responsive images. Pending rendition jobs are not missing
+files. Markdown destinations are decoded and site hostnames and aliases are
+recognized with explicit ports, as they are by delivery. It includes historical
+revisions and working copies, so a finding can concern a recoverable draft
+rather than currently published content. A clean result cannot detect a
+featured-image selection already cleared by deletion; compare those
+selections with the backup separately.
+
+The file-backed rehearsal is runnable with:
+
+```sh
+uv run pytest tests/test_recovery.py::test_deleted_media_recovery_preserves_public_urls
+```
+
+It verifies deletion damage, original URL recovery by re-uploading backed-up
+bytes, and complete recovery of originals, renditions and featured-image
+associations from a database/media backup. There is no trash retention period;
+a pre-deletion backup or retained original is required.

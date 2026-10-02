@@ -7,6 +7,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Media deletion previews with known content usage and explicit confirmation for single and bulk deletion (#524).
+- Read-only `bragi media check --site <slug>` and verified accidental-deletion recovery guidance (#524).
 - Tested SQLite/media recovery procedure and a repeatable failed-upgrade rehearsal (#523).
 - Browser-local recovery for unfinished post and page edits, including structured
   resumes, with separate copies per tab and a seven-day retention period (#515).
