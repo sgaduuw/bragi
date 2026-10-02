@@ -7,6 +7,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Tested SQLite/media recovery procedure and a repeatable failed-upgrade rehearsal (#523).
 - Browser-local recovery for unfinished post and page edits, including structured
   resumes, with separate copies per tab and a seven-day retention period (#515).
 - Stale-save protection for post and page editors and working copies. Promotion
