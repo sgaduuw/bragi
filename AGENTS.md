@@ -11,6 +11,14 @@ GHCR images, and serving a live site. Treat it as production.
 Operator and deployment specifics are not in this file. If a task
 needs them, say so and ask rather than guessing.
 
+This file says *what to do*. Its companion
+[`CONTEXT.md`](CONTEXT.md), beside it at the repo root, says *why*,
+at length: the architecture, the decisions that look odd until you
+know what they cost, and the failure modes this codebase keeps
+producing. It is tracked too, and it is worth reading before a
+non-trivial change. Where a rule here has a one-line justification,
+the full reasoning is usually there.
+
 ## What bragi is
 
 A self-hosted CMS: a Flask app split into two processes against one
