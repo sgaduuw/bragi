@@ -19,13 +19,16 @@ if any remain.
 
 from __future__ import annotations
 
+import json
 import mimetypes
+from dataclasses import asdict
 
 from flask import (
     Blueprint,
     abort,
     current_app,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
@@ -33,6 +36,7 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
+from itsdangerous import BadData, URLSafeTimedSerializer
 from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
@@ -55,9 +59,12 @@ from bragi.core.bulk_action import (
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
+from bragi.core.editor_state import fingerprint, lock_editor_write
 from bragi.core.htmx import is_htmx, wants_partial
+from bragi.core.media_usage import attachment_usage
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
+from bragi.core.models.dataset import Dataset
 from bragi.core.models.site import Site
 from bragi.core.pagination import page_arg
 from bragi.core.permissions import require_role, resolve_site_or_abort
@@ -717,6 +724,9 @@ def _delete_one_attachment(db: Session, site: Site, row: Attachment) -> BulkOutc
             or db.execute(
                 select(AttachmentRendition).where(AttachmentRendition.storage_key == key).limit(1)
             ).scalar_one_or_none()
+            or db.execute(
+                select(Dataset).where(Dataset.storage_key == key).limit(1)
+            ).scalar_one_or_none()
         )
         if still_used is None:
             backend.remove(site_slug_for_storage, key)
@@ -724,14 +734,77 @@ def _delete_one_attachment(db: Session, site: Site, row: Attachment) -> BulkOutc
     return Ok(captured)
 
 
+def _deletion_preview(db: Session, site: Site, ids: list[int]) -> ResponseReturnValue | None:
+    """Require a fresh, signed preview before either deletion route mutates data."""
+    rows = list(
+        db.scalars(
+            select(Attachment)
+            .where(Attachment.site_id == site.id, Attachment.id.in_(ids))
+            .order_by(Attachment.id)
+        )
+    )
+    usages = attachment_usage(db, site, rows)
+    state = [
+        session["user_id"],
+        site.id,
+        sorted(set(ids)),
+        [
+            [
+                row.id,
+                fingerprint(row),
+                sorted(
+                    [asdict(ref) for ref in usages[row.id]],
+                    key=lambda ref: json.dumps(ref, sort_keys=True),
+                ),
+            ]
+            for row in rows
+        ],
+    ]
+    secret_key = current_app.secret_key
+    assert secret_key is not None
+    signer = URLSafeTimedSerializer(secret_key, salt="media-delete-v1")
+    token = request.form.get("_delete_token", "")
+    try:
+        confirmed = signer.loads(token, max_age=900) == state
+    except BadData:
+        confirmed = False
+    in_use = any(usages.values())
+    if confirmed and (not in_use or request.form.get("acknowledge") == "yes"):
+        return None
+    response = make_response(
+        render_template(
+            "admin/attachment_delete.html",
+            rows=rows,
+            usages=usages,
+            ids=ids,
+            delete_token=signer.dumps(state),
+            in_use=in_use,
+            changed=bool(token),
+            site=site,
+        )
+    )
+    # A bulk request may target the table; this preview replaces the main content.
+    if is_htmx():
+        response.headers.update(
+            {"HX-Retarget": "main", "HX-Reselect": "main", "HX-Reswap": "outerHTML"}
+        )
+    return response
+
+
 @bp.route("/<int:attachment_id>/delete", methods=["POST"])
 def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue:
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
         row = db.get(Attachment, attachment_id)
         if row is None or row.site_id != site.id:
             abort(404)
+        preview = _deletion_preview(db, site, [attachment_id])
+        if preview is not None:
+            return preview
 
         outcome = _delete_one_attachment(db, site, row)
         assert isinstance(outcome, Ok)  # attachments have no skip path today
@@ -792,6 +865,16 @@ def bulk_delete_attachments(site_slug: str) -> ResponseReturnValue:
         if not ids:
             flash("Select at least one attachment to delete.", "warning")
             return _bulk_list_response(site_slug)
+
+        if len(ids) > 200:
+            flash("Bulk delete is limited to 200 items per request.", "warning")
+            return _bulk_list_response(site_slug)
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        preview = _deletion_preview(db, site, ids)
+        if preview is not None:
+            return preview
 
         try:
             result = bulk_delete(

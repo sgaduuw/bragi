@@ -310,5 +310,123 @@ def test_backup_recovers_site_after_failed_upgrade(tmp_path: Path, monkeypatch) 
     print(f"recovery verified: schema {previous_revision} -> {target_revision}")
 
 
+def test_deleted_media_recovery_preserves_public_urls(tmp_path: Path) -> None:
+    """Exercise real SQLite, disk, backup, deletion and partial/full recovery."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.upper().startswith(("BRAGI_", "FLASK_")) and k not in ("PYTHONPATH", "PYTHONHOME")
+    }
+    env.update(BRAGI_ENV="production", BRAGI_SECRET_KEY=secrets.token_hex(32))
+    source = tmp_path / "source"
+    source.mkdir()
+    script = str(Path(__file__).resolve())
+
+    def run(args: list[str], root: Path = source, *, succeeds: bool = True):
+        result = subprocess.run(
+            [sys.executable, *args],
+            cwd=tmp_path,
+            env=dict(
+                env,
+                BRAGI_DATABASE_URL=f"sqlite:///{root / 'bragi.db'}",
+                BRAGI_ATTACHMENTS_ROOT=str(root / "attachments"),
+            ),
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        assert (result.returncode == 0) == succeeds, result.stdout + result.stderr
+        return result
+
+    cli = ["-c", "from bragi.cli import bragi; bragi()"]
+    run([*cli, "db", "upgrade"])
+    run([script, "seed"])
+    key = hashlib.sha256(IMAGE).hexdigest()
+    run(
+        [
+            "-c",
+            "from sqlalchemy import select; from bragi.core.db import SessionLocal; "
+            "from bragi.core.models.page import Page; "
+            "from bragi.core.render.markdown import render_markdown; import sys; "
+            "db = SessionLocal(); page = db.scalar(select(Page).where(Page.slug == 'about')); "
+            "page.body_markdown += '\\n\\n![Small](/attachments/' + sys.argv[1] + '/1/png)'; "
+            "page.body_html = render_markdown(page.body_markdown); db.commit(); db.close()",
+            key,
+        ]
+    )
+    run([script, "check"])
+    run([*cli, "media", "check", "--site", "blog"])
+    archive = tmp_path / "before-deletion.tar.gz"
+    run([*cli, "backup", "--output", str(archive)])
+    run(
+        [
+            "-c",
+            "from sqlalchemy import select; "
+            "from bragi.apps.admin import create_admin_app; "
+            "from bragi.core.db import SessionLocal; "
+            "from bragi.core.models.attachment import Attachment; "
+            "from bragi.core.models.site import Site; "
+            "from bragi.contrib.attachments.admin import _delete_one_attachment; "
+            "app = create_admin_app(); "
+            "ctx = app.app_context(); ctx.push(); "
+            "db = SessionLocal(); "
+            "_delete_one_attachment(db, db.scalar(select(Site)), db.scalar(select(Attachment))); "
+            "db.commit(); db.close()",
+        ]
+    )
+    with sqlite3.connect(source / "bragi.db") as db:
+        body, featured = db.execute("SELECT body_markdown, featured_image_id FROM posts").fetchone()
+        assert key in body and featured is None
+        assert db.execute("SELECT count(*) FROM attachments").fetchone() == (0,)
+    missing = run([*cli, "media", "check", "--site", "blog"], succeeds=False)
+    assert key in missing.stdout + missing.stderr
+    broken = run([script, "check"], succeeds=False)
+    assert "missing restored media" in broken.stderr
+
+    # Read the original from the backup, not from the surviving source tree.
+    restored = tmp_path / "restored"
+    restored.mkdir()
+    with tarfile.open(archive) as backup:
+        backup.extractall(restored, filter="data")
+    original = restored / "attachments" / "blog" / key[:2] / key / "original.png"
+    assert original.read_bytes() == IMAGE
+    run(
+        [
+            "-c",
+            "from pathlib import Path; from sqlalchemy import select; "
+            "from bragi.apps.admin import create_admin_app; "
+            "from bragi.apps.delivery import create_delivery_app; "
+            "from bragi.core.db import SessionLocal; "
+            "from bragi.core.models.site import Site; "
+            "from bragi.contrib.attachments.service import create_attachment_from_bytes; "
+            "import sys; app = create_admin_app(); "
+            "ctx = app.app_context(); ctx.push(); db = SessionLocal(); "
+            "site = db.scalar(select(Site)); "
+            "result = create_attachment_from_bytes(db, site_id=site.id, site_slug=site.slug, "
+            "site_theme_slug=None, filename='recovered.png', content_type='image/png', "
+            "data=Path(sys.argv[1]).read_bytes(), width=2, height=2); "
+            "assert result.attachment.storage_key == sys.argv[2]; db.commit(); db.close(); "
+            "client = create_delivery_app().test_client(); "
+            "response = client.get('/attachments/' + sys.argv[2], base_url=sys.argv[3]); "
+            "assert response.status_code == 200; "
+            "assert response.data == Path(sys.argv[1]).read_bytes(); "
+            "assert client.get('/attachments/' + sys.argv[2] + '/1/png', "
+            "base_url=sys.argv[3]).status_code == 404",
+            str(original),
+            key,
+            PUBLIC,
+        ]
+    )
+    with sqlite3.connect(source / "bragi.db") as db:
+        assert db.execute("SELECT featured_image_id FROM posts").fetchone() == (None,)
+    partial = run([*cli, "media", "check", "--site", "blog"], succeeds=False)
+    assert f"{key}/1/png" in partial.stdout + partial.stderr
+    # Full recovery restores associations and historical rendition URLs too.
+    run([script, "check"], restored)
+    run([*cli, "media", "check", "--site", "blog"], restored)
+    with sqlite3.connect(restored / "bragi.db") as db:
+        assert db.execute("SELECT featured_image_id FROM posts").fetchone() == (1,)
+
+
 if __name__ == "__main__":
     {"seed": seed_site, "check": check_site}[sys.argv[1]]()

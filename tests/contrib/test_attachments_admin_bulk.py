@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import select
@@ -146,10 +147,15 @@ def _bulk_delete(
     """POST to attachments bulk-delete with a valid CSRF token + ids."""
     token = csrf_token(client, path=f"/admin/sites/{site_slug}/attachments/")
     pairs = [("_csrf_token", token)] + [("ids", str(i)) for i in ids]
-    return client.post(
-        f"/admin/sites/{site_slug}/attachments/bulk-delete",
-        data=MultiDict(pairs),
+    path = f"/admin/sites/{site_slug}/attachments/bulk-delete"
+    response = client.post(path, data=MultiDict(pairs))
+    token_field = BeautifulSoup(response.data, "html.parser").find(
+        "input", {"name": "_delete_token"}
     )
+    if token_field is not None:
+        pairs.extend([("_delete_token", str(token_field["value"])), ("acknowledge", "yes")])
+        response = client.post(path, data=MultiDict(pairs))
+    return response
 
 
 def _blog_id(db_session_factory: sessionmaker[Session]) -> int:
