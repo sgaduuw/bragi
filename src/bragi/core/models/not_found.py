@@ -1,14 +1,14 @@
 """NotFound: detected public 404s, per site, for admin triage.
 
 One row per (site_id, path). The delivery app's `after_request`
-recorder upserts on every real 404 that survives the scanner
-blocklist: insert on first sight, else bump `count` / `last_seen`
+recorder upserts eligible 404s within configured row and rate limits:
+insert on first sight, else bump `count` / `last_seen`
 / `last_referrer`. The admin overview lists `open` rows so the
 operator can create a redirect, mark the path Gone (410), create
 a page/post at it, or dismiss it.
 
-Lifecycle is just `open` -> `ignored` (dismiss). There is no
-`resolved` state: "handled via a redirect" is computed at list
+Rows can be soft-dismissed (reopen on a recorded hit) or permanently
+ignored. There is no `resolved` state: "handled via a redirect" is computed at list
 time from redirect-table membership, so the redirects table stays
 the single source of truth for what has been redirected.
 
@@ -51,9 +51,9 @@ class NotFound(IdMixin, Base):
     # Capped at the same 1024 the recorder rejects longer paths at.
     path: Mapped[str] = mapped_column(String(1024))
 
-    # Hit count for triage priority. Bumped on every re-hit of an
-    # `open` row; `ignored` rows are not bumped (no write churn, and
-    # they never resurface).
+    # Recorded hit count for triage priority, not a complete access log.
+    # Bumped on each admitted re-hit of an open or dismissed row.
+    # Ignored rows are not bumped and never resurface.
     count: Mapped[int] = mapped_column(default=1)
 
     # first_seen never changes after insert; last_seen updates on

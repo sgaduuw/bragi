@@ -93,6 +93,53 @@ row records the reverse proxy's IP, hiding real client IPs;
 each unit of trust extends the `X-Forwarded-*` spoofability
 boundary one hop outward.
 
+## 404 recording limits and cleanup
+
+The 404 admin page is a bounded triage list. By default, each site can retain
+1,000 records across all statuses, and each delivery worker attempts at most
+60 recordings per site in each fixed 60-second window. Set these values on
+both admin and delivery so the displayed limits match enforcement:
+
+- `BRAGI_NOTFOUND_MAX_ROWS` (default `1000`, minimum `1`).
+- `BRAGI_NOTFOUND_RECORDS_PER_MINUTE` (default `60`, minimum `0`). Set `0` to
+  disable recording while keeping the existing records and triage tools.
+
+The Compose example passes both values from your environment or `.env` file.
+Restart the services after changing them. With four delivery workers, the
+default allows 240 attempts per site per window. Worker restarts reset their
+budgets, and adjacent windows can admit a burst at the boundary. The storage
+cap is enforced in the database across workers. All workers must use the same
+configured cap. Existing data above a lowered cap is preserved.
+
+At capacity, new paths are skipped. Known paths can still update or reopen
+when a recording attempt is admitted. Ignored paths stay ignored and still
+consume capacity. The 404 page displays the retained count, and the admin
+shows a capacity warning. Recording attempts wait at most 50 ms for a SQLite
+lock and are not retried; the normal response remains a 404. This limit covers
+the recorder's lock wait, not the total response time or other delivery work.
+Rate suppression and database failures log at most once per site per worker
+per window. Recorded hit counts and timestamps are therefore incomplete.
+
+To reclaim capacity, dismiss unwanted records or create redirects, then
+preview and run explicit cleanup:
+
+```sh
+bragi notfound prune --site blog --dry-run
+bragi notfound prune --site blog
+```
+
+For Compose, prefix the commands with `docker compose exec admin`.
+Cleanup removes dismissed records and records covered by active exact
+redirects, including Gone (410). It preserves ignored records and unresolved
+open records. It never runs automatically. Pruning loses the removed records'
+hit history; a later eligible 404 can create a new record. Ignored records
+cannot be reclaimed by this command, so a site filled with permanent ignores
+needs a higher cap or a separate deliberate cleanup of those ignores.
+
+The scanner blocklist remains configurable through `BRAGI_NOTFOUND_BLOCKLIST`
+(JSON globs). `.well-known/*` is allowed by default, but an operator can add it
+to the blocklist. Referrers and path shapes do not bypass the recording limits.
+
 ## Container runtime
 
 Container runtime hardening already in the published images:

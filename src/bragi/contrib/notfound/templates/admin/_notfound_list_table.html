@@ -1,12 +1,23 @@
 <div id="notfound-list-table">
+<p id="notfound-capacity"><small>Retained records: {{ retained }} / {{ capacity }}</small></p>
+{% if not recording_enabled %}
+<p>404 recording is disabled in the server configuration. Existing records are kept.</p>
+{% endif %}
+{% if retained >= capacity %}
+<p id="notfound-capacity-warning" role="status">Capacity reached. New paths are no longer recorded.
+   Run 404 record cleanup to remove dismissed or redirected records, or raise the configured limit.
+   Ignored records are kept and also count toward capacity.</p>
+{% endif %}
+<p><small>Recording is rate-limited and may be skipped when the database is busy.
+   Counts and times reflect recorded hits only.</small></p>
 {% if entries %}
 <table>
   <thead>
     <tr>
       <th><input type="checkbox" class="nf-select-all" title="Select all"></th>
       <th>Path</th>
-      <th>Hits</th>
-      <th>Last seen</th>
+      <th>Recorded hits</th>
+      <th>Last recorded</th>
       <th>Referrer</th>
       <th>Suggestion</th>
       <th>Actions</th>
