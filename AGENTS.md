@@ -100,8 +100,7 @@ Violating any of these produces a bug, not a style complaint.
 
 ## The database rules, which bite hardest
 
-SQLite with one writer. Two rules follow, and both have caused
-production 500s:
+SQLite permits one writer. Keep writes atomic and the lock short:
 
 1. **One connection per request.** A lifecycle hookimpl that writes
    MUST use the session it is handed and must never open its own
@@ -116,6 +115,17 @@ production 500s:
    not (SQLite treats NULL in a UNIQUE tuple as distinct, so the
    app-level check is the only guard). Single-row routes are usually
    safe because they commit per call; bulk actions are not.
+3. **Trace every transaction exit:** success, preview, validation
+   failure, conflict, and exception. Commit successful content and
+   lifecycle writes once; roll back rejected work before expensive
+   response rendering, preserving submitted fields and their original
+   version token. Preview-only work should not acquire a writer lock.
+4. **Move slow work outside the lock with a freshness check.** Name
+   every mutable input used by a scan or permission decision and
+   revalidate it under the lock before mutating. An attachment
+   fingerprint cannot detect a post gaining a reference to it.
+   For each supported authentication mode, refresh permissions without
+   losing the principal or opening a second writing session.
 
 ## htmx dispatch
 
@@ -191,19 +201,25 @@ requests that gunicorn runs concurrently.
 `uv run pytest` is the gate. Add tests for anything touching
 rendering, the plugin surface, auth, redirects, or a write path.
 
-Two structural blind spots in the fixtures, worth knowing before you
-trust a green run:
+The default unit-test fixtures have two structural blind spots:
 
-- The suite uses `:memory:` SQLite built with `Base.metadata.create_all`
-  rather than alembic, so anything that exists only in a migration
-  (FTS5 virtual tables, triggers, generated columns) is absent, and
-  a `_safe`-style swallow turns that into a silent pass.
+- They use `:memory:` SQLite built with `Base.metadata.create_all`
+  and explicitly create `posts_fts` and `pages_fts`. They do not run
+  Alembic, so passing tests cannot establish that this setup matches
+  the migrated schema.
 - `:memory:` has different connection semantics from file-backed
   SQLite, so cross-connection write-lock races never reproduce.
 
-When correctness depends on either, add a unit-level spy that
-asserts the invariant directly rather than relying on the
-integration path.
+When correctness depends on either, use the migrated, file-backed
+fixtures in `tests/integration/conftest.py`. Exercise locking with
+independent connections and persistence through the actual route or
+command and lifecycle hooks. Spies can supplement these checks, but
+cannot establish database behavior.
+
+Exercise affected behavior with the supported authentication modes
+(browser session and bearer token where applicable) and the input
+forms promised by the documentation. Where two paths can satisfy the
+same assertion, include an input that requires each path.
 
 Five mechanical checks worth more than "write a good test":
 
@@ -217,6 +233,14 @@ Five mechanical checks worth more than "write a good test":
    comparison degenerates there.
 5. **Parse values; never `in` against formatted output.**
    `"remaining=5" in log` also matches `remaining=50`.
+
+## Recovery checks
+
+For a limit, migration, or protective refusal, start from the blocked
+state and exercise the documented operator recovery through to usable
+state. Include existing data and hidden statuses where relevant.
+Verify that recovery preserves content and deliberate operator
+decisions; document any required copy-out before restaging or upgrade.
 
 ## CHANGELOG
 
@@ -244,6 +268,15 @@ Removing or renaming a structural identifier (a module, workflow,
 plugin, Settings field, CLI command) means grepping the README for
 the old name in the same PR. Adding a public route means updating
 the route list.
+
+## Review evidence
+
+Name the revision, mutation, and exact tests run when reporting
+coverage. A mutation surviving selected tests proves only that those
+tests did not reject it; search all tracked tests before claiming a
+behavior has no guard. Check current documentation before reporting
+missing guidance, and executable behavior at the relevant older
+revision before proposing a compatibility migration.
 
 ## Pull requests
 
