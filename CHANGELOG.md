@@ -9,6 +9,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - Media deletion parses and renders previews before taking the writer lock, then rechecks all scan inputs before removing records or files (#530).
 - Media usage checks recognize literal URLs inside code and beside sentence punctuation, including rendition filenames (#534).
+- Legacy working-copy editors explain how to copy out changes before restaging replaces the copy; promotion still requires a fresh baseline (#536, #538).
 - 404 database failures and rate suppression each retain a bounded warning per site and worker window (#538).
 - Repeated internal-link lifecycle hooks reconcile pending edges within the same transaction, preventing publication failures (#529).
 - Rejected post and page edits release the writer lock before rendering; invalid inline status changes do not claim it (#532, #538).

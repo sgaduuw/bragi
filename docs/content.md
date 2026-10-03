@@ -26,8 +26,17 @@ If someone changes content after you open it, Bragi rejects your stale save and
 keeps your submitted text visible. Open the latest version in another tab, compare
 and copy your changes there, then save. Recovering an older browser copy retains
 its original version check. Working-copy promotion also checks whether the live
-content changed since staging. Restage from the latest live editor after comparing
-your changes; working copies created before this protection need restaging too.
+content changed since staging. Working copies created before this protection
+cannot be promoted until restaged.
+
+To recover a legacy or conflicting working copy:
+
+1. Copy all your changed fields somewhere safe **before restaging**. Restaging
+   replaces the existing working copy.
+2. Open the latest live editor and stage a fresh copy.
+3. Restore your copied fields into that new working copy, keeping any newer live
+   changes you want to retain.
+4. Save the working copy, review it, then promote it.
 
 ## Scheduling posts
 

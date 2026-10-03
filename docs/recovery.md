@@ -34,6 +34,12 @@ installed plugins, and `SELECT version_num FROM alembic_version` with the
 backup. A package version alone cannot distinguish unreleased source commits.
 Do not put secret values in the evidence record.
 
+Before an upgrade that adds working-copy version checks, promote pending copies
+or copy their changed fields somewhere safe. Existing copies have no baseline and
+must be restaged before promotion. Downgrading and reapplying that migration also
+loses the baseline. Follow the [copy-out recovery steps](content.md#protecting-unfinished-writing)
+before restaging, because it replaces the old copy.
+
 ## Make a consistent backup
 
 1. Put the site into maintenance at the proxy and stop **all writers**:

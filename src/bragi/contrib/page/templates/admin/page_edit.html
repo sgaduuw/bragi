@@ -22,6 +22,14 @@
     Use <strong>Promote</strong> to copy the staged content onto the
     live page and publish it.
   </p>
+  {% if page.base_fingerprint is none %}
+  <p id="working-copy-upgrade-help">
+    This working copy predates version checks. Copy your changed fields somewhere
+    safe <strong>before restaging</strong>: restaging replaces this copy.
+    Open the latest live editor, stage a fresh copy, restore your copied fields,
+    then save and promote it.
+  </p>
+  {% endif %}
   {# Preview (Task 3): opens the staged content rendered through the real
      theme at the live URL, on the delivery host, in a new tab. Suppressed
      for post_index working copies (no preview path in v1) and when the
