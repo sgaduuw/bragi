@@ -9,6 +9,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - Media deletion parses and renders previews before taking the writer lock, then rechecks all scan inputs before removing records or files (#530).
 - Media usage checks recognize literal URLs inside code and beside sentence punctuation, including rendition filenames (#534).
+- 404 database failures and rate suppression each retain a bounded warning per site and worker window (#538).
 - Repeated internal-link lifecycle hooks reconcile pending edges within the same transaction, preventing publication failures (#529).
 - Rejected post and page edits release the writer lock before rendering; invalid inline status changes do not claim it (#532, #538).
 - Scheduled publication rechecks current eligibility atomically, isolates failures, and reports committed publication separately from cache-purge warnings (#521).
@@ -21,6 +22,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skip busy SQLite writes promptly and show capacity warnings (#519).
 
 ### Added
+- Optional `bragi notfound prune --include-ignored` cleanup with dry-run and explicit `--yes` confirmation reclaims capacity occupied by ignored paths; ordinary cleanup preserves suppression (#533).
 - Site-timezone post scheduling with rescheduling, cancellation, and visible overdue or missing-time states (#521).
 - Explicit `bragi notfound prune --site <slug>` cleanup with `--dry-run`,
   preserving ignored records and unresolved open paths (#519).

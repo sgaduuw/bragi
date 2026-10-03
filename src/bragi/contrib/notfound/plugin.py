@@ -12,7 +12,7 @@ Splits into two surfaces:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
 from time import monotonic
 from typing import cast
@@ -44,7 +44,7 @@ _MAX_PATH_LEN = 1024
 class _Window:
     number: int
     attempts: int = 0
-    warned: bool = False
+    warned_reasons: set[str] = field(default_factory=set)
 
 
 @hookimpl
@@ -69,9 +69,9 @@ def on_app_init(app: Flask, registry: object) -> None:
 
     def warn_once(site_id: int, budget: _Window, reason: str) -> None:
         with lock:
-            if budget.warned:
+            if reason in budget.warned_reasons:
                 return
-            budget.warned = True
+            budget.warned_reasons.add(reason)
         LOG.warning("404 recording skipped for site_id=%d: %s", site_id, reason)
 
     @app.after_request
@@ -204,7 +204,8 @@ def admin_notices(site: Site) -> list[AdminNotice]:
             severity="warn",
             title="404 recording capacity reached",
             body=f"{retained} records retained. New paths are no longer recorded. "
-            "Prune dismissed or redirected records, or raise the configured limit.",
+            "Prune dismissed or redirected records. To remove ignored records too, use "
+            "--include-ignored --yes; those paths can then be recorded again.",
             cta_label="404 records",
             cta_endpoint="notfound_admin.list_notfound",
             cta_endpoint_kwargs={"site_slug": site.slug},

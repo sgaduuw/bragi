@@ -157,8 +157,10 @@ consume capacity. The 404 page displays the retained count, and the admin
 shows a capacity warning. Recording attempts wait at most 50 ms for a SQLite
 lock and are not retried; the normal response remains a 404. This limit covers
 the recorder's lock wait, not the total response time or other delivery work.
-Rate suppression and database failures log at most once per site per worker
-per window. Recorded hit counts and timestamps are therefore incomplete.
+Rate suppression and database failures each log at most once per site per worker
+per window, at most two warnings for these reasons. Recorded hit counts and
+timestamps are therefore incomplete. The capacity probe walks the site index up
+to the configured row cap, so measure its cost before substantially raising the cap.
 
 To reclaim capacity, dismiss unwanted records or create redirects, then
 preview and run explicit cleanup:
@@ -172,9 +174,20 @@ For Compose, prefix the commands with `docker compose exec admin`.
 Cleanup removes dismissed records and records covered by active exact
 redirects, including Gone (410). It preserves ignored records and unresolved
 open records. It never runs automatically. Pruning loses the removed records'
-hit history; a later eligible 404 can create a new record. Ignored records
-cannot be reclaimed by this command, so a site filled with permanent ignores
-needs a higher cap or a separate deliberate cleanup of those ignores.
+hit history; a later eligible 404 can create a new record.
+
+If ignored records fill the store, explicitly include them in cleanup:
+
+```sh
+bragi notfound prune --site blog --include-ignored --dry-run
+bragi notfound prune --site blog --include-ignored --yes
+```
+
+The dry run changes nothing. Removing ignored records requires `--yes` because
+it removes their suppression and hit history; those paths can be recorded again.
+Other sites and unresolved open records remain untouched. Ordinary cleanup keeps
+ignored records and does not require `--yes`. No existing ignored status is changed
+automatically during an upgrade.
 
 The scanner blocklist remains configurable through `BRAGI_NOTFOUND_BLOCKLIST`
 (JSON globs). `.well-known/*` is allowed by default, but an operator can add it
