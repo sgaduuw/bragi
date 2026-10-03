@@ -219,8 +219,10 @@ selection.
 Before confirming deletion, review the listed published content, drafts,
 working copies, saved revisions and site defaults. Published featured images
 can also supply social cards. Confirmation is checked again when submitted;
-changed usage requires another review. The list reports known usage, not a
-promise that an image is unused. External sites, third-party plugins,
+changed content or media mappings require another review. Scanning and preview
+rendering leave database writes available; confirmed deletion briefly locks writes
+to recheck the scanned values and protect file removal. The list reports known
+usage, not a promise that an image is unused. External sites, third-party plugins,
 structured resume data, custom theme/settings fields and browser-only drafts
 are outside this check.
 

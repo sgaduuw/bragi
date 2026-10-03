@@ -1,6 +1,6 @@
 import pytest
 
-from bragi.core.media_usage import attachment_usage, media_usage
+from bragi.core.media_usage import attachment_usage, media_usage, media_usage_inputs
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.post import Post
 from bragi.core.models.post_revision import PostRevision
@@ -176,3 +176,59 @@ def test_usage_normalizes_rendered_local_urls(db_session, body_template):
     usages = attachment_usage(db_session, site, [attachment])[attachment.id]
     assert len(usages) == 1
     assert usages[0].storage_key == key and usages[0].status == "published"
+
+
+@pytest.mark.parametrize(
+    ("body_template", "suffix", "local"),
+    [
+        ("Use `/attachments/{key}` here.", "", True),
+        ("See /attachments/{key}.", "", True),
+        ("See https://blog.test/attachments/{key}, please.", "", True),
+        ("```html\n<img src='/attachments/{key}'>\n```", "", True),
+        ("<div><img src='/attachments/{key}'></div>", "", True),
+        ("Use `/attachments/{key}` here.", "/320/image.large.webp", True),
+        ("Use `https://foreign.test/attachments/{key}` here.", "", False),
+    ],
+)
+def test_usage_includes_literal_media_urls(db_session, body_template, suffix, local):
+    site = make_test_site(db_session, slug="blog", hostname="blog.test", title="Blog")
+    key = "a" * 64 + suffix
+    post = Post(
+        site_id=site.id,
+        author_id=site.owner_user_id,
+        slug="literal",
+        title="Literal example",
+        body_markdown=body_template.format(key=key),
+    )
+    db_session.add(post)
+    db_session.flush()
+    assert [
+        (ref.storage_key, ref.source_type, ref.source_id) for ref in media_usage(db_session, site)
+    ] == ([(key, "post", post.id)] if local else [])
+
+
+def test_usage_parses_supplied_snapshot_after_database_changes(db_session):
+    site = make_test_site(db_session, slug="blog", hostname="blog.test", title="Blog")
+    key = "a" * 64
+    attachment = Attachment(
+        site_id=site.id, filename="a.png", content_type="image/png", size_bytes=1, storage_key=key
+    )
+    post = Post(
+        site_id=site.id,
+        author_id=site.owner_user_id,
+        slug="snapshot",
+        title="Snapshot",
+        body_markdown=f"![old](/attachments/{key})",
+    )
+    db_session.add_all([attachment, post])
+    db_session.flush()
+    inputs = media_usage_inputs(db_session, site)
+    post.body_markdown = "Changed after snapshot"
+    attachment.storage_key = "b" * 64
+    db_session.flush()
+    assert media_usage(db_session, site) == []
+    assert [ref.storage_key for ref in media_usage(db_session, site, inputs=inputs)] == [key]
+    assert [
+        ref.storage_key
+        for ref in attachment_usage(db_session, site, [attachment], inputs=inputs)[attachment.id]
+    ] == [key]
