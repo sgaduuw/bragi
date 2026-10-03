@@ -355,3 +355,165 @@ def test_resolve_featured_image_id_rejects_cross_site_attachment(
         value, err = _resolve_featured_image_id(db, "abc", site_a.id)
         assert value is None
         assert err is not None
+
+
+def test_post_index_honors_noindex(delivery_app, db_session):
+    from bs4 import BeautifulSoup
+    from sqlalchemy import select
+
+    page = db_session.scalars(select(Page).where(Page.kind == PageKind.POST_INDEX)).one()
+    page.noindex = True
+    db_session.commit()
+    assert db_session.get(Page, page.id).noindex is True
+    response = delivery_app.test_client().get("/posts/", headers={"Host": "blog.example.com"})
+    assert response.status_code == 200
+    robots = BeautifulSoup(response.data, "html.parser").select_one('meta[name="robots"]')
+    assert robots is not None and robots["content"] == "noindex"
+
+
+@pytest.mark.parametrize(
+    "kind", ["post", "static", "resume", "profile", "post_index", "home", "nested"]
+)
+@pytest.mark.parametrize("case", ["fallback", "override", "rendition", "empty", "no-origin"])
+def test_effective_metadata_matches_public_head(delivery_app, db_session, kind, case):
+    from bs4 import BeautifulSoup
+    from sqlalchemy import select
+
+    from bragi.core.models.attachment_rendition import AttachmentRendition
+    from bragi.core.profiles import profile_view
+    from bragi.core.seo import effective_metadata
+
+    site = db_session.scalars(select(Site)).one()
+    index = db_session.scalars(select(Page).where(Page.kind == "post_index")).one()
+    item = (
+        db_session.scalars(select(Post)).one()
+        if kind == "post"
+        else index
+        if kind == "post_index"
+        else db_session.scalars(select(Page).where(Page.slug == "about")).one()
+    )
+    path = "/posts/hello/" if kind == "post" else "/posts/" if kind == "post_index" else "/about/"
+    if kind == "home":
+        site.home_page_id = item.id
+        path = "/"
+    elif kind == "nested":
+        item.parent_id = index.id
+        path = "/posts/about/"
+    elif kind in ("resume", "profile"):
+        item.kind = kind
+    item.title = 'Plain <title> & "quotes"'
+    item.body_excerpt = "Body <excerpt> & details" if case != "empty" else ""
+    item.noindex = True
+    author = db_session.get(User, item.author_id)
+    if kind == "profile" and case != "empty":
+        author.bio = "Author **biography**"
+        author.avatar_url = "https://images.example/avatar.png"
+    default = db_session.scalars(
+        select(Attachment).where(Attachment.storage_key == "sha-default")
+    ).one()
+    if case != "empty":
+        site.default_featured_image_id = default.id
+    if case == "override":
+        item.meta_title = "Preferred <title> & details"
+        item.meta_description = "Preferred <description> & details"
+        item.canonical_url = "https://preferred.example/item/?a=1&b=2"
+    elif case == "rendition":
+        image = db_session.scalars(
+            select(Attachment).where(Attachment.storage_key == "sha-post")
+        ).one()
+        item.featured_image_id = image.id
+        db_session.add(
+            AttachmentRendition(
+                attachment_id=image.id,
+                size_label="800w",
+                format="webp",
+                width=800,
+                content_type="image/webp",
+                storage_key="social.webp",
+                status="done",
+            )
+        )
+    elif case == "no-origin":
+        site.canonical_url = ""
+    db_session.commit()
+    with delivery_app.app_context():
+        metadata = effective_metadata(
+            item=item,
+            site=site,
+            public_path=path,
+            db=db_session,
+            page_kind=getattr(item, "kind", None),
+            profile=profile_view(author) if kind == "profile" else None,
+        )
+    assert metadata.title == (item.meta_title or item.title)
+    assert metadata.description == (
+        item.meta_description
+        or ("Author biography" if kind == "profile" and case != "empty" else None)
+        or item.body_excerpt
+        or None
+    )
+    expected_canonical = (
+        item.canonical_url
+        if kind != "post_index" and item.canonical_url
+        else "https://blog.example.com" + path
+        if case != "no-origin"
+        else None
+    )
+    assert metadata.canonical_url == expected_canonical
+    expected_image = (
+        "https://images.example/avatar.png"
+        if kind == "profile" and case != "empty"
+        else None
+        if case in ("empty", "no-origin")
+        else "https://blog.example.com/attachments/social.webp"
+        if case == "rendition"
+        else "https://blog.example.com/attachments/sha-default"
+    )
+    assert metadata.image_url == expected_image
+    response = delivery_app.test_client().get(path, headers={"Host": "blog.example.com"})
+    assert response.status_code == 200
+    head = BeautifulSoup(response.data, "html.parser")
+    assert head.title.text == metadata.document_title
+    for selector, value in [
+        ('meta[name="description"]', metadata.description),
+        ('meta[property="og:title"]', metadata.title),
+        ('meta[name="twitter:title"]', metadata.title),
+        ('meta[property="og:description"]', metadata.description),
+        ('meta[name="twitter:description"]', metadata.description),
+        ('meta[property="og:image"]', metadata.image_url),
+        ('meta[name="twitter:image"]', metadata.image_url),
+        ('meta[property="og:url"]', metadata.canonical_url),
+        ('meta[name="robots"]', "noindex"),
+    ]:
+        element = head.select_one(selector)
+        assert (element["content"] if element else None) == value, selector
+    canonical = head.select_one('link[rel="canonical"]')
+    assert (canonical["href"] if canonical else None) == metadata.canonical_url
+
+
+def test_post_index_pagination_self_canonicalizes(delivery_app, db_session):
+    from bs4 import BeautifulSoup
+    from sqlalchemy import select
+
+    site = db_session.scalars(select(Site)).one()
+    site.extra_settings = {"posts_per_page": 1}
+    index = db_session.scalars(select(Page).where(Page.kind == "post_index")).one()
+    index.canonical_url = "https://ignored.example/"
+    index.noindex = True
+    db_session.add(
+        Post(
+            site_id=site.id,
+            author_id=site.owner_user_id,
+            slug="second",
+            title="Second",
+            status="published",
+            published_at=datetime(2026, 5, 2),
+        )
+    )
+    db_session.commit()
+    for path in ("/posts/", "/posts/page/2/"):
+        response = delivery_app.test_client().get(path, headers={"Host": "blog.example.com"})
+        assert response.status_code == 200
+        head = BeautifulSoup(response.data, "html.parser")
+        assert head.select_one('link[rel="canonical"]')["href"] == "https://blog.example.com" + path
+        assert head.select_one('meta[name="robots"]')["content"] == "noindex"

@@ -691,8 +691,9 @@ disable 404 recording independently of redirects.
 upsert. New paths are admitted only below `notfound_max_rows` (default
 1000 total rows/site). Checking capacity inside the write prevents
 cross-worker admission races. The indexed capacity probe stops at the
-configured limit, even when pre-existing data exceeds it. Existing paths
-can update at capacity; no data is evicted automatically.
+configured limit, even when pre-existing data exceeds it. Its indexed OFFSET
+walk is linear in the configured cap; measure before large increases. Existing
+paths can update at capacity; no data is evicted automatically.
 
 A thread-safe in-memory budget admits at most
 `notfound_records_per_minute` attempts (default 60) per site per delivery
@@ -704,8 +705,9 @@ not a deployment-wide limiter. A shared limiter is the upgrade path if that
 becomes necessary. The recorder uses one 50 ms SQLite lock attempt and
 restores the connection's original timeout before returning it to the pool.
 A recording failure does not change the 404 response. Suppression/failure
-warnings occur at most once per site/worker/window. Counts and timestamps
-represent recorded hits, not a complete access log.
+warnings each occur at most once per site/worker/window, at most two warnings
+for the current reasons. One reason cannot suppress the other. Counts and
+timestamps represent recorded hits, not a complete access log.
 
 **Why the scanner blocklist still filters before recording.**
 `Settings.notfound_blocklist` (case-insensitive fnmatch globs, JSON
@@ -724,8 +726,11 @@ and the admin shows a count and a cached capacity warning.
 `bragi notfound prune --site <slug>` explicitly deletes dismissed records
 or records currently covered by active exact redirects. `--dry-run` counts
 candidates. The delete rechecks those predicates itself, preserving a
-concurrent Ignore and never touching another site. Ignored records are
-always retained; there is no automatic retention or eviction policy.
+concurrent Ignore during ordinary cleanup and never touching another site.
+Ignored records are retained by default. `--include-ignored --dry-run` previews
+optional removal, and `--include-ignored --yes` confirms losing their suppression
+and history so the store can recover from capacity occupied by ignores. Those
+paths can be recorded again. There is no automatic retention or eviction policy.
 See [operations](docs/operations.md#404-recording-limits-and-cleanup).
 
 **Why suggestions are leaf-slug matches only.** Per detected 404,

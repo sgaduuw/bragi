@@ -123,3 +123,42 @@ def test_restore_cleans_notifications_when_publication_won_first(editor, db_sess
         assert (post.status, post.scheduled_for, post.title) == ("draft", None, "Earlier")
         assert list(db.scalars(select(ActivityPubOutbox))) == []
         assert list(db.scalars(select(WebmentionOutbox))) == []
+
+
+@pytest.mark.parametrize("status", ["scheduled", "invalid"])
+def test_rejected_inline_status_does_not_claim_writer_lock(editor, db_engine, monkeypatch, status):
+    from bragi.contrib.post import admin
+
+    client, _, post_id = editor
+    token = csrf_token(client)
+    render = admin.render_template
+    claims = []
+    probes = []
+
+    def observe_lock(conn, cursor, statement, parameters, context, many):
+        if statement == "BEGIN IMMEDIATE":
+            claims.append(statement)
+
+    def probe_render(template, *args, **kwargs):
+        assert template == "admin/_status_cell.html"
+        other = sqlite3.connect(db_engine.url.database, timeout=0)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            probes.append(True)
+        finally:
+            other.rollback()
+            other.close()
+        return render(template, *args, **kwargs)
+
+    monkeypatch.setattr(admin, "render_template", probe_render)
+    event.listen(db_engine, "before_cursor_execute", observe_lock)
+    try:
+        response = client.patch(
+            f"/admin/sites/blog/posts/{post_id}/patch/status",
+            data={"_csrf_token": token, "status": status},
+        )
+    finally:
+        event.remove(db_engine, "before_cursor_execute", observe_lock)
+    assert response.status_code == 200
+    assert probes == [True]
+    assert claims == []

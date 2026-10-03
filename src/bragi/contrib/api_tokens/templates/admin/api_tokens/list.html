@@ -2,7 +2,7 @@
 {% block title %}API tokens &middot; bragi admin{% endblock %}
 {% block content %}
 <h1>API tokens</h1>
-<p>Personal access tokens authenticate scripts and bots. Use them with the <code>Authorization: Bearer ...</code> header on any admin endpoint or the JSON REST surface at <code>/admin/api/sites/&lt;slug&gt;/posts/</code>.</p>
+<p>Personal access tokens authenticate scripts and bots on the JSON API at <code>/admin/api/sites/&lt;slug&gt;/posts/</code>, using the <code>Authorization: Bearer ...</code> header. HTML admin routes reject bearer headers; use a browser session and CSRF token for those routes.</p>
 
 <section style="margin-top: 2rem;">
   <h2>Create a token</h2>

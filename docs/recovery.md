@@ -34,6 +34,12 @@ installed plugins, and `SELECT version_num FROM alembic_version` with the
 backup. A package version alone cannot distinguish unreleased source commits.
 Do not put secret values in the evidence record.
 
+Before an upgrade that adds working-copy version checks, promote pending copies
+or copy their changed fields somewhere safe. Existing copies have no baseline and
+must be restaged before promotion. Downgrading and reapplying that migration also
+loses the baseline. Follow the [copy-out recovery steps](content.md#protecting-unfinished-writing)
+before restaging, because it replaces the old copy.
+
 ## Make a consistent backup
 
 1. Put the site into maintenance at the proxy and stop **all writers**:
@@ -219,8 +225,10 @@ selection.
 Before confirming deletion, review the listed published content, drafts,
 working copies, saved revisions and site defaults. Published featured images
 can also supply social cards. Confirmation is checked again when submitted;
-changed usage requires another review. The list reports known usage, not a
-promise that an image is unused. External sites, third-party plugins,
+changed content or media mappings require another review. Scanning and preview
+rendering leave database writes available; confirmed deletion briefly locks writes
+to recheck the scanned values and protect file removal. The list reports known
+usage, not a promise that an image is unused. External sites, third-party plugins,
 structured resume data, custom theme/settings fields and browser-only drafts
 are outside this check.
 

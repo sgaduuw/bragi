@@ -6,7 +6,10 @@
 {% if retained >= capacity %}
 <p id="notfound-capacity-warning" role="status">Capacity reached. New paths are no longer recorded.
    Run 404 record cleanup to remove dismissed or redirected records, or raise the configured limit.
-   Ignored records are kept and also count toward capacity.</p>
+   Ignored records also count toward capacity. To deliberately remove their suppression and hit history,
+   preview with <code>bragi notfound prune --site {{ site.slug }} --include-ignored --dry-run</code>,
+   then confirm with <code>bragi notfound prune --site {{ site.slug }} --include-ignored --yes</code>.
+   Removed ignored paths can be recorded again.</p>
 {% endif %}
 <p><small>Recording is rate-limited and may be skipped when the database is busy.
    Counts and times reflect recorded hits only.</small></p>

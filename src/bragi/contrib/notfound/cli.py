@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import click
 from flask.cli import with_appcontext
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 
+from bragi.contrib.notfound.queries import covered_by_exact_redirect
 from bragi.core.db import SessionLocal
 from bragi.core.models.not_found import NotFound, NotFoundStatus
-from bragi.core.models.redirect import MatchType, Redirect
 from bragi.core.models.site import Site
 
 
@@ -20,38 +20,48 @@ def notfound_group() -> None:
 @notfound_group.command("prune")
 @click.option("--site", "site_slug", required=True, help="Site slug to clean up.")
 @click.option("--dry-run", is_flag=True, help="Count eligible records without deleting them.")
+@click.option(
+    "--include-ignored",
+    is_flag=True,
+    help="Also remove ignored paths, losing their suppression and hit history.",
+)
+@click.option(
+    "--yes", is_flag=True, help="Confirm removing ignored paths; they can be recorded again."
+)
 @with_appcontext
-def prune(site_slug: str, dry_run: bool) -> None:
+def prune(site_slug: str, dry_run: bool, include_ignored: bool, yes: bool) -> None:
     """Remove dismissed or active exact-redirect-covered records.
 
-    Ignored records remain permanently suppressed and still consume
-    capacity. Unresolved open records are kept. Nothing is pruned automatically.
+    Ignored records are kept unless explicitly included and confirmed.
+    Unresolved open records are kept. Nothing is pruned automatically.
     """
+    if include_ignored and not dry_run and not yes:
+        raise click.UsageError(
+            "Removing ignored records loses suppression and hit history; "
+            "those paths can be recorded again. Add --yes to confirm or --dry-run to preview."
+        )
     with SessionLocal() as db:
         site_id = db.scalar(select(Site.id).where(Site.slug == site_slug))
         if site_id is None:
             raise click.UsageError(f"No site with slug {site_slug!r}.")
-        covered = (
-            select(Redirect.id)
-            .where(
-                Redirect.site_id == site_id,
-                Redirect.source_path == NotFound.path,
-                Redirect.match_type == MatchType.EXACT,
-                Redirect.active.is_(True),
-            )
-            .correlate(NotFound)
-            .exists()
-        )
+        statuses = [NotFoundStatus.DISMISSED]
+        if include_ignored:
+            statuses.append(NotFoundStatus.IGNORED)
         eligible = (
             NotFound.site_id == site_id,
-            NotFound.status != NotFoundStatus.IGNORED,
-            or_(NotFound.status == NotFoundStatus.DISMISSED, covered),
+            or_(
+                NotFound.status.in_(statuses),
+                and_(
+                    NotFound.status != NotFoundStatus.IGNORED,
+                    covered_by_exact_redirect(site_id),
+                ),
+            ),
         )
         if dry_run:
             count = db.scalar(select(func.count()).select_from(NotFound).where(*eligible))
         else:
             # Evaluate status and redirect membership in the DELETE itself,
-            # so a concurrent Ignore cannot be undone by a stale list of IDs.
+            # so default cleanup preserves a concurrent Ignore.
             count = db.connection().execute(delete(NotFound).where(*eligible)).rowcount
             db.commit()
     verb = "Would prune" if dry_run else "Pruned"

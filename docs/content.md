@@ -26,8 +26,44 @@ If someone changes content after you open it, Bragi rejects your stale save and
 keeps your submitted text visible. Open the latest version in another tab, compare
 and copy your changes there, then save. Recovering an older browser copy retains
 its original version check. Working-copy promotion also checks whether the live
-content changed since staging. Restage from the latest live editor after comparing
-your changes; working copies created before this protection need restaging too.
+content changed since staging. Working copies created before this protection
+cannot be promoted until restaged.
+
+To recover a legacy or conflicting working copy:
+
+1. Copy all your changed fields somewhere safe **before restaging**. Restaging
+   replaces the existing working copy.
+2. Open the latest live editor and stage a fresh copy.
+3. Restore your copied fields into that new working copy, keeping any newer live
+   changes you want to retain.
+4. Save the working copy, review it, then promote it.
+
+## Search and social previews
+
+Post and page editors show illustrative search and social cards using the same
+metadata rules as the public site. After changing fields, choose **Update previews**
+to refresh the cards. This reads the submitted form without saving or publishing;
+choose the normal save action when ready. Further typing requires another preview
+update. Search engines and sharing services may choose a different presentation.
+
+Blank metadata fields use these fallbacks:
+
+| Field | Effective value |
+| --- | --- |
+| Meta title | Content title; the document/search title also includes the site title. |
+| Meta description | Body excerpt. Profile pages prefer the author's biography. |
+| Canonical URL | Generated public address. Blog indexes always use their own page address, including pagination. |
+| Social image | Selected featured image, then the site default. Profile pages prefer the author's avatar. |
+
+A canonical override identifies the preferred indexing address; it does not
+redirect readers. **Noindex** asks search engines not to list the content and does
+not make it private. Blog-index pages also honor this setting.
+
+Working-copy cards use the proposed slug and parent after promotion. The separate
+working-copy theme preview still uses the live address. Posts need a published
+blog index for a public address; never-published posts on dated permalinks acquire
+their date segments at first publication. Without a configured site URL, generated
+absolute addresses and local social-image URLs are unavailable.
 
 ## Scheduling posts
 
@@ -118,8 +154,8 @@ posts without a time need a time entered, or cancellation to Draft.
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties
   use. No internal fast path.
-- **SEO as a first-class citizen.** Per-page title / meta /
-  canonical / JSON-LD editable in admin. Open Graph + Twitter
+- **SEO as a first-class citizen.** Post and page metadata controls with
+  search/social previews, canonical URLs and noindex; automatic JSON-LD. Open Graph + Twitter
   Card meta on every post and page (with a per-post / per-page
   attachment override and a per-site default OG image), so
   social shares render rich previews. Per-site `sitemap.xml`,
@@ -160,8 +196,11 @@ posts without a time need a time entered, or cancellation to Draft.
   via `Authorization: Bearer brg_<id>_<secret>`. The JSON REST
   surface at `/admin/api/sites/<slug>/posts/` covers GET list,
   POST create, PATCH update, and POST publish, scope-gated by
-  `post:write`. Argon2id-hashed at rest; expiry honoured; every
-  use recorded in the audit log.
+  `post:write`. Bearer tokens work only on this JSON API. HTML admin
+  routes reject bearer headers, including requests that also carry a
+  browser session cookie. Use the normal browser session and CSRF token
+  for those routes. Tokens are Argon2id-hashed at rest; expiry is honoured
+  and usage is recorded in the audit log.
 - **Indieweb webmentions (send + receive).** Outbound: on
   publish or update, every external link in a post is queued
   behind a debounce hold-off window; edits within the window

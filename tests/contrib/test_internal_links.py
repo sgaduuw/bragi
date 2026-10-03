@@ -770,6 +770,73 @@ def test_reindex_source_replaces_prior_edges(
     assert {(e.target_type, e.target_id) for e in edges} == {("post", target_a.id)}
 
 
+@pytest.mark.parametrize("final_link", ["same", "different", "removed"])
+def test_reindex_source_replaces_pending_edges(
+    db_session: Session,
+    seeded: tuple[Site, User],
+    final_link: str,
+) -> None:
+    """Two hooks in one transaction must leave only the latest edge set."""
+    from bragi.contrib.internal_links.index import reindex_source
+    from bragi.core.models.internal_link import InternalLink
+
+    site, user = seeded
+    target_a, target_b = db_session.scalars(select(Post).order_by(Post.id)).all()
+    source = Post(
+        site_id=site.id,
+        author_id=user.id,
+        slug="pending-source",
+        title="Source",
+        body_markdown="x",
+        body_html=f'<a data-bragi-link="post:{target_a.id}">A</a>',
+        status=PostStatus.DRAFT,
+    )
+    db_session.add(source)
+    db_session.flush()
+    assert db_session.autoflush is False
+    reindex_source(source, db_session)
+    assert any(isinstance(row, InternalLink) for row in db_session.new)
+
+    expected = {("post", target_a.id)}
+    if final_link == "different":
+        source.body_html = f'<a data-bragi-link="post:{target_b.id}">B</a>'
+        expected = {("post", target_b.id)}
+    elif final_link == "removed":
+        source.body_html = "<p>No links.</p>"
+        expected = set()
+    reindex_source(source, db_session)
+    db_session.commit()
+
+    edges = db_session.scalars(
+        select(InternalLink).where(
+            InternalLink.source_type == "post", InternalLink.source_id == source.id
+        )
+    ).all()
+    assert {(edge.target_type, edge.target_id) for edge in edges} == expected
+    assert len(edges) == len(expected)
+
+
+@pytest.mark.parametrize("deleted_side", ["source", "target"])
+def test_drop_for_deleted_removes_pending_edges(
+    db_session: Session,
+    seeded: tuple[Site, User],
+    deleted_side: str,
+) -> None:
+    """A later delete hook must remove edges staged by an earlier update."""
+    from bragi.contrib.internal_links.index import drop_for_deleted, reindex_source
+    from bragi.core.models.internal_link import InternalLink
+
+    source, target = db_session.scalars(select(Post).order_by(Post.id)).all()
+    source.body_html = f'<a data-bragi-link="post:{target.id}">Target</a>'
+    reindex_source(source, db_session)
+    assert any(isinstance(row, InternalLink) for row in db_session.new)
+
+    drop_for_deleted(source if deleted_side == "source" else target, db_session)
+    db_session.commit()
+
+    assert db_session.scalars(select(InternalLink)).all() == []
+
+
 def test_reindex_source_ignores_slug_form_markers(
     db_session: Session,
     seeded: tuple[Site, User],

@@ -74,6 +74,14 @@ from bragi.core.renditions import (
     resolve_featured_image_id as _resolve_featured_image_id,
 )
 from bragi.core.security import current_user
+from bragi.core.seo import (
+    apply_metadata_form,
+    effective_metadata,
+    metadata_form,
+    metadata_image_src,
+    submitted_metadata,
+    validate_metadata_form,
+)
 from bragi.core.text import slugify
 from bragi.core.time import naive_utcnow
 
@@ -102,6 +110,7 @@ def _stamp_public_url_date(post: Post, new_status: str) -> None:
 def _form_from_request() -> dict[str, str]:
     """Pull the post-edit form fields off the current request."""
     return {
+        **submitted_metadata(request.form),
         "title": (request.form.get("title") or "").strip(),
         "slug": (request.form.get("slug") or "").strip(),
         "body_markdown": request.form.get("body_markdown") or "",
@@ -273,9 +282,45 @@ def _render_post_form(
     falsy-guarded in the template, so a default is equivalent to the kwarg
     being absent.
     """
+    # A POST reaches this boundary only when it did not save.
+    if request.method == "POST":
+        db.rollback()
     fid = form.get("featured_image_id")
     site = db.get(Site, site_id)
     assert site is not None
+    form = {**metadata_form(post), **form}
+    live = db.get(Post, working_copy_post_id) if working_copy_post_id else post
+    featured_id, image_error = _resolve_featured_image_id(db, fid or "", site_id)
+    metadata_error = validate_metadata_form(form) or image_error
+    metadata = None
+    metadata_note = None
+    if not metadata_error:
+        from bragi.core.url import permalink_style_for, post_url_for
+
+        body = form.get("body_markdown", "")
+        candidate = Post(
+            title=form.get("title", ""),
+            featured_image_id=featured_id,
+            body_excerpt=post.body_excerpt
+            if post and body == post.body_markdown
+            else make_excerpt(body),
+        )
+        apply_metadata_form(candidate, form)
+        slug = form.get("slug", "")
+        published_at = live.published_at if isinstance(live, Post) else None
+        path = post_url_for(site, slug, published_at=published_at, db=db) if slug else None
+        if not slug:
+            metadata_note = "Enter a slug to complete the public address."
+        elif not path:
+            metadata_note = (
+                "No public post address is available until this site has a published blog index."
+            )
+        elif published_at is None and permalink_style_for(site, db=db) != "flat":
+            metadata_note = (
+                "First publication supplies the date segments. "
+                "This draft currently uses the flat address."
+            )
+        metadata = effective_metadata(item=candidate, site=site, public_path=path, db=db)
     schedule_error = None
     try:
         schedule_zone(site.timezone)
@@ -288,6 +333,12 @@ def _render_post_form(
         recovery_site_id=site_id,
         schedule_site=site,
         schedule_error=schedule_error,
+        metadata=metadata,
+        metadata_error=metadata_error,
+        metadata_note=metadata_note,
+        metadata_kind=None,
+        metadata_unsaved=request.method == "POST",
+        metadata_image_src=metadata_image_src(metadata.image_url) if metadata else None,
         edit_token=editor_token(
             post, None if is_working_copy or post is None else _wc_for_post(db, site_id, post.id)
         ),
@@ -404,6 +455,7 @@ def _apply_post_form_fields(
     back), but a save must not blank a field the form can't set.
     """
     body_markdown = form["body_markdown"]
+    apply_metadata_form(target, form)
     target.title = form["title"]
     target.slug = form["slug"]
     target.body_markdown = body_markdown
@@ -494,6 +546,8 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             return _render_post_form(db, site_id, None, seed_form)
 
         form = _form_from_request()
+        if request.form.get("_metadata_preview") == "1":
+            return _render_post_form(db, site_id, None, form)
         if not form["slug"] and form["title"]:
             from bragi.core.text import unique_slug_for_post
 
@@ -503,6 +557,10 @@ def new_post(site_slug: str) -> ResponseReturnValue:
                 # slugify(title) was empty — fall through to the existing
                 # required-fields error path with the title preserved.
                 pass
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_post_form(db, site_id, None, form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_post_form(db, site_id, None, form)
@@ -544,6 +602,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             is_pinned=(form["is_pinned"] == "1"),
             pinned_until=pinned_until,
         )
+        apply_metadata_form(new_post_row, form)
         db.add(new_post_row)
         db.flush()
         _sync_post_tags(db, new_post_row, form["tags"], site_id)
@@ -594,6 +653,9 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         if not ((is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)):
             abort(403)
 
+        if request.method == "POST" and request.form.get("_metadata_preview") == "1":
+            return _render_post_form(db, site.id, post, _form_from_request())
+
         if request.method == "POST":
             body_markdown = _form_from_request()["body_markdown"]
             body_html = render_markdown(body_markdown)
@@ -640,6 +702,10 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         if not editor_matches(post, _wc_for_post(db, site.id, post.id)):
             editor_conflict()
             return _render_post_form(db, post.site_id, post, form), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_post_form(db, post.site_id, post, form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_post_form(db, post.site_id, post, form)
@@ -874,6 +940,10 @@ def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         if not editor_matches(post, _wc_for_post(db, site.id, post.id)):
             editor_conflict()
             return _render_post_form(db, post.site_id, post, form), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_post_form(db, post.site_id, post, form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_post_form(db, post.site_id, post, form)
@@ -891,11 +961,12 @@ def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         wc = _wc_for_post(db, site.id, post.id)
         if wc is None:
             # `fork` seeds the staging metadata + the fields the form does
-            # not carry (subtitle/meta_*/canonical/noindex); `_apply` then
+            # not carry (subtitle); `_apply` then
             # overwrites the edited fields from the posted form.
             wc = fork_post_working_copy(post, editor_user_id=int(session["user_id"]))
             db.add(wc)
         else:
+            # Explicit restaging rebases on current live fields before applying this form.
             wc.editor_user_id = int(session["user_id"])
             for field in _EDITABLE_POST_FIELDS:
                 setattr(wc, field, getattr(post, field))
@@ -984,6 +1055,20 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
         if post is None or post.site_id != site.id:
             abort(404)
 
+        if request.form.get("_metadata_preview") == "1":
+            wc = _wc_for_post(db, site.id, post.id)
+            if wc is None:
+                abort(404)
+            return _render_post_form(
+                db,
+                site.id,
+                wc,
+                _form_from_request(),
+                is_working_copy=True,
+                working_copy_post_id=post.id,
+                preview_url=_working_copy_preview_url(wc, site),
+            )
+
         body_markdown = _form_from_request()["body_markdown"]
         body_html = render_markdown(body_markdown)
         body_excerpt = make_excerpt(body_markdown)
@@ -1024,6 +1109,10 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
         if not editor_matches(wc):
             editor_conflict()
             return _rerender(form), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _rerender(form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _rerender(form)
@@ -1523,7 +1612,8 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         error = f"Invalid status: {raw!r}"
 
     with SessionLocal() as db:
-        db.execute(text("BEGIN IMMEDIATE"))
+        if error is None:
+            db.execute(text("BEGIN IMMEDIATE"))
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
         post = db.get(Post, post_id)

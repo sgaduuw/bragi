@@ -150,33 +150,31 @@ def test_delivery_app_has_no_csrf_guard() -> None:
     assert "csrf_token" not in app.jinja_env.globals
 
 
-def test_bogus_bearer_does_not_bypass_csrf(admin_app: Flask) -> None:
-    """A session-cookie POST with `Authorization: bearer junk` is still CSRF'd.
-
-    Before #164 the CSRF guard skipped on header *presence*. An
-    attacker who could lure a logged-in browser into a cross-
-    origin POST that smuggled a custom Authorization header (e.g.
-    via a misconfigured CORS proxy or a future bug in another
-    middleware) could bypass CSRF. The verified-bearer-only
-    exemption closes that gap.
-    """
+def test_html_bearer_does_not_bypass_csrf_or_log_out(admin_app: Flask) -> None:
+    """HTML rejects bearer headers first; cookie-only writes still require CSRF."""
     client = admin_app.test_client()
-    # Populate a session + log in so cookie auth is active. Without
-    # cookie auth there's no CSRF risk to begin with; the test
-    # exercises the cookie-auth-plus-junk-bearer combination.
     token = csrf_token(client)
-    client.post(
+    response = client.post(
         "/auth/login",
         data={"email": EMAIL, "password": PASSWORD, FORM_FIELD: token},
         follow_redirects=False,
     )
-    # POST again without a CSRF token, but with a junk bearer
-    # header. CSRF must still fire.
-    resp = client.post(
+    assert response.status_code == 302
+    with client.session_transaction() as sess:
+        user_id = sess["user_id"]
+    response = client.post(
         "/auth/logout",
         headers={"Authorization": "Bearer brg_xx_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"},
     )
-    assert resp.status_code == 400
+    assert response.status_code == 401
+    with client.session_transaction() as sess:
+        assert sess["user_id"] == user_id
+    assert client.post("/auth/logout").status_code == 400
+    with client.session_transaction() as sess:
+        assert sess["user_id"] == user_id
+    assert client.post("/auth/logout", data={FORM_FIELD: token}).status_code == 302
+    with client.session_transaction() as sess:
+        assert "user_id" not in sess
 
 
 def test_register_csrf_raises_when_on_app_init_marker_missing() -> None:

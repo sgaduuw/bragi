@@ -291,7 +291,9 @@ def test_capacity_visible_in_full_partial_and_boosted_admin(
     capacity = soup.select_one("#notfound-capacity")
     assert capacity is not None
     assert capacity.get_text(" ", strip=True) == "Retained records: 3 / 3"
-    assert soup.select_one("#notfound-capacity-warning") is not None
+    warning = soup.select_one("#notfound-capacity-warning")
+    assert warning is not None
+    assert "--include-ignored --yes" in warning.get_text(" ", strip=True)
     assert [h.get_text(strip=True) for h in soup.select("th")][2] == "Recorded hits"
     other = client.get("/admin/sites/other/not-found/", headers={"Host": HOST_A, **headers})
     other_soup = BeautifulSoup(other.data, "html.parser")
@@ -320,6 +322,7 @@ def test_capacity_notice_uses_existing_plugin_surface(
     assert len(matching) == 1
     assert matching[0].severity == "warn"
     assert matching[0].dismissible is False
+    assert "--include-ignored --yes" in matching[0].body
     assert matching[0].cta_endpoint == "notfound_admin.list_notfound"
     assert matching[0].cta_endpoint_kwargs == {"site_slug": "blog"}
     with admin_app_file_db.app_context():
@@ -396,6 +399,13 @@ def test_prune_only_dismissed_or_exact_redirect_covered_and_preserves_ignored(
     assert "Pruned 2 records." in result.output.splitlines()
     expected = before - {(a, "/dismissed/"), (a, "/covered/")}
     assert {(r.site_id, r.path) for r in _rows(patched_file_session_locals)} == expected
+    result = runner.invoke(
+        bragi, ["notfound", "prune", "--site", "blog", "--include-ignored", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Pruned 2 records." in result.output.splitlines()
+    expected -= {(a, "/ignored/"), (a, "/covered-ignored/")}
+    assert {(r.site_id, r.path) for r in _rows(patched_file_session_locals)} == expected
     for args in (["notfound", "prune"], ["notfound", "prune", "--site", "absent"]):
         result = runner.invoke(bragi, args)
         assert result.exit_code == 2, result.output
@@ -458,7 +468,7 @@ def test_ineligible_requests_do_not_spend_the_recording_budget(
     }
 
 
-def test_failures_use_attempt_budget_and_log_once_per_window(
+def test_failures_use_attempt_budget_and_log_once_per_reason_per_window(
     delivery_app_file_db: Flask,
     file_db_session_factory: sessionmaker[Session],
     limits: list[float],
@@ -480,7 +490,10 @@ def test_failures_use_attempt_budget_and_log_once_per_window(
             assert client.get("/secret-path/", headers={"Host": HOST_A}).status_code == 404
     assert len(calls) == 4
     warnings = [r for r in caplog.records if r.name == plugin.__name__]
-    assert len(warnings) == 2
+    assert [r.getMessage().split(": ", 1)[1] for r in warnings] == [
+        "database write failed",
+        "recording rate limit reached",
+    ] * 2
     assert all("secret-path" not in r.getMessage() and r.exc_info is None for r in warnings)
 
 
@@ -500,3 +513,55 @@ def test_site_alias_cannot_get_an_extra_recording_budget(
     for host in (HOST_A, "alias.example.com", HOST_A, "alias.example.com"):
         assert client.get("/repeat/", headers={"Host": host}).status_code == 404
     assert [(r.path, r.count) for r in _rows(file_db_session_factory)] == [("/repeat/", 2)]
+
+
+def test_ignored_capacity_recovery_requires_explicit_cleanup(patched_file_session_locals, limits):
+    from click.testing import CliRunner
+
+    from bragi.cli import bragi
+
+    factory = patched_file_session_locals
+    _seed(factory)
+    with factory() as db:
+        a = db.scalar(select(Site.id).where(Site.hostname == HOST_A))
+        b = db.scalar(select(Site.id).where(Site.hostname == HOST_B))
+    for i in range(3):
+        plugin._record(a, f"/ignored-{i}/", None)
+    plugin._record(b, "/ignored-other/", None)
+    with factory() as db:
+        for row in db.scalars(select(NotFound)):
+            row.status = NotFoundStatus.IGNORED
+        db.commit()
+    original = {(r.site_id, r.path, r.status, r.count) for r in _rows(factory)}
+    assert len(original) == 4
+    plugin._record(a, "/new/", None)
+    plugin._record(a, "/ignored-0/", None)
+    assert {(r.site_id, r.path, r.status, r.count) for r in _rows(factory)} == original
+    runner = CliRunner()
+    args = ["notfound", "prune", "--site", "blog"]
+    for flags, expected in (
+        (["--dry-run"], "Would prune 0 records."),
+        ([], "Pruned 0 records."),
+        (["--include-ignored", "--dry-run"], "Would prune 3 records."),
+    ):
+        result = runner.invoke(bragi, args + flags)
+        assert result.exit_code == 0, result.output
+        assert expected in result.output.splitlines()
+        assert {(r.site_id, r.path, r.status, r.count) for r in _rows(factory)} == original
+    result = runner.invoke(bragi, args + ["--include-ignored"])
+    assert result.exit_code == 2
+    assert "--yes" in result.output
+    assert {(r.site_id, r.path, r.status, r.count) for r in _rows(factory)} == original
+    result = runner.invoke(bragi, args + ["--include-ignored", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert "Pruned 3 records." in result.output.splitlines()
+    assert {(r.site_id, r.path, r.status, r.count) for r in _rows(factory)} == {
+        (b, "/ignored-other/", "ignored", 1)
+    }
+    plugin._record(a, "/new/", None)
+    plugin._record(a, "/ignored-0/", None)
+    assert {(r.site_id, r.path, r.status, r.count) for r in _rows(factory)} == {
+        (a, "/new/", "open", 1),
+        (a, "/ignored-0/", "open", 1),
+        (b, "/ignored-other/", "ignored", 1),
+    }

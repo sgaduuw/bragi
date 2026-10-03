@@ -11,9 +11,9 @@
 
 {% extends "delivery/base.html" %}
 
-{% block title %}{{ page.meta_title or page.title }} &middot; {{ site.title }}{% endblock %}
+{% block title %}{{ metadata.document_title }}{% endblock %}
 {% block social_meta %}
-  {%- set _title = page.meta_title or page.title -%}
+  {%- set _title = metadata.title -%}
   <meta property="og:title" content="{{ _title }}">
   <meta property="og:type" content="website">
   {% if canonical_url %}<meta property="og:url" content="{{ canonical_url }}">{% endif %}

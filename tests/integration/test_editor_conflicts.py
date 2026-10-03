@@ -147,19 +147,51 @@ def test_success_receipt_only_after_committed_save(editor):
     assert draft["_recovery_id"].encode() not in response.data
 
 
-def test_legacy_working_copy_cannot_promote(editor, db_session_factory):
+def test_legacy_working_copy_recovers_without_losing_copied_content(editor, db_session_factory):
     from bragi.core.models.page_working_copy import PageWorkingCopy
     from bragi.core.models.post_working_copy import PostWorkingCopy
 
-    client, root, form, model, _ = editor
+    client, root, form, model, item_id = editor
+    copy_model = PostWorkingCopy if model is Post else PageWorkingCopy
     assert client.post(root + "/working-copy/stage", data=form()).status_code == 302
     with db_session_factory() as db:
-        wc = db.scalars(select(PostWorkingCopy if model is Post else PageWorkingCopy)).one()
+        wc = db.scalars(select(copy_model)).one()
         wc.base_fingerprint = None
+        live = db.get(model, item_id)
+        live.body_markdown = "Latest live writing"
+        live.meta_description = "Current live metadata"
         db.commit()
+    response = client.get(root + "/working-copy")
+    assert response.status_code == 200
+    soup = BeautifulSoup(response.data, "html.parser")
+    copied_title = soup.select_one('input[name="title"]')["value"]
+    copied_body = soup.select_one('textarea[name="body_markdown"]').text
+    assert copied_body == "Keep this draft"
+    help_text = soup.select_one("#working-copy-upgrade-help")
+    assert help_text is not None
+    assert "before restaging" in help_text.get_text()
     assert (
         client.post(root + "/working-copy/promote", data=form("/working-copy")).status_code == 409
     )
+    with db_session_factory() as db:
+        wc = db.scalars(select(copy_model)).one()
+        assert wc.base_fingerprint is None and wc.body_markdown == copied_body
+    # Deliberate restaging replaces the old copy, so preserve its fields first.
+    data = dict(form(), body_markdown="Latest live writing")
+    assert client.post(root + "/working-copy/stage", data=data).status_code == 302
+    with db_session_factory() as db:
+        wc = db.scalars(select(copy_model)).one()
+        assert wc.base_fingerprint is not None
+        assert wc.body_markdown == "Latest live writing" and wc.body_markdown != copied_body
+    restored = dict(form("/working-copy"), title=copied_title, body_markdown=copied_body)
+    assert client.post(root + "/working-copy/save", data=restored).status_code == 302
+    tokens = {key: value for key, value in form("/working-copy").items() if key.startswith("_")}
+    assert client.post(root + "/working-copy/promote", data=tokens).status_code == 302
+    with db_session_factory() as db:
+        live = db.get(model, item_id)
+        assert (live.title, live.body_markdown) == (copied_title, copied_body)
+        assert live.meta_description == "Current live metadata"
+        assert db.scalars(select(copy_model)).first() is None
 
 
 def test_explicit_restage_uses_current_live_baseline(editor, db_session_factory):
@@ -481,3 +513,87 @@ def test_dashboard_exposes_scoped_recovery_without_an_editor(admin_app, db_sessi
     assert library["data-recovery-site"] == str(site_id)
     assert library["hx-history"] == "false"
     assert soup.select_one("form[data-editor-recovery]") is None
+
+
+@pytest.mark.parametrize(
+    ("action", "fault"),
+    [(action, "conflict") for action in ("edit", "stage", "save", "promote", "discard")]
+    + [(action, "validation") for action in ("edit", "stage", "save")],
+)
+def test_rejected_editor_renders_without_writer_lock(
+    editor, db_engine, db_session_factory, monkeypatch, action, fault
+):
+    import sqlite3
+
+    from bragi.contrib.page import admin as page_admin
+    from bragi.contrib.post import admin as post_admin
+    from bragi.core.models.page_working_copy import PageWorkingCopy
+    from bragi.core.models.post_working_copy import PostWorkingCopy
+
+    client, root, form, model, item_id = editor
+    copy_model = PostWorkingCopy if model is Post else PageWorkingCopy
+    if action in ("save", "promote", "discard"):
+        assert client.post(root + "/working-copy/stage", data=form()).status_code == 302
+        data = form("/working-copy")
+    else:
+        data = form()
+    path = "/edit" if action == "edit" else "/working-copy/" + action
+    if fault == "conflict":
+        data["_edit_token"] = "forged"
+    else:
+        data["title"] = ""
+    with db_session_factory() as db:
+        item = db.get(model, item_id)
+        before = (item.title, item.body_markdown)
+        copies_before = [
+            (copy.title, copy.body_markdown) for copy in db.scalars(select(copy_model))
+        ]
+
+    module = post_admin if model is Post else page_admin
+    render = module.render_template
+    probes = []
+
+    def probe_render(template, *args, **kwargs):
+        assert template == ("admin/edit.html" if model is Post else "admin/page_edit.html")
+        other = sqlite3.connect(db_engine.url.database, timeout=0)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            probes.append(True)
+        finally:
+            other.rollback()
+            other.close()
+        return render(template, *args, **kwargs)
+
+    monkeypatch.setattr(module, "render_template", probe_render)
+    response = client.post(root + path, data=data)
+    assert response.status_code == (409 if fault == "conflict" else 200)
+    assert probes == [True]
+    soup = BeautifulSoup(response.data, "html.parser")
+    assert soup.select_one('input[name="_edit_token"]')["value"] == data["_edit_token"]
+    assert soup.select_one('textarea[name="body_markdown"]').text == data["body_markdown"]
+    with db_session_factory() as db:
+        item = db.get(model, item_id)
+        assert (item.title, item.body_markdown) == before
+        assert [
+            (copy.title, copy.body_markdown) for copy in db.scalars(select(copy_model))
+        ] == copies_before
+
+
+@pytest.mark.parametrize(
+    ("submitted", "expected"),
+    [
+        ("malformed", None),
+        ("", None),
+        ("9C9A0058DF914EBFA3D30B694B076E25", "9c9a0058-df91-4ebf-a3d3-0b694b076e25"),
+    ],
+)
+def test_save_receipt_validates_and_canonicalizes_draft_id(editor, submitted, expected):
+    client, root, form, _, _ = editor
+    response = client.post(
+        root + "/edit", data=dict(form(), _recovery_id=submitted), follow_redirects=True
+    )
+    assert response.status_code == 200
+    receipts = BeautifulSoup(response.data, "html.parser").select("[data-editor-saved]")
+    assert [receipt["data-editor-saved"] for receipt in receipts] == (
+        [] if expected is None else [expected]
+    )

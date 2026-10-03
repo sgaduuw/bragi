@@ -32,6 +32,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bragi.api import Crumb, set_breadcrumbs
+from bragi.contrib.notfound.queries import covered_by_exact_redirect
 from bragi.contrib.notfound.suggestions import Candidate, suggest
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import wants_partial
@@ -176,17 +177,7 @@ def list_notfound(site_slug: str) -> ResponseReturnValue:
         # (no state threaded back through the deep-link). Correlated
         # NOT EXISTS keeps pagination correct. Prefix/regex redirects are
         # deliberately not consulted here (exact membership only).
-        covered = (
-            select(Redirect.id)
-            .where(
-                Redirect.site_id == site.id,
-                Redirect.source_path == NotFound.path,
-                Redirect.match_type == MatchType.EXACT,
-                Redirect.active.is_(True),
-            )
-            .correlate(NotFound)
-            .exists()
-        )
+        covered = covered_by_exact_redirect(site.id)
         query = (
             select(NotFound)
             .where(
@@ -222,6 +213,7 @@ def list_notfound(site_slug: str) -> ResponseReturnValue:
     template = "admin/_notfound_list_table.html" if wants_partial() else "admin/notfound_list.html"
     return render_template(
         template,
+        site=site,
         entries=entries,
         page=page,
         has_more=has_more,

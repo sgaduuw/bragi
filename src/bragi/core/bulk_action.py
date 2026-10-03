@@ -85,6 +85,15 @@ class BulkLimitExceeded(Exception):
     flashes the exception string and returns to the list view."""
 
 
+DEFAULT_MAX_BATCH = 200
+
+
+def check_bulk_limit(ids: Sequence[int], *, max_batch: int = DEFAULT_MAX_BATCH) -> None:
+    """Reject oversized batches before selection or other expensive work."""
+    if len(ids) > max_batch:
+        raise BulkLimitExceeded(f"Bulk delete is limited to {max_batch} items per request.")
+
+
 def bulk_delete[T](
     *,
     db: Session,
@@ -92,7 +101,7 @@ def bulk_delete[T](
     model: type[T],
     ids: Sequence[int],
     delete_one: Callable[[Session, Any, T], BulkOutcome],
-    max_batch: int = 200,
+    max_batch: int = DEFAULT_MAX_BATCH,
 ) -> BulkResult:
     """Run `delete_one` over every row in `ids` scoped to `site`.
 
@@ -100,8 +109,7 @@ def bulk_delete[T](
 
     Rows are deleted in ascending id order. This is the only ordering guarantee.
     """
-    if len(ids) > max_batch:
-        raise BulkLimitExceeded(f"Bulk delete is limited to {max_batch} items per request.")
+    check_bulk_limit(ids, max_batch=max_batch)
 
     rows = (
         db.execute(

@@ -2,10 +2,10 @@
 
 Public-facing surface:
 
-- `Authorization: Bearer brg_<public_id>_<secret>` on any admin
-  endpoint authenticates the request as the token's owner. CSRF
-  is bypassed for token-authenticated requests (bearer is its
-  own anti-CSRF, by virtue of not being a cookie).
+- `Authorization: Bearer brg_<public_id>_<secret>` authenticates
+  the registered JSON API as the token's owner. Only those requests
+  bypass CSRF. HTML admin routes reject bearer headers and require
+  the normal browser session and CSRF token.
 - `/admin/account/tokens/` lists, creates, and revokes the
   current user's tokens. Plaintext token is shown exactly once,
   on create.

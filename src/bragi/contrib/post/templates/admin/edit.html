@@ -22,6 +22,14 @@
     Use <strong>Promote</strong> to copy the staged content (and tags)
     onto the live post and publish it.
   </p>
+  {% if post.base_fingerprint is none %}
+  <p id="working-copy-upgrade-help">
+    This working copy predates version checks. Copy your changed fields somewhere
+    safe <strong>before restaging</strong>: restaging replaces this copy.
+    Open the latest live editor, stage a fresh copy, restore your copied fields,
+    then save and promote it.
+  </p>
+  {% endif %}
   {# Preview (Task 5b): opens the staged content rendered through the real
      theme at the live post URL, on the delivery host, in a new tab.
      Suppressed when the site has no canonical (delivery) URL configured
@@ -176,6 +184,7 @@
      submit button on the SAME form (HTML forbids nested forms). Drafts
      edit live as today, so the label stays the plain "Save". #}
   {% set is_published_live = is_edit and not is_wc and post.status == 'published' %}
+  {% include "admin/_metadata_fields.html" %}
   <div class="actions">
     <button type="submit">
       {%- if is_wc %}Save working copy
@@ -196,6 +205,7 @@
     {% endif %}
     <a href="{{ url_for('post_admin.list_posts') }}" class="btn secondary">Cancel</a>
   </div>
+  {% include "admin/_metadata_preview.html" %}
 </form>
 
 {% if not is_edit %}

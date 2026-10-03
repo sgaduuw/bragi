@@ -22,6 +22,14 @@
     Use <strong>Promote</strong> to copy the staged content onto the
     live page and publish it.
   </p>
+  {% if page.base_fingerprint is none %}
+  <p id="working-copy-upgrade-help">
+    This working copy predates version checks. Copy your changed fields somewhere
+    safe <strong>before restaging</strong>: restaging replaces this copy.
+    Open the latest live editor, stage a fresh copy, restore your copied fields,
+    then save and promote it.
+  </p>
+  {% endif %}
   {# Preview (Task 3): opens the staged content rendered through the real
      theme at the live URL, on the delivery host, in a new tab. Suppressed
      for post_index working copies (no preview path in v1) and when the
@@ -278,6 +286,7 @@
      sits in its own form below (HTML forbids nested forms). Drafts edit
      live as today, so the label stays the plain "Save". #}
   {% set is_published_live = is_edit and not is_wc and page.status == 'published' %}
+  {% include "admin/_metadata_fields.html" %}
   <div class="actions">
     <button type="submit">
       {%- if is_wc %}Save working copy
@@ -298,6 +307,7 @@
     {% endif %}
     <a href="{{ url_for('page_admin.list_pages') }}" class="btn secondary">Cancel</a>
   </div>
+  {% include "admin/_metadata_preview.html" %}
 </form>
 
 <script src="{{ url_for('admin_static.static', filename='page-kind-toggle.js') }}"></script>

@@ -1,0 +1,17 @@
+<fieldset aria-describedby="metadata-fields-help">
+  <legend>Search and sharing</legend>
+  <input type="hidden" name="_metadata_fields" value="1">
+  <p id="metadata-fields-help">Blank text uses the fallback shown in the previews. Update previews after changing fields.</p>
+  <p><label for="meta_title">Meta title</label>
+    <input id="meta_title" name="meta_title" maxlength="255" value="{{ form.get('meta_title', '') }}"></p>
+  <p><label for="meta_description">Meta description</label>
+    <textarea id="meta_description" name="meta_description" rows="3">{{ form.get('meta_description', '') }}</textarea></p>
+  {% if metadata_kind != 'post_index' %}
+  <p><label for="canonical_url">Canonical URL</label>
+    <input id="canonical_url" name="canonical_url" maxlength="255" value="{{ form.get('canonical_url', '') }}" aria-describedby="canonical-help">
+    <small id="canonical-help">Preferred indexing address. This does not redirect readers. Blank uses the public address.</small></p>
+  {% else %}<p>Blog indexes use automatic canonical addresses for each pagination page.</p>{% endif %}
+  <p><label for="noindex"><input type="checkbox" id="noindex" name="noindex" value="1" {% if form.get('noindex') == '1' %}checked{% endif %}> Ask search engines not to list this page</label>
+    <small>This does not make the content private.</small></p>
+  {% if metadata_kind == 'profile' %}<p>Profile pages use the author's biography and avatar before the body excerpt and featured image.</p>{% endif %}
+</fieldset>
