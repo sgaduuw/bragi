@@ -45,7 +45,7 @@ from bragi.core.models.user import User
 from bragi.core.profiles import ProfileView, profile_jsonld, profile_view
 from bragi.core.render.reading_time import reading_time_minutes
 from bragi.core.render.toc import build_toc_html
-from bragi.core.seo import featured_image_url_for
+from bragi.core.seo import effective_metadata
 from bragi.core.url import author_profile_url_for, post_url_for
 
 # Re-publishing within this window of the initial publish doesn't
@@ -133,14 +133,12 @@ def _render_post(post: Any, _request: Any) -> str:
     post_path = (
         post_url_for(site, post.slug, published_at=post.published_at) if site is not None else None
     )
-    canonical = post.canonical_url or (
-        f"{site.base_url}{post_path}" if site and site.canonical_url and post_path else None
-    )
     author_name: str | None = None
     author_profile: ProfileView | None = None
     author_url: str | None = None
     related: list[Post] = []
     with SessionLocal() as db:
+        metadata = effective_metadata(item=post, site=site, public_path=post_path, db=db)
         if post.author_id:
             author = db.get(User, post.author_id)
             if author is not None:
@@ -178,10 +176,11 @@ def _render_post(post: Any, _request: Any) -> str:
         author_jsonld=profile_jsonld(author_profile, None) if author_profile else None,
         reading_time=reading_time_minutes(post.body_markdown or ""),
         updated_visible=updated_visible,
-        meta_description=post.meta_description or post.body_excerpt or None,
-        canonical_url=canonical,
-        noindex=post.noindex,
-        og_image_url=featured_image_url_for(item=post, site=site),
+        metadata=metadata,
+        meta_description=metadata.description,
+        canonical_url=metadata.canonical_url,
+        noindex=metadata.noindex,
+        og_image_url=metadata.image_url,
         related_posts=related,
         toc_html=build_toc_html(post.body_html or ""),
     )

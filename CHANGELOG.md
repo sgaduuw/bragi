@@ -7,6 +7,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Blog-index pages honor their noindex setting while keeping each pagination page self-canonical (#522).
 - Media deletion parses and renders previews before taking the writer lock, then rechecks all scan inputs before removing records or files (#530).
 - Media usage checks recognize literal URLs inside code and beside sentence punctuation, including rendition filenames (#534).
 - Legacy working-copy editors explain how to copy out changes before restaging replaces the copy; promotion still requires a fresh baseline (#536, #538).
@@ -23,6 +24,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skip busy SQLite writes promptly and show capacity warnings (#519).
 
 ### Added
+- Post and page metadata controls with saved and unsaved search/social previews, sharing the public site's fallback rules (#522).
 - Optional `bragi notfound prune --include-ignored` cleanup with dry-run and explicit `--yes` confirmation reclaims capacity occupied by ignored paths; ordinary cleanup preserves suppression (#533).
 - Site-timezone post scheduling with rescheduling, cancellation, and visible overdue or missing-time states (#521).
 - Explicit `bragi notfound prune --site <slug>` cleanup with `--dry-run`,

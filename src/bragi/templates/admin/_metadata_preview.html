@@ -1,0 +1,30 @@
+<section aria-labelledby="metadata-preview-heading" id="metadata-preview">
+  <h2 id="metadata-preview-heading">Illustrative preview</h2>
+  <p>Search engines and sharing services may choose another presentation. Changes appear here after you select Update previews.</p>
+  <button type="submit" name="_metadata_preview" value="1" formnovalidate>Update previews</button>
+  {% if metadata_error %}<p id="metadata-error" role="alert">{{ metadata_error }}</p>{% endif %}
+  {% if metadata %}
+  <p id="metadata-state">{{ 'Unsaved preview. Nothing has been saved or published.' if metadata_unsaved else 'Preview of saved values.' }}</p>
+  {% if metadata_note %}<p id="metadata-note">{{ metadata_note }}</p>{% endif %}
+  {% if is_wc %}<p>These cards show the address after promotion. The separate Preview link renders the last saved working copy at the live address.</p>{% endif %}
+  <section aria-labelledby="metadata-search-heading">
+    <h3 id="metadata-search-heading">Search result</h3>
+    <p id="metadata-search-url">{{ metadata.canonical_url or 'No absolute public address' }}</p>
+    <strong id="metadata-search-title">{{ metadata.document_title }}</strong>
+    <p id="metadata-search-description">{{ metadata.description or 'No description' }}</p>
+  </section>
+  <section aria-labelledby="metadata-social-heading">
+    <h3 id="metadata-social-heading">Social card</h3>
+    {% if metadata_image_src %}<img id="metadata-social-image" src="{{ metadata_image_src }}" alt="Social card image" style="max-width: 100%; max-height: 18rem;">{% endif %}
+    <strong id="metadata-social-title">{{ metadata.title }}</strong>
+    <p id="metadata-social-description">{{ metadata.description or 'No description' }}</p>
+  </section>
+  <dl>
+    <dt>Title source</dt><dd>{{ metadata.title_source }}</dd>
+    <dt>Description source</dt><dd>{{ metadata.description_source }}</dd>
+    <dt>Address source</dt><dd>{{ metadata.canonical_source }}</dd>
+    <dt>Image source</dt><dd>{{ metadata.image_source }}{% if metadata.image_url and not metadata_image_src %} (unsafe image address omitted){% endif %}</dd>
+    <dt>Indexing</dt><dd>{{ 'Search engines are asked not to list this page.' if metadata.noindex else 'Search engines may list this page.' }}</dd>
+  </dl>
+  {% endif %}
+</section>

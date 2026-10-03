@@ -71,6 +71,14 @@ from bragi.core.renditions import (
 from bragi.core.renditions import (
     resolve_featured_image_id as _resolve_featured_image_id,
 )
+from bragi.core.seo import (
+    apply_metadata_form,
+    effective_metadata,
+    metadata_form,
+    metadata_image_src,
+    submitted_metadata,
+    validate_metadata_form,
+)
 
 if TYPE_CHECKING:
     from bragi.contrib.page.resume import ResumeData
@@ -114,6 +122,7 @@ def _form_from_request() -> dict[str, str]:
     # a direct POST, keeping profile rows body-free.
     body_markdown = "" if kind == PageKind.PROFILE else (request.form.get("body_markdown") or "")
     return {
+        **submitted_metadata(request.form),
         "title": (request.form.get("title") or "").strip(),
         "slug": (request.form.get("slug") or "").strip(),
         "body_markdown": body_markdown,
@@ -438,12 +447,73 @@ def _render_page_form(
     # A POST reaches this boundary only when it did not save.
     if request.method == "POST":
         db.rollback()
+    form = {**metadata_form(page), **form}
     fid = form.get("featured_image_id")
+    live_id = working_copy_page_id or (page.id if page else None)
+    live = db.get(Page, live_id) if live_id else None
+    kind = form.get("kind", PageKind.STATIC)
+    featured_id, image_error = _resolve_featured_image_id(db, fid or "", site.id)
+    parent_id, parent_error = _validated_parent_id_or_error(
+        db, _normalized_parent_id(form.get("parent_id", "")), site.id, exclude_page_id=live_id
+    )
+    metadata_error = (
+        validate_metadata_form(
+            {k: v for k, v in form.items() if k != "canonical_url" or kind != PageKind.POST_INDEX}
+        )
+        or image_error
+        or parent_error
+    )
+    if kind not in _SELECTABLE_PAGE_KINDS:
+        metadata_error = _KIND_ERROR
+    metadata = None
+    metadata_note = None
+    if not metadata_error:
+        from bragi.core.models.user import User
+        from bragi.core.profiles import profile_view
+        from bragi.core.url import page_path_preview
+
+        body = form.get("body_markdown", "")
+        candidate = Page(
+            title=form.get("title", ""),
+            featured_image_id=featured_id,
+            body_excerpt=page.body_excerpt
+            if page and body == page.body_markdown
+            else make_excerpt(body),
+        )
+        apply_metadata_form(candidate, form)
+        slug = form.get("slug", "")
+        path = (
+            page_path_preview(db, site=site, parent_id=parent_id, slug=slug, page_id=live_id)
+            if slug or (live_id and site.home_page_id == live_id)
+            else None
+        )
+        if not path:
+            metadata_note = "Enter a slug to complete the public address."
+        elif kind == PageKind.POST_INDEX:
+            metadata_note = (
+                "Blog indexes use automatic canonical addresses. "
+                "This is page 1; later pages use their own addresses."
+            )
+        author_id = live.author_id if live else int(session["user_id"])
+        profile = (
+            profile_view(db.get(User, author_id))
+            if kind == PageKind.PROFILE and author_id
+            else None
+        )
+        metadata = effective_metadata(
+            item=candidate, site=site, public_path=path, db=db, page_kind=kind, profile=profile
+        )
     return render_template(
         "admin/page_edit.html",
         page=page,
         form=form,
         recovery_site_id=site.id,
+        metadata=metadata,
+        metadata_error=metadata_error,
+        metadata_note=metadata_note,
+        metadata_kind=kind,
+        metadata_unsaved=request.method == "POST",
+        metadata_image_src=metadata_image_src(metadata.image_url) if metadata else None,
         edit_token=editor_token(
             page, None if is_working_copy or page is None else _wc_for_page(db, site.id, page.id)
         ),
@@ -553,6 +623,7 @@ def _apply_page_form_fields(
     field), and a working copy has no status column.
     """
     body_markdown = str(form["body_markdown"])
+    apply_metadata_form(target, form)
     target.title = str(form["title"])
     target.slug = str(form["slug"])
     target.parent_id = parent_id
@@ -663,6 +734,8 @@ def new_page(site_slug: str) -> ResponseReturnValue:
 
         form = _form_from_request()
         parents = _all_pages_for_picker(db, site_id)
+        if request.form.get("_metadata_preview") == "1":
+            return _render_page_form(db, site, None, form, parents)
         if not form["slug"] and form["title"]:
             from bragi.core.text import unique_slug_for_page
 
@@ -678,6 +751,10 @@ def new_page(site_slug: str) -> ResponseReturnValue:
                 # Slug generation failed (e.g., title is empty or too short);
                 # let the required-fields validation below handle the error.
                 pass
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_page_form(db, site, None, form, parents)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_page_form(db, site, None, form, parents)
@@ -749,6 +826,7 @@ def new_page(site_slug: str) -> ResponseReturnValue:
             show_in_nav=(form.get("show_in_nav") == "1"),
             menu_order=_safe_int(form.get("menu_order")),
         )
+        apply_metadata_form(page_row, form)
         db.add(page_row)
         # Flush (not commit) so page_row gets its id and the pending
         # writes (incl. the existing_index demotion above) are visible
@@ -887,6 +965,11 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
+        if request.method == "POST" and request.form.get("_metadata_preview") == "1":
+            return _render_page_form(
+                db, site, page, _form_from_request(), _all_pages_for_picker(db, site.id)
+            )
+
         if request.method == "POST":
             body_markdown = _form_from_request()["body_markdown"]
             body_html = render_markdown(body_markdown)
@@ -948,6 +1031,10 @@ def edit_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         if not editor_matches(page, _wc_for_page(db, site.id, page.id)):
             editor_conflict()
             return _render_page_form(db, site, page, form, parents), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_page_form(db, site, page, form, parents)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_page_form(db, site, page, form, parents)
@@ -1227,6 +1314,10 @@ def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
         if not editor_matches(page, _wc_for_page(db, site.id, page.id)):
             editor_conflict()
             return _render_page_form(db, site, page, form, parents), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_page_form(db, site, page, form, parents)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_page_form(db, site, page, form, parents)
@@ -1254,12 +1345,12 @@ def stage_page(site_slug: str, page_id: int) -> ResponseReturnValue:
 
         wc = _wc_for_page(db, site.id, page.id)
         if wc is None:
-            # `fork` seeds the staging metadata + the fields the form does
-            # not carry (meta_*/canonical/noindex); `_apply` then overwrites
+            # `fork` seeds the staging metadata; `_apply` then overwrites
             # the edited fields from the posted form.
             wc = fork_page_working_copy(page, editor_user_id=int(session["user_id"]))
             db.add(wc)
         else:
+            # Explicit restaging rebases on current live fields before applying this form.
             wc.editor_user_id = int(session["user_id"])
             for field in _EDITABLE_PAGE_FIELDS:
                 setattr(wc, field, getattr(page, field))
@@ -1360,6 +1451,21 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
         if page is None or page.site_id != site.id:
             abort(404)
 
+        if request.form.get("_metadata_preview") == "1":
+            wc = _wc_for_page(db, site.id, page.id)
+            if wc is None:
+                abort(404)
+            return _render_page_form(
+                db,
+                site,
+                wc,
+                _form_from_request(),
+                _all_pages_for_picker(db, site.id),
+                is_working_copy=True,
+                working_copy_page_id=page.id,
+                preview_url=_working_copy_preview_url(wc, site),
+            )
+
         body_markdown = _form_from_request()["body_markdown"]
         body_html = render_markdown(body_markdown)
         body_excerpt = make_excerpt(body_markdown)
@@ -1411,6 +1517,10 @@ def save_page_working_copy(site_slug: str, page_id: int) -> ResponseReturnValue:
         if not editor_matches(wc):
             editor_conflict()
             return _rerender(form), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _rerender(form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _rerender(form)

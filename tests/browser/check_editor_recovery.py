@@ -40,6 +40,21 @@ HTML = """<!doctype html><div class="admin-content">
 <script src="/htmx.min.js"></script><script src="/editor-recovery.js"></script>"""
 
 
+def metadata_html(form):
+    fields = env.get_template("admin/_metadata_fields.html").render(
+        form=form, metadata_kind="static"
+    )
+    preview = env.get_template("admin/_metadata_preview.html").render(
+        metadata=None,
+        metadata_error=None,
+        metadata_note=None,
+        metadata_unsaved=True,
+        metadata_image_src=None,
+    )
+    # Keep the real preview partial after the primary Save button, as in the editors.
+    return fields + "<button>Save</button>" + preview
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -66,6 +81,11 @@ class Handler(BaseHTTPRequestHandler):
                 '<script src="/page-kind-toggle.js"></script>'
             )
         html = HTML.replace("USER", "2" if "other" in query else "1").replace("EXTRA", extra)
+        if "metadata" in query:
+            html = html.replace("<button>Save</button>", metadata_html({}))
+            html = html.replace('<input name="title"', '<input required name="title"')
+        if "boosted" in query:
+            html = html.replace('<form method="post"', '<form hx-boost="true" method="post"')
         if "working" in query:
             html = html.replace(
                 'data-recovery-context="live"', 'data-recovery-context="working-copy"'
@@ -78,11 +98,21 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(html.encode())
 
     def do_POST(self):
-        self.rfile.read(int(self.headers["Content-Length"]))
-        self.send_response(409)
+        data = parse_qs(
+            self.rfile.read(int(self.headers["Content-Length"])).decode(), keep_blank_values=True
+        )
+        preview = data.get("_metadata_preview") == ["1"]
+        self.send_response(200 if preview else 409)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
-        self.wfile.write(HTML.replace("USER", "1").replace("EXTRA", "").encode())
+        html = HTML.replace("USER", "1").replace("EXTRA", "")
+        if preview:
+            html = html.replace(
+                "<button>Save</button>",
+                metadata_html({key: values[0] for key, values in data.items()}),
+            )
+            html += '<p id="preview-result">Unsaved preview. Nothing saved.</p>'
+        self.wfile.write(html.encode())
 
     def log_message(self, *_args):
         pass
@@ -379,6 +409,78 @@ try:
         rich.fill("After boosted navigation")
         flush(page)
         assert any("After boosted navigation" in str(record) for record in records(page))
+        # Actual metadata partials submit current rich text and retain recovery on HTTP 200.
+        for boosted in (False, True):
+            preview_context = browser.new_context(ignore_https_errors=True)
+            preview_page = preview_context.new_page()
+            preview_page.on("dialog", lambda dialog: dialog.accept())
+            preview_url = url + "?metadata=1&rich=1" + ("&boosted=1" if boosted else "")
+            load(preview_page, preview_url)
+            preview_rich = preview_page.locator(".tiptap[contenteditable=true]")
+            preview_rich.wait_for(timeout=90000)
+            preview_page.locator('[name="title"]').fill(
+                ""
+            )  # Preview bypasses save-only required fields.
+            metadata_values = {
+                "meta_title": "Unpublished search title",
+                "meta_description": "Unpublished description",
+                "canonical_url": "https://example.com/preferred/",
+            }
+            for field, value in metadata_values.items():
+                preview_page.locator(f'[name="{field}"]').fill(value)
+            preview_page.locator('[name="noindex"]').check()
+            preview_rich.fill("Latest rich-text preview")
+            with preview_page.expect_request(lambda req: req.method == "POST") as sent:
+                preview_page.get_by_role("button", name="Update previews", exact=True).press(
+                    "Enter"
+                )
+            submitted = parse_qs(sent.value.post_data, keep_blank_values=True)
+            assert submitted["_metadata_preview"] == ["1"]
+            assert submitted["_metadata_fields"] == ["1"]
+            assert submitted["title"] == [""]
+            assert submitted["body_markdown"] == ["Latest rich-text preview"]
+            assert submitted["noindex"] == ["1"]
+            assert all(submitted[field] == [value] for field, value in metadata_values.items())
+            preview_page.locator("#preview-result").wait_for()
+            recovery_id = submitted["_recovery_id"][0]
+            record = next(record for record in records(preview_page) if record["id"] == recovery_id)
+            recovered_fields = dict(record["data"]["fields"])
+            assert recovered_fields["body_markdown"] == "Latest rich-text preview"
+            assert all(recovered_fields[field] == value for field, value in metadata_values.items())
+            assert recovered_fields["noindex"] is True
+            load(preview_page, preview_url)
+            preview_rich.wait_for(timeout=90000)
+            preview_page.locator(f'[data-recovery-id="{recovery_id}"]').get_by_role(
+                "button", name="Restore", exact=True
+            ).click()
+            assert all(
+                preview_page.locator(f'[name="{field}"]').input_value() == value
+                for field, value in metadata_values.items()
+            )
+            assert preview_page.locator('[name="noindex"]').is_checked()
+            assert preview_rich.inner_text() == "Latest rich-text preview"
+            # Implicit Enter must still choose the first (Save) button.
+            preview_page.locator('[name="title"]').fill("Save with Enter")
+            with preview_page.expect_request(lambda req: req.method == "POST") as sent:
+                preview_page.locator('[name="title"]').press("Enter")
+            assert "_metadata_preview" not in parse_qs(sent.value.post_data)
+            preview_context.close()
+        # The same native button works without JavaScript, including formnovalidate.
+        native_context = browser.new_context(java_script_enabled=False)
+        native_page = native_context.new_page()
+        native_page.goto(url + "?metadata=1")
+        native_page.locator('[name="title"]').fill("")
+        native_page.locator('[name="meta_title"]').fill("Native preview")
+        native_page.locator('[name="body_markdown"]').fill("Native body")
+        with native_page.expect_request(lambda req: req.method == "POST") as sent:
+            native_page.get_by_role("button", name="Update previews", exact=True).press("Enter")
+        submitted = parse_qs(sent.value.post_data, keep_blank_values=True)
+        assert submitted["_metadata_preview"] == ["1"]
+        assert submitted["title"] == [""]
+        assert submitted["meta_title"] == ["Native preview"]
+        assert submitted["body_markdown"] == ["Native body"]
+        native_page.locator("#preview-result").wait_for()
+        native_context.close()
         browser.close()
 finally:
     server.shutdown()

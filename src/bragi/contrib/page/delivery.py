@@ -61,7 +61,7 @@ from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.tag import Tag
 from bragi.core.models.user import User
-from bragi.core.seo import featured_image_url_for
+from bragi.core.seo import effective_metadata
 from bragi.core.time import naive_utcnow
 from bragi.core.url import (
     page_url_for,
@@ -307,6 +307,9 @@ def render_post_index_page(site: Site, page: Page, page_n: int = 1) -> Response:
         # own /page/N/ URL, and prev/next carry the same path form.
         index_base = "/" if site.home_page_id == page.id else page_url_for(page, db=db)
         index_path = _paginated_index_url(index_base, page_n)
+        metadata = effective_metadata(
+            item=page, site=site, public_path=index_path, db=db, page_kind=page.kind
+        )
         body = render_template(
             "delivery/post_index.html",
             site=site,
@@ -320,9 +323,11 @@ def render_post_index_page(site: Site, page: Page, page_n: int = 1) -> Response:
             has_next=page_n < total_pages,
             prev_url=_paginated_index_url(index_base, page_n - 1),
             next_url=_paginated_index_url(index_base, page_n + 1),
-            meta_description=page.meta_description or page.body_excerpt or None,
-            canonical_url=(f"{site.base_url}{index_path}" if site.canonical_url else None),
-            og_image_url=featured_image_url_for(item=page, site=site, db=db),
+            metadata=metadata,
+            meta_description=metadata.description,
+            canonical_url=metadata.canonical_url,
+            noindex=metadata.noindex,
+            og_image_url=metadata.image_url,
         )
         response = make_response(body)
         attach_validators(response, etag=etag, last_modified=last_modified)

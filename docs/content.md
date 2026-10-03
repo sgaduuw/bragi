@@ -38,6 +38,33 @@ To recover a legacy or conflicting working copy:
    changes you want to retain.
 4. Save the working copy, review it, then promote it.
 
+## Search and social previews
+
+Post and page editors show illustrative search and social cards using the same
+metadata rules as the public site. After changing fields, choose **Update previews**
+to refresh the cards. This reads the submitted form without saving or publishing;
+choose the normal save action when ready. Further typing requires another preview
+update. Search engines and sharing services may choose a different presentation.
+
+Blank metadata fields use these fallbacks:
+
+| Field | Effective value |
+| --- | --- |
+| Meta title | Content title; the document/search title also includes the site title. |
+| Meta description | Body excerpt. Profile pages prefer the author's biography. |
+| Canonical URL | Generated public address. Blog indexes always use their own page address, including pagination. |
+| Social image | Selected featured image, then the site default. Profile pages prefer the author's avatar. |
+
+A canonical override identifies the preferred indexing address; it does not
+redirect readers. **Noindex** asks search engines not to list the content and does
+not make it private. Blog-index pages also honor this setting.
+
+Working-copy cards use the proposed slug and parent after promotion. The separate
+working-copy theme preview still uses the live address. Posts need a published
+blog index for a public address; never-published posts on dated permalinks acquire
+their date segments at first publication. Without a configured site URL, generated
+absolute addresses and local social-image URLs are unavailable.
+
 ## Scheduling posts
 
 In the post editor, choose **Scheduled**, enter a future **Publication time**,
@@ -127,8 +154,8 @@ posts without a time need a time entered, or cancellation to Draft.
   redirects, importers, analytics, ...) register through the
   `bragi.plugins` entry-point group, the same path third parties
   use. No internal fast path.
-- **SEO as a first-class citizen.** Per-page title / meta /
-  canonical / JSON-LD editable in admin. Open Graph + Twitter
+- **SEO as a first-class citizen.** Post and page metadata controls with
+  search/social previews, canonical URLs and noindex; automatic JSON-LD. Open Graph + Twitter
   Card meta on every post and page (with a per-post / per-page
   attachment override and a per-site default OG image), so
   social shares render rich previews. Per-site `sitemap.xml`,
