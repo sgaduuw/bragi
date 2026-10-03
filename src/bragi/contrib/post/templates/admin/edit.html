@@ -102,6 +102,24 @@
   </fieldset>
   {% endif %}
 
+  {% if not is_wc %}
+  <fieldset>
+    <label for="scheduled_for">Publication time</label>
+    <input type="datetime-local" name="scheduled_for" id="scheduled_for" step="1"
+           value="{{ form.get('scheduled_for', '') }}" aria-describedby="schedule-help">
+    <label for="schedule_timezone">Site timezone</label>
+    <input type="text" name="schedule_timezone" id="schedule_timezone" readonly
+           value="{{ form.get('schedule_timezone', schedule_site.timezone) }}">
+    <small id="schedule-help">Required when status is Scheduled. Choose a future time in this timezone.
+      To cancel, select Draft and save. Publication runs on the task runner's next check.</small>
+    {% if schedule_error %}<p role="alert">{{ schedule_error }}</p>{% endif %}
+    {% if is_edit %}
+      {% set schedule = post_schedule(post, schedule_site) %}
+      {% include "admin/_post_schedule.html" %}
+    {% endif %}
+  </fieldset>
+  {% endif %}
+
   {# Show the pin controls on a published live post, AND always in WC
      mode: a working copy is forked from a published post, so its pin
      state is meaningful and must stay editable (otherwise a WC save with

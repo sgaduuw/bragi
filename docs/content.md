@@ -29,6 +29,35 @@ its original version check. Working-copy promotion also checks whether the live
 content changed since staging. Restage from the latest live editor after comparing
 your changes; working copies created before this protection need restaging too.
 
+## Scheduling posts
+
+In the post editor, choose **Scheduled**, enter a future **Publication time**,
+and save. The time uses the site's displayed timezone, not the browser's timezone.
+The saved schedule shows its UTC offset. Bragi stores the instant in UTC, so a later
+site-timezone change only changes its display. Reload an editor opened before such
+a change before saving a schedule.
+
+Reopen the post to inspect or change its time. To cancel, choose **Draft** and save;
+the inline status control can also cancel by selecting Draft. Scheduling does not
+publish immediately. A post already public must be unpublished before scheduling;
+working-copy promotion remains immediate.
+
+New schedules cannot use a local time skipped by a daylight-saving change, or one
+that occurs twice when clocks move back. Choose a time outside that skipped or
+repeated interval. An existing schedule keeps its exact instant when its time is
+unchanged, including overdue schedules.
+
+Revisions do not store publication times. Restoring a Scheduled revision restores
+its content as Draft and clears any current schedule. Choose a new time and select
+Scheduled to schedule the restored content.
+
+The list and editor distinguish future, overdue, and missing-time schedules.
+**Overdue** means the time has passed but publication has not completed; a normal
+polling delay can cause this briefly. Publication depends on the task runner.
+If it persists, ask an administrator to check the runner and its logs using the
+[operations guidance](operations.md#scheduled-publication). Existing Scheduled
+posts without a time need a time entered, or cancellation to Draft.
+
 ## Publishing and site management
 
 - **Multisite by design.** One database serves many sites; the Host

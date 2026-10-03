@@ -37,6 +37,7 @@ from bragi.contrib.post.admin import bp as post_admin_bp
 from bragi.contrib.post.cli import rebuild_excerpts_cmd, scheduled_publish
 from bragi.contrib.post.delivery import bp as post_templates_bp
 from bragi.contrib.post.related import related_posts_count_for, related_posts_for
+from bragi.contrib.post.scheduling import schedule_details
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post
 from bragi.core.models.site import Site
@@ -233,6 +234,7 @@ def register_template_globals(env: jinja2.Environment) -> None:
     detail-page hrefs.
     """
     env.globals["url_for_post"] = _url_for_post
+    env.globals["post_schedule"] = schedule_details
 
 
 @hookimpl
