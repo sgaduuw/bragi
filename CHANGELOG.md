@@ -7,11 +7,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Repeated internal-link lifecycle hooks reconcile pending edges within the same transaction, preventing publication failures (#529).
+- Rejected post and page edits release the writer lock before rendering; invalid inline status changes do not claim it (#532, #538).
 - Scheduled publication rechecks current eligibility atomically, isolates failures, and reports committed publication separately from cache-purge warnings (#521).
 - Scheduled revisions restore as Draft with a prompt to choose a new time; out-of-range legacy schedules accept valid replacement dates (#521).
 - Revision restoration locks before reading publication state, so concurrent scheduled publication cannot leave pending notifications after restoration to Draft (#521).
 
 ### Security
+- Personal access tokens authenticate only the scoped JSON API; HTML admin routes reject bearer headers and require normal browser authentication (#531).
 - Bound 404 triage storage per site and recording attempts per delivery worker;
   skip busy SQLite writes promptly and show capacity warnings (#519).
 

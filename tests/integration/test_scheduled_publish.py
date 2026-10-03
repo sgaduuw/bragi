@@ -230,7 +230,7 @@ def test_cache_failure_reports_committed_publication_and_does_not_republish(
     finally:
         pm.unregister(name="failing-purge")
     assert result.exit_code == 0, result.output
-    assert "2 post(s) published" in result.output
+    assert result.output.splitlines()[-1] == "scheduled-publish: 2 post(s) published."
     assert "cache purge failed" in result.output.lower()
     assert "FAILED id=" not in result.output
     assert again.exit_code == 0 and "nothing due" in again.output

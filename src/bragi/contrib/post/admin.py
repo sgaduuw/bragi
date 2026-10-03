@@ -273,6 +273,9 @@ def _render_post_form(
     falsy-guarded in the template, so a default is equivalent to the kwarg
     being absent.
     """
+    # A POST reaches this boundary only when it did not save.
+    if request.method == "POST":
+        db.rollback()
     fid = form.get("featured_image_id")
     site = db.get(Site, site_id)
     assert site is not None
@@ -1523,7 +1526,8 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         error = f"Invalid status: {raw!r}"
 
     with SessionLocal() as db:
-        db.execute(text("BEGIN IMMEDIATE"))
+        if error is None:
+            db.execute(text("BEGIN IMMEDIATE"))
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
         post = db.get(Post, post_id)

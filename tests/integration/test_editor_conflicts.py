@@ -481,3 +481,67 @@ def test_dashboard_exposes_scoped_recovery_without_an_editor(admin_app, db_sessi
     assert library["data-recovery-site"] == str(site_id)
     assert library["hx-history"] == "false"
     assert soup.select_one("form[data-editor-recovery]") is None
+
+
+@pytest.mark.parametrize(
+    ("action", "fault"),
+    [(action, "conflict") for action in ("edit", "stage", "save", "promote", "discard")]
+    + [(action, "validation") for action in ("edit", "stage", "save")],
+)
+def test_rejected_editor_renders_without_writer_lock(
+    editor, db_engine, db_session_factory, monkeypatch, action, fault
+):
+    import sqlite3
+
+    from bragi.contrib.page import admin as page_admin
+    from bragi.contrib.post import admin as post_admin
+    from bragi.core.models.page_working_copy import PageWorkingCopy
+    from bragi.core.models.post_working_copy import PostWorkingCopy
+
+    client, root, form, model, item_id = editor
+    copy_model = PostWorkingCopy if model is Post else PageWorkingCopy
+    if action in ("save", "promote", "discard"):
+        assert client.post(root + "/working-copy/stage", data=form()).status_code == 302
+        data = form("/working-copy")
+    else:
+        data = form()
+    path = "/edit" if action == "edit" else "/working-copy/" + action
+    if fault == "conflict":
+        data["_edit_token"] = "forged"
+    else:
+        data["title"] = ""
+    with db_session_factory() as db:
+        item = db.get(model, item_id)
+        before = (item.title, item.body_markdown)
+        copies_before = [
+            (copy.title, copy.body_markdown) for copy in db.scalars(select(copy_model))
+        ]
+
+    module = post_admin if model is Post else page_admin
+    render = module.render_template
+    probes = []
+
+    def probe_render(template, *args, **kwargs):
+        assert template == ("admin/edit.html" if model is Post else "admin/page_edit.html")
+        other = sqlite3.connect(db_engine.url.database, timeout=0)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            probes.append(True)
+        finally:
+            other.rollback()
+            other.close()
+        return render(template, *args, **kwargs)
+
+    monkeypatch.setattr(module, "render_template", probe_render)
+    response = client.post(root + path, data=data)
+    assert response.status_code == (409 if fault == "conflict" else 200)
+    assert probes == [True]
+    soup = BeautifulSoup(response.data, "html.parser")
+    assert soup.select_one('input[name="_edit_token"]')["value"] == data["_edit_token"]
+    assert soup.select_one('textarea[name="body_markdown"]').text == data["body_markdown"]
+    with db_session_factory() as db:
+        item = db.get(model, item_id)
+        assert (item.title, item.body_markdown) == before
+        assert [
+            (copy.title, copy.body_markdown) for copy in db.scalars(select(copy_model))
+        ] == copies_before

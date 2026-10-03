@@ -435,6 +435,9 @@ def _render_page_form(
     `PageWorkingCopy`: both expose the same editable attribute names,
     so the template binds to either via the editable-source seam.
     """
+    # A POST reaches this boundary only when it did not save.
+    if request.method == "POST":
+        db.rollback()
     fid = form.get("featured_image_id")
     return render_template(
         "admin/page_edit.html",

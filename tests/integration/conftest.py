@@ -6,11 +6,9 @@ isolated, but it has two structural blind spots that hide whole
 classes of production bug (see bragi `_claude/MEMORY.md` 2026-06-10 /
 2026-06-14):
 
-1. **Schema gap.** `create_all` doesn't know about anything that
-   lives only in an alembic migration: the FTS5 virtual tables +
-   triggers (`pages_fts`, `posts_fts`), generated columns, etc. A
-   `_safe`-style "no such table" swallow in production code passes
-   vacuously under `create_all`.
+1. **Schema gap.** The default fixture explicitly creates `pages_fts`
+   and `posts_fts`, but does not run Alembic. It cannot establish parity
+   with migration-created tables, triggers, or generated columns.
 2. **Lock / commit-semantics gap.** `:memory:` SQLite has different
    connection and commit semantics than a file-backed WAL database
    (single-connection isolation, no WAL file, no busy_timeout-bound

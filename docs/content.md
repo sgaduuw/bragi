@@ -160,8 +160,11 @@ posts without a time need a time entered, or cancellation to Draft.
   via `Authorization: Bearer brg_<id>_<secret>`. The JSON REST
   surface at `/admin/api/sites/<slug>/posts/` covers GET list,
   POST create, PATCH update, and POST publish, scope-gated by
-  `post:write`. Argon2id-hashed at rest; expiry honoured; every
-  use recorded in the audit log.
+  `post:write`. Bearer tokens work only on this JSON API. HTML admin
+  routes reject bearer headers, including requests that also carry a
+  browser session cookie. Use the normal browser session and CSRF token
+  for those routes. Tokens are Argon2id-hashed at rest; expiry is honoured
+  and usage is recorded in the audit log.
 - **Indieweb webmentions (send + receive).** Outbound: on
   publish or update, every external link in a post is queued
   behind a debounce hold-off window; edits within the window
