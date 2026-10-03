@@ -29,10 +29,11 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, set_breadcrumbs
+from bragi.contrib.post.scheduling import parse_schedule, schedule_input, schedule_zone
 from bragi.core.audit import AuditAction, audit
 from bragi.core.bulk_action import (
     BulkLimitExceeded,
@@ -105,6 +106,8 @@ def _form_from_request() -> dict[str, str]:
         "slug": (request.form.get("slug") or "").strip(),
         "body_markdown": request.form.get("body_markdown") or "",
         "status": request.form.get("status") or PostStatus.DRAFT,
+        "scheduled_for": (request.form.get("scheduled_for") or "").strip(),
+        "schedule_timezone": (request.form.get("schedule_timezone") or "").strip(),
         "tags": (request.form.get("tags") or "").strip(),
         "featured_image_id": (request.form.get("featured_image_id") or "").strip(),
         # Pinning. The checkbox sends "1" when ticked, absent when not.
@@ -113,6 +116,30 @@ def _form_from_request() -> dict[str, str]:
         "is_pinned": "1" if request.form.get("is_pinned") else "",
         "pinned_until": (request.form.get("pinned_until") or "").strip(),
     }
+
+
+def _scheduled_for_form(
+    form: dict[str, str], site: Site, post: Post | None = None
+) -> tuple[datetime | None, str | None]:
+    if form["status"] != PostStatus.SCHEDULED:
+        return None, None
+    if post is not None and post.status in (PostStatus.PUBLISHED, PostStatus.UNLISTED):
+        return None, "Unpublish this post before scheduling it. Working copies cannot be scheduled."
+    if form["schedule_timezone"] != site.timezone:
+        return (
+            None,
+            "The site timezone changed. Reload the editor before scheduling; "
+            "your writing is preserved below.",
+        )
+    try:
+        existing = (
+            post.scheduled_for if post is not None and post.status == PostStatus.SCHEDULED else None
+        )
+        return parse_schedule(
+            form["scheduled_for"], site.timezone, now=naive_utcnow(), existing=existing
+        ), None
+    except ValueError as exc:
+        return None, str(exc)
 
 
 def _parse_pinned_until(raw: str) -> tuple[datetime | None, str | None]:
@@ -247,11 +274,20 @@ def _render_post_form(
     being absent.
     """
     fid = form.get("featured_image_id")
+    site = db.get(Site, site_id)
+    assert site is not None
+    schedule_error = None
+    try:
+        schedule_zone(site.timezone)
+    except ValueError as exc:
+        schedule_error = str(exc)
     return render_template(
         "admin/edit.html",
         post=post,
         form=form,
         recovery_site_id=site_id,
+        schedule_site=site,
+        schedule_error=schedule_error,
         edit_token=editor_token(
             post, None if is_working_copy or post is None else _wc_for_post(db, site_id, post.id)
         ),
@@ -273,6 +309,7 @@ def _post_snapshot(post: Post) -> dict[str, object]:
         "slug": post.slug,
         "title": post.title,
         "status": post.status,
+        "scheduled_for": post.scheduled_for.isoformat() if post.scheduled_for else None,
         "is_pinned": post.is_pinned,
         "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
     }
@@ -481,6 +518,11 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             flash(pin_err, "error")
             return _render_post_form(db, site_id, None, form)
 
+        scheduled_for, schedule_err = _scheduled_for_form(form, site)
+        if schedule_err:
+            flash(schedule_err, "error")
+            return _render_post_form(db, site_id, None, form)
+
         body_markdown = form["body_markdown"]
         new_status = form["status"]
         new_post_row = Post(
@@ -492,6 +534,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             body_excerpt=make_excerpt(body_markdown),
             author_id=int(session["user_id"]),
             status=new_status,
+            scheduled_for=scheduled_for,
             published_at=(
                 naive_utcnow()
                 if new_status in (PostStatus.PUBLISHED, PostStatus.UNLISTED)
@@ -569,7 +612,13 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         )
 
         if request.method == "GET":
+            try:
+                scheduled_input = schedule_input(post.scheduled_for, site.timezone)
+            except ValueError:
+                scheduled_input = ""
             form = {
+                "scheduled_for": scheduled_input,
+                "schedule_timezone": site.timezone,
                 "title": post.title,
                 "slug": post.slug,
                 "body_markdown": post.body_markdown,
@@ -610,6 +659,11 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             flash(pin_err, "error")
             return _render_post_form(db, post.site_id, post, form)
 
+        scheduled_for, schedule_err = _scheduled_for_form(form, site, post)
+        if schedule_err:
+            flash(schedule_err, "error")
+            return _render_post_form(db, post.site_id, post, form)
+
         before = _post_snapshot(post)
         # Snapshot the pre-edit state so the editor can roll back
         # later. Captured BEFORE the mutation: the live row stays
@@ -642,6 +696,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         is_first_publish = was_unpublished and becoming_published
         _stamp_public_url_date(post, form["status"])
         post.status = form["status"]
+        post.scheduled_for = scheduled_for
 
         _sync_post_tags(db, post, form["tags"], post.site_id)
         updated_id = post.id
@@ -1468,6 +1523,7 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         error = f"Invalid status: {raw!r}"
 
     with SessionLocal() as db:
+        db.execute(text("BEGIN IMMEDIATE"))
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
         post = db.get(Post, post_id)
@@ -1489,6 +1545,7 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         before = _post_snapshot(post)
         _stamp_public_url_date(post, raw)
         post.status = raw
+        post.scheduled_for = None
         after = _post_snapshot(post)
 
         pm = current_app.extensions["plugin_manager"]
@@ -1700,6 +1757,8 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
     after capturing the now-current state as a fresh revision so
     the restore is itself undoable."""
     with SessionLocal() as db:
+        # Read hook state under the same writer lock as scheduled publication.
+        lock_editor_write(db)
         site = resolve_site_or_abort(db, site_slug)
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
@@ -1723,7 +1782,11 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         was_unpublished = post.status != PostStatus.PUBLISHED
         post.title = revision.title
         post.slug = revision.slug
-        post.status = revision.status
+        # Revisions have no publication time. Never reuse a newer schedule
+        # for older content or restore an unusable Scheduled state.
+        restored_schedule = revision.status == PostStatus.SCHEDULED
+        post.status = PostStatus.DRAFT if restored_schedule else revision.status
+        post.scheduled_for = None
         post.body_markdown = revision.body_markdown
         post.body_html = revision.body_html
         post.body_excerpt = revision.body_excerpt
@@ -1757,5 +1820,12 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         site_id=site_id_for_audit,
         extra={"event": "revision-restore", "revision_id": rev_id},
     )
-    flash("Revision restored.", "success")
+    if restored_schedule:
+        flash(
+            "Revision restored as Draft. Choose a new publication time "
+            "and select Scheduled to schedule it.",
+            "warning",
+        )
+    else:
+        flash("Revision restored.", "success")
     return redirect(url_for("post_admin.edit_post", post_id=restored_id))

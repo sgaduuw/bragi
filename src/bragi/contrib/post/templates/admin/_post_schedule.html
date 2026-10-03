@@ -1,0 +1,12 @@
+{% if schedule %}
+<div data-schedule-state="{{ schedule.state }}">
+  <small>{{ schedule.label }}{% if schedule.time %} {{ schedule.time }}{% endif %}</small>
+  {% if schedule.state == 'overdue' %}
+  <small>Still unpublished. The task runner publishes due posts on its next check.
+    If this persists, ask an administrator to check the task runner and its logs.</small>
+  {% elif schedule.state == 'missing' %}
+  <small>Open the editor to set a time or change the status to Draft.</small>
+  {% endif %}
+  {% if schedule.error %}<small role="alert">{{ schedule.error }}</small>{% endif %}
+</div>
+{% endif %}

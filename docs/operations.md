@@ -93,6 +93,46 @@ row records the reverse proxy's IP, hiding real client IPs;
 each unit of trust extends the `X-Forwarded-*` spoofability
 boundary one hop outward.
 
+## Scheduled publication
+
+`bragi scheduled-publish` publishes posts whose status is Scheduled and whose UTC
+publication time has arrived. The task runner invokes it every 60 seconds by
+default (`SCHEDULED_PUBLISH_EVERY`). Its loop sleeps between checks and runs other
+tasks sequentially, so this is a polling interval, not an exact delivery deadline.
+After restart, due posts remain in the database and are picked up on the next
+eligible check.
+
+For a persistently overdue post, inspect the runner and preview due work:
+
+```sh
+docker compose ps bragi-tasks
+docker compose logs --tail 100 bragi-tasks
+docker compose exec admin bragi scheduled-publish --dry-run
+```
+
+Check the configured interval, migration errors, and publication failures. A
+Scheduled post without a time is never due; correct it in the editor. To publish
+all currently due posts manually, run
+`docker compose exec admin bragi scheduled-publish` without `--dry-run`
+(the command is global across sites).
+
+Each post is rechecked under the database write lock. Cancellation or postponement
+committed before this check wins; overlapping workers cannot commit the same
+scheduled transition twice. Publication and database writes from the publish hooks
+commit together. A failed post rolls back, other posts continue, and the command
+exits nonzero if any publication failed. A later invocation can retry failed posts.
+A cache-purge failure after commit is reported separately as a warning: the post
+is already published, and rerunning the command does not repeat its publish hooks.
+
+Scheduled publication uses the existing publish hooks for search, internal links,
+ActivityPub, webmentions, and IndexNow. It records a system audit event without a
+human actor and invalidates caches after commit. It does not invoke content-edit
+hooks or create an editorial revision because it changes no authored content.
+First publication records the actual worker publication time; an existing
+publication timestamp is preserved. The intended schedule remains available as
+context. Audit and cache invalidation are best effort after commit, as in manual
+publishing; arbitrary external plugin effects are not guaranteed exactly once.
+
 ## 404 recording limits and cleanup
 
 The 404 admin page is a bounded triage list. By default, each site can retain

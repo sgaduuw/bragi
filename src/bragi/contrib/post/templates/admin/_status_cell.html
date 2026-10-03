@@ -16,4 +16,6 @@
     </select>
     {% if error %}<div class="inline-edit-error">{{ error }}</div>{% endif %}
   </form>
+  {% set schedule = post_schedule(post, site) %}
+  {% include "admin/_post_schedule.html" %}
 </td>

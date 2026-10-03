@@ -6,11 +6,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Scheduled publication rechecks current eligibility atomically, isolates failures, and reports committed publication separately from cache-purge warnings (#521).
+- Scheduled revisions restore as Draft with a prompt to choose a new time; out-of-range legacy schedules accept valid replacement dates (#521).
+- Revision restoration locks before reading publication state, so concurrent scheduled publication cannot leave pending notifications after restoration to Draft (#521).
+
 ### Security
 - Bound 404 triage storage per site and recording attempts per delivery worker;
   skip busy SQLite writes promptly and show capacity warnings (#519).
 
 ### Added
+- Site-timezone post scheduling with rescheduling, cancellation, and visible overdue or missing-time states (#521).
 - Explicit `bragi notfound prune --site <slug>` cleanup with `--dry-run`,
   preserving ignored records and unresolved open paths (#519).
 - Media deletion previews with known content usage and explicit confirmation for single and bulk deletion (#524).

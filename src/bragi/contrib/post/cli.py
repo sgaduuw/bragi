@@ -19,8 +19,9 @@ import logging
 import click
 from flask import current_app
 from flask.cli import with_appcontext
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
+from bragi.core.audit import AuditAction, audit
 from bragi.core.db import SessionLocal
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.time import naive_utcnow
@@ -36,72 +37,100 @@ LOG = logging.getLogger(__name__)
 )
 @with_appcontext
 def scheduled_publish(dry_run: bool) -> None:
-    """Publish posts whose scheduled_for has elapsed.
+    """Publish due posts, failing the command if any publication rolls back.
 
-    Idempotent: a post that is already published stays published;
-    a post whose scheduled_for is still in the future is left
-    alone. Exit code is always 0; a clean tick prints a single
-    no-op line.
+    Each conditional transition and its hook writes commit together. Concurrent
+    workers and edits recheck eligibility in the write, not a stale batch snapshot.
     """
-    now = naive_utcnow()
     with SessionLocal() as db:
-        due = (
-            db.execute(
-                select(Post)
-                .where(Post.status == PostStatus.SCHEDULED)
-                .where(Post.scheduled_for.is_not(None))
-                .where(Post.scheduled_for <= now)
-                .order_by(Post.scheduled_for)
+        due = db.execute(
+            select(Post.id, Post.site_id, Post.slug)
+            .where(
+                Post.status == PostStatus.SCHEDULED,
+                Post.scheduled_for.is_not(None),
+                Post.scheduled_for <= naive_utcnow(),
             )
-            .scalars()
-            .all()
-        )
+            .order_by(Post.scheduled_for, Post.id)
+        ).all()
 
-        if not due:
-            click.echo("scheduled-publish: nothing due.")
-            return
+    if not due:
+        click.echo("scheduled-publish: nothing due.")
+        return
 
-        if dry_run:
-            click.echo(f"scheduled-publish: {len(due)} post(s) would be published:")
-            for post in due:
-                click.echo(f"  id={post.id} site_id={post.site_id} slug={post.slug!r}")
-            return
+    if dry_run:
+        click.echo(f"scheduled-publish: {len(due)} post(s) would be published:")
+        for candidate in due:
+            click.echo(f"  id={candidate.id} site_id={candidate.site_id} slug={candidate.slug!r}")
+        return
 
-        pm = current_app.extensions["plugin_manager"]
-        published: list[int] = []
-        failed: list[int] = []
-        for post in due:
-            # Wrap each row independently. The earlier shape let one
-            # hook implementation raising (AP fanout, search index,
-            # webmention sender, ...) abandon every subsequent row;
-            # an operator would only notice when a follow-up tick
-            # accidentally re-picked the same row up. Each iteration
-            # now rolls back the partial transition on failure and
-            # the loop carries on.
-            try:
-                post.status = PostStatus.PUBLISHED
-                if post.published_at is None:
-                    post.published_at = now
-                # Fire the publish hook BEFORE committing so any
-                # writes it makes on `db` (search FTS, internal-links
-                # edges, AP outbox fanout) land in the same transaction
-                # as the status flip (issue #430). The try/except still
-                # rolls the whole row back if the hook raises.
+    pm = current_app.extensions["plugin_manager"]
+    published = 0
+    failed = 0
+    for candidate in due:
+        try:
+            # A fresh session sees the latest content and owns the writer lock
+            # from the eligibility check through all transactional hook effects.
+            with SessionLocal() as db:
+                now = naive_utcnow()
+                claimed = db.scalar(
+                    update(Post)
+                    .where(
+                        Post.id == candidate.id,
+                        Post.status == PostStatus.SCHEDULED,
+                        Post.scheduled_for.is_not(None),
+                        Post.scheduled_for <= now,
+                    )
+                    .values(
+                        status=PostStatus.PUBLISHED,
+                        published_at=func.coalesce(Post.published_at, now),
+                    )
+                    .returning(Post.id)
+                )
+                if claimed is None:
+                    continue
+                post = db.get(Post, claimed)
+                assert post is not None and post.scheduled_for is not None
+                slug, site_id = post.slug, post.site_id
+                scheduled_for = post.scheduled_for.isoformat()
                 pm.hook.on_post_published(item=post, session=db)
                 db.commit()
-                pm.hook.on_cache_purge(scope="post", key=str(post.id))
-                published.append(post.id)
-                click.echo(f"scheduled-publish: published id={post.id} slug={post.slug!r}")
-            except Exception:
-                LOG.exception("scheduled-publish: failed for post id=%s", post.id)
-                db.rollback()
-                failed.append(post.id)
-                click.echo(f"scheduled-publish: FAILED id={post.id} slug={post.slug!r} (see logs)")
+        except Exception:
+            # Session exit rolls back before logging; expired ORM attributes
+            # cannot mask the original error or prevent later posts proceeding.
+            LOG.exception("scheduled-publish: failed for post id=%s", candidate.id)
+            failed += 1
+            click.echo(f"scheduled-publish: FAILED id={candidate.id} (see logs)")
+            continue
 
-        msg = f"scheduled-publish: {len(published)} post(s) published"
-        if failed:
-            msg += f", {len(failed)} failed"
-        click.echo(f"{msg}.")
+        published += 1
+        audit(
+            AuditAction.POST_UPDATED,
+            target_type="post",
+            target_id=candidate.id,
+            site_id=site_id,
+            extra={
+                "source": "scheduled-publish",
+                "scheduled_for": scheduled_for,
+                "before": {"status": PostStatus.SCHEDULED},
+                "after": {"status": PostStatus.PUBLISHED},
+            },
+        )
+        try:
+            pm.hook.on_cache_purge(scope="post", key=str(candidate.id))
+        except Exception:
+            LOG.exception("scheduled-publish: cache purge failed for post id=%s", candidate.id)
+            click.echo(
+                f"scheduled-publish: published id={candidate.id}; cache purge failed (see logs)"
+            )
+        else:
+            click.echo(f"scheduled-publish: published id={candidate.id} slug={slug!r}")
+
+    msg = f"scheduled-publish: {published} post(s) published"
+    if failed:
+        msg += f", {failed} failed"
+    click.echo(f"{msg}.")
+    if failed:
+        raise click.ClickException("Some scheduled posts could not be published; see logs.")
 
 
 @click.command("rebuild-excerpts")
