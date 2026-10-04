@@ -5,7 +5,7 @@ repo deliberately: more than one agent and more than one tool work
 on this codebase, and these are the rules whose absence causes real
 bugs rather than style nits. Read this before your first change.
 
-bragi is at 1.53.x, published to PyPI as `bragi-cms`, shipped as two
+bragi is at 1.54.x, published to PyPI as `bragi-cms`, shipped as two
 GHCR images, and serving a live site. Treat it as production.
 
 Operator and deployment specifics are not in this file. If a task

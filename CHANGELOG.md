@@ -6,6 +6,15 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.54.0] - 2026-10-04
+
+Before upgrading, promote pending working copies or copy their changed fields
+somewhere safe. Migration `f515c0ffee01` adds baseline tracking; existing copies
+need a fresh baseline before promotion. Restaging replaces their content.
+Follow the [upgrade and recovery guidance](docs/recovery.md).
+Personal access tokens now authenticate only `/admin/api/*`; HTML admin routes
+require a browser session.
+
 ### Fixed
 - Unsaved metadata previews predict the description produced by Save when imported custom excerpts differ from the Markdown body (#543).
 - Saving after previews or rejected edits clears the submitted browser recovery copies while preserving newer writing (#542).

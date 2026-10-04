@@ -393,4 +393,3 @@ bragi datasets rerender 1              # re-bake all datasets for site 1
 bragi datasets rerender 1 revenue      # re-bake only the "revenue" dataset
 bragi datasets rerender 1 --dry-run    # report without writing
 ```
-
