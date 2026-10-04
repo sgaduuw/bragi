@@ -67,6 +67,8 @@
 {% endif %}
 
 <form method="post" data-editor-recovery hx-history="false"
+      data-recovery-source="{{ request.form.get('_recovery_id', '') }}"
+      data-recovery-source-version="{{ request.form.get('_recovery_version', '') }}"
       data-recovery-user="{{ session['user_id'] }}"
       data-recovery-site="{{ recovery_site_id }}"
       data-recovery-entity="post:{{ working_copy_post_id if is_wc else (post.id if is_edit else 'new') }}"
