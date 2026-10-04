@@ -19,13 +19,16 @@ if any remain.
 
 from __future__ import annotations
 
+import json
 import mimetypes
+from dataclasses import asdict
 
 from flask import (
     Blueprint,
     abort,
     current_app,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
@@ -33,6 +36,7 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
+from itsdangerous import BadData, URLSafeTimedSerializer
 from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
@@ -52,12 +56,16 @@ from bragi.core.bulk_action import (
     DeletedItem,
     Ok,
     bulk_delete,
+    check_bulk_limit,
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
+from bragi.core.editor_state import fingerprint, lock_editor_write
 from bragi.core.htmx import is_htmx, wants_partial
+from bragi.core.media_usage import attachment_usage, media_usage_inputs
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
+from bragi.core.models.dataset import Dataset
 from bragi.core.models.site import Site
 from bragi.core.pagination import page_arg
 from bragi.core.permissions import require_role, resolve_site_or_abort
@@ -653,34 +661,12 @@ def _parse_focal(raw: str | None) -> float | None:
 def _delete_one_attachment(db: Session, site: Site, row: Attachment) -> BulkOutcome:
     """Delete one attachment in the current transaction.
 
-    Collects rendition storage_keys before the cascade removes them, then
-    runs the refcount-aware on-disk cleanup BETWEEN `db.flush()` and the
-    caller's `db.commit()`. The caller commits once at the end of the
-    batch; the writer lock (SQLAlchemy's deferred BEGIN, upgraded to
-    RESERVED on the cascade DELETE, which queues other writers under
-    SQLite WAL) is held continuously from each per-row DELETE through
-    the final commit. A concurrent upload of the same content-addressed
-    bytes therefore cannot land an INSERT against any `storage_key`
-    between any per-row refcount check and its `backend.remove` call
-    (#171). Pre-v1.13.0 the commit fired first and the refcount loop
-    ran post-commit, leaving a narrow window during which a concurrent
-    upload could persist a row referencing a key we then unlinked.
-    The "caller commits once" rule extends that lock-window-collapse
-    to bulk batches automatically: a bulk delete of N rows is
-    semantically equivalent to N single deletes collapsed into one
-    transaction, with the writer lock held across the whole batch.
-    A residual race on the upload side (an in-flight `store_bytes`
-    that already ran before we acquired the lock) is acknowledged as
-    out-of-scope: closing it requires the upload path to re-store
-    inside its insert txn, tracked separately.
-
-    Pending renditions (status='pending'/'processing') have
-    storage_key=None and contribute no on-disk file to refcount.
+    Keep the writer lock across flush, reference checks, unlink and the
+    caller's single commit, so another upload cannot insert a reference
+    between checking and removing bytes. An upload that stored bytes before
+    our lock remains a separate upload-side race; fixing it requires storing
+    again inside the upload's insert transaction.
     """
-    # `site` is the resolved request-site, not derived from the row;
-    # capture its slug early because `backend.remove` needs it and we
-    # do not want to re-touch `site` after the cascade DELETE expires
-    # transient ORM state.
     site_slug_for_storage = site.slug
     storage_key = row.storage_key
     filename = row.filename
@@ -702,12 +688,7 @@ def _delete_one_attachment(db: Session, site: Site, row: Attachment) -> BulkOutc
     db.delete(row)
     db.flush()  # apply cascade so refcount sees post-delete state
 
-    # If no other row across attachments or renditions points at a
-    # key, free the on-disk file. Otherwise leave it; some surviving
-    # row still resolves through that key. This loop must stay
-    # INSIDE the per-row callable (between flush and the caller's
-    # commit) so the writer lock is held while refcount + unlink
-    # happen; see the function docstring for the #171 rationale.
+    # Check all sites and keep the lock until the caller commits.
     backend = resolve_storage(current_app)
     for key in {storage_key, *rendition_keys}:
         still_used = (
@@ -717,11 +698,83 @@ def _delete_one_attachment(db: Session, site: Site, row: Attachment) -> BulkOutc
             or db.execute(
                 select(AttachmentRendition).where(AttachmentRendition.storage_key == key).limit(1)
             ).scalar_one_or_none()
+            or db.execute(
+                select(Dataset).where(Dataset.storage_key == key).limit(1)
+            ).scalar_one_or_none()
         )
         if still_used is None:
             backend.remove(site_slug_for_storage, key)
 
     return Ok(captured)
+
+
+def _deletion_preview(
+    db: Session, site: Site, ids: list[int], *, force_preview: bool = False
+) -> ResponseReturnValue | None:
+    """Require a fresh, signed preview before either deletion route mutates data."""
+    query = (
+        select(Attachment)
+        .where(Attachment.site_id == site.id, Attachment.id.in_(ids))
+        .order_by(Attachment.id)
+    )
+    rows = list(db.scalars(query))
+    fingerprints = [(row.id, fingerprint(row)) for row in rows]
+    inputs = media_usage_inputs(db, site)
+    usages = attachment_usage(db, site, rows, inputs=inputs)
+    state = [
+        session["user_id"],
+        site.id,
+        sorted(set(ids)),
+        [
+            [
+                row_id,
+                row_fingerprint,
+                sorted(
+                    [asdict(ref) for ref in usages[row_id]],
+                    key=lambda ref: json.dumps(ref, sort_keys=True),
+                ),
+            ]
+            for row_id, row_fingerprint in fingerprints
+        ],
+    ]
+    secret_key = current_app.secret_key
+    assert secret_key is not None
+    signer = URLSafeTimedSerializer(secret_key, salt="media-delete-v1")
+    token = request.form.get("_delete_token", "")
+    try:
+        confirmed = signer.loads(token, max_age=900) == state
+    except BadData:
+        confirmed = False
+    in_use = any(usages.values())
+    if not force_preview and confirmed and (not in_use or request.form.get("acknowledge") == "yes"):
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site.slug)
+        require_role("editor", site.id)
+        fresh_fingerprints = [(row.id, fingerprint(row)) for row in db.scalars(query)]
+        # ponytail: reread is O(content bytes); add an index only after a measured slow reread.
+        fresh_inputs = media_usage_inputs(db, site)
+        if inputs == fresh_inputs and fingerprints == fresh_fingerprints:
+            return None
+        db.rollback()
+        return _deletion_preview(db, site, ids, force_preview=True)
+    response = make_response(
+        render_template(
+            "admin/attachment_delete.html",
+            rows=rows,
+            usages=usages,
+            ids=ids,
+            delete_token=signer.dumps(state),
+            in_use=in_use,
+            changed=bool(token),
+            site=site,
+        )
+    )
+    # A bulk request may target the table; this preview replaces the main content.
+    if is_htmx():
+        response.headers.update(
+            {"HX-Retarget": "main", "HX-Reselect": "main", "HX-Reswap": "outerHTML"}
+        )
+    return response
 
 
 @bp.route("/<int:attachment_id>/delete", methods=["POST"])
@@ -732,7 +785,13 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
         row = db.get(Attachment, attachment_id)
         if row is None or row.site_id != site.id:
             abort(404)
+        preview = _deletion_preview(db, site, [attachment_id])
+        if preview is not None:
+            return preview
 
+        row = db.get(Attachment, attachment_id)
+        if row is None or row.site_id != site.id:
+            abort(404)
         outcome = _delete_one_attachment(db, site, row)
         assert isinstance(outcome, Ok)  # attachments have no skip path today
         deleted = outcome.item
@@ -756,34 +815,7 @@ def delete_attachment(site_slug: str, attachment_id: int) -> ResponseReturnValue
 
 @bp.route("/bulk-delete", methods=["POST"])
 def bulk_delete_attachments(site_slug: str) -> ResponseReturnValue:
-    """Delete a batch of attachments. Best-effort partial-failure.
-
-    The writer lock is held continuously from the first per-row
-    flush through the single batch commit; `_delete_one_attachment`
-    runs its refcount check and `backend.remove` BETWEEN its
-    `db.flush()` and the caller's `db.commit()`, so a concurrent
-    upload of the same content-addressed bytes cannot land an
-    INSERT against any storage_key between any per-row refcount
-    check and its `backend.remove` call. See
-    `_delete_one_attachment`'s docstring for the #171 rationale;
-    the "caller commits once" rule extends that lock-window-collapse
-    property across N rows automatically.
-
-    Each per-row callable queries the current `Attachment` /
-    `AttachmentRendition` state from `db`, which reflects all
-    earlier flushes in this batch AND any rows outside the batch.
-    A surviving (not-in-batch) Attachment row that references a
-    storage_key still in use is therefore visible to the refcount
-    check, so its bytes survive on disk; an unshared key in the
-    batch is unlinked.
-
-    Auth precedes the empty-ids early return (T5 review fix): an
-    author-role user POSTing an empty form must get 403, not the
-    warning flash.
-
-    No `on_cache_purge` fires: attachments don't fire a cache-purge
-    hook today (pre-existing pattern; spec says to leave that alone).
-    """
+    """Delete a confirmed batch under one writer lock and commit once."""
     ids = request.form.getlist("ids", type=int)
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
@@ -794,16 +826,21 @@ def bulk_delete_attachments(site_slug: str) -> ResponseReturnValue:
             return _bulk_list_response(site_slug)
 
         try:
-            result = bulk_delete(
-                db=db,
-                site=site,
-                model=Attachment,
-                ids=ids,
-                delete_one=_delete_one_attachment,
-            )
+            check_bulk_limit(ids)
         except BulkLimitExceeded as exc:
             flash(str(exc), "warning")
             return _bulk_list_response(site_slug)
+        preview = _deletion_preview(db, site, ids)
+        if preview is not None:
+            return preview
+
+        result = bulk_delete(
+            db=db,
+            site=site,
+            model=Attachment,
+            ids=ids,
+            delete_one=_delete_one_attachment,
+        )
 
         db.commit()
 

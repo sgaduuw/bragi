@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import select, update
@@ -278,7 +279,8 @@ def test_delete_removes_row_and_file(
         aid = db.execute(select(Attachment)).scalar_one().id
 
     token = csrf_token(client, path="/admin/sites/blog/attachments/")
-    resp = client.post(
+    resp = _confirmed_delete(
+        client,
         f"/admin/sites/blog/attachments/{aid}/delete",
         data={"_csrf_token": token},
         follow_redirects=False,
@@ -323,7 +325,8 @@ def test_delete_attachment_audit_carries_via_single(
         aid = db.execute(select(Attachment)).scalar_one().id
 
     token = csrf_token(client, path="/admin/sites/blog/attachments/")
-    resp = client.post(
+    resp = _confirmed_delete(
+        client,
         f"/admin/sites/blog/attachments/{aid}/delete",
         data={"_csrf_token": token},
         follow_redirects=False,
@@ -394,7 +397,8 @@ def test_delete_preserves_file_when_other_rows_reference_it(
         )
 
     token = csrf_token(client, path="/admin/sites/blog/attachments/")
-    client.post(
+    _confirmed_delete(
+        client,
         f"/admin/sites/blog/attachments/{blog_aid}/delete",
         data={"_csrf_token": token},
     )
@@ -1025,7 +1029,8 @@ def test_delete_cascades_renditions_and_unlinks_storage(
     assert original_on_disk.exists(), "expected original on disk before delete"
 
     token = csrf_token(client, path="/admin/sites/blog/attachments/")
-    client.post(
+    _confirmed_delete(
+        client,
         f"/admin/sites/blog/attachments/{aid}/delete",
         data={"_csrf_token": token},
     )
@@ -1112,7 +1117,8 @@ def test_delete_refcount_and_remove_happen_before_commit(
     event.listen(Session, "after_commit", _on_commit)
     try:
         token = csrf_token(client, path="/admin/sites/blog/attachments/")
-        client.post(
+        _confirmed_delete(
+            client,
             f"/admin/sites/blog/attachments/{aid}/delete",
             data={"_csrf_token": token},
         )
@@ -3802,3 +3808,235 @@ def test_list_attachments_htmx_returns_partial(
     assert b'id="attachments-list-table"' in hx.data
     # Partial does not include the page chrome.
     assert b"<html" not in hx.data
+
+
+def _confirmed_delete(client, path, **kwargs):
+    preview = client.post(path, **kwargs)
+    form = BeautifulSoup(preview.data, "html.parser").find("input", {"name": "_delete_token"})
+    assert form is not None
+    kwargs["data"] = {
+        **kwargs.get("data", {}),
+        "_delete_token": form["value"],
+        "acknowledge": "yes",
+    }
+    return client.post(path, **kwargs)
+
+
+def test_delete_requires_preview(admin_app, db_session_factory):
+    client = admin_app.test_client()
+    _login(client)
+    with db_session_factory() as db:
+        row = Attachment(
+            site_id=_blog_id(db_session_factory),
+            filename="keep.txt",
+            storage_key="a" * 64,
+            content_type="text/plain",
+            size_bytes=1,
+        )
+        db.add(row)
+        db.commit()
+        aid = row.id
+    token = csrf_token(client, path="/admin/sites/blog/attachments/")
+    response = client.post(
+        f"/admin/sites/blog/attachments/{aid}/delete",
+        data={"_csrf_token": token, "acknowledge": "yes"},
+    )
+    assert response.status_code == 200
+    assert b"Review media deletion" in response.data
+    with db_session_factory() as db:
+        assert db.get(Attachment, aid) is not None
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+def test_deletion_confirmation_rechecks_usage(admin_app, db_session_factory, bulk):
+    from bragi.core.models.post import Post
+
+    client = admin_app.test_client()
+    _login(client)
+    site_id = _blog_id(db_session_factory)
+    with db_session_factory() as db:
+        row = Attachment(
+            site_id=site_id,
+            filename="used.txt",
+            storage_key="b" * 64,
+            content_type="text/plain",
+            size_bytes=1,
+        )
+        db.add(row)
+        db.flush()
+        aid = row.id
+        post = Post(
+            site_id=site_id,
+            title="Published story",
+            slug="story",
+            status="published",
+            body_markdown="Hello",
+            featured_image_id=aid,
+            author_id=db.get(Site, site_id).owner_user_id,
+        )
+        db.add(post)
+        db.commit()
+        pid = post.id
+    path = (
+        "/admin/sites/blog/attachments/bulk-delete"
+        if bulk
+        else f"/admin/sites/blog/attachments/{aid}/delete"
+    )
+    data = {
+        "_csrf_token": csrf_token(client, path="/admin/sites/blog/attachments/"),
+        "ids": [str(aid)],
+    }
+    preview = client.post(path, data=data, headers={"HX-Request": "true"})
+    assert preview.status_code == 200
+    assert preview.headers["HX-Retarget"] == "main"
+    assert b"Published story" in preview.data and b"Published" in preview.data
+    assert b"Delete anyway" in preview.data
+    assert b"/posts/" in preview.data
+    token = BeautifulSoup(preview.data, "html.parser").find("input", {"name": "_delete_token"})[
+        "value"
+    ]
+    # A valid token is not an acknowledgement.
+    assert client.post(path, data={**data, "_delete_token": token}).status_code == 200
+    # A forged token never authorizes deletion.
+    assert (
+        client.post(
+            path, data={**data, "_delete_token": "forged", "acknowledge": "yes"}
+        ).status_code
+        == 200
+    )
+    with db_session_factory() as db:
+        post = db.get(Post, pid)
+        post.body_markdown = "![new usage](/attachments/" + "b" * 64 + ")"
+        db.commit()
+    changed = client.post(path, data={**data, "_delete_token": token, "acknowledge": "yes"})
+    assert changed.status_code == 200
+    assert b"Nothing was deleted" in changed.data
+    with db_session_factory() as db:
+        assert db.get(Attachment, aid) is not None
+    fresh = BeautifulSoup(changed.data, "html.parser").find("input", {"name": "_delete_token"})[
+        "value"
+    ]
+    assert (
+        client.post(path, data={**data, "_delete_token": fresh, "acknowledge": "yes"}).status_code
+        == 302
+    )
+    with db_session_factory() as db:
+        assert db.get(Attachment, aid) is None
+        assert db.get(Post, pid).featured_image_id is None
+
+
+def test_delete_retains_bytes_shared_with_dataset(
+    admin_app, db_session_factory, tmp_attachments_root
+):
+    from bragi.core.models.dataset import Dataset
+    from bragi.core.storage import read_bytes, store_bytes
+
+    client = admin_app.test_client()
+    _login(client)
+    site_id = _blog_id(db_session_factory)
+    with admin_app.app_context():
+        key, _ = store_bytes("blog", b"col\nvalue\n")
+    with db_session_factory() as db:
+        row = Attachment(
+            site_id=site_id,
+            filename="shared.txt",
+            storage_key=key,
+            content_type="text/plain",
+            size_bytes=10,
+        )
+        db.add(row)
+        db.add(
+            Dataset(
+                site_id=site_id,
+                slug="shared",
+                name="Shared",
+                storage_key=key,
+                source_type="csv",
+                size_bytes=10,
+                content_sha=key,
+            )
+        )
+        db.commit()
+        aid = row.id
+    _confirmed_delete(
+        client,
+        f"/admin/sites/blog/attachments/{aid}/delete",
+        data={"_csrf_token": csrf_token(client, path="/admin/sites/blog/attachments/")},
+    )
+    assert read_bytes("blog", key) == b"col\nvalue\n"
+
+
+@pytest.mark.parametrize("change", ["expired", "selection", "row"])
+def test_delete_confirmation_bound_to_current_selection(
+    admin_app, db_session_factory, monkeypatch, change
+):
+    import time
+
+    from itsdangerous import TimestampSigner
+
+    client = admin_app.test_client()
+    _login(client)
+    site_id = _blog_id(db_session_factory)
+    with db_session_factory() as db:
+        rows = [
+            Attachment(
+                site_id=site_id,
+                filename=f"{letter}.txt",
+                storage_key=letter * 64,
+                content_type="text/plain",
+                size_bytes=1,
+            )
+            for letter in "cd"
+        ]
+        db.add_all(rows)
+        db.commit()
+        ids = [row.id for row in rows]
+    path = "/admin/sites/blog/attachments/bulk-delete"
+    data = {
+        "_csrf_token": csrf_token(client, path="/admin/sites/blog/attachments/"),
+        "ids": [str(ids[0])],
+    }
+    preview = client.post(path, data=data)
+    token = BeautifulSoup(preview.data, "html.parser").find("input", {"name": "_delete_token"})[
+        "value"
+    ]
+    if change == "expired":
+        future = int(time.time()) + 901
+        monkeypatch.setattr(TimestampSigner, "get_timestamp", lambda self: future)
+    elif change == "selection":
+        data["ids"] = [str(aid) for aid in ids]
+    else:
+        with db_session_factory() as db:
+            db.get(Attachment, ids[0]).filename = "changed.txt"
+            db.commit()
+    response = client.post(path, data={**data, "_delete_token": token, "acknowledge": "yes"})
+    assert response.status_code == 200
+    assert b"Nothing was deleted" in response.data
+    with db_session_factory() as db:
+        assert all(db.get(Attachment, aid) is not None for aid in ids)
+
+
+def test_media_selection_works_without_javascript(admin_app, db_session_factory):
+    client = admin_app.test_client()
+    _login(client)
+    with db_session_factory() as db:
+        row = Attachment(
+            site_id=_blog_id(db_session_factory),
+            filename="select.txt",
+            storage_key="e" * 64,
+            content_type="text/plain",
+            size_bytes=1,
+        )
+        db.add(row)
+        db.commit()
+        aid = row.id
+    response = client.get("/admin/sites/blog/attachments/")
+    soup = BeautifulSoup(response.data, "html.parser")
+    form = soup.find("form", {"id": "media-delete-selection"})
+    assert form["method"] == "post"
+    assert form["action"].endswith("/attachments/bulk-delete")
+    assert form.find("button", {"type": "submit"}) is not None
+    checkbox = soup.find("input", {"name": "ids", "value": str(aid)})
+    assert checkbox is not None and checkbox["form"] == form["id"]
+    assert checkbox["aria-label"] == "Select select.txt"
+    assert b"bulk_select.js" not in response.data

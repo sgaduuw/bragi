@@ -28,10 +28,11 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from bragi.api import Crumb, set_breadcrumbs
+from bragi.contrib.notfound.queries import covered_by_exact_redirect
 from bragi.contrib.notfound.suggestions import Candidate, suggest
 from bragi.core.db import SessionLocal
 from bragi.core.htmx import wants_partial
@@ -42,6 +43,7 @@ from bragi.core.models.redirect import MatchType, Redirect, RedirectSource
 from bragi.core.pagination import page_arg
 from bragi.core.permissions import require_role, resolve_site_or_abort
 from bragi.core.url import page_url_for, post_url_for
+from bragi.settings import settings
 
 bp = Blueprint(
     "notfound_admin",
@@ -166,23 +168,16 @@ def list_notfound(site_slug: str) -> ResponseReturnValue:
     with SessionLocal() as db:
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
+        retained = db.scalar(
+            select(func.count()).select_from(NotFound).where(NotFound.site_id == site.id)
+        )
 
         # Hide open rows an active EXACT redirect now covers: that is how
         # a row drops off the list after you deep-link-create its redirect
         # (no state threaded back through the deep-link). Correlated
         # NOT EXISTS keeps pagination correct. Prefix/regex redirects are
         # deliberately not consulted here (exact membership only).
-        covered = (
-            select(Redirect.id)
-            .where(
-                Redirect.site_id == site.id,
-                Redirect.source_path == NotFound.path,
-                Redirect.match_type == MatchType.EXACT,
-                Redirect.active.is_(True),
-            )
-            .correlate(NotFound)
-            .exists()
-        )
+        covered = covered_by_exact_redirect(site.id)
         query = (
             select(NotFound)
             .where(
@@ -216,7 +211,16 @@ def list_notfound(site_slug: str) -> ResponseReturnValue:
         ]
 
     template = "admin/_notfound_list_table.html" if wants_partial() else "admin/notfound_list.html"
-    return render_template(template, entries=entries, page=page, has_more=has_more)
+    return render_template(
+        template,
+        site=site,
+        entries=entries,
+        page=page,
+        has_more=has_more,
+        retained=retained,
+        capacity=settings.notfound_max_rows,
+        recording_enabled=settings.notfound_records_per_minute > 0,
+    )
 
 
 def _set_status_or_abort(site_slug: str, nf_id: int, status: str, verb: str) -> None:

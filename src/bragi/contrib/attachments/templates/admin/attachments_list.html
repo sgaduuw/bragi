@@ -56,12 +56,10 @@
       Images missing alt text ({{ missing_alt_count }})
     </a>
   {% endif %}
-  {% with bulk_action_url=url_for('attachment_admin.bulk_delete_attachments', site_slug=request.view_args['site_slug']),
-          singular="attachment",
-          plural="attachments",
-          wrapper_id="attachments-list-table" %}
-    {% include "admin/_bulk_actions_bar.html" %}
-  {% endwith %}
+  <form id="media-delete-selection" method="post" action="{{ url_for('attachment_admin.bulk_delete_attachments', site_slug=request.view_args['site_slug']) }}" hx-boost="false">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit">Review selected deletion</button>
+  </form>
 </div>
 
 {% if missing_alt %}
@@ -76,6 +74,5 @@
 {% endif %}
 
 {% include "admin/_attachments_list_table.html" %}
-
-<script src="{{ url_for('admin_static.static', filename='bulk_select.js') }}"></script>
+<script src="{{ url_for('admin_static.static', filename='media_select.js') }}"></script>
 {% endblock %}

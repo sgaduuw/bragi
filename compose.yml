@@ -4,7 +4,7 @@
 # source. The tag is parameterised via `BRAGI_TAG` (default
 # `latest`); pin to a specific release in production:
 #
-#   BRAGI_TAG=v1.11.0 docker compose up -d
+#   BRAGI_TAG=v1.54.0 docker compose up -d
 #
 # Companion file `docker/compose.dev.yml` builds the images
 # locally instead, for testing the container shape without a
@@ -97,6 +97,8 @@ services:
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
       BRAGI_ENV: production
       BRAGI_TRUSTED_PROXY_HOPS: "1"
+      BRAGI_NOTFOUND_MAX_ROWS: ${BRAGI_NOTFOUND_MAX_ROWS:-1000}
+      BRAGI_NOTFOUND_RECORDS_PER_MINUTE: ${BRAGI_NOTFOUND_RECORDS_PER_MINUTE:-60}
       # Optional knobs (uncomment to enable). Each maps to a
       # `Settings` field documented in `src/bragi/settings.py`.
       # BRAGI_GITHUB_CLIENT_ID: ...
@@ -160,6 +162,8 @@ services:
       BRAGI_ATTACHMENTS_ROOT: /data/uploads
       BRAGI_ENV: production
       BRAGI_TRUSTED_PROXY_HOPS: "1"
+      BRAGI_NOTFOUND_MAX_ROWS: ${BRAGI_NOTFOUND_MAX_ROWS:-1000}
+      BRAGI_NOTFOUND_RECORDS_PER_MINUTE: ${BRAGI_NOTFOUND_RECORDS_PER_MINUTE:-60}
       # Optional knobs (see `src/bragi/settings.py` for field docs).
       # BRAGI_SECURITY_CONTACT: mailto:security@example.com
       # BRAGI_MAX_REQUEST_BYTES: "1048576"

@@ -52,6 +52,9 @@ def test_parse_tag_csv_ignores_empty_and_unsluggable() -> None:
 # ============================================================
 
 
+pytestmark = pytest.mark.usefixtures("editor_client")
+
+
 @pytest.fixture
 def admin_app(
     db_session: Session,

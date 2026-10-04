@@ -61,6 +61,9 @@ HOST = "blog.example.com"
 OTHER_HOST = "other.example.com"
 
 
+pytestmark = pytest.mark.usefixtures("editor_client")
+
+
 @pytest.fixture
 def site_with_posts(
     admin_app_file_db: Flask,

@@ -38,6 +38,7 @@
       var attachmentId = card.dataset.attachmentId || "";
       if (!attachmentId) return;
       hidden.value = attachmentId;
+      hidden.dispatchEvent(new Event("change", { bubbles: true }));
       previewEl.style.display = "flex";
       previewEl.innerHTML =
         '<img class="image-picker-thumb" src="' + attachmentPrefix + key + '"' +
@@ -53,11 +54,20 @@
 
     function clearSelection() {
       hidden.value = "";
+      hidden.dispatchEvent(new Event("change", { bubbles: true }));
       previewEl.style.display = "none";
       previewEl.innerHTML = "";
       pickBtn.textContent = "Pick image";
       clearBtn.style.display = "none";
     }
+
+    hidden.addEventListener("editor:restore", function () {
+      previewEl.replaceChildren();
+      previewEl.textContent = hidden.value ? "Recovered image selection #" + hidden.value : "";
+      previewEl.style.display = hidden.value ? "flex" : "none";
+      pickBtn.textContent = hidden.value ? "Change image" : "Pick image";
+      clearBtn.style.display = hidden.value ? "inline-block" : "none";
+    });
 
     pickBtn.addEventListener("click", openPicker);
     clearBtn.addEventListener("click", clearSelection);

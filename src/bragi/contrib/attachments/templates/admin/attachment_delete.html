@@ -1,0 +1,28 @@
+{% extends "admin/base.html" %}
+{% block title %}Review media deletion · bragi admin{% endblock %}
+{% block content %}
+<h1>Review media deletion</h1>
+{% if changed %}<p role="alert">The confirmation expired, the selection or usage changed, or acknowledgement is missing. Review the current details below. Nothing was deleted.</p>{% endif %}
+<p>Deleting media can break images and links, and clears featured image selections. Recovery requires the original files or a backup.</p>
+<p>Known usage covers stored content and revisions. External sites, custom plugins and other untracked references may still use these files. No known usage does not guarantee deletion is safe.</p>
+{% set field_labels = {'body_markdown': 'Body image or link', 'featured_image_id': 'Featured image / social card', 'default_featured_image_id': 'Default featured image / social card'} %}
+{% set status_labels = {'working_copy': 'Working copy', 'revision': 'Saved revision', 'site_default': 'Site default'} %}
+{% for row in rows %}
+<h2>{{ row.filename }}</h2>
+<ul>
+{% for ref in usages[row.id] %}
+<li>{% if ref.source_type.startswith('post') %}<a href="{{ url_for('post_admin.edit_post', site_slug=site.slug, post_id=ref.content_id or ref.source_id) }}">{{ ref.title }}</a>{% elif ref.source_type.startswith('page') %}<a href="{{ url_for('page_admin.edit_page', site_slug=site.slug, page_id=ref.content_id or ref.source_id) }}">{{ ref.title }}</a>{% else %}<a href="{{ url_for('site_admin.edit_site_current', site_slug=site.slug) }}">{{ ref.title }}</a>{% endif %}: {{ status_labels.get(ref.status, ref.status|capitalize) }} · {{ field_labels[ref.field] }}</li>
+{% else %}<li>No known usage.</li>{% endfor %}
+</ul>
+{% endfor %}
+{% if rows %}
+<form method="post" action="{{ request.path }}" hx-boost="false">
+<input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="_delete_token" value="{{ delete_token }}">
+{% for id in ids %}<input type="hidden" name="ids" value="{{ id }}">{% endfor %}
+{% if in_use %}<label><input type="checkbox" name="acknowledge" value="yes" required> Delete anyway: I understand this can break published content and remove featured image selections.</label>{% endif %}
+<button type="submit" class="danger">Delete {{ rows|length }} attachment{{ 's' if rows|length != 1 else '' }}</button>
+</form>
+{% else %}<p>No selected attachments remain on this site.</p>{% endif %}
+<a href="{{ url_for('attachment_admin.list_attachments', site_slug=site.slug) }}">Cancel</a>
+{% endblock %}

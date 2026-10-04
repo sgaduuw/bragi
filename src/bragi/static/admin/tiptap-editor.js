@@ -45,7 +45,13 @@ import TableCell from 'https://esm.sh/@tiptap/extension-table-cell@2.6';
 // (`type="application/json"` is not restricted by CSP `script-src`).
 // Values (textarea id, picker URLs, attachment prefix) are computed
 // server-side exactly as the former inline module interpolated them.
-const cfg = JSON.parse(document.getElementById('tiptap-editor-config').textContent);
+let currentEditor;
+function initEditor() {
+const config = document.getElementById('tiptap-editor-config');
+if (!config || config.dataset.editorWired) return;
+config.dataset.editorWired = '1';
+currentEditor?.destroy();
+const cfg = JSON.parse(config.textContent);
 // BubbleMenu floats a small toolbar above the focused Image node
 // so the operator can change size + alignment without leaving the
 // editor. Admin-only; delivery ships none of this.
@@ -438,10 +444,12 @@ if (!textarea || !mount || !toolbar) {
     content: publicToAdmin(textarea.value),
     onUpdate: ({ editor }) => {
       textarea.value = adminToPublic(editor.storage.markdown.getMarkdown());
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
     },
     onSelectionUpdate: ({ editor }) => updateToolbarActive(editor),
   });
 
+  currentEditor = editor;
   document.body.classList.add('has-tiptap-editor');
   // Hide the source textarea directly (id-agnostic, since the editor
   // can bind to any caller-provided textarea id).
@@ -461,6 +469,7 @@ if (!textarea || !mount || !toolbar) {
     // `position: absolute` math is off by the offsetParent's
     // document-relative offset, which is what the "menu lands
     // at the top-left of the editor" bug was.
+    document.body.querySelector(':scope > #tiptap-image-bubble-menu')?.remove();
     document.body.appendChild(imageBubbleMenu);
     imageBubbleMenu.style.position = 'absolute';
     imageBubbleMenu.style.zIndex = '50';
@@ -823,6 +832,10 @@ if (!textarea || !mount || !toolbar) {
     editor.on('update', refreshBubbleMenu);
   }
 
+  textarea.addEventListener('editor:restore', () => {
+    editor.commands.setContent(publicToAdmin(textarea.value));
+  });
+
   // Belt-and-braces: even if onUpdate hasn't fired yet (rare race
   // when submitting immediately after typing), serialize one more
   // time on form submit so the textarea is fresh.
@@ -833,3 +846,8 @@ if (!textarea || !mount || !toolbar) {
     });
   }
 }
+
+}
+initEditor();
+document.addEventListener('htmx:afterSwap', initEditor);
+document.addEventListener('htmx:historyRestore', initEditor);

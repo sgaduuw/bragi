@@ -16,6 +16,7 @@ from collections.abc import Iterator
 
 import jinja2
 import pytest
+from bs4 import BeautifulSoup
 from flask import Flask
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -133,3 +134,21 @@ def test_in_tree_theme_uses_package_loader_not_dict_or_filesystem(
     spec = delivery_app.extensions["registry"].theme(slug)
     assert spec is not None
     assert isinstance(spec.template_loader, jinja2.PackageLoader)
+
+
+@pytest.mark.parametrize(("slug", "_label"), IN_TREE_THEMES)
+def test_in_tree_theme_renders_name_only_generator(
+    delivery_app: Flask, slug: str, _label: str
+) -> None:
+    spec = delivery_app.extensions["registry"].theme(slug)
+    assert spec is not None
+    source, _, _ = spec.template_loader.get_source(delivery_app.jinja_env, "delivery/base.html")
+    with delivery_app.test_request_context():
+        html = delivery_app.jinja_env.from_string(source).render(
+            site=None, active_theme_slug=lambda: slug
+        )
+    head = BeautifulSoup(html, "html.parser").head
+    assert head is not None
+    generators = head.find_all("meta", attrs={"name": "generator"})
+    assert len(generators) == 1
+    assert generators[0].get("content") == "Bragi"

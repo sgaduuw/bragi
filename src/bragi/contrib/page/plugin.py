@@ -36,7 +36,7 @@ from bragi.core.cache import attach_validators, etag_for, fold_site_mtime, maybe
 from bragi.core.db import SessionLocal
 from bragi.core.models.page import Page, PageKind, PageStatus
 from bragi.core.models.user import User
-from bragi.core.seo import featured_image_url_for
+from bragi.core.seo import effective_metadata
 from bragi.core.url import page_url_for
 
 PAGE_EDIT_FIELDS: list[FieldSpec] = [
@@ -107,91 +107,49 @@ def _render_page(page: Any, _request: Any) -> str:
     RESUME pages render the structured resume template with inline
     microdata and a JSON-LD block.
     """
+    from bragi.core.profiles import profile_jsonld, profile_view
+
     site = g.get("site")
-    if page.kind == PageKind.RESUME:
-        from bragi.contrib.page.resume import ResumeData
-
-        resume = ResumeData.model_validate(page.resume_data or {})
-        path = _effective_url_for_page(page)
-        canonical = page.canonical_url or (
-            f"{site.base_url}{path}" if site and site.canonical_url else None
-        )
-        author_name: str | None = None
-        if page.author_id:
-            with SessionLocal() as db:
-                author = db.get(User, page.author_id)
-                if author is not None:
-                    author_name = author.display_name
-        return render_template(
-            "delivery/resume.html",
-            page=page,
-            resume=resume,
-            site=site,
-            author_name=author_name,
-            meta_description=page.meta_description or page.body_excerpt or None,
-            canonical_url=canonical,
-            noindex=page.noindex,
-            og_image_url=featured_image_url_for(item=page, site=site),
-        )
-    if page.kind == PageKind.PROFILE:
-        from bragi.core.profiles import profile_jsonld, profile_view
-
-        path = _effective_url_for_page(page)
-        canonical = page.canonical_url or (
-            f"{site.base_url}{path}" if site and site.canonical_url else None
-        )
-        author = None
-        if page.author_id:
-            with SessionLocal() as db:
-                author = db.get(User, page.author_id)
-        profile = profile_view(author)
-        return render_template(
-            "delivery/profile.html",
-            page=page,
-            site=site,
-            profile=profile,
-            profile_jsonld=profile_jsonld(profile, canonical) if profile else None,
-            meta_description=(
-                page.meta_description
-                or (profile.bio_text if profile else None)
-                or page.body_excerpt
-                or None
-            ),
-            canonical_url=canonical,
-            noindex=page.noindex,
-            og_image_url=(
-                profile.avatar_url
-                if profile and profile.avatar_url
-                else featured_image_url_for(item=page, site=site)
-            ),
-        )
     if page.kind == PageKind.POST_INDEX and site is not None:
-        # The listing helper returns a full Response; the Spec
-        # contract is a string body, so unwrap. Cache validators
-        # are re-attached by the caller (resolve_home or the
-        # dispatcher).
-        response = render_post_index_page(site, page)
-        return response.get_data(as_text=True)
-    path = _effective_url_for_page(page)
-    canonical = page.canonical_url or (
-        f"{site.base_url}{path}" if site and site.canonical_url else None
-    )
-    author_name = None
-    if page.author_id:
-        with SessionLocal() as db:
-            author = db.get(User, page.author_id)
-            if author is not None:
-                author_name = author.display_name
-    return render_template(
-        "delivery/page.html",
+        return render_post_index_page(site, page).get_data(as_text=True)
+    with SessionLocal() as db:
+        author = db.get(User, page.author_id) if page.author_id else None
+        profile = profile_view(author) if page.kind == PageKind.PROFILE else None
+        metadata = effective_metadata(
+            item=page,
+            site=site,
+            public_path=_effective_url_for_page(page),
+            db=db,
+            page_kind=page.kind,
+            profile=profile,
+        )
+        author_name = author.display_name if author else None
+    context = dict(
         page=page,
         site=site,
         author_name=author_name,
-        meta_description=page.meta_description or page.body_excerpt or None,
-        canonical_url=canonical,
-        noindex=page.noindex,
-        og_image_url=featured_image_url_for(item=page, site=site),
+        metadata=metadata,
+        meta_description=metadata.description,
+        canonical_url=metadata.canonical_url,
+        noindex=metadata.noindex,
+        og_image_url=metadata.image_url,
     )
+    if page.kind == PageKind.RESUME:
+        from bragi.contrib.page.resume import ResumeData
+
+        return render_template(
+            "delivery/resume.html",
+            resume=ResumeData.model_validate(page.resume_data or {}),
+            **context,
+        )
+    if page.kind == PageKind.PROFILE:
+        return render_template(
+            "delivery/profile.html",
+            profile=profile,
+            profile_jsonld=profile_jsonld(profile, metadata.canonical_url) if profile else None,
+            **context,
+        )
+    return render_template("delivery/page.html", **context)
 
 
 @hookimpl

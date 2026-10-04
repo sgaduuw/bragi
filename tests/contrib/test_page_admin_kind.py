@@ -30,6 +30,9 @@ EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
 
 
+pytestmark = pytest.mark.usefixtures("editor_client")
+
+
 @pytest.fixture
 def admin_app(
     db_session: Session,

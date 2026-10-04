@@ -45,6 +45,9 @@ class PostWorkingCopy(IdMixin, TimestampsMixin, Base):
         UniqueConstraint("site_id", "post_id", name="uq_post_working_copies_site_post"),
     )
 
+    # Null legacy rows fail closed at promotion; their live baseline is unknown.
+    base_fingerprint: Mapped[str | None] = mapped_column(String(64), default=None)
+
     # Multitenancy: every query MUST filter on site_id.
     site_id: Mapped[int] = mapped_column(
         ForeignKey("sites.id", ondelete="CASCADE"), index=True, nullable=False

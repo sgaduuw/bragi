@@ -122,6 +122,31 @@ def test_over_max_batch_raises(db: Session) -> None:
     assert "5" in str(exc.value)
 
 
+@pytest.mark.parametrize("max_batch", [200, 5])
+def test_bulk_limit_allows_boundary_and_rejects_next_item(db, max_batch):
+    kwargs = {} if max_batch == 200 else {"max_batch": max_batch}
+    assert (
+        bulk_delete(
+            db=db,
+            site=db.get(_Site, 1),
+            model=_Thing,
+            ids=list(range(max_batch)),
+            delete_one=_delete_ok,
+            **kwargs,
+        ).missing_count
+        == max_batch
+    )
+    with pytest.raises(BulkLimitExceeded, match=f"limited to {max_batch} items"):
+        bulk_delete(
+            db=db,
+            site=db.get(_Site, 1),
+            model=_Thing,
+            ids=list(range(max_batch + 1)),
+            delete_one=_delete_ok,
+            **kwargs,
+        )
+
+
 def test_cross_site_and_missing_ids_count_as_missing(db: Session) -> None:
     other_site = _Site(id=2, slug="b")
     db.add(other_site)

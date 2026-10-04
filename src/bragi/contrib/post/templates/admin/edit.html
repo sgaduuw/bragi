@@ -22,6 +22,14 @@
     Use <strong>Promote</strong> to copy the staged content (and tags)
     onto the live post and publish it.
   </p>
+  {% if post.base_fingerprint is none %}
+  <p id="working-copy-upgrade-help">
+    This working copy predates version checks. Copy your changed fields somewhere
+    safe <strong>before restaging</strong>: restaging replaces this copy.
+    Open the latest live editor, stage a fresh copy, restore your copied fields,
+    then save and promote it.
+  </p>
+  {% endif %}
   {# Preview (Task 5b): opens the staged content rendered through the real
      theme at the live post URL, on the delivery host, in a new tab.
      Suppressed when the site has no canonical (delivery) URL configured
@@ -38,6 +46,7 @@
         onsubmit="return confirm('Promote this working copy? The staged content becomes the live post.');"
         style="display: inline; margin: 0;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="_edit_token" value="{{ edit_token }}">
     <label style="margin-right: 0.5em;">
       <input type="checkbox" name="skip_redirect" value="1">
       Skip 301 redirect on a slug change
@@ -51,14 +60,23 @@
         onsubmit="return confirm('Discard this working copy? The live post is unaffected.');"
         style="display: inline; margin: 0;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="_edit_token" value="{{ edit_token }}">
     <button type="submit" class="danger">Discard working copy</button>
   </form>
 </div>
 {% endif %}
 
-<form method="post"
+<form method="post" data-editor-recovery hx-history="false"
+      data-recovery-source="{{ request.form.get('_recovery_id', '') }}"
+      data-recovery-source-version="{{ request.form.get('_recovery_version', '') }}"
+      data-recovery-user="{{ session['user_id'] }}"
+      data-recovery-site="{{ recovery_site_id }}"
+      data-recovery-entity="post:{{ working_copy_post_id if is_wc else (post.id if is_edit else 'new') }}"
+      data-recovery-context="{{ 'working-copy' if is_wc else 'live' }}"
+      data-recovery-conflict="{{ 'true' if g.editor_conflict else 'false' }}"
       action="{% if is_wc %}{{ url_for('post_admin.save_post_working_copy', post_id=working_copy_post_id) }}{% elif is_edit %}{{ url_for('post_admin.edit_post', post_id=post.id) }}{% else %}{{ url_for('post_admin.new_post') }}{% endif %}">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="_edit_token" value="{{ edit_token }}">
   <fieldset>
     <label for="title">Title</label>
     <input type="text" name="title" id="title" required
@@ -91,6 +109,24 @@
       <option value="unlisted" {% if current_status == 'unlisted' %}selected{% endif %}>Unlisted (reachable by link, hidden from listings)</option>
       <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archived</option>
     </select>
+  </fieldset>
+  {% endif %}
+
+  {% if not is_wc %}
+  <fieldset>
+    <label for="scheduled_for">Publication time</label>
+    <input type="datetime-local" name="scheduled_for" id="scheduled_for" step="1"
+           value="{{ form.get('scheduled_for', '') }}" aria-describedby="schedule-help">
+    <label for="schedule_timezone">Site timezone</label>
+    <input type="text" name="schedule_timezone" id="schedule_timezone" readonly
+           value="{{ form.get('schedule_timezone', schedule_site.timezone) }}">
+    <small id="schedule-help">Required when status is Scheduled. Choose a future time in this timezone.
+      To cancel, select Draft and save. Publication runs on the task runner's next check.</small>
+    {% if schedule_error %}<p role="alert">{{ schedule_error }}</p>{% endif %}
+    {% if is_edit %}
+      {% set schedule = post_schedule(post, schedule_site) %}
+      {% include "admin/_post_schedule.html" %}
+    {% endif %}
   </fieldset>
   {% endif %}
 
@@ -150,6 +186,7 @@
      submit button on the SAME form (HTML forbids nested forms). Drafts
      edit live as today, so the label stays the plain "Save". #}
   {% set is_published_live = is_edit and not is_wc and post.status == 'published' %}
+  {% include "admin/_metadata_fields.html" %}
   <div class="actions">
     <button type="submit">
       {%- if is_wc %}Save working copy
@@ -170,6 +207,7 @@
     {% endif %}
     <a href="{{ url_for('post_admin.list_posts') }}" class="btn secondary">Cancel</a>
   </div>
+  {% include "admin/_metadata_preview.html" %}
 </form>
 
 {% if not is_edit %}

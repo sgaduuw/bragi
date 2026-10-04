@@ -23,7 +23,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from flask import Flask, g, request
+from flask import Flask, abort, g, request
 from flask.typing import ResponseReturnValue
 
 from bragi.contrib.api_tokens.tokens import parse_token, verify
@@ -196,6 +196,10 @@ def _bearer_before_request() -> ResponseReturnValue | None:
     header = request.headers.get("Authorization", "")
     if not header.lower().startswith("bearer "):
         return None
+    # Only the JSON API enforces token scopes. Never grant HTML routes
+    # a bearer identity or CSRF exemption, even alongside a browser session.
+    if request.blueprint != "api_tokens_api":
+        abort(401, description="Personal access tokens are only supported on /admin/api/ routes.")
     presented = header.split(" ", 1)[1].strip()
 
     # Cache lookup before any DB / argon2 work. See module-level

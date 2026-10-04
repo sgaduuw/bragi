@@ -29,10 +29,11 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, set_breadcrumbs
+from bragi.contrib.post.scheduling import parse_schedule, schedule_input, schedule_zone
 from bragi.core.audit import AuditAction, audit
 from bragi.core.bulk_action import (
     BulkLimitExceeded,
@@ -43,6 +44,14 @@ from bragi.core.bulk_action import (
     format_bulk_result,
 )
 from bragi.core.db import SessionLocal
+from bragi.core.editor_state import (
+    editor_conflict,
+    editor_matches,
+    editor_saved,
+    editor_token,
+    fingerprint,
+    lock_editor_write,
+)
 from bragi.core.htmx import is_htmx, wants_partial
 from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.post_revision import PostRevision
@@ -65,6 +74,14 @@ from bragi.core.renditions import (
     resolve_featured_image_id as _resolve_featured_image_id,
 )
 from bragi.core.security import current_user
+from bragi.core.seo import (
+    apply_metadata_form,
+    effective_metadata,
+    metadata_form,
+    metadata_image_src,
+    submitted_metadata,
+    validate_metadata_form,
+)
 from bragi.core.text import slugify
 from bragi.core.time import naive_utcnow
 
@@ -93,10 +110,13 @@ def _stamp_public_url_date(post: Post, new_status: str) -> None:
 def _form_from_request() -> dict[str, str]:
     """Pull the post-edit form fields off the current request."""
     return {
+        **submitted_metadata(request.form),
         "title": (request.form.get("title") or "").strip(),
         "slug": (request.form.get("slug") or "").strip(),
         "body_markdown": request.form.get("body_markdown") or "",
         "status": request.form.get("status") or PostStatus.DRAFT,
+        "scheduled_for": (request.form.get("scheduled_for") or "").strip(),
+        "schedule_timezone": (request.form.get("schedule_timezone") or "").strip(),
         "tags": (request.form.get("tags") or "").strip(),
         "featured_image_id": (request.form.get("featured_image_id") or "").strip(),
         # Pinning. The checkbox sends "1" when ticked, absent when not.
@@ -105,6 +125,30 @@ def _form_from_request() -> dict[str, str]:
         "is_pinned": "1" if request.form.get("is_pinned") else "",
         "pinned_until": (request.form.get("pinned_until") or "").strip(),
     }
+
+
+def _scheduled_for_form(
+    form: dict[str, str], site: Site, post: Post | None = None
+) -> tuple[datetime | None, str | None]:
+    if form["status"] != PostStatus.SCHEDULED:
+        return None, None
+    if post is not None and post.status in (PostStatus.PUBLISHED, PostStatus.UNLISTED):
+        return None, "Unpublish this post before scheduling it. Working copies cannot be scheduled."
+    if form["schedule_timezone"] != site.timezone:
+        return (
+            None,
+            "The site timezone changed. Reload the editor before scheduling; "
+            "your writing is preserved below.",
+        )
+    try:
+        existing = (
+            post.scheduled_for if post is not None and post.status == PostStatus.SCHEDULED else None
+        )
+        return parse_schedule(
+            form["scheduled_for"], site.timezone, now=naive_utcnow(), existing=existing
+        ), None
+    except ValueError as exc:
+        return None, str(exc)
 
 
 def _parse_pinned_until(raw: str) -> tuple[datetime | None, str | None]:
@@ -238,11 +282,66 @@ def _render_post_form(
     falsy-guarded in the template, so a default is equivalent to the kwarg
     being absent.
     """
+    # A POST reaches this boundary only when it did not save.
+    if request.method == "POST":
+        db.rollback()
     fid = form.get("featured_image_id")
+    site = db.get(Site, site_id)
+    assert site is not None
+    form = {**metadata_form(post), **form}
+    live = db.get(Post, working_copy_post_id) if working_copy_post_id else post
+    featured_id, image_error = _resolve_featured_image_id(db, fid or "", site_id)
+    metadata_error = validate_metadata_form(form) or image_error
+    metadata = None
+    metadata_note = None
+    if not metadata_error:
+        from bragi.core.url import permalink_style_for, post_url_for
+
+        body = form.get("body_markdown", "")
+        candidate = Post(
+            title=form.get("title", ""),
+            featured_image_id=featured_id,
+            body_excerpt=post.body_excerpt
+            if request.method != "POST" and post and body == post.body_markdown
+            else make_excerpt(body),
+        )
+        apply_metadata_form(candidate, form)
+        slug = form.get("slug", "")
+        published_at = live.published_at if isinstance(live, Post) else None
+        path = post_url_for(site, slug, published_at=published_at, db=db) if slug else None
+        if not slug:
+            metadata_note = "Enter a slug to complete the public address."
+        elif not path:
+            metadata_note = (
+                "No public post address is available until this site has a published blog index."
+            )
+        elif published_at is None and permalink_style_for(site, db=db) != "flat":
+            metadata_note = (
+                "First publication supplies the date segments. "
+                "This draft currently uses the flat address."
+            )
+        metadata = effective_metadata(item=candidate, site=site, public_path=path, db=db)
+    schedule_error = None
+    try:
+        schedule_zone(site.timezone)
+    except ValueError as exc:
+        schedule_error = str(exc)
     return render_template(
         "admin/edit.html",
         post=post,
         form=form,
+        recovery_site_id=site_id,
+        schedule_site=site,
+        schedule_error=schedule_error,
+        metadata=metadata,
+        metadata_error=metadata_error,
+        metadata_note=metadata_note,
+        metadata_kind=None,
+        metadata_unsaved=request.method == "POST",
+        metadata_image_src=metadata_image_src(metadata.image_url) if metadata else None,
+        edit_token=editor_token(
+            post, None if is_working_copy or post is None else _wc_for_post(db, site_id, post.id)
+        ),
         featured_image=_load_featured_image(db, fid, site_id),
         featured_image_thumb_key=_featured_image_thumb_key(db, fid, site_id),
         is_working_copy=is_working_copy,
@@ -261,6 +360,7 @@ def _post_snapshot(post: Post) -> dict[str, object]:
         "slug": post.slug,
         "title": post.title,
         "status": post.status,
+        "scheduled_for": post.scheduled_for.isoformat() if post.scheduled_for else None,
         "is_pinned": post.is_pinned,
         "pinned_until": post.pinned_until.isoformat() if post.pinned_until else None,
     }
@@ -323,6 +423,7 @@ def fork_post_working_copy(post: Post, *, editor_user_id: int | None) -> PostWor
     # Snapshot the live tag set as ids; the WC stores ids, not junction
     # rows (promote, Task 5c, writes the real post_tags). Empty -> None.
     wc.tag_ids = [t.id for t in post.tags] or None
+    wc.base_fingerprint = fingerprint(post)
     return wc
 
 
@@ -330,14 +431,16 @@ def _apply_post_form_fields(
     target: Post | PostWorkingCopy,
     form: dict[str, str],
     *,
+    body_html: str,
+    body_excerpt: str,
     featured_image_id: int | None,
     pinned_until: datetime | None,
 ) -> None:
     """Assign the post-edit form fields onto `target` (live Post or WC).
 
     The single source of truth for the title/subtitle/slug/body/
-    featured-image/pin assignments plus the body_html render and excerpt
-    derivation, shared by `edit_post` (live) and `save_post_working_copy`
+    featured-image/pin assignments including pre-rendered HTML and excerpt,
+    shared by `edit_post` (live) and `save_post_working_copy`
     (working copy). `status` and tags are deliberately NOT set here:
     `status` is live-only (the live-edit path sets it separately; a
     working copy has no status column), and tags differ by target
@@ -352,11 +455,12 @@ def _apply_post_form_fields(
     back), but a save must not blank a field the form can't set.
     """
     body_markdown = form["body_markdown"]
+    apply_metadata_form(target, form)
     target.title = form["title"]
     target.slug = form["slug"]
     target.body_markdown = body_markdown
-    target.body_html = render_markdown(body_markdown)
-    target.body_excerpt = make_excerpt(body_markdown)
+    target.body_html = body_html
+    target.body_excerpt = body_excerpt
     target.featured_image_id = featured_image_id
     target.is_pinned = form["is_pinned"] == "1"
     target.pinned_until = pinned_until
@@ -442,6 +546,8 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             return _render_post_form(db, site_id, None, seed_form)
 
         form = _form_from_request()
+        if request.form.get("_metadata_preview") == "1":
+            return _render_post_form(db, site_id, None, form)
         if not form["slug"] and form["title"]:
             from bragi.core.text import unique_slug_for_post
 
@@ -451,6 +557,10 @@ def new_post(site_slug: str) -> ResponseReturnValue:
                 # slugify(title) was empty — fall through to the existing
                 # required-fields error path with the title preserved.
                 pass
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_post_form(db, site_id, None, form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_post_form(db, site_id, None, form)
@@ -466,6 +576,11 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             flash(pin_err, "error")
             return _render_post_form(db, site_id, None, form)
 
+        scheduled_for, schedule_err = _scheduled_for_form(form, site)
+        if schedule_err:
+            flash(schedule_err, "error")
+            return _render_post_form(db, site_id, None, form)
+
         body_markdown = form["body_markdown"]
         new_status = form["status"]
         new_post_row = Post(
@@ -477,6 +592,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             body_excerpt=make_excerpt(body_markdown),
             author_id=int(session["user_id"]),
             status=new_status,
+            scheduled_for=scheduled_for,
             published_at=(
                 naive_utcnow()
                 if new_status in (PostStatus.PUBLISHED, PostStatus.UNLISTED)
@@ -486,6 +602,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
             is_pinned=(form["is_pinned"] == "1"),
             pinned_until=pinned_until,
         )
+        apply_metadata_form(new_post_row, form)
         db.add(new_post_row)
         db.flush()
         _sync_post_tags(db, new_post_row, form["tags"], site_id)
@@ -502,6 +619,7 @@ def new_post(site_slug: str) -> ResponseReturnValue:
         # and any publish-time index/edge writes land atomically
         # (issue #430). Unconditional: a draft create must persist too.
         db.commit()
+        editor_saved()
         if published:
             pm.hook.on_cache_purge(scope="post", key=str(new_id))
 
@@ -535,13 +653,34 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         if not ((is_own and has_role("author", post.site_id)) or has_role("editor", post.site_id)):
             abort(403)
 
+        if request.method == "POST" and request.form.get("_metadata_preview") == "1":
+            return _render_post_form(db, site.id, post, _form_from_request())
+
+        if request.method == "POST":
+            body_markdown = _form_from_request()["body_markdown"]
+            body_html = render_markdown(body_markdown)
+            body_excerpt = make_excerpt(body_markdown)
+            lock_editor_write(db)
+            site = resolve_site_or_abort(db, site_slug)
+            post = db.get(Post, post_id)
+            if post is None or post.site_id != site.id:
+                abort(404)
+            if not _can_view_post(post):
+                abort(403)
+
         set_breadcrumbs(
             Crumb("Posts", "post_admin.list_posts"),
             Crumb(post.title or "Untitled", None),
         )
 
         if request.method == "GET":
+            try:
+                scheduled_input = schedule_input(post.scheduled_for, site.timezone)
+            except ValueError:
+                scheduled_input = ""
             form = {
+                "scheduled_for": scheduled_input,
+                "schedule_timezone": site.timezone,
                 "title": post.title,
                 "slug": post.slug,
                 "body_markdown": post.body_markdown,
@@ -560,6 +699,13 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             return _render_post_form(db, post.site_id, post, form)
 
         form = _form_from_request()
+        if not editor_matches(post, _wc_for_post(db, site.id, post.id)):
+            editor_conflict()
+            return _render_post_form(db, post.site_id, post, form), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_post_form(db, post.site_id, post, form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_post_form(db, post.site_id, post, form)
@@ -579,6 +725,11 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
             flash(pin_err, "error")
             return _render_post_form(db, post.site_id, post, form)
 
+        scheduled_for, schedule_err = _scheduled_for_form(form, site, post)
+        if schedule_err:
+            flash(schedule_err, "error")
+            return _render_post_form(db, post.site_id, post, form)
+
         before = _post_snapshot(post)
         # Snapshot the pre-edit state so the editor can roll back
         # later. Captured BEFORE the mutation: the live row stays
@@ -591,6 +742,8 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         _apply_post_form_fields(
             post,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             featured_image_id=featured_image_id,
             pinned_until=pinned_until,
         )
@@ -609,6 +762,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         is_first_publish = was_unpublished and becoming_published
         _stamp_public_url_date(post, form["status"])
         post.status = form["status"]
+        post.scheduled_for = scheduled_for
 
         _sync_post_tags(db, post, form["tags"], post.site_id)
         updated_id = post.id
@@ -633,6 +787,7 @@ def edit_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         # one atomic transaction (issue #430). Unconditional: the save
         # must persist even when skip_redirect fired no on_post_updated.
         db.commit()
+        editor_saved()
         # Any save invalidates the post's cached page. A slug
         # change also invalidates the old slug, but that one's
         # routed via the slug-change Redirect row and the redirect
@@ -768,10 +923,27 @@ def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         if post is None or post.site_id != site.id:
             abort(404)
 
+        body_markdown = _form_from_request()["body_markdown"]
+        body_html = render_markdown(body_markdown)
+        body_excerpt = make_excerpt(body_markdown)
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
+
         # Same validation as the live edit / WC save paths; on error
         # re-render the LIVE edit form (the operator is on it) with input
         # preserved, not the WC editor.
         form = _form_from_request()
+        if not editor_matches(post, _wc_for_post(db, site.id, post.id)):
+            editor_conflict()
+            return _render_post_form(db, post.site_id, post, form), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _render_post_form(db, post.site_id, post, form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _render_post_form(db, post.site_id, post, form)
@@ -789,15 +961,21 @@ def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         wc = _wc_for_post(db, site.id, post.id)
         if wc is None:
             # `fork` seeds the staging metadata + the fields the form does
-            # not carry (subtitle/meta_*/canonical/noindex); `_apply` then
+            # not carry (subtitle); `_apply` then
             # overwrites the edited fields from the posted form.
             wc = fork_post_working_copy(post, editor_user_id=int(session["user_id"]))
             db.add(wc)
         else:
+            # Explicit restaging rebases on current live fields before applying this form.
             wc.editor_user_id = int(session["user_id"])
+            for field in _EDITABLE_POST_FIELDS:
+                setattr(wc, field, getattr(post, field))
+            wc.base_fingerprint = fingerprint(post)
         _apply_post_form_fields(
             wc,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             featured_image_id=featured_image_id,
             pinned_until=pinned_until,
         )
@@ -805,6 +983,7 @@ def stage_post(site_slug: str, post_id: int) -> ResponseReturnValue:
         wc.tag_ids = _capture_tag_ids(db, form["tags"], site.id)
         # No lifecycle hooks: nothing is live. Single commit.
         db.commit()
+        editor_saved()
 
     return redirect(url_for("post_admin.post_working_copy_editor", post_id=post_id))
 
@@ -875,9 +1054,41 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404)
+
+        if request.form.get("_metadata_preview") == "1":
+            wc = _wc_for_post(db, site.id, post.id)
+            if wc is None:
+                abort(404)
+            return _render_post_form(
+                db,
+                site.id,
+                wc,
+                _form_from_request(),
+                is_working_copy=True,
+                working_copy_post_id=post.id,
+                preview_url=_working_copy_preview_url(wc, site),
+            )
+
+        body_markdown = _form_from_request()["body_markdown"]
+        body_html = render_markdown(body_markdown)
+        body_excerpt = make_excerpt(body_markdown)
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
         wc = _wc_for_post(db, site.id, post.id)
         if wc is None:
-            abort(404)
+            editor_conflict(missing_copy=True)
+            return _render_post_form(
+                db,
+                site.id,
+                post,
+                _form_from_request(),
+                is_working_copy=True,
+                working_copy_post_id=post.id,
+            ), 409
 
         def _rerender(form: dict[str, str]) -> str:
             # The token previews the WC's last-saved state; on a validation
@@ -895,6 +1106,13 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
             )
 
         form = _form_from_request()
+        if not editor_matches(wc):
+            editor_conflict()
+            return _rerender(form), 409
+        metadata_error = validate_metadata_form(form)
+        if metadata_error:
+            flash(metadata_error, "error")
+            return _rerender(form)
         if not form["title"] or not form["slug"]:
             flash("Title and slug are required.", "error")
             return _rerender(form)
@@ -916,12 +1134,15 @@ def save_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnValue:
         _apply_post_form_fields(
             wc,
             form,
+            body_html=body_html,
+            body_excerpt=body_excerpt,
             featured_image_id=featured_image_id,
             pinned_until=pinned_until,
         )
         # Capture the selected tags as ids; still no junction write.
         wc.tag_ids = _capture_tag_ids(db, form["tags"], site.id)
         db.commit()
+        editor_saved()
         flash("Working copy saved. The live post is unchanged.", "success")
 
     return redirect(url_for("post_admin.post_working_copy_editor", post_id=post_id))
@@ -936,15 +1157,27 @@ def discard_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
     (the operator likely discarded it in another tab).
     """
     with SessionLocal() as db:
+        lock_editor_write(db)
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404)
         wc = _wc_for_post(db, site.id, post.id)
+        if wc is not None and not editor_matches(wc):
+            editor_conflict(saved_copy="title" not in request.form)
+            form = (
+                _form_from_request()
+                if "title" in request.form
+                else _form_from_working_copy(wc, _tag_labels_for_ids(db, site.id, wc.tag_ids))
+            )
+            return _render_post_form(
+                db, site.id, wc, form, is_working_copy=True, working_copy_post_id=post.id
+            ), 409
         if wc is not None:
             db.delete(wc)
             db.commit()
+            editor_saved()
             flash("Working copy discarded.", "success")
         else:
             flash("No working copy to discard.", "warning")
@@ -1011,9 +1244,37 @@ def promote_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
             abort(404)
+
+        rendering_copy = _wc_for_post(db, site.id, post.id)
+        body_html = render_markdown(rendering_copy.body_markdown) if rendering_copy else ""
+        lock_editor_write(db)
+        site = resolve_site_or_abort(db, site_slug)
+        require_role("editor", site.id)
+        post = db.get(Post, post_id)
+        if post is None or post.site_id != site.id:
+            abort(404)
         wc = _wc_for_post(db, site.id, post.id)
         if wc is None:
-            abort(404)
+            editor_conflict(missing_copy=True)
+            return _render_post_form(
+                db,
+                site.id,
+                post,
+                _form_from_request(),
+                is_working_copy=True,
+                working_copy_post_id=post.id,
+            ), 409
+
+        if not editor_matches(wc) or wc.base_fingerprint != fingerprint(post):
+            editor_conflict(saved_copy="title" not in request.form)
+            form = (
+                _form_from_request()
+                if "title" in request.form
+                else _form_from_working_copy(wc, _tag_labels_for_ids(db, site.id, wc.tag_ids))
+            )
+            return _render_post_form(
+                db, site.id, wc, form, is_working_copy=True, working_copy_post_id=post.id
+            ), 409
 
         before = _post_snapshot(post)
         was_published = post.status == PostStatus.PUBLISHED
@@ -1031,7 +1292,7 @@ def promote_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
             setattr(post, field, getattr(wc, field))
         # Re-render body_html from the staged markdown so the live cache
         # can't drift from its source, regardless of what the WC stored.
-        post.body_html = render_markdown(post.body_markdown)
+        post.body_html = body_html
         # Tags reconcile: make the live junction EXACTLY the staged set,
         # in this same transaction (atomic with the content copy).
         post.tags = _resolve_tags_from_ids(db, site.id, wc.tag_ids)
@@ -1063,6 +1324,7 @@ def promote_post_working_copy(site_slug: str, post_id: int) -> ResponseReturnVal
         # Unconditional: a skip_redirect promote (which fired no hook) must
         # still persist the content copy, the tags, and the WC delete.
         db.commit()
+        editor_saved()
         pm.hook.on_cache_purge(scope="post", key=str(post.id))
         flash(f"Working copy promoted; '{post.title}' is now live.", "success")
 
@@ -1350,6 +1612,8 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         error = f"Invalid status: {raw!r}"
 
     with SessionLocal() as db:
+        if error is None:
+            db.execute(text("BEGIN IMMEDIATE"))
         site = resolve_site_or_abort(db, site_slug)
         require_role("editor", site.id)
         post = db.get(Post, post_id)
@@ -1371,6 +1635,7 @@ def patch_status(site_slug: str, post_id: int) -> ResponseReturnValue:
         before = _post_snapshot(post)
         _stamp_public_url_date(post, raw)
         post.status = raw
+        post.scheduled_for = None
         after = _post_snapshot(post)
 
         pm = current_app.extensions["plugin_manager"]
@@ -1582,6 +1847,8 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
     after capturing the now-current state as a fresh revision so
     the restore is itself undoable."""
     with SessionLocal() as db:
+        # Read hook state under the same writer lock as scheduled publication.
+        lock_editor_write(db)
         site = resolve_site_or_abort(db, site_slug)
         post = db.get(Post, post_id)
         if post is None or post.site_id != site.id:
@@ -1605,7 +1872,11 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         was_unpublished = post.status != PostStatus.PUBLISHED
         post.title = revision.title
         post.slug = revision.slug
-        post.status = revision.status
+        # Revisions have no publication time. Never reuse a newer schedule
+        # for older content or restore an unusable Scheduled state.
+        restored_schedule = revision.status == PostStatus.SCHEDULED
+        post.status = PostStatus.DRAFT if restored_schedule else revision.status
+        post.scheduled_for = None
         post.body_markdown = revision.body_markdown
         post.body_html = revision.body_html
         post.body_excerpt = revision.body_excerpt
@@ -1639,5 +1910,12 @@ def restore_revision(site_slug: str, post_id: int, rev_id: int) -> ResponseRetur
         site_id=site_id_for_audit,
         extra={"event": "revision-restore", "revision_id": rev_id},
     )
-    flash("Revision restored.", "success")
+    if restored_schedule:
+        flash(
+            "Revision restored as Draft. Choose a new publication time "
+            "and select Scheduled to schedule it.",
+            "warning",
+        )
+    else:
+        flash("Revision restored.", "success")
     return redirect(url_for("post_admin.edit_post", post_id=restored_id))

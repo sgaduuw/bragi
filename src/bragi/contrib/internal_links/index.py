@@ -64,6 +64,9 @@ def reindex_source(item: Any, session: Any) -> None:
     if not isinstance(source_id, int) or not isinstance(site_id, int):
         return
 
+    # With autoflush=False, a prior lifecycle hook may have only staged
+    # edges. Make them visible to the DELETE without committing the save.
+    session.flush()
     # Drop prior edges for this source so a removed link is
     # reflected in the index the same release the body is saved.
     session.execute(
@@ -129,6 +132,8 @@ def drop_for_deleted(item: Any, session: Any) -> None:
     if not isinstance(item_id, int):
         return
 
+    # Include edges staged by earlier hooks in this transaction.
+    session.flush()
     session.execute(
         delete(InternalLink).where(
             or_(

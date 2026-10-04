@@ -126,6 +126,39 @@ def csrf_token(client: FlaskClient, *, path: str = "/auth/login") -> str:
 
 
 @pytest.fixture
+def editor_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opt-in browser form loading for pre-existing editor behaviour tests.
+
+    Conflict tests use the unmodified client and carry their original tokens.
+    Explicit tokens (including empty ones) are never changed here.
+    """
+    import re
+
+    from bs4 import BeautifulSoup
+
+    original = FlaskClient.post
+
+    def post(client: FlaskClient, *args: Any, **kwargs: Any) -> Any:
+        path = args[0] if args else kwargs.get("path", "")
+        match = re.fullmatch(
+            r"(/admin/sites/[^/]+/(?:posts|pages)/\d+)/(edit|working-copy/(?:stage|save|promote|discard))",
+            path,
+        )
+        data = kwargs.get("data")
+        if match and isinstance(data, dict) and "_edit_token" not in data:
+            suffix = "/edit" if match[2] in ("edit", "working-copy/stage") else "/working-copy"
+            response = client.get(match[1] + suffix, headers=kwargs.get("headers"))
+            field = BeautifulSoup(response.data, "html.parser").select_one(
+                'input[name="_edit_token"]'
+            )
+            if field is not None:
+                kwargs["data"] = dict(data, _edit_token=field["value"])
+        return original(client, *args, **kwargs)
+
+    monkeypatch.setattr(FlaskClient, "post", post)
+
+
+@pytest.fixture
 def db_engine() -> Iterator[Engine]:
     """Fresh in-memory SQLite with all tables created.
 

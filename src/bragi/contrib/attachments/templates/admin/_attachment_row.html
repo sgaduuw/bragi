@@ -4,7 +4,7 @@
    htmx response from /alt-text can swap it in place. #}
 <tr id="attachment-row-{{ r.id }}">
   <td class="bulk-col">
-    <input type="checkbox" class="bulk-select" value="{{ r.id }}">
+    <input type="checkbox" class="bulk-select" name="ids" form="media-delete-selection" aria-label="Select {{ r.filename }}" value="{{ r.id }}">
   </td>
   <td style="width: 56px;">
     {% set thumb_key = thumb_storage_key_by_id.get(r.id) if thumb_storage_key_by_id is defined else none %}
@@ -54,7 +54,6 @@
        class="btn secondary">Edit</a>
     <form method="post"
           action="{{ url_for('attachment_admin.delete_attachment', attachment_id=r.id) }}"
-          onsubmit="return confirm('Delete this attachment? The file bytes are removed only when no other attachment row references the same SHA-256.');"
           style="display: inline; margin: 0;">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="danger">Delete</button>

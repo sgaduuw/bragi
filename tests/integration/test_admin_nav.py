@@ -105,6 +105,7 @@ def test_bulk_select_assets_served(admin_app: Flask) -> None:
         "account-profile.js",
         "image-picker-field.js",
         "attachments-picker-tabs.js",
+        "media_select.js",
         "unsplash-select.js",
         "resume-fieldset.js",
         "htmx.min.js",
@@ -222,7 +223,9 @@ def test_bulk_select_list_templates_use_bare_filenames() -> None:
     for tmpl in templates:
         text = tmpl.read_text()
         assert "filename='bulk_select.css'" in text, f"{tmpl}: missing CSS ref"
-        assert "filename='bulk_select.js'" in text, f"{tmpl}: missing JS ref"
+        script = "media_select.js" if tmpl.name == "attachments_list.html" else "bulk_select.js"
+        assert f"filename='{script}'" in text, f"{tmpl}: missing JS ref"
+        assert f"filename='admin/{script}'" not in text, f"{tmpl}: double-prefix bug"
         assert "filename='admin/bulk_select" not in text, f"{tmpl}: double-prefix bug"
 
 

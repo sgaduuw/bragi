@@ -291,6 +291,13 @@ class Settings(BaseSettings):
     login_throttle_max_failures: int = Field(default=5, ge=1)
     login_throttle_window_seconds: int = Field(default=900, ge=1)
 
+    # Total retained rows/site, across all statuses. Existing rows survive
+    # lowering the cap; only admission of new paths stops.
+    # The indexed OFFSET probe grows linearly with the cap; measure before large increases.
+    notfound_max_rows: int = Field(default=1000, ge=1)
+    # Attempts/site/delivery worker in each 60-second window; 0 disables.
+    notfound_records_per_minute: int = Field(default=60, ge=0)
+
     # 404 triage (bragi.contrib.notfound). Paths matching any of these
     # fnmatch globs are dropped BEFORE the recorder writes, so scanner
     # noise (vulnerability probes hammering random paths) never reaches

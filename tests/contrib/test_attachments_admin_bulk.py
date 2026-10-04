@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import select
@@ -146,10 +147,15 @@ def _bulk_delete(
     """POST to attachments bulk-delete with a valid CSRF token + ids."""
     token = csrf_token(client, path=f"/admin/sites/{site_slug}/attachments/")
     pairs = [("_csrf_token", token)] + [("ids", str(i)) for i in ids]
-    return client.post(
-        f"/admin/sites/{site_slug}/attachments/bulk-delete",
-        data=MultiDict(pairs),
+    path = f"/admin/sites/{site_slug}/attachments/bulk-delete"
+    response = client.post(path, data=MultiDict(pairs))
+    token_field = BeautifulSoup(response.data, "html.parser").find(
+        "input", {"name": "_delete_token"}
     )
+    if token_field is not None:
+        pairs.extend([("_delete_token", str(token_field["value"])), ("acknowledge", "yes")])
+        response = client.post(path, data=MultiDict(pairs))
+    return response
 
 
 def _blog_id(db_session_factory: sessionmaker[Session]) -> int:
@@ -501,3 +507,59 @@ def test_bulk_delete_over_cap_flashes_warning_and_no_writes(
         assert (
             len(db.execute(select(Attachment).where(Attachment.id.in_(ids))).scalars().all()) == 3
         )
+
+
+@pytest.mark.parametrize(
+    ("app_fixture", "count", "expected_status"),
+    [("admin_app", 200, 200), ("admin_app", 201, 302), ("admin_app_with_author", 201, 403)],
+)
+def test_bulk_delete_limit_precedes_media_scan(
+    request, db_session_factory, monkeypatch, app_fixture, count, expected_status
+):
+    from bragi.contrib.attachments import admin
+
+    app = request.getfixturevalue(app_fixture)
+    client = app.test_client()
+    email = AUTHOR_EMAIL if app_fixture == "admin_app_with_author" else EMAIL
+    client.post(
+        "/auth/login",
+        data={"email": email, "password": PASSWORD, "_csrf_token": csrf_token(client)},
+    )
+    with db_session_factory() as db:
+        row = Attachment(
+            site_id=_blog_id(db_session_factory),
+            filename="keep.txt",
+            content_type="text/plain",
+            size_bytes=1,
+            storage_key="a" * 64,
+        )
+        db.add(row)
+        db.commit()
+        aid = row.id
+    scans = []
+    scan = admin.attachment_usage
+
+    def observe_scan(*args, **kwargs):
+        scans.append(True)
+        assert count == 200, "An oversized or unauthorized batch reached the media scan"
+        return scan(*args, **kwargs)
+
+    monkeypatch.setattr(admin, "attachment_usage", observe_scan)
+    response = client.post(
+        "/admin/sites/blog/attachments/bulk-delete",
+        data={
+            "_csrf_token": csrf_token(client, path="/admin/sites/blog/attachments/"),
+            "ids": [aid, *range(10_000, 10_000 + count - 1)],
+        },
+    )
+    assert response.status_code == expected_status
+    assert scans == ([True] if count == 200 else [])
+    if expected_status == 302:
+        with client.session_transaction() as session:
+            assert session["_flashes"] == [
+                ["warning", "Bulk delete is limited to 200 items per request."]
+            ]
+    elif expected_status == 200:
+        assert BeautifulSoup(response.data, "html.parser").select_one('input[name="_delete_token"]')
+    with db_session_factory() as db:
+        assert db.get(Attachment, aid) is not None

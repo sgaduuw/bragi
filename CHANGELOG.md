@@ -4,6 +4,52 @@ All notable changes to bragi are documented here. Format adapted
 from [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.54.0] - 2026-10-04
+
+Before upgrading, promote pending working copies or copy their changed fields
+somewhere safe. Migration `f515c0ffee01` adds baseline tracking; existing copies
+need a fresh baseline before promotion. Restaging replaces their content.
+Follow the [upgrade and recovery guidance](docs/recovery.md).
+Personal access tokens now authenticate only `/admin/api/*`; HTML admin routes
+require a browser session.
+
+### Fixed
+- Unsaved metadata previews predict the description produced by Save when imported custom excerpts differ from the Markdown body (#543).
+- Saving after previews or rejected edits clears the submitted browser recovery copies while preserving newer writing (#542).
+- Resume previews and rejected saves preserve incomplete form fields for new pages, live pages, and working copies (#541).
+- Blog-index pages honor their noindex setting while keeping each pagination page self-canonical (#522).
+- Media deletion parses and renders previews before taking the writer lock, then rechecks all scan inputs before removing records or files (#530).
+- Media usage checks recognize literal URLs inside code and beside sentence punctuation, including rendition filenames (#534).
+- Legacy working-copy editors explain how to copy out changes before restaging replaces the copy; promotion still requires a fresh baseline (#536, #538).
+- 404 database failures and rate suppression each retain a bounded warning per site and worker window (#538).
+- Repeated internal-link lifecycle hooks reconcile pending edges within the same transaction, preventing publication failures (#529).
+- Rejected post and page edits release the writer lock before rendering; invalid inline status changes do not claim it (#532, #538).
+- Scheduled publication rechecks current eligibility atomically, isolates failures, and reports committed publication separately from cache-purge warnings (#521).
+- Scheduled revisions restore as Draft with a prompt to choose a new time; out-of-range legacy schedules accept valid replacement dates (#521).
+- Revision restoration locks before reading publication state, so concurrent scheduled publication cannot leave pending notifications after restoration to Draft (#521).
+
+### Security
+- Personal access tokens authenticate only the scoped JSON API; HTML admin routes reject bearer headers and require normal browser authentication (#531).
+- Bound 404 triage storage per site and recording attempts per delivery worker;
+  skip busy SQLite writes promptly and show capacity warnings (#519).
+
+### Added
+- Post and page metadata controls with saved and unsaved search/social previews, sharing the public site's fallback rules (#522).
+- Optional `bragi notfound prune --include-ignored` cleanup with dry-run and explicit `--yes` confirmation reclaims capacity occupied by ignored paths; ordinary cleanup preserves suppression (#533).
+- Site-timezone post scheduling with rescheduling, cancellation, and visible overdue or missing-time states (#521).
+- Explicit `bragi notfound prune --site <slug>` cleanup with `--dry-run`,
+  preserving ignored records and unresolved open paths (#519).
+- Media deletion previews with known content usage and explicit confirmation for single and bulk deletion (#524).
+- Read-only `bragi media check --site <slug>` and verified accidental-deletion recovery guidance (#524).
+- Tested SQLite/media recovery procedure and a repeatable failed-upgrade rehearsal (#523).
+- Browser-local recovery for unfinished post and page edits, including structured
+  resumes, with separate copies per tab and a seven-day retention period (#515).
+- Stale-save protection for post and page editors and working copies. Promotion
+  checks both the working copy and its live baseline; stale discards are rejected.
+- Public pages in all four built-in themes identify Bragi with a name-only generator meta tag.
+
 ## [1.53.1] - 2026-07-18
 
 ### Fixed
@@ -11,8 +57,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   site's `updated_at`, so changing a site setting (e.g. the 1.53.0
   "Show 'About the author'" toggle), title, theme, or nav takes effect on a
   normal reload instead of being pinned behind a conditional-GET `304` until
-  the post/page is next saved. Posts, static pages, the post index, and profile
-  pages are all covered (the profile page already folded in the author).
+  the content is next saved. Covers posts, static pages, the post index,
+  profile pages, the static/post-index home render, and the archive
+  (index / year / month) pages. Tag listings were already unaffected (no
+  conditional-GET validator); the profile page already folded in the author.
 
 ## [1.53.0] - 2026-07-18
 

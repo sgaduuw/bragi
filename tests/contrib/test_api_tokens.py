@@ -973,3 +973,48 @@ def test_api_list_bad_pagination_400(
         headers={"Authorization": f"Bearer {plaintext}"},
     )
     assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("cookie", [False, True])
+@pytest.mark.parametrize("scopes", [[], [TokenScope.POST_WRITE]])
+def test_bearer_credentials_cannot_mutate_html_admin(client, db_session, cookie, scopes):
+    from tests.conftest import csrf_token
+
+    user = db_session.scalars(select(User).where(User.email == OWNER_EMAIL)).one()
+    site = db_session.scalars(select(Site).where(Site.slug == "blog")).one()
+    post = Post(
+        site_id=site.id, author_id=user.id, title="Original", slug="original", status="draft"
+    )
+    db_session.add(post)
+    db_session.commit()
+    post_id = post.id
+    plaintext = _mint(db_session, user.id, scopes=scopes)
+    if cookie:
+        with client.session_transaction() as session:
+            session["user_id"] = user.id
+    url = f"/admin/sites/blog/posts/{post_id}/patch/status"
+    response = client.patch(
+        url, data={"status": "published"}, headers={"Authorization": f"bEaReR {plaintext}"}
+    )
+    assert response.status_code == 401
+    db_session.expire_all()
+    assert db_session.get(Post, post_id).status == "draft"
+    assert db_session.scalars(select(PersonalAccessToken)).one().last_used_at is None
+    assert list(db_session.scalars(select(AuditLog).where(AuditLog.action == "token.used"))) == []
+    if cookie:
+        assert client.patch(url, data={"status": "published"}).status_code == 400
+        response = client.patch(
+            url, data={"status": "published", "_csrf_token": csrf_token(client)}
+        )
+        assert response.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(Post, post_id).status == "published"
+
+
+def test_bearer_credentials_cannot_read_html_admin(client, db_session):
+    user = db_session.scalars(select(User).where(User.email == OWNER_EMAIL)).one()
+    plaintext = _mint(db_session, user.id)
+    response = client.get(
+        "/admin/sites/blog/posts/", headers={"Authorization": f"Bearer {plaintext}"}
+    )
+    assert response.status_code == 401

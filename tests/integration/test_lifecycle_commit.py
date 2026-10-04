@@ -29,9 +29,9 @@ every update flow.
 Why the existing suite misses it
 ================================
 `tests/conftest.py` builds the DB with `:memory:` +
-`Base.metadata.create_all`, which has different commit/connection
-semantics and no FTS5 tables; and `tests/contrib/test_internal_links.py`
-inserts `InternalLink` rows directly rather than driving
+`Base.metadata.create_all` and explicitly creates FTS5 tables, but it
+does not run Alembic and has different connection semantics. The unit
+indexer tests in `tests/contrib/test_internal_links.py` do not drive
 `reindex_source` through the real edit -> hook -> commit path. This
 test closes both gaps: it uses the file-backed, alembic-applied
 fixture from `tests/integration/conftest.py` and drives a REAL admin
@@ -53,16 +53,21 @@ from flask.testing import FlaskClient
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from bragi.api import hookimpl
 from bragi.contrib.auth_local.passwords import hash_password
 from bragi.core.models.internal_link import InternalLink
 from bragi.core.models.local_credential import LocalCredential
 from bragi.core.models.page import Page, PageKind, PageStatus
+from bragi.core.models.post import Post, PostStatus
 from bragi.core.models.site import Site
 from bragi.core.models.user import User
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
 HOST = "blog.example.com"
+
+
+pytestmark = pytest.mark.usefixtures("editor_client")
 
 
 @pytest.fixture
@@ -404,3 +409,74 @@ def test_internal_link_edge_persists_on_published_create(
             "issue #430 (create path): the published-create internal_links edge was "
             "rolled back because new_page committed before its hook chain"
         )
+
+
+@pytest.mark.parametrize("hook_fails", [False, True], ids=["publish", "rollback"])
+def test_inline_publication_reconciles_links_atomically(
+    site_with_two_pages: tuple[Flask, sessionmaker[Session], int, int],
+    hook_fails: bool,
+) -> None:
+    """Update and publish hooks share one transaction, including failures."""
+    admin_app, session_factory, _page_a_id, page_b_id = site_with_two_pages
+    client = admin_app.test_client()
+    _login(client)
+    token = _csrf_token(client, "/admin/sites/blog/posts/new")
+    body = f"See [B](page:{page_b_id})."
+    response = client.post(
+        "/admin/sites/blog/posts/new",
+        data={
+            "title": "Linked draft",
+            "slug": "linked-draft",
+            "body_markdown": body,
+            "status": "draft",
+            "_csrf_token": token,
+        },
+        headers={"Host": HOST},
+    )
+    assert response.status_code == 302
+    with session_factory() as db:
+        post = db.scalars(select(Post).where(Post.slug == "linked-draft")).one()
+        post_id = post.id
+        assert post.status == PostStatus.DRAFT
+        assert post.published_at is None
+        assert f'data-bragi-link="page:{page_b_id}"' in post.body_html
+        assert db.scalars(select(InternalLink)).all() == []
+
+    completed_hooks: list[int] = []
+
+    class PublicationProbe:
+        @hookimpl(wrapper=True)
+        def on_post_published(self, item: Post, session: Session) -> Iterator[None]:
+            yield
+            session.flush()
+            edges = session.scalars(select(InternalLink)).all()
+            assert [(edge.target_type, edge.target_id) for edge in edges] == [("page", page_b_id)]
+            completed_hooks.append(item.id)
+            raise RuntimeError("publication hook failed after reconciliation")
+
+    pm = admin_app.extensions["plugin_manager"]
+    probe = PublicationProbe()
+    if hook_fails:
+        pm.register(probe)
+    try:
+        response = client.patch(
+            f"/admin/sites/blog/posts/{post_id}/patch/status",
+            data={"status": "published", "_csrf_token": token},
+            headers={"Host": HOST},
+        )
+    finally:
+        if hook_fails:
+            pm.unregister(probe)
+
+    assert completed_hooks == ([post_id] if hook_fails else [])
+    assert response.status_code == (500 if hook_fails else 200)
+    with session_factory() as db:
+        post = db.get(Post, post_id)
+        assert post is not None
+        assert post.body_markdown == body
+        assert post.status == (PostStatus.DRAFT if hook_fails else PostStatus.PUBLISHED)
+        assert (post.published_at is None) == hook_fails
+        edges = db.scalars(select(InternalLink)).all()
+        assert [
+            (edge.source_type, edge.source_id, edge.target_type, edge.target_id) for edge in edges
+        ] == ([] if hook_fails else [("post", post_id, "page", page_b_id)])

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import sys
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -26,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from bragi.core.db import SessionLocal
 from bragi.core.image_processor import resize_and_encode
+from bragi.core.media_usage import media_usage
 from bragi.core.models.attachment import Attachment
 from bragi.core.models.attachment_rendition import AttachmentRendition
 from bragi.core.models.site import Site
@@ -434,3 +436,71 @@ def regenerate_all(site_slug: str, yes: bool) -> None:
         added = _enqueue_missing_renditions(db, site, current_app)
         db.commit()
     click.echo(f"Enqueued {added} pending rendition(s) for site {site_slug!r}.")
+
+
+@media_group.command("check")
+@click.option("--site", "site_slug", required=True, help="Site slug to scan.")
+@with_appcontext
+def check_media(site_slug: str) -> None:
+    """Report missing local media referenced by content and saved snapshots."""
+    backend = resolve_storage(current_app)
+    missing = 0
+    with SessionLocal() as db:
+        site = db.scalar(select(Site).where(Site.slug == site_slug))
+        if site is None:
+            raise click.ClickException(f"No site with slug {site_slug!r}.")
+        attachments = list(db.scalars(select(Attachment).where(Attachment.site_id == site.id)))
+        ids = {a.id for a in attachments}
+        keys = {a.storage_key for a in attachments}
+        renditions = list(
+            db.scalars(
+                select(AttachmentRendition).where(AttachmentRendition.attachment_id.in_(ids))
+            )
+        )
+        keys.update(r.storage_key for r in renditions if r.storage_key)
+        originals = {a.id: a.storage_key for a in attachments}
+        completed: dict[str, set[str]] = {}
+        for rendition in renditions:
+            if rendition.status == "done" and rendition.storage_key:
+                completed.setdefault(originals[rendition.attachment_id], set()).add(
+                    rendition.storage_key
+                )
+        refs = media_usage(db, site)
+        # Social cards and responsive images select completed renditions at render
+        # time, so their URLs need not appear in the stored Markdown.
+        for ref in tuple(refs):
+            for key in sorted(completed.get(ref.storage_key or "", set())):
+                refs.append(replace(ref, storage_key=key))
+        refs = list(dict.fromkeys(refs))
+        for ref in refs:
+            reason = None
+            if ref.storage_key not in keys or (
+                ref.attachment_id is not None and ref.attachment_id not in ids
+            ):
+                reason = "missing record"
+            else:
+                try:
+                    backend.read(site.slug, ref.storage_key)
+                except FileNotFoundError:
+                    reason = "missing bytes"
+            if reason:
+                missing += 1
+                target = (
+                    f"/attachments/{ref.storage_key}"
+                    if ref.storage_key
+                    else f"attachment #{ref.attachment_id}"
+                )
+                click.echo(
+                    f"{ref.source_type} #{ref.source_id} {ref.title!r} [{ref.status}] "
+                    f"{ref.field}: {target}: {reason}"
+                )
+    click.echo(f"Checked {len(refs)} known references; {missing} missing.")
+    click.echo(
+        "Scope: local content, working copies, revisions, featured images "
+        "and completed renditions. "
+        "External sites, plugin fields, structured resume data, custom themes/settings and "
+        "browser-only drafts are not checked; "
+        "literal URLs in code examples are included."
+    )
+    if missing:
+        raise click.exceptions.Exit(1)
