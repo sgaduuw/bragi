@@ -21,8 +21,8 @@ docker compose up -d
 A `bragi-tasks` sidecar owns `bragi db upgrade` on start
 (touching `/data/.migrated` once the schema is current), then
 enters a sleeper loop that dispatches periodic CMS commands:
-`scheduled-publish` (flips drafts whose `scheduled_for` has
-elapsed), `embeds rerender-pending`, `webmentions send-pending`,
+`scheduled-publish` (publishes due scheduled posts), `embeds rerender-pending`,
+`webmentions send-pending`,
 `activitypub send-pending`, `db analyze` (daily), and `db vacuum`
 (weekly). The admin and delivery services gate their start on
 the sidecar's healthcheck, which checks for `/data/.migrated`.
