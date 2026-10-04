@@ -16,7 +16,7 @@ need an explicit query.
 from __future__ import annotations
 
 from collections import Counter
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 from flask import (
     Blueprint,
@@ -79,9 +79,6 @@ from bragi.core.seo import (
     submitted_metadata,
     validate_metadata_form,
 )
-
-if TYPE_CHECKING:
-    from bragi.contrib.page.resume import ResumeData
 
 bp = Blueprint(
     "page_admin",
@@ -196,14 +193,14 @@ def _validate_resume_data(raw: str) -> tuple[dict[str, object] | None, str | Non
     return data.model_dump(mode="json", exclude_defaults=True), None
 
 
-def _resume_data_for_form(page: Page | PageWorkingCopy | None, form: dict[str, str]) -> ResumeData:
-    """Build the typed ResumeData object the resume fieldset template
-    consumes. On GET-edit: from `page.resume_data` (or empty if NULL).
-    On POST-rerender (validation error): from the raw JSON in `form`
-    so the author's edits aren't lost. Falls back to an empty
-    ResumeData if any decode fails (the form just shows empty rows).
+def _resume_data_for_form(page: Page | PageWorkingCopy | None, form: dict[str, str]) -> object:
+    """Render submitted resume controls even while required fields are incomplete.
+
+    This representation is only for the form. Save still uses strict ResumeData
+    validation in ``_validate_resume_data``.
     """
     import json
+    from types import SimpleNamespace
 
     from pydantic import ValidationError
 
@@ -212,9 +209,109 @@ def _resume_data_for_form(page: Page | PageWorkingCopy | None, form: dict[str, s
     raw = form.get("resume_data") or ""
     if raw.strip():
         try:
-            return ResumeData.model_validate(json.loads(raw))
-        except json.JSONDecodeError, ValidationError:
+            submitted = json.loads(raw)
+        except json.JSONDecodeError:
             pass
+        else:
+            if isinstance(submitted, dict):
+
+                def strings(value: object) -> list[str]:
+                    return (
+                        [item for item in value if isinstance(item, str)]
+                        if isinstance(value, list)
+                        else []
+                    )
+
+                def rows(
+                    section: str, fields: tuple[str, ...], lists: tuple[str, ...] = ()
+                ) -> list[SimpleNamespace]:
+                    value = submitted.get(section)
+                    if not isinstance(value, list):
+                        return []
+                    result = []
+                    for item in value:
+                        if not isinstance(item, dict):
+                            continue
+                        display = {
+                            field: item.get(field) if isinstance(item.get(field), str) else ""
+                            for field in ("id", *fields)
+                        }
+                        display.update({field: strings(item.get(field)) for field in lists})
+                        if section == "certifications":
+                            year = item.get("year")
+                            display["year"] = (
+                                year if isinstance(year, int) and not isinstance(year, bool) else ""
+                            )
+                        result.append(SimpleNamespace(**display))
+                    return result
+
+                header = submitted.get("header")
+                header = header if isinstance(header, dict) else {}
+
+                def text(field: str) -> str:
+                    value = header.get(field)
+                    return value if isinstance(value, str) else ""
+
+                return SimpleNamespace(
+                    header=SimpleNamespace(
+                        tagline=text("tagline"),
+                        location=text("location"),
+                        profile_links=[
+                            SimpleNamespace(
+                                label=link.get("label", "")
+                                if isinstance(link.get("label"), str)
+                                else "",
+                                url=link.get("url", "") if isinstance(link.get("url"), str) else "",
+                            )
+                            for link in header.get("profile_links", [])
+                            if isinstance(link, dict)
+                        ]
+                        if isinstance(header.get("profile_links"), list)
+                        else [],
+                    ),
+                    highlights=strings(submitted.get("highlights")),
+                    experience=rows(
+                        "experience",
+                        (
+                            "company",
+                            "role",
+                            "location",
+                            "start_date",
+                            "end_date",
+                            "description_markdown",
+                        ),
+                        ("impacts",),
+                    ),
+                    projects=rows(
+                        "projects",
+                        (
+                            "name",
+                            "role",
+                            "url",
+                            "linked_position_id",
+                            "location",
+                            "start_date",
+                            "end_date",
+                            "description_markdown",
+                        ),
+                        ("impacts",),
+                    ),
+                    education=rows(
+                        "education",
+                        (
+                            "institution",
+                            "degree",
+                            "location",
+                            "start_date",
+                            "end_date",
+                            "description_markdown",
+                        ),
+                    ),
+                    skills=rows("skills", ("group_label",), ("items",)),
+                    certifications=rows("certifications", ("name", "issuer", "url")),
+                    languages=rows("languages", ("name", "level")),
+                    lead_with_role=submitted.get("lead_with_role") is True,
+                )
     if page is not None and page.resume_data:
         try:
             return ResumeData.model_validate(page.resume_data)
@@ -477,7 +574,7 @@ def _render_page_form(
             title=form.get("title", ""),
             featured_image_id=featured_id,
             body_excerpt=page.body_excerpt
-            if page and body == page.body_markdown
+            if request.method != "POST" and page and body == page.body_markdown
             else make_excerpt(body),
         )
         apply_metadata_form(candidate, form)

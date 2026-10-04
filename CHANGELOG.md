@@ -7,6 +7,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Unsaved metadata previews predict the description produced by Save when imported custom excerpts differ from the Markdown body (#543).
+- Saving after previews or rejected edits clears the submitted browser recovery copies while preserving newer writing (#542).
+- Resume previews and rejected saves preserve incomplete form fields for new pages, live pages, and working copies (#541).
 - Blog-index pages honor their noindex setting while keeping each pagination page self-canonical (#522).
 - Media deletion parses and renders previews before taking the writer lock, then rechecks all scan inputs before removing records or files (#530).
 - Media usage checks recognize literal URLs inside code and beside sentence punctuation, including rendition filenames (#534).

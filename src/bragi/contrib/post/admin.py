@@ -302,7 +302,7 @@ def _render_post_form(
             title=form.get("title", ""),
             featured_image_id=featured_id,
             body_excerpt=post.body_excerpt
-            if post and body == post.body_markdown
+            if request.method != "POST" and post and body == post.body_markdown
             else make_excerpt(body),
         )
         apply_metadata_form(candidate, form)

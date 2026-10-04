@@ -144,7 +144,7 @@ def test_success_receipt_only_after_committed_save(editor):
     draft["_recovery_id"] = str(uuid4())
     response = client.post(root + "/edit", data=draft)
     assert response.status_code == 409
-    assert draft["_recovery_id"].encode() not in response.data
+    assert not BeautifulSoup(response.data, "html.parser").select("[data-editor-saved]")
 
 
 def test_legacy_working_copy_recovers_without_losing_copied_content(editor, db_session_factory):

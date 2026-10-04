@@ -136,7 +136,7 @@
         for (const source of record?.sources || []) {
           const sourceKey = prefix + source.id;
           const current = JSON.parse(localStorage.getItem(sourceKey) || 'null');
-          if (current?.savedAt === source.savedAt) localStorage.removeItem(sourceKey);
+          if (current?.scope === record.scope && current.savedAt === source.savedAt) localStorage.removeItem(sourceKey);
         }
         localStorage.removeItem(key);
       } catch (_) { /* The editor below reports unavailable storage. */ }
@@ -159,6 +159,9 @@
     const receipt = document.createElement('input');
     receipt.type = 'hidden'; receipt.name = '_recovery_id'; receipt.value = id;
     form.append(receipt);
+    const version = document.createElement('input');
+    version.type = 'hidden'; version.name = '_recovery_version';
+    form.append(version);
     const warn = () => { status.textContent = 'Browser recovery is unavailable. Keep this page open and copy your work before leaving.'; };
     const dirty = () => JSON.stringify(snapshot(form)) !== baseline;
     function persist() {
@@ -173,8 +176,10 @@
           baseline = submittedSnapshot;
           sources = []; submittedSnapshot = null; submitting = false;
         }
-        if (!dirty()) { localStorage.removeItem(prefix + id); return; }
-        localStorage.setItem(prefix + id, JSON.stringify({id, scope, savedAt: Date.now(),
+        if (!dirty() && !sources.length) { localStorage.removeItem(prefix + id); return; }
+        const previous = JSON.parse(localStorage.getItem(prefix + id) || 'null');
+        version.value = String(Math.max(Date.now(), (previous?.savedAt || 0) + 1));
+        localStorage.setItem(prefix + id, JSON.stringify({id, scope, savedAt: Number(version.value),
           data: snapshot(form), baseToken: form.elements._edit_token?.value || '', sources}));
         status.textContent = 'Recovery copy updated at ' + new Date().toLocaleTimeString() + '. Not saved to Bragi.';
       } catch (_) { warn(); }
@@ -186,7 +191,13 @@
     } catch (_) { warn(); }
     // Full storage can still be read and cleared, so keep recovery controls available.
     try {
-      const records = readRecords().filter(record => record.scope === scope);
+      // Unsaved responses carry only the submitted version, never newer tab work.
+      const source = JSON.parse(localStorage.getItem(prefix + form.dataset.recoverySource) || 'null');
+      if (source?.scope === scope && source.savedAt === Number(form.dataset.recoverySourceVersion)) {
+        sources = [...(source.sources || []), {id: source.id, savedAt: source.savedAt}];
+        persist();
+      }
+      const records = readRecords().filter(record => record.scope === scope && record.id !== id);
       records.sort((a, b) => b.savedAt - a.savedAt).forEach(record => {
         const row = document.createElement('p');
         row.dataset.recoveryId = record.id;
