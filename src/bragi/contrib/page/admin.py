@@ -574,7 +574,7 @@ def _render_page_form(
             title=form.get("title", ""),
             featured_image_id=featured_id,
             body_excerpt=page.body_excerpt
-            if page and body == page.body_markdown
+            if request.method != "POST" and page and body == page.body_markdown
             else make_excerpt(body),
         )
         apply_metadata_form(candidate, form)
