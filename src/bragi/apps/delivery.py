@@ -19,6 +19,7 @@ from werkzeug.wrappers import Response
 from bragi.core.cache import apply_cache_policy
 from bragi.core.errors import register_error_handlers
 from bragi.core.healthz import register_healthz
+from bragi.core.middleware.form_limits import register_form_limits
 from bragi.core.middleware.redirects import register_redirect_handler
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.registry import Registry
@@ -49,6 +50,7 @@ def create_delivery_app() -> Flask:
     assert_secret_key_safe("bragi-delivery")
     app = Flask("bragi-delivery")
     app.config["SECRET_KEY"] = settings.secret_key
+    register_form_limits(app)
     # Hard cap so a streaming-body attack on a public inbox
     # (webmentions, ActivityPub /actor/inbox) can't OOM the
     # worker. See `Settings.max_request_bytes`.

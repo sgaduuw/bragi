@@ -21,6 +21,7 @@ from bragi.api import NavItem
 from bragi.core.cache import CACHE_POLICIES
 from bragi.core.healthz import register_healthz
 from bragi.core.middleware.csrf import register_csrf
+from bragi.core.middleware.form_limits import register_form_limits
 from bragi.core.middleware.sessions import register_server_sessions
 from bragi.core.middleware.site_resolver import register_site_resolver
 from bragi.core.permissions import accessible_sites_for
@@ -132,6 +133,7 @@ def create_admin_app() -> Flask:
     assert_secret_key_safe("bragi-admin")
     app = Flask("bragi-admin")
     app.config["SECRET_KEY"] = settings.secret_key
+    register_form_limits(app)
     # Hard cap so a streaming-body attack can't OOM the worker.
     # Admin has to admit attachment uploads, so the floor is the
     # attachment cap (plus multipart overhead). Delivery sets a

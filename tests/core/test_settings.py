@@ -84,3 +84,46 @@ def test_admin_max_content_length_admits_attachment_uploads() -> None:
     app = create_admin_app()
     cap = app.config["MAX_CONTENT_LENGTH"]
     assert cap >= settings_module.settings.attachments_max_bytes
+
+
+@pytest.mark.usefixtures("patched_session_locals")
+@pytest.mark.parametrize("app_name", ["admin", "delivery"])
+@pytest.mark.parametrize("streamed", [False, True])
+@pytest.mark.parametrize("size", [500_000, 500_001])
+def test_app_urlencoded_form_limit(app_name: str, size: int, streamed: bool) -> None:
+    """Reject oversized forms before dispatch, including streamed bodies."""
+    from bragi.apps.admin import create_admin_app
+    from bragi.apps.delivery import create_delivery_app
+
+    app = create_admin_app() if app_name == "admin" else create_delivery_app()
+    assert app.config["MAX_CONTENT_LENGTH"] > size
+    assert app.config["MAX_FORM_MEMORY_SIZE"] == 500_000
+    body = b"username=" + b"x" * (size - len(b"username="))
+    overrides = {"CONTENT_LENGTH": "", "wsgi.input_terminated": True} if streamed else {}
+    response = app.test_client().post(
+        "/auth/login",
+        data=body,
+        content_type="application/x-www-form-urlencoded",
+        environ_overrides=overrides,
+    )
+    # Admitted bodies reach CSRF (admin) or method rejection (delivery).
+    expected_status = 413 if size > 500_000 else (400 if app_name == "admin" else 405)
+    assert response.status_code == expected_status
+
+
+@pytest.mark.usefixtures("patched_session_locals")
+def test_admin_multipart_file_keeps_upload_allowance() -> None:
+    """The ordinary form cap must not shrink the file upload allowance."""
+    import io
+
+    from bragi.apps.admin import create_admin_app
+
+    app = create_admin_app()
+    data = b"x" * 600_000
+    assert len(data) > app.config["MAX_FORM_MEMORY_SIZE"]
+    assert len(data) < app.config["MAX_CONTENT_LENGTH"]
+    response = app.test_client().post(
+        "/auth/login",
+        data={"file": (io.BytesIO(data), "sample.bin")},
+    )
+    assert response.status_code == 400  # Parsed successfully, then rejected by CSRF.
