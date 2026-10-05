@@ -39,11 +39,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from bragi.contrib.webmentions.parse import (
-    classify_mention,
-    extract_hcard,
-    source_links_to_target,
-)
+from bragi.contrib.webmentions.parse import parse_html
 from bragi.core.db import SessionLocal
 from bragi.core.http import (
     SafeHTTPError,
@@ -121,9 +117,10 @@ def receive() -> ResponseReturnValue:
                 target,
                 exc,
             )
-            return jsonify({"status": "rejected", "reason": str(exc)}), 400
+            return jsonify({"status": "rejected", "reason": "source fetch failed"}), 400
 
-        if not source_links_to_target(html, source, target):
+        parsed = parse_html(html, source)
+        if not parsed.links_to_target(target):
             LOG.warning(
                 "webmention rejected: source HTML does not link to target; source=%s target=%s",
                 source,
@@ -142,7 +139,7 @@ def receive() -> ResponseReturnValue:
         # `verified_at`, but leave moderation state (`status`,
         # `approved`) alone so a previously-rejected mention can't
         # be re-presented into the queue.
-        name, url, photo = extract_hcard(html, source)
+        name, url, photo = parsed.hcard
         existing = db.execute(
             select(Webmention).where(
                 Webmention.site_id == site.id,
@@ -154,8 +151,8 @@ def receive() -> ResponseReturnValue:
             existing.author_name = name
             existing.author_url = url
             existing.author_photo = photo
-            existing.content_text = _content_snippet(html)
-            existing.mention_type = classify_mention(html)
+            existing.content_text = parsed.snippet
+            existing.mention_type = parsed.mention_type
             existing.verified_at = naive_utcnow()
             db.commit()
             return jsonify({"status": "accepted"}), 202
@@ -169,8 +166,8 @@ def receive() -> ResponseReturnValue:
             author_name=name,
             author_url=url,
             author_photo=photo,
-            content_text=_content_snippet(html),
-            mention_type=classify_mention(html),
+            content_text=parsed.snippet,
+            mention_type=parsed.mention_type,
             verified_at=naive_utcnow(),
         )
         post = _post_for_target(db, site, target)
@@ -252,16 +249,5 @@ def _post_for_target(db: Session, site: Site, target_url: str) -> Post | None:
 
 
 def _content_snippet(html: str) -> str | None:
-    """Pull a short text snippet for moderation preview.
-
-    Strips tags via a quick regex and clips to 280 chars. Good
-    enough for an admin "what was said" preview without dragging
-    in a sanitiser.
-    """
-    import re
-
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text).strip()
-    if not text:
-        return None
-    return text[:280]
+    """Plain-text moderation preview, capped at 280 characters."""
+    return parse_html(html).snippet
