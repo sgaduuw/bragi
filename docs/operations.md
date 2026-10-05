@@ -341,3 +341,17 @@ DB half and a separate tar of `attachments_root` for the file
 half. `bragi db vacuum` follows the same gate (`PRAGMA
 wal_checkpoint(TRUNCATE)` is SQLite-only); on Postgres use
 `VACUUM (FULL)` or your usual autovacuum tooling instead.
+
+## Outbound HTTP security
+
+Federation, webmentions, embeds and remote media fetches connect only to
+validated public IP addresses. Each redirect is checked, and HTTPS keeps
+certificate verification against the original hostname.
+
+These guarded fetches reject configured outbound HTTP, HTTPS and SOCKS
+proxies because a proxy could resolve the destination outside Bragi's
+validation. If these requests fail with a proxy-policy error, remove the
+applicable `HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY` setting, including
+lowercase variants, and ensure the application can reach public services
+directly. `NO_PROXY` exclusions still permit direct connections.
+`REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` retain their normal Requests behavior.

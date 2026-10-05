@@ -14,7 +14,9 @@ metadata, ::1, fc00::/7, ...).
   request would touch, re-checked after each redirect (the
   request library's own `allow_redirects` is left ON so we
   follow normally, but we attach our own adapter that
-  re-validates).
+  re-validates). Connections use only validated numeric IPs, preserving
+  the original hostname for HTTP and TLS. Outbound proxies are rejected
+  because their DNS resolution cannot be pinned here.
 - Maximum body size (caller-supplied; defaults to a generous
   cap so the federation plugins can tune per surface).
 - Hard timeout default.
@@ -34,6 +36,11 @@ from urllib.parse import urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
+from requests.utils import select_proxy
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+from urllib3.util.connection import create_connection
 
 LOG = logging.getLogger(__name__)
 
@@ -162,14 +169,8 @@ def _safe_request(
         session.close()
 
 
-def _validate_url(url: str) -> frozenset[str]:
-    """Scheme + host check (DNS-resolved); raises SafeHTTPError.
-
-    Returns the set of validated IP strings the host resolved to;
-    the caller (the `_GuardedAdapter.send` re-check) uses this to
-    detect DNS rebinding by comparing against a fresh resolution
-    just before the connection is established.
-    """
+def _validate_url(url: str) -> tuple[str, ...]:
+    """Validate scheme and host; return public IPs or raise SafeHTTPError."""
     try:
         parsed = urlparse(url)
     except ValueError as exc:
@@ -183,19 +184,19 @@ def _validate_url(url: str) -> frozenset[str]:
     return _assert_public_host(host)
 
 
-def _assert_public_host(host: str) -> frozenset[str]:
+def _assert_public_host(host: str) -> tuple[str, ...]:
     """Resolve `host` and reject if any resolved IP is non-public.
 
     Reject when ANY resolved address is non-public (an attacker
     can't poison just one record and rely on the other being
-    chosen). Returns the set of IPs we accepted, so the adapter
-    can detect DNS rebinding at send time.
+    chosen). Returns unique IPs in resolver order so connections preserve
+    address preference without resolving the hostname again.
     """
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         raise SafeHTTPError(f"DNS resolution failed for {host!r}: {exc}") from exc
-    ips: set[str] = set()
+    ips: list[str] = []
     for info in infos:
         ip_str = str(info[4][0])
         try:
@@ -204,8 +205,10 @@ def _assert_public_host(host: str) -> frozenset[str]:
             raise SafeHTTPError(f"unparseable IP for {host!r}: {ip_str!r}") from None
         if _is_blocked_ip(ip):
             raise SafeHTTPError(f"host {host!r} resolves to non-public IP {ip!s}")
-        ips.add(ip_str)
-    return frozenset(ips)
+        ips.append(ip_str)
+    if not ips:
+        raise SafeHTTPError(f"DNS returned no addresses for {host!r}")
+    return tuple(dict.fromkeys(ips))
 
 
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -215,59 +218,70 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     private (RFC 1918, fc00::/7 ULA), multicast, unspecified,
     reserved.
     """
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_unspecified
-        or ip.is_reserved
-    )
+    return not ip.is_global or ip.is_multicast or ip.is_reserved
+
+
+def _connect_public(connection: HTTPConnection) -> socket.socket:
+    """Resolve once, then connect to a validated numeric address.
+
+    Keep the connection's hostname intact for Host headers, TLS SNI and
+    certificate verification. Numeric addresses cannot trigger another DNS
+    lookup of the attacker-controlled name.
+    """
+    last_error: OSError | None = None
+    for ip in _assert_public_host(connection._dns_host):
+        try:
+            return create_connection(
+                (ip, connection.port or connection.default_port),
+                timeout=connection.timeout,
+                source_address=connection.source_address,
+                socket_options=connection.socket_options,
+            )
+        except OSError as exc:
+            last_error = exc
+    if isinstance(last_error, TimeoutError):
+        raise ConnectTimeoutError(
+            connection, f"Connection to {connection.host} timed out"
+        ) from last_error
+    raise NewConnectionError(
+        connection, f"Could not connect to {connection.host}: {last_error}"
+    ) from last_error
+
+
+class _GuardedHTTPConnection(HTTPConnection):
+    def _new_conn(self) -> socket.socket:
+        return _connect_public(self)
+
+
+class _GuardedHTTPSConnection(HTTPSConnection):
+    def _new_conn(self) -> socket.socket:
+        return _connect_public(self)
+
+
+class _GuardedHTTPPool(HTTPConnectionPool):
+    ConnectionCls = _GuardedHTTPConnection
+
+
+class _GuardedHTTPSPool(HTTPSConnectionPool):
+    ConnectionCls = _GuardedHTTPSConnection
 
 
 class _GuardedAdapter(HTTPAdapter):
-    """Re-validate every redirect hop before the connection opens.
+    """Validate each redirect and pin DNS at the socket boundary."""
 
-    `requests` validates only the initial URL. A 302 to
-    `http://127.0.0.1/` would otherwise be followed. We hook
-    `send` so each call re-runs `_validate_url`.
-
-    **DNS-rebinding mitigation** (#M5 / audit pass 4): an attacker
-    controlling the authoritative DNS for `attacker.example` can
-    serve a public IP at validation time and a private IP at
-    connect time (very short TTL, or interleaved A records). The
-    URL-time `_validate_url` check then succeeds, the `requests` /
-    `urllib3` stack does its own `getaddrinfo` at connect time,
-    and the socket opens against the private IP.
-
-    We mitigate by re-resolving the host one more time inside
-    `send()` and asserting the connect-time IP set is a subset of
-    the validation-time set. A rebinding attacker who flipped the
-    record between the two calls trips this check.
-
-    A residual TOCTOU gap remains between this check and the
-    kernel `getaddrinfo` that urllib3 issues inside the actual
-    socket-connect path (microseconds). Full IP-pin-and-Host-
-    rewrite at the urllib3 connection layer is the next step if
-    telemetry shows the residual matters; tracked as a follow-up.
-    """
+    def init_poolmanager(
+        self, connections: int, maxsize: int, block: bool = False, **pool_kwargs: Any
+    ) -> None:
+        super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+        # Assign a private mapping; urllib3's default mapping is shared.
+        self.poolmanager.pool_classes_by_scheme = {
+            "http": _GuardedHTTPPool,
+            "https": _GuardedHTTPSPool,
+        }
 
     def send(self, request: Any, **kwargs: Any) -> Any:  # type: ignore[override]
-        validated_ips = _validate_url(request.url)
-        host = urlparse(request.url).hostname
-        if host is not None:
-            try:
-                infos = socket.getaddrinfo(host, None)
-            except socket.gaierror as exc:
-                raise SafeHTTPError(
-                    f"DNS resolution failed for {host!r} at send time: {exc}"
-                ) from exc
-            connect_ips = {info[4][0] for info in infos}
-            rebound = connect_ips - validated_ips
-            if rebound:
-                raise SafeHTTPError(
-                    f"DNS rebinding detected for {host!r}: "
-                    f"send-time IP(s) {sorted(rebound)} not in validation set "
-                    f"{sorted(validated_ips)}"
-                )
+        _validate_url(request.url)
+        if select_proxy(request.url, kwargs.get("proxies")):
+            # A proxy may resolve the destination itself, outside our guard.
+            raise SafeHTTPError("Outbound proxies are not supported by the SSRF guard")
         return super().send(request, **kwargs)
