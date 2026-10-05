@@ -915,3 +915,256 @@ def test_delivery_head_has_webmention_link(delivery_app: Flask, client: FlaskCli
     resp = client.get("/", headers={"Host": "blog.example.com"})
     body = resp.data.decode()
     assert 'rel="webmention"' in body
+
+
+@pytest.mark.parametrize("shape", ["links", "hcard", "photo", "snippet"])
+def test_webmention_malformed_html_finishes_within_deadline(shape):
+    """Run hostile inputs in a killable process so a regression cannot hang CI."""
+    import subprocess
+    import sys
+
+    code = """
+import sys
+from bragi.contrib.webmentions.parse import extract_links, extract_hcard
+from bragi.contrib.webmentions.receiver import _content_snippet
+target = '<a href="https://blog.example.com/posts/hello/">link</a>'
+card = '<a class="h-card" href="https://author.example/">Ada</a>'
+shape = sys.argv[1]
+if shape == "links":
+    assert extract_links(target + "<a " * 80000, "https://source.example/")[0] == "https://blog.example.com/posts/hello/"
+elif shape == "hcard":
+    extract_hcard(target + '<a ' + 'class="h-card" ' * 30000, "https://source.example/")
+elif shape == "photo":
+    assert extract_hcard(target + card + "<img " * 40000, "https://source.example/")[0] == "Ada"
+else:
+    assert _content_snippet(target + "<" * 250000)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, shape],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_link_verification_ignores_comments_and_raw_text():
+    target = "https://blog.example.com/posts/hello/"
+    html = (
+        f'<!-- <a href="{target}">comment</a> -->'
+        f"<script>const fake = '<a href=\"{target}\">script</a>';</script>"
+        f'<style>/* <a href="{target}">style</a> */</style>'
+    )
+    assert not source_links_to_target(html, "https://source.example/", target)
+
+
+def test_parser_accepts_attribute_order_entities_and_unquoted_urls():
+    html = (
+        '<a href=/ada class="author h-card">Ada &amp; Eve</a>'
+        "<img src=/photo.png class=u-photo>"
+        '<link href=/wm rel="alternate webmention">'
+    )
+    assert extract_hcard(html, "https://source.example/") == (
+        "Ada & Eve",
+        "https://source.example/ada",
+        "https://source.example/photo.png",
+    )
+    assert find_endpoint({}, html, "https://source.example/") == "https://source.example/wm"
+
+
+def test_html_snippet_ignores_script_and_style_and_decodes_entities():
+    from bragi.contrib.webmentions.receiver import _content_snippet
+
+    html = "<style>hidden</style><script>hidden</script><p>Hello &amp; goodbye</p>"
+    assert _content_snippet(html) == "Hello & goodbye"
+    assert _content_snippet("<p>" + "a" * 400 + "</p>") == "a" * 280
+    assert _content_snippet("<p> \n </p>") is None
+
+
+def test_fetch_failure_hides_diagnostics_but_retains_operator_log(
+    client, db_session, monkeypatch, caplog
+):
+    from bragi.core.http import SafeHTTPError
+
+    detail = "host source.example resolves to non-public IP 10.23.45.67"
+
+    def fail(*args, **kwargs):
+        raise SafeHTTPError(detail)
+
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", fail)
+    response = client.post(
+        "/webmentions",
+        data={
+            "source": "https://source.example/note",
+            "target": "https://blog.example.com/posts/hello/",
+        },
+        headers={"Host": "blog.example.com"},
+    )
+    assert response.status_code == 400
+    assert response.get_json() == {"status": "rejected", "reason": "source fetch failed"}
+    assert detail in caplog.text
+    db_session.rollback()
+    assert list(db_session.scalars(select(Webmention))) == []
+
+
+@pytest.mark.parametrize(
+    "header,expected",
+    [
+        ('<https://target.example/wm>; title="a=b"; rel="webmention"', "https://target.example/wm"),
+        (
+            '<https://target.example/wm>; title="a; b"; rel="webmention"',
+            "https://target.example/wm",
+        ),
+        ('<https://target.example/wm;a=b>; rel="webmention"', "https://target.example/wm;a=b"),
+        (
+            '<https://target.example/wm?key=a;b>; rel="webmention"',
+            "https://target.example/wm?key=a;b",
+        ),
+        (
+            r'<https://target.example/wm>; title="a\", <b;c=d>"; rel="webmention"',
+            "https://target.example/wm",
+        ),
+        ('<https://target.example/wm,a;b>; rel="webmention"', "https://target.example/wm,a;b"),
+        (
+            '<https://target.example/other>; title="a, b"; rel="alternate", '
+            '<https://target.example/wm>; rel="alternate webmention"',
+            "https://target.example/wm",
+        ),
+    ],
+)
+def test_link_header_preserves_uri_and_quoted_parameters(header, expected):
+    assert (
+        find_endpoint(
+            {"Link": header},
+            '<link rel="webmention" href="/fallback">',
+            "https://target.example/post",
+        )
+        == expected
+    )
+
+
+@pytest.fixture
+def oversized_character_reference():
+    from html import unescape
+
+    reference = "&#" + "9" * 5000 + ";"
+    # Prove this exercises the interpreter's decimal conversion limit.
+    with pytest.raises(ValueError, match="limit"):
+        unescape(reference)
+    return reference
+
+
+@pytest.mark.parametrize("location", ["text", "attribute"])
+def test_inbox_rejects_unparseable_entities_and_recovers(
+    client, db_session, monkeypatch, oversized_character_reference, location
+):
+    from types import SimpleNamespace
+
+    target = "https://blog.example.com/posts/hello/"
+    valid = f'<a class="h-card" href="https://author.example/">Ada</a><a href="{target}">link</a>'
+    invalid = (
+        oversized_character_reference
+        if location == "text"
+        else f'<span title="{oversized_character_reference}">text</span>'
+    )
+    body = SimpleNamespace(status_code=200, content=(valid + invalid).encode())
+    assert len(body.content) < 1_000_000
+    monkeypatch.setattr("bragi.contrib.webmentions.receiver.safe_get", lambda *a, **kw: body)
+    data = {"source": "https://source.example/note", "target": target}
+
+    response = client.post("/webmentions", data=data, headers={"Host": "blog.example.com"})
+    assert response.status_code == 400
+    assert response.get_json() == {"status": "rejected", "reason": "no link"}
+    db_session.rollback()
+    assert list(db_session.scalars(select(Webmention))) == []
+
+    # Fixing the source must restore verification without retaining partial data.
+    body.content = valid.encode()
+    response = client.post("/webmentions", data=data, headers={"Host": "blog.example.com"})
+    assert response.status_code == 202
+    db_session.rollback()
+    row = db_session.scalars(select(Webmention)).one()
+    assert (row.source_url, row.author_name) == (data["source"], "Ada")
+
+
+def test_send_pending_continues_after_unparseable_entities(
+    patched_session_locals, db_session, monkeypatch, oversized_character_reference
+):
+    from types import SimpleNamespace
+
+    del patched_session_locals
+    site, _, post = _seed_blog(db_session)
+    first, second = "https://first.example/post", "https://second.example/post"
+    for seconds, target in [(2, first), (1, second)]:
+        db_session.add(
+            WebmentionOutbox(
+                site_id=site.id,
+                post_id=post.id,
+                target_url=target,
+                status=WebmentionOutboxStatus.PENDING,
+                not_before=naive_utcnow() - timedelta(seconds=seconds),
+            )
+        )
+    db_session.commit()
+    fetched, sent = [], []
+
+    def head(url, **kwargs):
+        return SimpleNamespace(url=url, headers={})
+
+    def get(url, **kwargs):
+        fetched.append(url)
+        # An endpoint found before the parse error must also be discarded.
+        html = '<link rel="webmention" href="/wm">'
+        if url == first:
+            html += oversized_character_reference
+        return SimpleNamespace(url=url, headers={}, text=html)
+
+    def send(url, **kwargs):
+        sent.append(url)
+        return SimpleNamespace(status_code=202)
+
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_head", head)
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_get", get)
+    monkeypatch.setattr("bragi.contrib.webmentions.sender.safe_post", send)
+    counts = send_pending(db_session)
+    assert fetched == [first, second]
+    assert sent == ["https://second.example/wm"]
+    assert counts == {"sent": 1, "skipped": 1, "failed": 0, "pending": 0}
+    db_session.rollback()
+    rows = {row.target_url: row for row in db_session.scalars(select(WebmentionOutbox))}
+    assert rows[first].status == WebmentionOutboxStatus.SKIPPED
+    assert rows[first].endpoint_url is None
+    assert rows[second].status == WebmentionOutboxStatus.SENT
+
+
+@pytest.mark.parametrize(
+    "relation",
+    [
+        'rel = "webmention"',
+        'rel= "webmention"',
+        "rel =webmention",
+        'rel\t=\t"alternate webmention"',
+        "REL\t= webmention",
+    ],
+)
+def test_link_header_accepts_whitespace_around_relation_equals(relation):
+    assert (
+        find_endpoint(
+            {"Link": f'</wm>; title="a=b; c, d"; {relation}'},
+            '<link rel="webmention" href="/fallback">',
+            "https://target.example/post",
+        )
+        == "https://target.example/wm"
+    )
+
+
+def test_link_header_does_not_find_relation_inside_quoted_title():
+    assert (
+        find_endpoint(
+            {"Link": '</other>; title="a; rel = webmention"; rel = alternate'},
+            '<link rel="webmention" href="/fallback">',
+            "https://target.example/post",
+        )
+        == "https://target.example/fallback"
+    )

