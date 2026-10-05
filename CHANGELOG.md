@@ -7,6 +7,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- Update development checks to pytest 9.1, mypy 2.4, and Ruff 0.16, preserving the existing rules and strictness (#555).
 - Update SQLAlchemy to 2.1, Alembic to 1.20, and Mako to 1.4 while retaining explicit session flush boundaries. No schema migration is added (#552).
 - SQLAlchemy 2.1 decodes percent escapes in database URL paths. If `BRAGI_DATABASE_URL` contains `%`, compare the resolved file before upgrading; see the [recovery guidance](docs/recovery.md#attempt-the-upgrade) (#552).
 
