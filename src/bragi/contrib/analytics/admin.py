@@ -28,7 +28,7 @@ from datetime import timedelta
 
 from flask import Blueprint, render_template, request
 from flask.typing import ResponseReturnValue
-from sqlalchemy import func, select
+from sqlalchemy import String, func, select
 from sqlalchemy.orm import Session
 
 from bragi.api import Crumb, set_breadcrumbs
@@ -123,7 +123,7 @@ def list_analytics(site_slug: str) -> ResponseReturnValue:
         site = resolve_site_or_abort(db, site_slug)
         rows = db.execute(
             select(
-                func.date(AnalyticsEventRow.occurred_at).label("day"),
+                func.date(AnalyticsEventRow.occurred_at, type_=String).label("day"),
                 AnalyticsEventRow.user_agent_class,
                 func.count().label("count"),
             )
@@ -253,7 +253,7 @@ def page_detail(site_slug: str) -> ResponseReturnValue:
         site = resolve_site_or_abort(db, site_slug)
         rows = db.execute(
             select(
-                func.date(AnalyticsEventRow.occurred_at).label("day"),
+                func.date(AnalyticsEventRow.occurred_at, type_=String).label("day"),
                 func.count().label("count"),
             )
             .where(

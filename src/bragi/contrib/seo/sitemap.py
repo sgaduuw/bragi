@@ -25,6 +25,7 @@ friendlier signal to crawlers).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 from xml.sax.saxutils import escape
 
@@ -61,7 +62,7 @@ def sitemap_xml() -> ResponseReturnValue:
         prewarm_page_url_cache(db, site.id)
         for spec in specs:
             model = spec.model
-            rows = (
+            rows: Sequence[Any] = (
                 db.execute(
                     select(model).where(
                         model.site_id == site.id,
