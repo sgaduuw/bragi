@@ -6,6 +6,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.54.1] - 2026-10-05
+
+Guarded outbound HTTP requests now require direct connections. If this
+installation uses an outbound proxy, follow the [proxy recovery guidance](docs/operations.md#outbound-http-security)
+before upgrading.
+
 ### Changed
 - Update development checks to pytest 9.1, mypy 2.4, and Ruff 0.16, preserving the existing rules and strictness (#555).
 - Update SQLAlchemy to 2.1, Alembic to 1.20, and Mako to 1.4 while retaining explicit session flush boundaries. No schema migration is added (#552).
