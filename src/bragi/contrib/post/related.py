@@ -52,7 +52,7 @@ def related_posts_for(db: Session, post: Post, *, limit: int) -> list[Post]:
     Posts are ordered (overlap_count desc, published_at desc).
     The current post is excluded.
     """
-    target_tag_ids = list(
+    target_tag_ids: list[int] = list(
         db.execute(select(post_tags.c.tag_id).where(post_tags.c.post_id == post.id)).scalars().all()
     )
     if not target_tag_ids:

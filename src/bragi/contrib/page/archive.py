@@ -36,7 +36,7 @@ from bragi.core.models.site import Site
 ARCHIVE_ETAG_VERSION = "v1"
 
 
-def _post_archive_base_query(site_id: int) -> Select[tuple[Post]]:
+def _post_archive_base_query(site_id: int) -> Select[Post]:
     """The shared `posts WHERE ...` filter for every archive level."""
     return select(Post).where(
         Post.site_id == site_id,

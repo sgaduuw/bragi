@@ -6,6 +6,24 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.54.1] - 2026-10-05
+
+Guarded outbound HTTP requests now require direct connections. If this
+installation uses an outbound proxy, follow the [proxy recovery guidance](docs/operations.md#outbound-http-security)
+before upgrading.
+
+### Changed
+- Update development checks to pytest 9.1, mypy 2.4, and Ruff 0.16, preserving the existing rules and strictness (#555).
+- Update SQLAlchemy to 2.1, Alembic to 1.20, and Mako to 1.4 while retaining explicit session flush boundaries. No schema migration is added (#552).
+- SQLAlchemy 2.1 decodes percent escapes in database URL paths. If `BRAGI_DATABASE_URL` contains `%`, compare the resolved file before upgrading; see the [recovery guidance](docs/recovery.md#attempt-the-upgrade) (#552).
+
+### Security
+- Give theme-notification jobs no default GitHub token permissions; dispatch continues through scoped App tokens (CodeQL alerts 1-2).
+- Parse webmention HTML without backtracking regex scans, preventing malformed sources from exhausting public workers. Reject undecodable character references without interrupting delivery batches, and retain Link-header whitespace compatibility. Keep source-fetch diagnostics in server logs and return a generic rejection reason (CodeQL alerts 23-27).
+- Pin outbound HTTP connections to validated public IPs to prevent DNS-rebinding SSRF. Preserve DNS address preference and HTTPS hostname verification, and reject configured outbound proxies, which could bypass destination validation (CodeQL alert 6).
+- Require pydantic-settings 2.14.2, cryptography 50.0.0, and Pillow 12.3.0 or newer within their supported major versions, and refresh runtime dependencies (#551).
+- Preserve the ordinary form-size limit after the Werkzeug update, including streamed requests, while retaining the multipart file upload allowance. Flask 3.1 or newer is required for per-request limits (#551).
+
 ## [1.54.0] - 2026-10-04
 
 Before upgrading, promote pending working copies or copy their changed fields

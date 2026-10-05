@@ -24,6 +24,7 @@ on:
 
 jobs:
   dispatch:
+    permissions: {}
     runs-on: ubuntu-latest
     steps:
       - name: Mint App installation token

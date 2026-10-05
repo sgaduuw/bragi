@@ -83,6 +83,22 @@ snapshot consistency does not make the file archive atomic.
 
 ## Attempt the upgrade
 
+When moving from SQLAlchemy 2.0 to 2.1, check any `BRAGI_DATABASE_URL`
+containing `%` before starting the new application or running migrations.
+SQLAlchemy 2.1 decodes escapes in the database path: `site%20name.db`
+now refers to `site name.db`, where 2.0 used the literal `%20` filename.
+In both the previous and candidate environments, with the intended configuration,
+inspect the resolved path without opening a database:
+
+```sh
+python -c 'from bragi.settings import settings; from sqlalchemy.engine import make_url; print(make_url(settings.database_url).database)'
+```
+
+If the paths differ, stop and resolve the configuration before proceeding.
+The candidate must open the existing database, not create an empty one.
+Keep the old configuration with the recovery set. URLs without percent escapes,
+including the default `sqlite:///bragi.db`, keep the same path.
+
 Keep web services and background jobs stopped. Select the new pinned release
 and explicitly run its migrations:
 

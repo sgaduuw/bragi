@@ -217,6 +217,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   notify-themes:
+    permissions: {}
     needs: publish-docker
     # `success()` would walk the whole needs chain and skip because
     # publish-pypi is `skipped` on the dispatch path; with always() +

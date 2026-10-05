@@ -291,7 +291,7 @@ def _search(site_id: int, query: str, page: int, page_size: int) -> SearchResult
         # both counts and stash.
         total = _cached_total_or_none(site_id, safe)
         if total is None:
-            post_total = db.execute(
+            post_total: int = db.execute(
                 text(
                     "SELECT COUNT(*) FROM posts_fts"
                     " JOIN posts ON posts.id = posts_fts.rowid"
@@ -301,7 +301,7 @@ def _search(site_id: int, query: str, page: int, page_size: int) -> SearchResult
                 ),
                 {"q": safe, "site_id": site_id, "published": PostStatus.PUBLISHED},
             ).scalar_one()
-            page_total = db.execute(
+            page_total: int = db.execute(
                 text(
                     "SELECT COUNT(*) FROM pages_fts"
                     " JOIN pages ON pages.id = pages_fts.rowid"

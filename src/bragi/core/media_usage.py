@@ -108,7 +108,7 @@ def media_usage_inputs(db: Session, site: Site) -> MediaUsageInputs:
             if kind.endswith("revision")
             else (literal("working_copy") if kind.endswith("working_copy") else columns.status)
         )
-        query = query.with_only_columns(
+        content_query: Select[int, int, str, str, str, int | None] = query.with_only_columns(
             columns.id,
             columns.get("post_id", columns.get("page_id", columns.id)),
             columns.title,
@@ -116,7 +116,7 @@ def media_usage_inputs(db: Session, site: Site) -> MediaUsageInputs:
             columns.body_markdown,
             columns.featured_image_id,
         )
-        content.extend(MediaSource(kind, *row) for row in db.execute(query))
+        content.extend(MediaSource(kind, *row) for row in db.execute(content_query))
     return MediaUsageInputs(
         site.id,
         site.hostname,
