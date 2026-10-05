@@ -155,7 +155,7 @@ def _record(site_id: int, path: str, referrer: str | None) -> None:
     # Use the configured session bind but own the Core connection until
     # timeout restoration. Session.commit() could return it to the pool early.
     with SessionLocal() as db, cast(Engine, db.get_bind()).connect() as conn:
-        previous_timeout = conn.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+        previous_timeout: int = conn.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
         try:
             conn.exec_driver_sql("PRAGMA busy_timeout=50")
             conn.execute(stmt)

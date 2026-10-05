@@ -6,6 +6,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Update SQLAlchemy to 2.1, Alembic to 1.20, and Mako to 1.4 while retaining explicit session flush boundaries. No schema migration is added (#552).
+- SQLAlchemy 2.1 decodes percent escapes in database URL paths. If `BRAGI_DATABASE_URL` contains `%`, compare the resolved file before upgrading; see the [recovery guidance](docs/recovery.md#attempt-the-upgrade) (#552).
+
 ### Security
 - Require pydantic-settings 2.14.2, cryptography 50.0.0, and Pillow 12.3.0 or newer within their supported major versions, and refresh runtime dependencies (#551).
 - Preserve the ordinary form-size limit after the Werkzeug update, including streamed requests, while retaining the multipart file upload allowance. Flask 3.1 or newer is required for per-request limits (#551).
