@@ -6,6 +6,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- Require pydantic-settings 2.14.2, cryptography 50.0.0, and Pillow 12.3.0 or newer within their supported major versions, and refresh runtime dependencies (#551).
+- Preserve the ordinary form-size limit after the Werkzeug update, including streamed requests, while retaining the multipart file upload allowance. Flask 3.1 or newer is required for per-request limits (#551).
+
 ## [1.54.0] - 2026-10-04
 
 Before upgrading, promote pending working copies or copy their changed fields
